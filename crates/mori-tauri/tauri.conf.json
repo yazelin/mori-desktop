@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mori",
+  "version": "0.0.1",
+  "identifier": "ai.yazelin.mori",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Mori",
+        "width": 480,
+        "height": 360,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [],
+    "category": "Productivity",
+    "shortDescription": "森林精靈 Mori 的桌面身體",
+    "longDescription": "Mori 是個跨平台的 AI 管家,聽你說話、處理你的任務、記住你的偏好。"
+  }
+}

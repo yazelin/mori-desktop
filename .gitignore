@@ -1,0 +1,33 @@
+# Rust
+/target
+**/*.rs.bk
+# Cargo.lock IS committed (binary project) — see https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control
+
+# Node / Vite
+node_modules
+dist
+.vite
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
+# Tauri
+crates/mori-tauri/gen
+crates/mori-tauri/target
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Mori runtime data
+.mori/
