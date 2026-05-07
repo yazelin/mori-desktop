@@ -639,13 +639,14 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     // Mode skill(phase 4B-2)
     prompt.push_str("**set_mode(mode)**:切換 Active / Background。\n");
     prompt.push_str(
-        "  • 觸發 background:「晚安」、「我先離開了」、「下班了」、「假寐」、\
+        "  • 觸發 background:「晚安」、「先休眠」、「我先離開了」、「下班了」、\
          「安靜一下」、「我去開會了」(明確表示要你閉麥)。\n");
     prompt.push_str(
-        "  • 觸發 active:「醒醒」、「起床」、「我回來了」、「在嗎」、\
+        "  • 觸發 active:「醒醒」、「起來」、「我回來了」、「在嗎」、\
          「我們繼續」(明確要 Mori 回來工作)。\n");
     prompt.push_str(
-        "  • 意圖不明確時不要切;切之後不要長篇,一兩句確認就好。\n\n");
+        "  • 意圖不明確時不要切;切之後一兩句確認就好,語氣帶點精靈感(\
+         例如休眠回「好,我先閉眼,叫我就回來」)。\n\n");
 
     prompt.push_str(&format!("現在時間:{now}\n"));
 
@@ -782,7 +783,7 @@ fn main() {
             // listen "mode-changed" 同步更新,以免使用者經 IPC / 語音 skill
             // 切了 mode 後 tray label 跟實際狀態對不上。
             let toggle_mode_item =
-                MenuItem::with_id(app, "toggle_mode", "假寐(關麥克風)", true, None::<&str>)?;
+                MenuItem::with_id(app, "toggle_mode", "休眠(關麥克風)", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[
@@ -842,9 +843,9 @@ fn main() {
             app.listen("mode-changed", move |event| {
                 let payload = event.payload();
                 let label = if payload.contains("\"background\"") {
-                    "回來工作(開麥克風)"
+                    "醒醒(開麥克風)"
                 } else {
-                    "假寐(關麥克風)"
+                    "休眠(關麥克風)"
                 };
                 if let Err(e) = toggle_mode_for_handler.set_text(label) {
                     tracing::warn!(?e, "tray toggle_mode set_text failed");

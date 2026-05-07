@@ -3,7 +3,7 @@
 //! - `Active` — Mori is "here": floating UI visible, mic available for
 //!   the hotkey, scheduler running. The default and most-of-the-time
 //!   state.
-//! - `Background` — Mori is "asleep": mic completely off, UI hidden
+//! - `Background` — Mori 在休眠:mic completely off, UI hidden
 //!   except for the tray icon, scheduler still ticking. Privacy-first:
 //!   the user can be sure no microphone capture happens in this mode.
 //!
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub enum Mode {
     /// 正常運作:UI 可見、麥克風待命、熱鍵可錄音。
     Active,
-    /// 假寐:UI 隱藏、麥克風完全關閉、排程繼續跑。
+    /// 休眠:UI 隱藏、麥克風完全關閉、排程繼續跑。
     Background,
 }
 

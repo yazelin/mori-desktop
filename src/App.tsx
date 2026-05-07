@@ -177,7 +177,7 @@ function App() {
           <>
             <div className="hero-dot" />
             <p className="hero-text">
-              {mode === "background" ? "假寐中(麥克風已關)" : "待命中"}
+              {mode === "background" ? "休眠中(麥克風已關)" : "待命中"}
             </p>
             <p className="hero-hint">
               {mode === "background" ? (
@@ -260,7 +260,7 @@ function App() {
           disabled={pipelineBusy || mode === "background"}
           title={
             mode === "background"
-              ? "Mori 在假寐(麥克風關)— 按右側「回來工作」或熱鍵叫他"
+              ? "Mori 在休眠(麥克風關)— 按右側「醒醒」或熱鍵叫他"
               : undefined
           }
         >
@@ -274,7 +274,7 @@ function App() {
           onClick={() => setTextOpen((v) => !v)}
           className="toggle-btn"
           disabled={textBusy}
-          title="貼長文 / 打字輸入(語音不適合的場景);Background 也能用"
+          title="貼長文 / 打字輸入(語音不適合的場景);休眠時也能用"
         >
           {textOpen ? "收起文字輸入" : "貼文字"}
         </button>
@@ -283,11 +283,11 @@ function App() {
           className="toggle-btn"
           title={
             mode === "active"
-              ? "切到 Background — 麥克風完全關閉,排程仍跑"
-              : "切回 Active — 重新允許麥克風"
+              ? "讓 Mori 休眠 — 麥克風完全關閉,背景排程仍跑"
+              : "叫醒 Mori — 重新允許麥克風"
           }
         >
-          {mode === "active" ? "假寐(關麥克風)" : "回來工作"}
+          {mode === "active" ? "休眠(關麥克風)" : "醒醒(開麥克風)"}
         </button>
         <button
           onClick={onReset}
@@ -342,7 +342,7 @@ function App() {
         <div className="status-row">
           <span className="label">mode</span>
           <span className={`value ${mode === "background" ? "warn" : "ok"}`}>
-            {mode === "background" ? "💤 background" : "🟢 active"}
+            {mode === "background" ? "💤 休眠" : "🟢 清醒"}
           </span>
         </div>
         <div className="status-row">
