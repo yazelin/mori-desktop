@@ -11,8 +11,17 @@
 
 use anyhow::{Context as _, Result};
 use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
+use ashpd::{register_host_app, AppID};
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter};
+
+/// App ID we register with the portal Registry. Must match
+/// `tauri.conf.json` `identifier` so per-app portal permissions are
+/// stored under one key. GNOME requires a registered app id before any
+/// portal call that needs to attribute permissions to a specific app
+/// (without it, GlobalShortcuts.CreateSession returns
+/// `org.freedesktop.portal.Error.NotAllowed: An app id is required`).
+const APP_ID: &str = "ai.yazelin.mori";
 
 /// Stable id we register with the portal — the `Activated` signal
 /// echoes this back so we can tell which shortcut fired (we'll have
@@ -37,6 +46,17 @@ const PREFERRED_TRIGGER: &str = "CTRL+ALT+space";
 /// "manual trigger" button — there's no global shortcut, but Mori still
 /// works.
 pub async fn run(app: AppHandle) -> Result<()> {
+    // Tell xdg-desktop-portal who we are. For non-flatpak apps this is
+    // necessary so the portal can scope permissions to our app id;
+    // flatpak'd apps inherit it from the sandbox manifest and ashpd
+    // skips this call automatically.
+    let app_id: AppID = APP_ID
+        .parse()
+        .context("APP_ID is not a valid reverse-DNS identifier")?;
+    register_host_app(app_id)
+        .await
+        .context("register host app id with xdg-desktop-portal Registry")?;
+
     let proxy = GlobalShortcuts::new()
         .await
         .context("connect to xdg-desktop-portal GlobalShortcuts (is xdg-desktop-portal-gnome installed?)")?;
