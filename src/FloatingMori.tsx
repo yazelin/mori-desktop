@@ -106,8 +106,12 @@ function FloatingMori() {
   // timer on phase change.
   const [transient, setTransient] = useState<Visual | null>(null);
 
-  // Anchor bottom-right on first paint, then leave alone (user can drag).
-  // Also re-assert always-on-top after positioning — GNOME mutter on
+  // Initial anchor: horizontally centred, ~10% down from the top edge —
+  // matches the AgentPulse capsule placement so Mori reads as a "perched
+  // companion at the top of the workspace" rather than a corner widget.
+  // User can drag elsewhere; we only set this once on mount.
+  //
+  // Also re-asserts always-on-top after positioning; GNOME mutter on
   // Wayland sometimes drops the flag during the initial geometry dance,
   // so doing it once from JS after we're settled is more reliable than
   // trusting the conf.json `alwaysOnTop: true` alone.
@@ -117,10 +121,8 @@ function FloatingMori() {
       const m = await currentMonitor();
       if (!m) return;
       const size = await w.outerSize();
-      const margin = 24;
-      const taskbarReserve = 60;
-      const x = m.size.width - size.width - margin;
-      const y = m.size.height - size.height - margin - taskbarReserve;
+      const x = Math.max(0, Math.round((m.size.width - size.width) / 2));
+      const y = Math.max(0, Math.round(m.size.height * 0.08));
       await w.setPosition(new PhysicalPosition(x, y));
       try {
         await w.setAlwaysOnTop(true);
