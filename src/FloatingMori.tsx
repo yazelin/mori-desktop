@@ -107,6 +107,10 @@ function FloatingMori() {
   const [transient, setTransient] = useState<Visual | null>(null);
 
   // Anchor bottom-right on first paint, then leave alone (user can drag).
+  // Also re-assert always-on-top after positioning — GNOME mutter on
+  // Wayland sometimes drops the flag during the initial geometry dance,
+  // so doing it once from JS after we're settled is more reliable than
+  // trusting the conf.json `alwaysOnTop: true` alone.
   useEffect(() => {
     (async () => {
       const w = getCurrentWindow();
@@ -118,6 +122,11 @@ function FloatingMori() {
       const x = m.size.width - size.width - margin;
       const y = m.size.height - size.height - margin - taskbarReserve;
       await w.setPosition(new PhysicalPosition(x, y));
+      try {
+        await w.setAlwaysOnTop(true);
+      } catch (e) {
+        dlog("setAlwaysOnTop failed:", String(e));
+      }
     })();
   }, []);
 
