@@ -6,9 +6,13 @@ mod recording;
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use mori_core::agent::Agent;
+use mori_core::context::Context as MoriContext;
 use mori_core::llm::groq::GroqProvider;
-use mori_core::llm::{ChatMessage, LlmProvider};
+use mori_core::llm::LlmProvider;
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
+use mori_core::memory::MemoryStore;
+use mori_core::skill::{RememberSkill, SkillRegistry};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -257,24 +261,30 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let system_prompt = build_system_prompt(&memory_context);
             tracing::debug!(
                 memory_chars = memory_context.chars().count(),
-                "calling LLM with system prompt"
+                "calling agent with system prompt"
             );
 
-            let messages = vec![
-                ChatMessage {
-                    role: "system".into(),
-                    content: system_prompt,
-                },
-                ChatMessage {
-                    role: "user".into(),
-                    content: transcript.clone(),
-                },
-            ];
-            let resp = provider.chat(messages, vec![]).await.context("groq chat")?;
-            let text = resp
-                .content
-                .ok_or_else(|| anyhow::anyhow!("LLM returned no content"))?;
-            Ok(text)
+            // 把 provider 包成 Arc<dyn LlmProvider> 給 Agent 用
+            let provider: Arc<dyn LlmProvider> = Arc::new(provider);
+
+            // 註冊這次能用的 skill — phase 1D 只有 RememberSkill
+            let mut registry = SkillRegistry::new();
+            registry.register(Arc::new(RememberSkill::new(
+                memory.clone() as Arc<dyn MemoryStore>,
+            )));
+            let registry = Arc::new(registry);
+
+            let agent = Agent::new(provider, registry);
+            let ctx = MoriContext::default();
+            let turn = agent.respond(&system_prompt, &transcript, &ctx).await?;
+            if !turn.skill_calls.is_empty() {
+                tracing::info!(
+                    n = turn.skill_calls.len(),
+                    skills = ?turn.skill_calls.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+                    "agent: skills executed"
+                );
+            }
+            Ok(turn.response)
         }
         .await;
 
@@ -309,6 +319,12 @@ fn build_system_prompt(memory_context: &str) -> String {
     prompt.push_str("- 不寫前言或客套(例如「好的」、「沒問題」、「以下是」)— 直接進主題\n");
     prompt.push_str("- 若使用者問你做不到的事(例如操作系統、開檔案),老實說「目前還沒這個能力」\n");
     prompt.push_str("- 回覆長度配合提問:閒聊就一兩句,問題要解釋才展開\n\n");
+    prompt.push_str("可用工具:\n");
+    prompt.push_str(
+        "- `remember`:把使用者明確要你記下的事(偏好、重要日期、人名、進行中專案)\
+         寫進長期記憶。當使用者說「記住...」、「以後我都...」、「我喜歡...」、\
+         分享生日 / 紀念日,或介紹重要的人事物時呼叫。一般閒聊或回答問題不要硬叫。\n");
+    prompt.push_str("呼叫 remember 後,用一兩句自然語言確認你記下了什麼。\n\n");
     prompt.push_str(&format!("現在時間:{now}\n"));
     if !memory_context.is_empty() {
         prompt.push_str("\n");

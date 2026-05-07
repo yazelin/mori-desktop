@@ -28,11 +28,18 @@
 - [x] System prompt 整合 Mori persona + core memory + 當前時間
 - [x] 單元測試:write/read roundtrip + search
 
-### Phase 1D — 後續(下個 PR)
-- [ ] `RememberSkill`:LLM tool call,讓 Mori 自己決定要不要寫記憶
-- [ ] `Skill` trait dispatch 真正接通(目前 chat 是直接 hardcode)
+### Phase 1D — Skill dispatch + RememberSkill(2026-05-08)
+- [x] `SkillRegistry`:註冊、列舉、dispatch
+- [x] `Agent::respond`:LLM tool calling 接 SkillRegistry
+- [x] `RememberSkill`:LLM 自己判斷該不該寫記憶 → 直接寫入 markdown store
+- [x] System prompt 加入 tool 使用守則(不要硬叫、寫完要確認)
+- [x] 替代原本 hardcode 的 provider.chat(),全走 Agent 路徑
+
+### Phase 1E — 後續
 - [ ] 系統 tray icon(隱藏視窗時仍可叫出)
-- [ ] 對話歷史(連續對話)— 目前每次都是 stateless
+- [ ] 對話歷史(連續對話 + multi-turn tool call)— 目前是 stateless 單輪
+- [ ] UI 顯示「Mori 剛剛呼叫了 X skill」(`AgentTurn::skill_calls` 已就緒)
+- [ ] ForgetSkill / EditMemorySkill(讓使用者語音改記憶)
 
 ## Phase 2 — 基礎 Skills(2026-06)
 
