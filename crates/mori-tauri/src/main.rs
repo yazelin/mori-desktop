@@ -194,11 +194,27 @@ fn main() {
 
     let state = Arc::new(AppState::default());
 
+    // 確保 ~/.mori/config.json 存在(第一次跑就會寫一份 stub)
+    let config_path = match GroqProvider::bootstrap_mori_config() {
+        Ok(p) => Some(p),
+        Err(e) => {
+            tracing::warn!(?e, "failed to bootstrap ~/.mori/config.json");
+            None
+        }
+    };
+
     if let Some(key) = GroqProvider::discover_api_key() {
-        tracing::info!("found GROQ_API_KEY (env or ~/.pi/agent/models.json)");
+        tracing::info!("found GROQ_API_KEY");
         *state.groq_api_key.lock() = Some(key);
     } else {
-        tracing::warn!("no GROQ_API_KEY found; transcription will fail until configured");
+        match &config_path {
+            Some(p) => tracing::warn!(
+                path = %p.display(),
+                "no GROQ_API_KEY found — edit this file and replace the placeholder, \
+                 or set $GROQ_API_KEY env var"
+            ),
+            None => tracing::warn!("no GROQ_API_KEY found and config bootstrap failed"),
+        }
     }
 
     let state_for_setup = state.clone();

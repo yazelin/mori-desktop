@@ -55,14 +55,28 @@ npm install
 npm run tauri dev
 ```
 
-## 環境變數
+## 設定 Groq API key
 
-`.env`(別 commit):
-```
-GROQ_API_KEY=gsk_...    # 用於 Whisper 語音轉文字 + LLM 對話
+Mori 啟動時會自動建 `~/.mori/config.json`(第一次跑會看到 stub 內容)。編輯這個檔,把 placeholder 換成你的 Groq key:
+
+```json
+{
+  "providers": {
+    "groq": {
+      "api_key": "gsk_...",
+      "chat_model": "openai/gpt-oss-120b",
+      "transcribe_model": "whisper-large-v3-turbo"
+    }
+  }
+}
 ```
 
-或讀取 `~/.pi/agent/models.json` 裡 `providers.groq.apiKey`(如果你已經設定 Pi)。
+從 [console.groq.com](https://console.groq.com) → API Keys 拿到 key。Free tier 已涵蓋 Whisper(每天 7,200 秒音訊)+ chat,個人用足夠。
+
+**Key 探測順序**(由前到後):
+1. `GROQ_API_KEY` 環境變數
+2. `~/.mori/config.json` 的 `providers.groq.api_key`
+3. `~/.pi/agent/models.json` 的 `providers.groq.apiKey`(legacy fallback,從 Pi 切過來不用搬 key)
 
 ## 相關專案
 

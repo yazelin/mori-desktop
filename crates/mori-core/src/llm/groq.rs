@@ -46,34 +46,83 @@ impl GroqProvider {
 
     /// 嘗試從以下來源依序取得 GROQ_API_KEY:
     /// 1. `GROQ_API_KEY` 環境變數
-    /// 2. `~/.pi/agent/models.json` 的 `providers.groq.apiKey`
+    /// 2. `~/.mori/config.json` 的 `providers.groq.api_key`(主要設定來源)
+    /// 3. `~/.pi/agent/models.json` 的 `providers.groq.apiKey`(legacy fallback —
+    ///    若你從 Pi 切過來,key 不用搬)
     pub fn discover_api_key() -> Option<String> {
         if let Ok(key) = std::env::var("GROQ_API_KEY") {
-            if !key.is_empty() {
+            if !key.is_empty() && !is_placeholder(&key) {
                 return Some(key);
             }
         }
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .ok()?;
-        let pi_config = std::path::Path::new(&home)
-            .join(".pi")
-            .join("agent")
-            .join("models.json");
-        if let Ok(text) = std::fs::read_to_string(&pi_config) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(key) = json
-                    .pointer("/providers/groq/apiKey")
-                    .and_then(|v| v.as_str())
-                {
-                    if !key.is_empty() && !key.starts_with("REPLACE") {
-                        return Some(key.to_string());
-                    }
-                }
-            }
+
+        let home = home_dir()?;
+
+        // (2) Mori 自己的 config
+        if let Some(key) = read_json_pointer(
+            &home.join(".mori").join("config.json"),
+            "/providers/groq/api_key",
+        ) {
+            return Some(key);
         }
+
+        // (3) Pi legacy
+        if let Some(key) = read_json_pointer(
+            &home.join(".pi").join("agent").join("models.json"),
+            "/providers/groq/apiKey",
+        ) {
+            return Some(key);
+        }
+
         None
     }
+
+    /// 確保 `~/.mori/` 存在,若 `config.json` 不存在就寫一份 stub
+    /// (含 placeholder,使用者編輯一次後就可用)。
+    pub fn bootstrap_mori_config() -> anyhow::Result<std::path::PathBuf> {
+        let home = home_dir()
+            .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
+        let dir = home.join(".mori");
+        std::fs::create_dir_all(&dir)?;
+
+        let config = dir.join("config.json");
+        if !config.exists() {
+            let stub = serde_json::json!({
+                "providers": {
+                    "groq": {
+                        "api_key": "REPLACE_ME_WITH_YOUR_GROQ_API_KEY",
+                        "chat_model": GroqProvider::DEFAULT_CHAT_MODEL,
+                        "transcribe_model": GroqProvider::DEFAULT_TRANSCRIBE_MODEL
+                    }
+                }
+            });
+            std::fs::write(&config, serde_json::to_string_pretty(&stub)?)?;
+            tracing::info!(path = %config.display(), "bootstrapped ~/.mori/config.json");
+        }
+        Ok(config)
+    }
+}
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(std::path::PathBuf::from)
+}
+
+fn is_placeholder(s: &str) -> bool {
+    let upper = s.to_uppercase();
+    upper.starts_with("REPLACE") || upper.contains("YOUR_GROQ") || upper == "TODO"
+}
+
+fn read_json_pointer(path: &std::path::Path, pointer: &str) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let key = json.pointer(pointer)?.as_str()?;
+    if key.is_empty() || is_placeholder(key) {
+        return None;
+    }
+    Some(key.to_string())
 }
 
 // ─── chat completion request/response wire types ────────────────────
