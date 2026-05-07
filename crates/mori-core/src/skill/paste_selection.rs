@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::context::Context;
-use crate::paste::PasteController;
+use crate::paste::{PasteController, PasteResult};
 use super::{Skill, SkillOutput};
 
 pub struct PasteSelectionBackSkill {
@@ -90,14 +90,30 @@ impl Skill for PasteSelectionBackSkill {
             });
         }
 
-        self.controller.paste_back(&text).await?;
+        let result = self.controller.paste_back(&text).await?;
 
         let preview: String = text.chars().take(40).collect();
         let suffix = if text.chars().count() > 40 { "…" } else { "" };
+        let (user_message, pasted) = match result {
+            PasteResult::Pasted => (
+                format!("已貼回反白範圍:「{preview}{suffix}」"),
+                true,
+            ),
+            PasteResult::ClipboardOnly => (
+                format!(
+                    "結果已放剪貼簿(「{preview}{suffix}」),但模擬 Ctrl+V 失敗 — \
+                     ydotoold 可能沒在跑,請手動 Ctrl+V 貼上。\
+                     之後跑 setup-wayland-input.sh + 重開機一次能修。"
+                ),
+                false,
+            ),
+        };
+
         Ok(SkillOutput {
-            user_message: format!("已貼回反白範圍:「{preview}{suffix}」"),
+            user_message,
             data: Some(serde_json::json!({
                 "pasted_chars": text.chars().count(),
+                "pasted": pasted,
             })),
         })
     }

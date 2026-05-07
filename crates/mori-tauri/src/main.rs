@@ -806,10 +806,15 @@ fn main() {
 
     tracing::info!("Mori starting — phase {}", PHASE);
     #[cfg(target_os = "linux")]
-    tracing::info!(
-        gdk_backend = %std::env::var("GDK_BACKEND").unwrap_or_default(),
-        "GDK backend (forced x11 unless overridden)",
-    );
+    {
+        tracing::info!(
+            gdk_backend = %std::env::var("GDK_BACKEND").unwrap_or_default(),
+            "GDK backend (forced x11 unless overridden)",
+        );
+        // 反白即改寫(phase 4C)依賴 wl-clipboard + ydotool。startup 早點警告
+        // 比讓 user 試了一次「為什麼沒貼回」再 grep 程式碼好。
+        crate::selection::warn_if_setup_missing();
+    }
 
     // 確保 ~/.mori/config.json 存在(第一次跑就會寫一份 stub)
     let config_path = match GroqProvider::bootstrap_mori_config() {

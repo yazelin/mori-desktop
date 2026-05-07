@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
-use mori_core::paste::PasteController;
+use mori_core::paste::{PasteController, PasteResult};
 
 /// 最大允許的反白字數 — 太長就視為使用者選了整篇，不適合直接送 Whisper /
 /// LLM tool args。1500 是經驗值(中文 ~2000 token,加上提示 + 結果輸出
@@ -71,18 +71,19 @@ pub struct LinuxPasteController;
 
 #[async_trait]
 impl PasteController for LinuxPasteController {
-    async fn paste_back(&self, text: &str) -> Result<()> {
-        // 1) 把結果寫到 Wayland 系統剪貼簿(透過 wl-copy)。我們用阻塞
-        //    版本 — wl-copy 預設會 fork 一個 daemon 把資料留在剪貼簿,
-        //    main process 立刻 return,所以 spawn → write stdin → drop
-        //    OK。
+    async fn paste_back(&self, text: &str) -> Result<PasteResult> {
+        // ── Step 1:寫入 Wayland 剪貼簿 ────────────────────────────
+        // 這步如果壞了等於 paste-back 整套沒希望(連 user 手動 Ctrl+V
+        // 都救不了)。Bail out 為 hard error。
         let mut child = Command::new("wl-copy")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
-            .context("spawn wl-copy (is wl-clipboard installed? run setup-wayland-input.sh)")?;
-
+            .context(
+                "spawn wl-copy (is wl-clipboard installed? \
+                 run setup-wayland-input.sh)",
+            )?;
         {
             let stdin = child
                 .stdin
@@ -95,29 +96,66 @@ impl PasteController for LinuxPasteController {
             anyhow::bail!("wl-copy exited non-zero ({status})");
         }
 
-        // 2) 給合成器一拍呼吸時間 — 太快送 ydotool 偶爾會在 wl-copy 的
-        //    daemon 還沒設好 selection 之前就觸發 paste,目標 app 抓到的
-        //    是「上一個」剪貼簿值。50ms 通常夠。
+        // ── Step 2:讓合成器消化一下 selection 變更 ───────────────
+        // 太快送 ydotool 偶爾會在 wl-copy 的 daemon 還沒設好 selection
+        // 之前就觸發 paste,目標 app 抓到「上一個」剪貼簿值。80ms 夠。
         tokio::time::sleep(Duration::from_millis(80)).await;
 
-        // 3) ydotool 用 Linux input-event keycode 送 Ctrl+V。
-        //    29 = LEFT_CTRL, 47 = V。`:1` 表示按下,`:0` 表示放開。
-        //    順序:Ctrl down → V down → V up → Ctrl up,完整 paste。
-        let status = Command::new("ydotool")
+        // ── Step 3:ydotool 模擬 Ctrl+V ────────────────────────────
+        // 這步比較脆弱(ydotoold 沒跑、user 沒進 input group、ydotool
+        // 沒裝)。失敗時**不要 bail** — 文字已經在剪貼簿,user 手動
+        // Ctrl+V 還能補上,所以回 `ClipboardOnly` 讓上層友善降級。
+        let ydotool_outcome = Command::new("ydotool")
             .args(["key", "29:1", "47:1", "47:0", "29:0"])
-            .status()
-            .context(
-                "ydotool key send (is ydotoold daemon running? \
-                 systemctl --user status ydotool)",
-            )?;
-        if !status.success() {
-            anyhow::bail!("ydotool exited non-zero ({status})");
-        }
+            .status();
 
-        tracing::info!(
-            chars = text.chars().count(),
-            "paste-back: wl-copy + ydotool Ctrl+V dispatched",
-        );
-        Ok(())
+        match ydotool_outcome {
+            Ok(s) if s.success() => {
+                tracing::info!(
+                    chars = text.chars().count(),
+                    "paste-back: wl-copy + ydotool Ctrl+V dispatched",
+                );
+                Ok(PasteResult::Pasted)
+            }
+            Ok(s) => {
+                tracing::warn!(
+                    status = ?s,
+                    "ydotool exited non-zero — text in clipboard but paste-key not sent. \
+                     Check `systemctl --user status ydotool` and that user is in `input` group.",
+                );
+                Ok(PasteResult::ClipboardOnly)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    ?e,
+                    "ydotool failed to spawn — text in clipboard but paste-key not sent. \
+                     Run setup-wayland-input.sh and reboot once for input-group membership.",
+                );
+                Ok(PasteResult::ClipboardOnly)
+            }
+        }
+    }
+}
+
+/// 啟動時的健康檢查 — 看 wl-clipboard / ydotool 在不在 PATH,缺什麼
+/// 早警告。**不要** fail app — 反白即改寫只是 phase 4C 的功能,沒它
+/// Mori 還是能跑(語音、剪貼簿、記憶都不受影響)。只是讓 user 早點
+/// 知道為何 paste-back 待會會 fallback 到 ClipboardOnly。
+pub fn warn_if_setup_missing() {
+    for tool in ["wl-paste", "wl-copy", "ydotool"] {
+        let ok = Command::new("which")
+            .arg(tool)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            tracing::warn!(
+                tool,
+                "selection / paste-back tool missing — phase 4C 功能會降級。\
+                 跑 yazelin/ubuntu-26.04-setup 的 setup-wayland-input.sh 裝齊。",
+            );
+        }
     }
 }

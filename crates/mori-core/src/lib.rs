@@ -22,4 +22,4 @@ pub mod voice;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 當前 phase 名稱
-pub const PHASE: &str = "4B — Active / Background mode + portal hotkey";
+pub const PHASE: &str = "4C — primary selection + ydotool paste-back";
