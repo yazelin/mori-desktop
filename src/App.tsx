@@ -2,12 +2,23 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+type SkillCallSummary = {
+  name: string;
+  args_brief: string;
+  success: boolean;
+};
+
 type Phase =
   | { kind: "idle" }
   | { kind: "recording"; started_at_ms: number }
   | { kind: "transcribing" }
   | { kind: "responding"; transcript: string }
-  | { kind: "done"; transcript: string; response: string }
+  | {
+      kind: "done";
+      transcript: string;
+      response: string;
+      skill_calls: SkillCallSummary[];
+    }
   | { kind: "error"; message: string };
 
 function App() {
@@ -17,15 +28,25 @@ function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [recElapsed, setRecElapsed] = useState<number>(0);
   const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [convLength, setConvLength] = useState<number>(0);
+
+  const refreshConvLength = () => {
+    invoke<number>("conversation_length")
+      .then(setConvLength)
+      .catch(() => setConvLength(0));
+  };
 
   useEffect(() => {
     invoke<string>("mori_version").then(setCoreVersion).catch(() => setCoreVersion("(unavailable)"));
     invoke<string>("mori_phase").then(setPhaseLabel).catch(() => setPhaseLabel("(unavailable)"));
     invoke<boolean>("has_groq_key").then(setHasKey).catch(() => setHasKey(false));
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
+    refreshConvLength();
 
     const unlistenPhase = listen<Phase>("phase-changed", (event) => {
       setPhase(event.payload);
+      // 每次 phase 變化(尤其轉到 done 時)順便刷一下對話長度
+      refreshConvLength();
     });
     const unlistenLevel = listen<number>("audio-level", (event) => {
       setAudioLevel(event.payload);
@@ -49,6 +70,15 @@ function App() {
 
   const onToggle = () => {
     invoke("toggle").catch((e) => console.error("toggle failed", e));
+  };
+
+  const onReset = () => {
+    invoke("reset_conversation")
+      .then(() => {
+        setConvLength(0);
+        setPhase({ kind: "idle" });
+      })
+      .catch((e) => console.error("reset failed", e));
   };
 
   return (
@@ -103,6 +133,20 @@ function App() {
             <div className="speech-block mori">
               <span className="speech-label">Mori</span>
               <p className="speech-text">{phase.response || "(無回應)"}</p>
+              {phase.skill_calls && phase.skill_calls.length > 0 && (
+                <div className="skill-badges">
+                  {phase.skill_calls.map((sc, i) => (
+                    <span
+                      key={i}
+                      className={`skill-badge ${sc.success ? "" : "failed"}`}
+                      title={sc.args_brief}
+                    >
+                      {sc.success ? "🔧" : "⚠️"} {sc.name}
+                      {sc.args_brief ? ` (${sc.args_brief})` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <p className="hero-hint">按 F8 / 按鈕錄下一段</p>
           </>
@@ -119,7 +163,15 @@ function App() {
 
       <section className="actions">
         <button onClick={onToggle} className="toggle-btn">
-          手動觸發(等同熱鍵)
+          手動觸發(等同 F8)
+        </button>
+        <button
+          onClick={onReset}
+          className="toggle-btn reset-btn"
+          disabled={convLength === 0}
+          title="清掉本次對話歷史(長期記憶不動)"
+        >
+          重新開始對話
         </button>
       </section>
 
@@ -137,6 +189,10 @@ function App() {
           <span className={`value ${hasKey ? "ok" : "warn"}`}>
             {hasKey === null ? "..." : hasKey ? "ready" : "no key"}
           </span>
+        </div>
+        <div className="status-row">
+          <span className="label">history</span>
+          <span className="value">{convLength} msgs</span>
         </div>
       </section>
     </main>

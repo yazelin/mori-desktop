@@ -44,11 +44,18 @@
       索引(name + description + id),body 透過 recall_memory 拉
 - [x] System prompt 重寫:教 LLM 何時用 recall vs remember、整合 vs 新增
 
-### Phase 1F — 後續
-- [ ] 系統 tray icon(隱藏視窗時仍可叫出)
-- [ ] 對話歷史(連續對話)— 目前每輪都重啟,不記得上句
-- [ ] UI 顯示「Mori 剛剛呼叫了 X skill」(`AgentTurn::skill_calls` 已就緒)
-- [ ] ForgetSkill / EditMemorySkill(讓使用者語音改 / 刪記憶)
+### Phase 1F — Conversation history + Tray + Forget/Edit(2026-05-08)
+- [x] **對話歷史**:`AppState.conversation: Vec<ChatMessage>`,
+      Agent::respond 取 `&[ChatMessage]` history,trim 到 MAX_HISTORY_PAIRS=10
+- [x] `reset_conversation` IPC + UI 按鈕 + 系統匣選單
+- [x] **系統 tray icon**:顯示 / 隱藏 / 重新對話 / 離開 選單,
+      關視窗 → 隱藏不殺 app(像 Slack)
+- [x] **ForgetMemorySkill / EditMemorySkill**:LLM 能語音刪 / 改記憶
+- [x] **Skill 呼叫透明化**:`Phase::Done` 帶 `skill_calls`,UI 在 Mori 回覆下
+      列 🔧 badge,失敗顯示 ⚠️
+- [x] System prompt 加 forget / edit 規則(destructive 要謹慎、明確 id)
+
+**Phase 1 完整收工:Mori 已是端到端可用的 voice AI 管家。**
 
 ## Phase 2 — 基礎 Skills(2026-06)
 
