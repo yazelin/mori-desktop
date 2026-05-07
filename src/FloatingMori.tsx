@@ -118,32 +118,40 @@ function FloatingMori() {
   useEffect(() => {
     (async () => {
       try {
-        dlog("anchor effect: starting");
         const w = getCurrentWindow();
-        dlog("anchor effect: got window, calling currentMonitor");
         const m = await currentMonitor();
-        dlog("anchor effect: currentMonitor returned", m ? "monitor" : "null");
         if (!m) return;
-        const size = await w.outerSize();
-        const x = Math.max(0, Math.round((m.size.width - size.width) / 2));
-        const y = Math.max(0, Math.round(m.size.height * 0.08));
+
+        // tauri.conf.json declares the window 160×160 (logical CSS px).
+        // We use the *configured logical size* × monitor scale factor as
+        // the position anchor — outerSize() on GNOME Wayland for
+        // transparent borderless windows includes a hefty invisible
+        // shadow region (we measured 424×504 reported for a 160×160
+        // configured window on a 3456×2160 sf:2 monitor), which threw
+        // the centring math off by ~80 logical pixels.
+        const LOGICAL_W = 160;
+        const LOGICAL_H = 160;
+        const physW = LOGICAL_W * m.scaleFactor;
+        const physH = LOGICAL_H * m.scaleFactor;
+        const x = Math.max(0, Math.round((m.size.width - physW) / 2));
+        const y = Math.max(0, Math.round(m.size.height * 0.05));
+
         dlog(
           "anchor: monitor",
           { w: m.size.width, h: m.size.height, sf: m.scaleFactor },
-          "window",
-          { w: size.width, h: size.height },
-          "→ pos",
+          "→ pos (phys)",
           { x, y },
         );
+
         try {
           await w.setPosition(new PhysicalPosition(x, y));
-          dlog("setPosition ok");
+          const after = await w.outerPosition();
+          dlog("after setPosition outerPosition:", { x: after.x, y: after.y });
         } catch (e) {
           dlog("setPosition failed:", String(e));
         }
         try {
           await w.setAlwaysOnTop(true);
-          dlog("setAlwaysOnTop ok");
         } catch (e) {
           dlog("setAlwaysOnTop failed:", String(e));
         }
