@@ -806,14 +806,10 @@ fn main() {
             }
         })
         .setup(move |app| {
-            // ── Floating 視窗:Rust 端 always-on-top 初始 assert ──
-            // conf.json 的 alwaysOnTop hint 在 mutter 上是 "soft",而從 JS
-            // 端 setAlwaysOnTop 會被 mutter 視為 client 亂搞而降級。從
-            // Rust 端呼叫則是合法的 window-manager-level 訊息。AgentPulse
-            // 用同套手法穩穩釘住自己的 capsule 視窗。
-            if let Some(f) = app.get_webview_window("floating") {
-                let _ = f.set_always_on_top(true);
-            }
+            // 注意:**不要**在這裡 setup() 直接 call set_always_on_top —
+            // AgentPulse 沒這樣做,他們依賴 conf.json 的 alwaysOnTop hint
+            // 處理初始狀態,只在 tray show handler 才 re-assert。
+            // 我們先試一樣的紀律,看 mutter 認不認帳。
 
             // ── 系統匣(tray)+ 選單 ──
             // toggle_mode 項目的 label 會跟著 Mode 動態切換;事件迴圈裡也
