@@ -30,6 +30,15 @@ cpal = "0.15"
 hound = "3.5"
 # Lock-free shared state for the audio callback path
 parking_lot = "0.12"
+# Async stream utilities — needed to consume ashpd's GlobalShortcuts signal stream.
+futures-util = "0.3"
+
+# Linux-only: xdg-desktop-portal client. Wayland blocks the X11-style
+# global-shortcut path that tauri-plugin-global-shortcut uses, so we go
+# through `org.freedesktop.portal.GlobalShortcuts` instead. ashpd is the
+# canonical Rust wrapper.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 
 [features]
 default = ["custom-protocol"]
