@@ -8,21 +8,45 @@
 
 ## 目前狀態
 
-**Phase 1 完整收工(2026-05-08)** — Mori 是端到端可用的 voice AI 管家。
+**Phase 1 + Phase 2 完成(2026-05-08)** — Mori 是端到端可用的 voice + text AI 管家,
+有 8 個 skill,但 **還沒實用** — 全域熱鍵被 Wayland 擋、剪貼簿 / URL / 螢幕內容都看不到,
+所以日常還是要切到 Mori 視窗才能用。Phase 3+ 在補這些。
 
-按 F8(或 UI 按鈕)→ 講話 → Mori 聽 → 想 → 回 → 必要時自己改長期記憶。
-跨 turn 記得這個 session 講過什麼。關視窗到系統匣繼續跑。
+按 F8(目前 Wayland 不通,用 UI 按鈕代替)或「貼文字」→ 講話 / 打字 → Mori 聽 → 想 → 回。
+跨 session 記得你是誰。同 session 接得上「再說一次」「這個再短點」。
+
+### 能做的事
 
 | | 已實作 |
 |---|---|
-| 🎙️ 聽 | 全域熱鍵 / UI 按鈕 → cpal 麥克風 → Groq Whisper turbo,即時音量條,debug WAV 存檔 |
+| 🎙️ 聽 | UI 按鈕 → cpal 麥克風 → Groq Whisper turbo,即時音量條,debug WAV 存檔 |
+| ⌨️ 打字 | textarea + Ctrl+Enter,bypass Whisper 直接走 chat(長文 / 程式碼 / 不方便講話時用) |
 | 🧠 想 | gpt-oss-120b + multi-turn tool calling(MAX 5 輪),system prompt 含 persona / 時間 / 記憶索引 / 對話歷史 |
 | 💬 回 | 繁中為主、不客套,UI 顯示「你說 / Mori」雙塊 + 🔧 skill badges |
 | 📝 記 / 🔍 查 / ✏️ 改 / 🗑️ 忘 | RememberSkill / RecallMemorySkill / EditMemorySkill / ForgetMemorySkill |
+| 🌐 翻譯 | TranslateSkill — zh-TW 在地化、source/target lang 可指定 |
+| ✏️ 潤稿 | PolishSkill — 直接改寫(不給建議),5 種 tone |
+| 📋 摘要 | SummarizeSkill — bullet / paragraph / tldr 三種風格 |
+| 📨 草擬 | ComposeSkill — email / message / essay / social post,不會捏造署名 |
 | 💭 對話歷史 | working memory 保留 10 對 user-assistant 訊息,可重置 |
 | 🪟 常駐 | 系統匣 icon(顯示 / 隱藏 / 重新對話 / 離開),關視窗 → 隱藏不殺 |
+| ⏱️ 限流自動退避 | 429 → 解析 Groq body「try again in Xs」+ Retry-After header,+1s 緩衝,UI 橘色 banner |
 
-完整路線圖見 [`docs/roadmap.md`](docs/roadmap.md)。Phase 2+ 規劃中(基礎 skills / TTS / context capture / 跨裝置同步 / Annuli MCP 整合)。
+### 還沒做(Phase 3+ 在排)
+
+讓 Mori「**真的能當主力**」需要的功能,目前還缺:
+
+| 缺什麼 | 為什麼重要 | 在哪個 Phase |
+|---|---|---|
+| ❌ Wayland 全域熱鍵 | 不能從別的 app 喚醒 Mori,要 alt-tab 過去點按鈕 | Phase 4(走 xdg-desktop-portal) |
+| ❌ 剪貼簿自動接入 | 「翻譯這個」要手動貼,沒法直接抓當下 clipboard | Phase 3 |
+| ❌ URL routing | YouTube 連結 → 自動摘要 / 文章 → fetch + 摘要 | Phase 3 |
+| ❌ 媒體下載 | 「下載這個影片」呼叫 yt-dlp | Phase 4 |
+| ❌ ExecCommand 白名單 | 「跑那個指令」要先有白名單 + 二次確認機制 | Phase 4 |
+| ❌ TTS | Mori 還不能開口說話,只有文字 | Phase 6 |
+| ❌ CLI 整合(claude / gemini / codex / copilot) | 語音控制其他 AI agent | Phase 4+ |
+
+完整路線圖見 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 架構速覽
 
@@ -31,10 +55,12 @@ mori-desktop/
 ├── crates/
 │   ├── mori-core/       ← 純 Rust lib,無 UI 依賴。所有平台共用。
 │   │   ├── memory/      ← MemoryStore trait + LocalMarkdownMemoryStore
-│   │   ├── context.rs   ← Context struct + ContextProvider trait
-│   │   ├── skill.rs     ← Skill trait + Registry + Remember/Recall/Edit/Forget
-│   │   ├── agent.rs     ← Multi-turn tool-calling loop
-│   │   ├── llm/         ← LlmProvider trait + GroqProvider
+│   │   ├── context.rs   ← Context struct + ContextProvider trait(phase 3 填內容)
+│   │   ├── skill/       ← 每 skill 一檔,加新的不撞:
+│   │   │                  echo / remember / recall / forget / edit /
+│   │   │                  translate / polish / summarize / compose
+│   │   ├── agent.rs     ← Multi-turn tool-calling loop(MAX 5 輪)
+│   │   ├── llm/         ← LlmProvider trait + GroqProvider(含 429 retry + body 解析)
 │   │   └── voice.rs     ← Whisper API client
 │   └── mori-tauri/      ← Tauri 2 桌面殼,IPC + 麥克風 + 系統匣 + 熱鍵
 ├── src/                 ← React 前端
