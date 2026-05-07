@@ -1,13 +1,14 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod context_provider;
 mod recording;
 
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use mori_core::agent::{Agent, SkillCallSummary};
-use mori_core::context::Context as MoriContext;
+use mori_core::context::{Context as MoriContext, ContextProvider};
 use mori_core::llm::groq::{GroqProvider, RetryEvent};
 use mori_core::llm::{ChatMessage, LlmProvider};
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
@@ -366,12 +367,27 @@ async fn run_chat_pipeline(
     let memory = state.memory.clone();
     let history_snapshot = state.conversation.lock().clone();
 
+    // Phase 3A:抓現場 context(目前只有剪貼簿)。Provider 是 Tauri 平台特定。
+    let ctx_provider = context_provider::TauriContextProvider::new(app.clone());
+    let ctx = ctx_provider.capture().await;
+    if let Some(clip) = &ctx.clipboard {
+        tracing::info!(
+            chars = clip.chars().count(),
+            "captured clipboard for context"
+        );
+    }
+    // Emit 給 UI 顯示「📋 含剪貼簿(N 字)」
+    if let Err(e) = app.emit("context-captured", &ctx) {
+        tracing::warn!(?e, "failed to emit context-captured");
+    }
+
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
         let memory_index = memory.read_index_as_context().unwrap_or_default();
-        let system_prompt = build_system_prompt(&memory_index);
+        let system_prompt = build_system_prompt(&memory_index, &ctx);
         tracing::debug!(
             index_chars = memory_index.chars().count(),
             history_msgs = history_snapshot.len(),
+            has_clipboard = ctx.clipboard.is_some(),
             "calling agent"
         );
 
@@ -391,7 +407,6 @@ async fn run_chat_pipeline(
         let registry = Arc::new(registry);
 
         let agent = Agent::new(provider, registry);
-        let ctx = MoriContext::default();
         let turn = agent
             .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
             .await?;
@@ -447,8 +462,8 @@ async fn run_chat_pipeline(
     }
 }
 
-/// 建構 Mori 的 system prompt — 角色 + 時間 + 記憶索引 + tool 規則。
-fn build_system_prompt(memory_index: &str) -> String {
+/// 建構 Mori 的 system prompt — 角色 + 時間 + 記憶索引 + 當下 context + tool 規則。
+fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%a)").to_string();
     let mut prompt = String::new();
 
@@ -546,6 +561,29 @@ fn build_system_prompt(memory_index: &str) -> String {
          摘要 / 撰寫)時才呼叫。\n\n");
 
     prompt.push_str(&format!("現在時間:{now}\n"));
+
+    // Phase 3A:當下 context(剪貼簿)。LLM 看到後可在使用者用代名詞時引用。
+    if let Some(clip) = &ctx.clipboard {
+        // 太長的 clipboard 截斷避免吃 context window;預估 4KB 對 gpt-oss-120b
+        // 也只是 ~1k token,夠用又不會失控
+        const MAX_CLIPBOARD_CHARS: usize = 4000;
+        let preview: String = if clip.chars().count() > MAX_CLIPBOARD_CHARS {
+            let truncated: String = clip.chars().take(MAX_CLIPBOARD_CHARS).collect();
+            format!("{truncated}\n…(剪貼簿太長,已截斷顯示前 {MAX_CLIPBOARD_CHARS} 字)")
+        } else {
+            clip.clone()
+        };
+        prompt.push_str("\n# 當下剪貼簿內容\n\n");
+        prompt.push_str(
+            "(使用者說「這個」/「這段」/「剛複製的」/「這篇文章」時,可能指這份內容。\n\
+             若使用者沒明確提及剪貼簿,**不要主動引用或評論這份內容**;\n\
+             只在需要時當作參考素材使用 — 例如他說「翻譯這個」就翻譯下面的內容。)\n\n",
+        );
+        prompt.push_str("```\n");
+        prompt.push_str(&preview);
+        prompt.push_str("\n```\n");
+    }
+
     if !memory_index.is_empty() {
         prompt.push_str("\n");
         prompt.push_str(memory_index);
