@@ -79,14 +79,51 @@ impl GroqProvider {
         status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
     }
 
-    /// 從 Retry-After header 抽秒數,失敗就 fallback 給 backoff
-    fn parse_retry_after(resp: &reqwest::Response, fallback_secs: u64) -> u64 {
+    /// 從 `Retry-After` header 抽秒數(整數秒)
+    fn parse_retry_after_header(resp: &reqwest::Response) -> Option<u64> {
         resp.headers()
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.trim().parse::<u64>().ok())
-            .map(|n| n.clamp(1, 60)) // 上限 60s,避免 server 給超大值卡死使用者
-            .unwrap_or(fallback_secs)
+    }
+
+    /// 從 Groq 429 response body 的 error message 抽「try again in X」秒數。
+    ///
+    /// Groq 訊息格式範例:
+    /// "Rate limit reached for model `xxx`. ... Please try again in 4.5s. ..."
+    /// "Please try again in 12.345s."
+    ///
+    /// 抓到 X 後 ceil 取整。
+    fn parse_retry_after_body(body: &str) -> Option<u64> {
+        let lower = body.to_lowercase();
+        let i = lower.find("try again in ")?;
+        let rest = &body[i + "try again in ".len()..];
+        let mut num = String::new();
+        for ch in rest.chars() {
+            if ch.is_ascii_digit() || ch == '.' {
+                num.push(ch);
+            } else {
+                break;
+            }
+        }
+        let secs: f64 = num.parse().ok()?;
+        if !(secs.is_finite() && secs >= 0.0) {
+            return None;
+        }
+        Some(secs.ceil() as u64)
+    }
+
+    /// 計算「該等多少秒」 — 優先順序:body parse > Retry-After header > backoff schedule。
+    /// 算出後加 +1s 緩衝(避免邊界 race),clamp 到 [1, 60]。
+    fn compute_wait_secs(
+        body: &str,
+        header_secs: Option<u64>,
+        fallback_secs: u64,
+    ) -> u64 {
+        let base = Self::parse_retry_after_body(body)
+            .or(header_secs)
+            .unwrap_or(fallback_secs);
+        (base + 1).clamp(1, 60)
     }
 
     /// 通報並等待。在最後一次 attempt 之後不再呼叫。
@@ -353,20 +390,25 @@ impl LlmProvider for GroqProvider {
                 break;
             }
 
+            // 失敗:先把 header 留下來,然後 consume body(讓 body 解析 + 錯誤訊息可用)
+            let header_wait = Self::parse_retry_after_header(&resp);
+            let err_body = resp.text().await.unwrap_or_default();
+
             if !Self::is_retriable(status) || attempt == MAX_ATTEMPTS {
-                let err_body = resp.text().await.unwrap_or_default();
                 bail!("groq chat: HTTP {}: {}", status, err_body);
             }
 
-            // 重試:讀 Retry-After 或 fallback backoff
-            let wait = Self::parse_retry_after(&resp, BACKOFF_SECS[attempt - 1]);
+            // 計算等待時間(body 內「try again in X」優先,header 次之,backoff 兜底,加 +1s 緩衝)
+            let wait = Self::compute_wait_secs(
+                &err_body,
+                header_wait,
+                BACKOFF_SECS[attempt - 1],
+            );
             let reason = if status == StatusCode::TOO_MANY_REQUESTS {
                 "rate_limit"
             } else {
                 "server_error"
             };
-            // 把 body drain 掉(reqwest 0.12 send 後 resp 就 own,讓它走)
-            let _ = resp.text().await;
             self.notify_and_wait("chat", attempt, wait, reason).await;
         }
 
@@ -449,23 +491,76 @@ impl LlmProvider for GroqProvider {
                 break;
             }
 
+            let header_wait = Self::parse_retry_after_header(&resp);
+            let err_body = resp.text().await.unwrap_or_default();
+
             if !Self::is_retriable(status) || attempt == MAX_ATTEMPTS {
-                let err_body = resp.text().await.unwrap_or_default();
                 bail!("groq transcribe: HTTP {}: {}", status, err_body);
             }
 
-            let wait = Self::parse_retry_after(&resp, BACKOFF_SECS[attempt - 1]);
+            let wait = Self::compute_wait_secs(
+                &err_body,
+                header_wait,
+                BACKOFF_SECS[attempt - 1],
+            );
             let reason = if status == StatusCode::TOO_MANY_REQUESTS {
                 "rate_limit"
             } else {
                 "server_error"
             };
-            let _ = resp.text().await;
             self.notify_and_wait("transcribe", attempt, wait, reason).await;
         }
 
         let parsed: TranscriptionResponse =
             serde_json::from_str(&text).context("groq transcribe: parse response")?;
         Ok(parsed.text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_body_groq_format() {
+        let body = r#"{"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` in organization xxx. Limit 30000 TPM. Used 28000 TPM. Please try again in 4.5s. Visit https://...","type":"tokens_rate_limit_exceeded"}}"#;
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(5));
+    }
+
+    #[test]
+    fn parse_body_integer_seconds() {
+        let body = "Please try again in 12s.";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(12));
+    }
+
+    #[test]
+    fn parse_body_no_match() {
+        let body = "Generic 503 service unavailable";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), None);
+    }
+
+    #[test]
+    fn compute_wait_prefers_body_over_header() {
+        // body says 4.5s, header says 60 — should pick ceil(4.5)+1 = 6
+        let body = "Please try again in 4.5s";
+        assert_eq!(GroqProvider::compute_wait_secs(body, Some(60), 8), 6);
+    }
+
+    #[test]
+    fn compute_wait_falls_back_to_header() {
+        let body = "no rate hint here";
+        assert_eq!(GroqProvider::compute_wait_secs(body, Some(3), 8), 4);
+    }
+
+    #[test]
+    fn compute_wait_falls_back_to_backoff() {
+        let body = "no rate hint here";
+        assert_eq!(GroqProvider::compute_wait_secs(body, None, 8), 9);
+    }
+
+    #[test]
+    fn compute_wait_clamps_to_60() {
+        let body = "Please try again in 120s";
+        assert_eq!(GroqProvider::compute_wait_secs(body, None, 8), 60);
     }
 }
