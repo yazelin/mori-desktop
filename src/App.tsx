@@ -21,6 +21,8 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
+type Mode = "active" | "background";
+
 function App() {
   const [coreVersion, setCoreVersion] = useState<string>("");
   const [phaseLabel, setPhaseLabel] = useState<string>("");
@@ -29,6 +31,7 @@ function App() {
   const [recElapsed, setRecElapsed] = useState<number>(0);
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [convLength, setConvLength] = useState<number>(0);
+  const [mode, setMode] = useState<Mode>("active");
 
   const refreshConvLength = () => {
     invoke<number>("conversation_length")
@@ -41,6 +44,7 @@ function App() {
     invoke<string>("mori_phase").then(setPhaseLabel).catch(() => setPhaseLabel("(unavailable)"));
     invoke<boolean>("has_groq_key").then(setHasKey).catch(() => setHasKey(false));
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
+    invoke<Mode>("current_mode").then(setMode).catch(() => {});
     refreshConvLength();
 
     const unlistenPhase = listen<Phase>("phase-changed", (event) => {
@@ -78,11 +82,16 @@ function App() {
         setLastContext(event.payload);
       },
     );
+    // Phase 4B-2:Mode 切換(tray / IPC / set_mode skill)都會 emit 這個
+    const unlistenMode = listen<Mode>("mode-changed", (event) => {
+      setMode(event.payload);
+    });
     return () => {
       unlistenPhase.then((f) => f());
       unlistenLevel.then((f) => f());
       unlistenRetry.then((f) => f());
       unlistenContext.then((f) => f());
+      unlistenMode.then((f) => f());
     };
   }, []);
 
@@ -135,6 +144,13 @@ function App() {
       .catch((e) => console.error("submit_text failed", e));
   };
 
+  const onToggleMode = () => {
+    const next: Mode = mode === "active" ? "background" : "active";
+    invoke("set_mode_cmd", { mode: next }).catch((e) =>
+      console.error("set_mode_cmd failed", e),
+    );
+  };
+
   // mid-pipeline busy(Mori 在處理,使用者不能切斷)
   const pipelineBusy =
     phase.kind === "transcribing" || phase.kind === "responding";
@@ -160,8 +176,16 @@ function App() {
         {phase.kind === "idle" && (
           <>
             <div className="hero-dot" />
-            <p className="hero-text">待命中</p>
-            <p className="hero-hint">按 <kbd>F8</kbd> 開始講話</p>
+            <p className="hero-text">
+              {mode === "background" ? "假寐中(麥克風已關)" : "待命中"}
+            </p>
+            <p className="hero-hint">
+              {mode === "background" ? (
+                <>按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 叫醒並開始講話</>
+              ) : (
+                <>按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 開始講話</>
+              )}
+            </p>
           </>
         )}
         {phase.kind === "recording" && (
@@ -216,7 +240,7 @@ function App() {
                 </div>
               )}
             </div>
-            <p className="hero-hint">按 F8 / 按鈕錄下一段</p>
+            <p className="hero-hint">按 Ctrl+Alt+Space / 按鈕錄下一段</p>
           </>
         )}
         {phase.kind === "error" && (
@@ -224,22 +248,46 @@ function App() {
             <div className="hero-dot error" />
             <p className="hero-text">出錯了</p>
             <p className="error-msg">{phase.message}</p>
-            <p className="hero-hint">按熱鍵重試</p>
+            <p className="hero-hint">按 Ctrl+Alt+Space 重試</p>
           </>
         )}
       </section>
 
       <section className="actions">
-        <button onClick={onToggle} className="toggle-btn" disabled={pipelineBusy}>
-          {phase.kind === "recording" ? "停止錄音" : "手動觸發(等同 F8)"}
+        <button
+          onClick={onToggle}
+          className="toggle-btn"
+          disabled={pipelineBusy || mode === "background"}
+          title={
+            mode === "background"
+              ? "Mori 在假寐(麥克風關)— 按右側「回來工作」或熱鍵叫他"
+              : undefined
+          }
+        >
+          {phase.kind === "recording"
+            ? "停止錄音"
+            : mode === "background"
+            ? "麥克風已關"
+            : "手動觸發(等同 Ctrl+Alt+Space)"}
         </button>
         <button
           onClick={() => setTextOpen((v) => !v)}
           className="toggle-btn"
           disabled={textBusy}
-          title="貼長文 / 打字輸入(語音不適合的場景)"
+          title="貼長文 / 打字輸入(語音不適合的場景);Background 也能用"
         >
           {textOpen ? "收起文字輸入" : "貼文字"}
+        </button>
+        <button
+          onClick={onToggleMode}
+          className="toggle-btn"
+          title={
+            mode === "active"
+              ? "切到 Background — 麥克風完全關閉,排程仍跑"
+              : "切回 Active — 重新允許麥克風"
+          }
+        >
+          {mode === "active" ? "假寐(關麥克風)" : "回來工作"}
         </button>
         <button
           onClick={onReset}
@@ -290,6 +338,12 @@ function App() {
         <div className="status-row">
           <span className="label">phase</span>
           <span className="value">{phaseLabel || "..."}</span>
+        </div>
+        <div className="status-row">
+          <span className="label">mode</span>
+          <span className={`value ${mode === "background" ? "warn" : "ok"}`}>
+            {mode === "background" ? "💤 background" : "🟢 active"}
+          </span>
         </div>
         <div className="status-row">
           <span className="label">groq</span>

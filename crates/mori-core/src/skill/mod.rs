@@ -154,6 +154,9 @@ mod polish;
 mod summarize;
 mod translate;
 
+// Phase 4B-2: 模式控制(Active / Background)
+mod set_mode;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -164,6 +167,8 @@ pub use compose::ComposeSkill;
 pub use polish::PolishSkill;
 pub use summarize::SummarizeSkill;
 pub use translate::TranslateSkill;
+
+pub use set_mode::SetModeSkill;
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 

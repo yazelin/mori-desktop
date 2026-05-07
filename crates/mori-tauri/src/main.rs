@@ -9,15 +9,17 @@ mod recording;
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use async_trait::async_trait;
 use mori_core::agent::{Agent, SkillCallSummary};
 use mori_core::context::{Context as MoriContext, ContextProvider};
 use mori_core::llm::groq::{GroqProvider, RetryEvent};
 use mori_core::llm::{ChatMessage, LlmProvider};
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
+use mori_core::mode::{Mode, ModeController};
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
-    RememberSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
+    RememberSkill, SetModeSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
@@ -74,6 +76,10 @@ pub struct AppState {
     /// Working memory:本次 session 的對話歷史(user / assistant 訊息對)。
     /// 重啟 app 就清空。長期記憶寫進 memory 那邊。
     pub conversation: Mutex<Vec<ChatMessage>>,
+    /// 運作模式 — Active(平常)/ Background(假寐,麥克風硬關)。
+    /// Phase 對應「使用者的這一輪對話進行到哪」,Mode 是「Mori 整體的工作狀態」,
+    /// 兩者正交。Phase 變回 Idle 不會動 Mode。
+    pub mode: Mutex<Mode>,
 }
 
 impl AppState {
@@ -83,6 +89,38 @@ impl AppState {
         if let Err(e) = app.emit("phase-changed", &new_phase) {
             tracing::warn!(?e, "failed to emit phase-changed");
         }
+    }
+
+    /// 切換模式。idempotent — 同模式不發 event、不留 log。
+    fn set_mode(&self, app: &AppHandle, new_mode: Mode) {
+        let prev = *self.mode.lock();
+        if prev == new_mode {
+            return;
+        }
+        *self.mode.lock() = new_mode;
+        tracing::info!(?prev, ?new_mode, "mode change");
+        if let Err(e) = app.emit("mode-changed", &new_mode) {
+            tracing::warn!(?e, "failed to emit mode-changed");
+        }
+    }
+}
+
+/// `ModeController` 實作給 mori-core 的 `SetModeSkill` 用 — 這樣 skill
+/// 在 mori-core 不依賴 Tauri,也能改 Mode。
+struct StateModeController {
+    state: Arc<AppState>,
+    app: AppHandle,
+}
+
+#[async_trait]
+impl ModeController for StateModeController {
+    async fn current_mode(&self) -> Mode {
+        *self.state.mode.lock()
+    }
+
+    async fn set_mode(&self, mode: Mode) -> anyhow::Result<()> {
+        self.state.set_mode(&self.app, mode);
+        Ok(())
     }
 }
 
@@ -130,6 +168,18 @@ fn conversation_length(state: tauri::State<Arc<AppState>>) -> usize {
     state.conversation.lock().len()
 }
 
+/// 取得當前 Mode(active / background)。
+#[tauri::command]
+fn current_mode(state: tauri::State<Arc<AppState>>) -> Mode {
+    *state.mode.lock()
+}
+
+/// UI 切換 Mode。Tray 選單也是這條路。
+#[tauri::command]
+fn set_mode_cmd(app: AppHandle, state: tauri::State<Arc<AppState>>, mode: Mode) {
+    state.set_mode(&app, mode);
+}
+
 /// 直接送一段文字給 Mori(bypass 麥克風 / Whisper)。
 ///
 /// 使用情境:長文摘要、貼文章、貼程式碼等不適合語音輸入的內容。
@@ -141,7 +191,9 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
         tracing::warn!("submit_text called with empty input — ignored");
         return;
     }
-    // 不允許在 Recording / Transcribing / Responding 中切進來
+    // Background 時 mic 是關的,但文字輸入仍應允許 — 允許文字 = 允許 LLM 對話,
+    // 模式切換語音指令(「醒醒」)就會跑;避免使用者卡死。
+    // 但仍然不允許 Recording / Transcribing / Responding 中切進來。
     {
         let phase = state.phase.lock();
         if !matches!(*phase, Phase::Idle | Phase::Done { .. } | Phase::Error { .. }) {
@@ -195,6 +247,14 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 // ─── 熱鍵 / toggle 處理 ─────────────────────────────────────────────
 
 fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
+    // Background 模式下熱鍵語意是「叫醒 + 開錄」一鍵到位,不用先開 tray menu。
+    // 切到 Active 後 fall-through 走正常 toggle 邏輯,phase 仍是 Idle 所以
+    // 會進到 start_recording。
+    if matches!(*state.mode.lock(), Mode::Background) {
+        tracing::info!("hotkey while Background → wake to Active + start recording");
+        state.set_mode(&app, Mode::Active);
+    }
+
     let current = state.phase.lock().clone();
     match current {
         Phase::Idle | Phase::Done { .. } | Phase::Error { .. } => {
@@ -210,6 +270,13 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
 }
 
 fn start_recording(app: &AppHandle, state: &Arc<AppState>) {
+    // 雙保險:Background 不該有路徑進到這裡(handle_hotkey_toggle 會先 wake),
+    // 但若使用者改 Mode 後 IPC 直接 toggle,守住這一道,避免「Background 卻在錄音」
+    // 的字面違反。
+    if matches!(*state.mode.lock(), Mode::Background) {
+        tracing::warn!("start_recording while Background — refused (mic stays off)");
+        return;
+    }
     match Recorder::start() {
         Ok(rec) => {
             // 取得 level atomic 共享給 polling task
@@ -407,6 +474,12 @@ async fn run_chat_pipeline(
         registry.register(Arc::new(PolishSkill::new(provider.clone())));
         registry.register(Arc::new(SummarizeSkill::new(provider.clone())));
         registry.register(Arc::new(ComposeSkill::new(provider.clone())));
+        // Mode 控制 skill(phase 4B-2):「晚安」/「醒醒」走這條
+        let mode_controller: Arc<dyn ModeController> = Arc::new(StateModeController {
+            state: state.clone(),
+            app: app.clone(),
+        });
+        registry.register(Arc::new(SetModeSkill::new(mode_controller)));
         let registry = Arc::new(registry);
 
         let agent = Agent::new(provider, registry);
@@ -563,6 +636,17 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
          上面這些 text skills 是當使用者**明確要求一個動作**(翻譯 / 潤稿 / \
          摘要 / 撰寫)時才呼叫。\n\n");
 
+    // Mode skill(phase 4B-2)
+    prompt.push_str("**set_mode(mode)**:切換 Active / Background。\n");
+    prompt.push_str(
+        "  • 觸發 background:「晚安」、「我先離開了」、「下班了」、「假寐」、\
+         「安靜一下」、「我去開會了」(明確表示要你閉麥)。\n");
+    prompt.push_str(
+        "  • 觸發 active:「醒醒」、「起床」、「我回來了」、「在嗎」、\
+         「我們繼續」(明確要 Mori 回來工作)。\n");
+    prompt.push_str(
+        "  • 意圖不明確時不要切;切之後不要長篇,一兩句確認就好。\n\n");
+
     prompt.push_str(&format!("現在時間:{now}\n"));
 
     // Phase 3A:當下 context(剪貼簿)。LLM 看到後可在使用者用代名詞時引用。
@@ -649,6 +733,7 @@ fn main() {
         groq_api_key: Mutex::new(None),
         memory,
         conversation: Mutex::new(Vec::new()),
+        mode: Mutex::new(Mode::Active),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -680,6 +765,8 @@ fn main() {
             reset_conversation,
             conversation_length,
             submit_text,
+            current_mode,
+            set_mode_cmd,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -691,17 +778,24 @@ fn main() {
         })
         .setup(move |app| {
             // ── 系統匣(tray)+ 選單 ──
+            // toggle_mode 項目的 label 會跟著 Mode 動態切換;事件迴圈裡也
+            // listen "mode-changed" 同步更新,以免使用者經 IPC / 語音 skill
+            // 切了 mode 後 tray label 跟實際狀態對不上。
+            let toggle_mode_item =
+                MenuItem::with_id(app, "toggle_mode", "假寐(關麥克風)", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[
                     &MenuItem::with_id(app, "show", "顯示 Mori", true, None::<&str>)?,
                     &MenuItem::with_id(app, "hide", "隱藏", true, None::<&str>)?,
+                    &toggle_mode_item,
                     &MenuItem::with_id(app, "reset", "重新開始對話", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "離開", true, None::<&str>)?,
                 ],
             )?;
 
             let state_for_tray = state_for_setup.clone();
+            let toggle_mode_for_handler = toggle_mode_item.clone();
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Mori")
@@ -719,6 +813,16 @@ fn main() {
                             let _ = w.hide();
                         }
                     }
+                    "toggle_mode" => {
+                        let cur = *state_for_tray.mode.lock();
+                        let next = match cur {
+                            Mode::Active => Mode::Background,
+                            Mode::Background => Mode::Active,
+                        };
+                        state_for_tray.set_mode(app, next);
+                        // label 由「mode-changed」listener 統一更新,不要在這
+                        // 裡重複寫,避免兩條路徑不一致。
+                    }
                     "reset" => {
                         let mut conv = state_for_tray.conversation.lock();
                         let n = conv.len();
@@ -732,6 +836,20 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // tray label 跟著 Mode 同步:任何來源(tray 點擊、IPC、skill)改了
+            // Mode 都會 emit "mode-changed",這裡統一接 → 改 label。
+            app.listen("mode-changed", move |event| {
+                let payload = event.payload();
+                let label = if payload.contains("\"background\"") {
+                    "回來工作(開麥克風)"
+                } else {
+                    "假寐(關麥克風)"
+                };
+                if let Err(e) = toggle_mode_for_handler.set_text(label) {
+                    tracing::warn!(?e, "tray toggle_mode set_text failed");
+                }
+            });
 
             // ── 全域熱鍵:Ctrl+Alt+Space ───────────────────────────
             // Linux 走 xdg-desktop-portal GlobalShortcuts(Wayland 唯一可行
