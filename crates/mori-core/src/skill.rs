@@ -349,6 +349,194 @@ impl Skill for RecallMemorySkill {
     }
 }
 
+// ─── ForgetMemorySkill ──────────────────────────────────────────────
+
+/// 刪除指定 id 的記憶(連同索引行)。LLM 在使用者明確要求「忘掉」、
+/// 「刪除」、「不用記了」之類時呼叫。
+///
+/// 是 destructive 操作 — `confirm_required` 為 true,理想上 UI 該攔下
+/// 二次確認再執行。Phase 1F 暫時沒攔(skill 直接執行)— phase 4+ 會做白名單
+/// + UI confirm flow。
+pub struct ForgetMemorySkill {
+    memory: Arc<dyn MemoryStore>,
+}
+
+impl ForgetMemorySkill {
+    pub fn new(memory: Arc<dyn MemoryStore>) -> Self {
+        Self { memory }
+    }
+}
+
+#[async_trait]
+impl Skill for ForgetMemorySkill {
+    fn name(&self) -> &'static str {
+        "forget_memory"
+    }
+
+    fn description(&self) -> &'static str {
+        "Delete a memory by id. Call this when the user explicitly asks you \
+         to forget / delete / remove a piece of information (e.g. '忘掉...', \
+         '不用記了', '把那個刪掉'). Identify the right memory by checking \
+         the memory index in system prompt. Operation is destructive — only \
+         call when the user's intent to delete is clear."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Memory id(檔名不含 .md)。從 system prompt 索引段抓。"
+                }
+            },
+            "required": ["id"]
+        })
+    }
+
+    fn confirm_required(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, args: Value, _context: &Context) -> Result<SkillOutput> {
+        let id = args
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("missing id"))?
+            .trim()
+            .to_string();
+
+        // 先確認存在,不存在直接回錯,免得「忘了一個本來就沒有的」假成功
+        let existed = self
+            .memory
+            .read(&id)
+            .await
+            .context("memory store read")?
+            .is_some();
+        if !existed {
+            return Ok(SkillOutput {
+                user_message: format!("找不到 id 為 `{id}` 的記憶,沒東西可忘"),
+                data: None,
+            });
+        }
+
+        self.memory
+            .delete(&id)
+            .await
+            .context("memory store delete")?;
+
+        Ok(SkillOutput {
+            user_message: format!("好,把 `{id}` 的記憶忘掉了"),
+            data: Some(serde_json::json!({ "id": id, "deleted": true })),
+        })
+    }
+}
+
+// ─── EditMemorySkill ────────────────────────────────────────────────
+
+/// 編輯既有記憶的內容(保留 name / type,只換 body / description)。
+///
+/// 跟「呼叫 `remember` 用同 title 覆寫」效果類似,但更明確 —
+/// 強制透過 id 指定,LLM 不會誤建新檔。建議用法:
+/// 1. recall_memory(id) 看舊 content
+/// 2. edit_memory(id, new_content) 寫整合後版本
+pub struct EditMemorySkill {
+    memory: Arc<dyn MemoryStore>,
+}
+
+impl EditMemorySkill {
+    pub fn new(memory: Arc<dyn MemoryStore>) -> Self {
+        Self { memory }
+    }
+}
+
+#[async_trait]
+impl Skill for EditMemorySkill {
+    fn name(&self) -> &'static str {
+        "edit_memory"
+    }
+
+    fn description(&self) -> &'static str {
+        "Update an existing memory's body content (keeping its name and type). \
+         Call this when the user is amending or correcting a memory you \
+         already have — typically after recall_memory revealed the old \
+         content. Use the same id from the memory index. \
+         Prefer this over calling `remember` for updates: it makes the intent \
+         explicit and avoids accidentally creating a duplicate from a \
+         slightly-different title."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Memory id(檔名不含 .md)。從索引或先前 recall_memory 結果取得。"
+                },
+                "new_content": {
+                    "type": "string",
+                    "description": "整合後的完整 content。要把舊 content + 新訊息合併,不可只寫新訊息。"
+                },
+                "new_description": {
+                    "type": "string",
+                    "description": "(可選)更新索引行的短描述。不給就保留舊的。"
+                }
+            },
+            "required": ["id", "new_content"]
+        })
+    }
+
+    async fn execute(&self, args: Value, _context: &Context) -> Result<SkillOutput> {
+        let id = args
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("missing id"))?
+            .trim()
+            .to_string();
+        let new_content = args
+            .get("new_content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("missing new_content"))?
+            .trim()
+            .to_string();
+        let new_description = args
+            .get("new_description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string());
+
+        let mut existing = self
+            .memory
+            .read(&id)
+            .await
+            .context("memory store read")?
+            .ok_or_else(|| anyhow!("no memory with id: {id} — cannot edit"))?;
+
+        existing.body = new_content.clone();
+        if let Some(desc) = new_description {
+            existing.description = desc;
+        } else {
+            // 沒給新描述,從新 content 抽前 60 字當描述
+            existing.description = new_content.chars().take(60).collect();
+        }
+        existing.last_used = chrono::Utc::now();
+
+        self.memory
+            .write(existing.clone())
+            .await
+            .context("memory store write")?;
+
+        Ok(SkillOutput {
+            user_message: format!("好,把「{}」更新了", existing.name),
+            data: Some(serde_json::json!({
+                "id": existing.id,
+                "name": existing.name,
+                "updated": true,
+            })),
+        })
+    }
+}
+
 /// 把標題 slug 化成檔名安全的 id。
 /// 規則:保留 CJK / 英數字 / 底線,空白→底線,其他標點丟掉。
 ///

@@ -20,4 +20,4 @@ pub mod voice;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 當前 phase 名稱
-pub const PHASE: &str = "1E — Multi-turn tools + RecallMemorySkill";
+pub const PHASE: &str = "1F — Conversation history + Tray + Forget/Edit";

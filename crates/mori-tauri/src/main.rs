@@ -6,17 +6,21 @@ mod recording;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use mori_core::agent::Agent;
+use mori_core::agent::{Agent, SkillCallSummary};
 use mori_core::context::Context as MoriContext;
 use mori_core::llm::groq::GroqProvider;
-use mori_core::llm::LlmProvider;
+use mori_core::llm::{ChatMessage, LlmProvider};
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
-use mori_core::skill::{RecallMemorySkill, RememberSkill, SkillRegistry};
+use mori_core::skill::{
+    EditMemorySkill, ForgetMemorySkill, RecallMemorySkill, RememberSkill, SkillRegistry,
+};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 
 use recording::Recorder;
@@ -34,10 +38,11 @@ pub enum Phase {
     Transcribing,
     /// transcript 拿到了,正在問 LLM
     Responding { transcript: String },
-    /// 完整一輪結束 — 同時帶 transcript 跟 LLM 回應
+    /// 完整一輪結束 — 同時帶 transcript、LLM 回應、用到的 skills
     Done {
         transcript: String,
         response: String,
+        skill_calls: Vec<SkillCallSummary>,
     },
     /// 錯誤(任何階段都可以掉到這)
     Error { message: String },
@@ -49,6 +54,9 @@ impl Default for Phase {
     }
 }
 
+/// 對話歷史最多保留幾「對」(user + assistant 各算一則,所以實際 message 數是 2x)。
+const MAX_HISTORY_PAIRS: usize = 10;
+
 pub struct AppState {
     pub phase: Mutex<Phase>,
     pub recorder: Mutex<Option<Recorder>>,
@@ -58,6 +66,9 @@ pub struct AppState {
     /// 長期記憶 store。Phase 1C 是 LocalMarkdownMemoryStore;
     /// phase 7+ 換成 SyncedMemoryStore 不重寫上層程式碼。
     pub memory: Arc<LocalMarkdownMemoryStore>,
+    /// Working memory:本次 session 的對話歷史(user / assistant 訊息對)。
+    /// 重啟 app 就清空。長期記憶寫進 memory 那邊。
+    pub conversation: Mutex<Vec<ChatMessage>>,
 }
 
 impl AppState {
@@ -96,6 +107,22 @@ fn has_groq_key(state: tauri::State<Arc<AppState>>) -> bool {
 #[tauri::command]
 fn toggle(app: AppHandle, state: tauri::State<Arc<AppState>>) {
     handle_hotkey_toggle(app, state.inner().clone());
+}
+
+/// 清空當前對話歷史(working memory),長期記憶不動。
+/// UI「重新開始對話」按鈕呼叫。
+#[tauri::command]
+fn reset_conversation(state: tauri::State<Arc<AppState>>) {
+    let mut conv = state.conversation.lock();
+    let n = conv.len();
+    conv.clear();
+    tracing::info!(cleared = n, "conversation reset");
+}
+
+/// 取得當前對話歷史長度(訊息數),供 UI 顯示用。
+#[tauri::command]
+fn conversation_length(state: tauri::State<Arc<AppState>>) -> usize {
+    state.conversation.lock().len()
 }
 
 // ─── 熱鍵 / toggle 處理 ─────────────────────────────────────────────
@@ -256,26 +283,34 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             },
         );
 
-        let chat_result: anyhow::Result<String> = async {
+        // 把當前 history snapshot 出來給 agent 用(避免拿著 lock 跑 await)
+        let history_snapshot = state.conversation.lock().clone();
+
+        let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
             let memory_index = memory.read_index_as_context().unwrap_or_default();
             let system_prompt = build_system_prompt(&memory_index);
             tracing::debug!(
                 index_chars = memory_index.chars().count(),
-                "calling agent with system prompt"
+                history_msgs = history_snapshot.len(),
+                "calling agent"
             );
 
             let provider: Arc<dyn LlmProvider> = Arc::new(provider);
 
-            // 註冊 phase 1E skills:remember(寫入)+ recall_memory(按需讀)
+            // 註冊 phase 1F skills:remember / recall / forget / edit
             let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
             let mut registry = SkillRegistry::new();
             registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
             registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
+            registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
+            registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
             let registry = Arc::new(registry);
 
             let agent = Agent::new(provider, registry);
             let ctx = MoriContext::default();
-            let turn = agent.respond(&system_prompt, &transcript, &ctx).await?;
+            let turn = agent
+                .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
+                .await?;
             if !turn.skill_calls.is_empty() {
                 tracing::info!(
                     n = turn.skill_calls.len(),
@@ -283,14 +318,38 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                     "agent: skills executed"
                 );
             }
-            Ok(turn.response)
+            let summaries: Vec<SkillCallSummary> =
+                turn.skill_calls.iter().map(|c| c.summary()).collect();
+            Ok((turn.response, summaries))
         }
         .await;
 
         match chat_result {
-            Ok(response) => {
+            Ok((response, skill_calls)) => {
                 tracing::info!(chars = response.chars().count(), "Mori responded");
-                state.set_phase(&app, Phase::Done { transcript, response });
+
+                // Append 到 conversation history,trim 到 cap
+                {
+                    let mut conv = state.conversation.lock();
+                    conv.push(ChatMessage::user(transcript.clone()));
+                    conv.push(ChatMessage::assistant_with_tool_calls(
+                        Some(response.clone()),
+                        Vec::new(),
+                    ));
+                    let max_msgs = MAX_HISTORY_PAIRS * 2;
+                    while conv.len() > max_msgs {
+                        conv.remove(0);
+                    }
+                }
+
+                state.set_phase(
+                    &app,
+                    Phase::Done {
+                        transcript,
+                        response,
+                        skill_calls,
+                    },
+                );
             }
             Err(e) => {
                 tracing::error!(?e, "chat failed");
@@ -357,6 +416,24 @@ fn build_system_prompt(memory_index: &str) -> String {
         "  • Content 一律寫**完整脈絡**(時間、人物、地點、事件),不要片段。\n");
     prompt.push_str("  • 呼叫後用一兩句自然語言確認記下了什麼。\n\n");
 
+    // edit_memory
+    prompt.push_str(
+        "**edit_memory(id, new_content, [new_description])**:\
+         更新既有記憶的內容。\n");
+    prompt.push_str(
+        "  • 對既有記憶補充 / 更正用這個比 remember 更明確 — \
+         不會因 title 微差建出重複檔。\n");
+    prompt.push_str(
+        "  • 標準流程:recall_memory(看舊內容)→ edit_memory(寫整合後新內容)。\n");
+    prompt.push_str("  • new_content 一樣要是「舊 + 新」整合版,不可只寫新訊息。\n\n");
+
+    // forget_memory
+    prompt.push_str("**forget_memory(id)**:刪除一筆記憶。\n");
+    prompt.push_str(
+        "  • 觸發時機:使用者**明確要求**忘掉(「忘掉那個」、「不用記了」、\
+         「把 X 刪掉」)。意圖不明確就不要主動刪。\n");
+    prompt.push_str("  • Destructive 操作,刪了沒救。確認 id 對。\n\n");
+
     prompt.push_str(&format!("現在時間:{now}\n"));
     if !memory_index.is_empty() {
         prompt.push_str("\n");
@@ -400,6 +477,7 @@ fn main() {
         recorder: Mutex::new(None),
         groq_api_key: Mutex::new(None),
         memory,
+        conversation: Mutex::new(Vec::new()),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -427,10 +505,63 @@ fn main() {
             mori_phase,
             current_phase,
             has_groq_key,
-            toggle
+            toggle,
+            reset_conversation,
+            conversation_length,
         ])
+        .on_window_event(|window, event| {
+            // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                tracing::info!("close requested → hiding to tray");
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .setup(move |app| {
-            // 全域熱鍵:F8(單鍵,衝突最少;Wayland 上單鍵攔截行為跟 combo 可能不同)
+            // ── 系統匣(tray)+ 選單 ──
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &MenuItem::with_id(app, "show", "顯示 Mori", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "hide", "隱藏", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "reset", "重新開始對話", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "quit", "離開", true, None::<&str>)?,
+                ],
+            )?;
+
+            let state_for_tray = state_for_setup.clone();
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Mori")
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(move |app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "hide" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.hide();
+                        }
+                    }
+                    "reset" => {
+                        let mut conv = state_for_tray.conversation.lock();
+                        let n = conv.len();
+                        conv.clear();
+                        tracing::info!(cleared = n, "conversation reset (tray)");
+                    }
+                    "quit" => {
+                        tracing::info!("quit from tray");
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
+            // ── 全域熱鍵:F8(Wayland 上常被擋,有 toggle 按鈕當 fallback)──
             let shortcut = Shortcut::new(None, Code::F8);
 
             let handle = app.handle().clone();
@@ -446,7 +577,7 @@ fn main() {
                 },
             )?;
 
-            tracing::info!("registered global shortcut: F8");
+            tracing::info!("registered global shortcut: F8 + tray icon");
             Ok(())
         })
         .run(tauri::generate_context!())

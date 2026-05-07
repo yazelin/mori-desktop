@@ -22,6 +22,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
+use serde::Serialize;
 
 use crate::context::Context;
 use crate::llm::{ChatMessage, LlmProvider};
@@ -44,6 +45,53 @@ pub struct SkillCallRecord {
     pub output: SkillOutput,
 }
 
+impl SkillCallRecord {
+    /// 給 UI 看的精簡版(name + 一兩個關鍵 arg + 是否成功)。
+    pub fn summary(&self) -> SkillCallSummary {
+        SkillCallSummary {
+            name: self.name.clone(),
+            args_brief: brief_args(&self.args),
+            success: !self.output.user_message.starts_with("(error"),
+        }
+    }
+}
+
+/// 給前端顯示用的 skill 呼叫簡述。
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillCallSummary {
+    pub name: String,
+    /// 簡短人類可讀的參數描述,例如 "title=「老婆生日」"
+    pub args_brief: String,
+    pub success: bool,
+}
+
+fn brief_args(args: &serde_json::Value) -> String {
+    let Some(obj) = args.as_object() else {
+        return truncate(&args.to_string(), 50);
+    };
+    let parts: Vec<String> = obj
+        .iter()
+        .take(2)
+        .map(|(k, v)| {
+            let val = match v.as_str() {
+                Some(s) => format!("「{}」", truncate(s, 24)),
+                None => truncate(&v.to_string(), 24),
+            };
+            format!("{k}={val}")
+        })
+        .collect();
+    parts.join(", ")
+}
+
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars - 1).collect();
+        format!("{truncated}…")
+    }
+}
+
 pub struct Agent {
     provider: Arc<dyn LlmProvider>,
     skills: Arc<SkillRegistry>,
@@ -55,16 +103,21 @@ impl Agent {
     }
 
     /// 跑一輪互動。多輪 tool call 迴圈最多 [`MAX_ROUNDS`] 次,超過視為異常。
+    ///
+    /// `history` 是先前對話的 user/assistant 訊息(不含 system,system 由
+    /// 本方法用 `system_prompt` 產生)。每輪交給 caller 自己 append 結果到
+    /// 自己的 history,不在 Agent 內 mutate state。
     pub async fn respond(
         &self,
         system_prompt: &str,
+        history: &[ChatMessage],
         user_input: &str,
         ctx: &Context,
     ) -> Result<AgentTurn> {
-        let mut messages = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(user_input),
-        ];
+        let mut messages = Vec::with_capacity(history.len() + 2);
+        messages.push(ChatMessage::system(system_prompt));
+        messages.extend_from_slice(history);
+        messages.push(ChatMessage::user(user_input));
         let tools = self.skills.tool_definitions();
         let mut all_skill_calls: Vec<SkillCallRecord> = Vec::new();
 
