@@ -12,11 +12,28 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Mori",
         "width": 480,
         "height": 360,
         "resizable": true,
         "fullscreen": false
+      },
+      {
+        "label": "floating",
+        "title": "Mori (floating)",
+        "width": 96,
+        "height": 96,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "focus": false,
+        "shadow": false,
+        "visible": true
       }
     ],
     "security": {

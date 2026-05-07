@@ -1,0 +1,195 @@
+/* ─── Floating Mori widget ─────────────────────────────────────────────
+   This stylesheet is loaded in BOTH windows but only the floating one
+   adds .floating-window to <body>; everything below is gated on that
+   class so the main window stays unaffected.
+   ──────────────────────────────────────────────────────────────────── */
+
+body.floating-window {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  overflow: hidden;
+  /* No text-selection while dragging the widget around */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+body.floating-window:active {
+  cursor: grabbing;
+}
+
+body.floating-window #root {
+  width: 96px;
+  height: 96px;
+}
+
+/* ─── The Mori "creature" ──────────────────────────────────────────── */
+
+.floating-mori {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Forest spirit base — green-tinted soft glow */
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(160, 220, 180, 0.95) 0%,
+    rgba(80, 150, 110, 0.92) 60%,
+    rgba(40, 90, 70, 0.88) 100%
+  );
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.35),
+    inset 0 -8px 16px rgba(0, 60, 30, 0.4),
+    inset 0 8px 16px rgba(255, 255, 255, 0.15);
+
+  transition: transform 200ms ease, opacity 300ms ease, box-shadow 300ms ease;
+}
+
+/* eyes */
+.floating-eye {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #1a2a1a;
+  border-radius: 50%;
+  top: 36%;
+  box-shadow: inset -2px -2px 3px rgba(255, 255, 255, 0.3);
+}
+.floating-eye-left {
+  left: 28%;
+}
+.floating-eye-right {
+  right: 28%;
+}
+
+/* mouth — tiny line, hidden by default */
+.floating-mouth {
+  position: absolute;
+  bottom: 30%;
+  width: 18px;
+  height: 3px;
+  background: #1a2a1a;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+
+/* ─── State variants ───────────────────────────────────────────────── */
+
+/* SLEEPING (Background mode): half opacity, eyes closed (squashed),
+   slow inhale-exhale animation. */
+.floating-sleeping {
+  opacity: 0.55;
+  animation: floating-breathe 4s ease-in-out infinite;
+  filter: saturate(0.5);
+}
+.floating-sleeping .floating-eye {
+  height: 2px;
+  border-radius: 1px;
+  top: 44%;
+  background: #2a3a2a;
+}
+.floating-sleeping .floating-mouth {
+  opacity: 0;
+}
+
+/* IDLE (Active, waiting): subtle breathing, eyes open. */
+.floating-idle {
+  animation: floating-breathe 6s ease-in-out infinite;
+}
+
+/* RECORDING: pulsing red ring, ears (eyes) wider — listening hard. */
+.floating-recording {
+  box-shadow:
+    0 0 0 0 rgba(255, 80, 80, 0.8),
+    0 4px 16px rgba(0, 0, 0, 0.35),
+    inset 0 -8px 16px rgba(0, 60, 30, 0.4);
+  animation: floating-listen-pulse 1.2s ease-out infinite;
+}
+.floating-recording .floating-eye {
+  width: 14px;
+  height: 14px;
+}
+
+/* THINKING (transcribing / responding): swirling ring. */
+.floating-thinking {
+  animation: floating-think-spin 1.6s linear infinite;
+}
+.floating-thinking::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: rgba(160, 220, 180, 0.9);
+  border-right-color: rgba(160, 220, 180, 0.45);
+  animation: floating-think-spin 1s linear infinite;
+}
+
+/* DONE: brief smile + glow, then returns to idle when phase changes. */
+.floating-done .floating-mouth {
+  opacity: 1;
+  border-radius: 0 0 10px 10px;
+  height: 4px;
+}
+.floating-done {
+  box-shadow:
+    0 0 16px 4px rgba(160, 220, 180, 0.5),
+    0 4px 16px rgba(0, 0, 0, 0.35),
+    inset 0 -8px 16px rgba(0, 60, 30, 0.4);
+}
+
+/* ERROR: red tint, slight wobble. */
+.floating-error {
+  filter: hue-rotate(120deg);
+  animation: floating-error-shake 0.4s ease 1;
+}
+
+/* ─── Keyframes ────────────────────────────────────────────────────── */
+
+@keyframes floating-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+@keyframes floating-listen-pulse {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(255, 80, 80, 0.65),
+      0 4px 16px rgba(0, 0, 0, 0.35),
+      inset 0 -8px 16px rgba(0, 60, 30, 0.4);
+    transform: scale(1);
+  }
+  70% {
+    box-shadow:
+      0 0 0 14px rgba(255, 80, 80, 0),
+      0 4px 16px rgba(0, 0, 0, 0.35),
+      inset 0 -8px 16px rgba(0, 60, 30, 0.4);
+    transform: scale(1.05);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(255, 80, 80, 0),
+      0 4px 16px rgba(0, 0, 0, 0.35),
+      inset 0 -8px 16px rgba(0, 60, 30, 0.4);
+    transform: scale(1);
+  }
+}
+
+@keyframes floating-think-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes floating-error-shake {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-3px); }
+  75%      { transform: translateX(3px); }
+}
