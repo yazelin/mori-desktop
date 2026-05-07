@@ -324,6 +324,31 @@ fn build_system_prompt(memory_context: &str) -> String {
         "- `remember`:把使用者明確要你記下的事(偏好、重要日期、人名、進行中專案)\
          寫進長期記憶。當使用者說「記住...」、「以後我都...」、「我喜歡...」、\
          分享生日 / 紀念日,或介紹重要的人事物時呼叫。一般閒聊或回答問題不要硬叫。\n");
+    prompt.push_str(
+        "  • Title 規則:**穩定 + 簡潔**。日期事件用「YYYY-MM-DD 主題」\
+         (例:「2026-05-11 會議」);人物 / 偏好用主題(例:「老婆生日」、\
+         「常用編輯器」)。\n");
+    prompt.push_str(
+        "  • **整合而非新增**:如果使用者補充 / 更正你已經記過的事(看「你已知關於\
+         使用者的事」段),呼叫 remember 時**用相同 title**,並且 content 必須是\
+         「舊內容 + 新訊息整合後的完整版本」,不可只寫新訊息(那會丟掉舊資訊)。\n");
+    prompt.push_str(
+        "    範例:\n");
+    prompt.push_str(
+        "    - 既有記憶 title=「2026-05-11 會議」、content=「2026-05-11 有會議」\n");
+    prompt.push_str(
+        "    - 使用者補充「是頻譜電子的會議」\n");
+    prompt.push_str(
+        "    - 正確呼叫:remember(title=「2026-05-11 會議」, \
+         content=「2026-05-11 與頻譜電子開會」)\n");
+    prompt.push_str(
+        "    - 錯誤呼叫:remember(title=「2026-05-11 頻譜電子會議」, ...) \
+         ← 會新增第二筆,造成重複\n");
+    prompt.push_str(
+        "    - 錯誤呼叫:remember(title=「2026-05-11 會議」, content=「頻譜電子」) \
+         ← 會丟掉「有會議」這個既有資訊\n");
+    prompt.push_str(
+        "  • Content 一律寫**完整脈絡**(時間、人物、地點、事件全部),不要只寫片段。\n");
     prompt.push_str("呼叫 remember 後,用一兩句自然語言確認你記下了什麼。\n\n");
     prompt.push_str(&format!("現在時間:{now}\n"));
     if !memory_context.is_empty() {

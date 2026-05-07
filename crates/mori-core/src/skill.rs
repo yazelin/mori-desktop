@@ -272,7 +272,12 @@ impl Skill for RememberSkill {
 }
 
 /// 把標題 slug 化成檔名安全的 id。
-/// 規則:小寫、空格→底線、保留中文/英數字、加 timestamp 避免撞名。
+/// 規則:保留 CJK / 英數字 / 底線,空白→底線,其他標點丟掉。
+///
+/// **故意不加 timestamp**:同 title 會 overwrite 既有檔案。這是有意的 —
+/// 讓 LLM 用同 title 寫「整合後的完整 content」就能更新既有記憶。
+/// 整合語意責任在 LLM 端(讀舊 content + 新訊息 → 寫整合版本),
+/// store 端只負責覆寫。詳見 system prompt 裡 remember tool 的使用規則。
 fn slugify(title: &str) -> String {
     let mut out = String::new();
     for ch in title.chars() {
@@ -288,7 +293,5 @@ fn slugify(title: &str) -> String {
     if out.is_empty() {
         out.push_str("memory");
     }
-    // 加 short timestamp 避免重複(同樣標題寫第二次也不蓋掉)
-    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    format!("{out}_{ts}")
+    out
 }
