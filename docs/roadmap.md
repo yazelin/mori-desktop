@@ -21,11 +21,18 @@
 - [x] State machine:Idle → Recording → Transcribing → Done / Error
 - [x] React UI:phase-aware hero panel,錄音狀態動畫 + transcript 顯示
 
-### Phase 1C — 後續(下個 PR)
-- [ ] `LocalMarkdownMemoryStore` 真實 read / write
-- [ ] `EchoSkill`:把 LLM 回應接到 UI(加入 chat 階段,不只 transcribe)
-- [ ] `RememberSkill`:把當前 transcript 寫入 memory
+### Phase 1C — Chat-back + 真實記憶 I/O(2026-05-07)
+- [x] `LocalMarkdownMemoryStore` 真實 read / write / search / delete
+- [x] Pipeline 加入 LLM chat 階段:transcript → gpt-oss-120b → response
+- [x] `Phase::Responding` / `Phase::Done { transcript, response }` 雙塊顯示
+- [x] System prompt 整合 Mori persona + core memory + 當前時間
+- [x] 單元測試:write/read roundtrip + search
+
+### Phase 1D — 後續(下個 PR)
+- [ ] `RememberSkill`:LLM tool call,讓 Mori 自己決定要不要寫記憶
+- [ ] `Skill` trait dispatch 真正接通(目前 chat 是直接 hardcode)
 - [ ] 系統 tray icon(隱藏視窗時仍可叫出)
+- [ ] 對話歷史(連續對話)— 目前每次都是 stateless
 
 ## Phase 2 — 基礎 Skills(2026-06)
 

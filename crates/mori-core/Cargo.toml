@@ -19,3 +19,6 @@ schemars = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
