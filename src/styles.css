@@ -73,6 +73,10 @@ header h1 {
   border-color: var(--accent);
 }
 
+.hero-responding {
+  border-color: var(--accent);
+}
+
 .hero-error {
   border-color: var(--error);
 }
@@ -176,6 +180,45 @@ header h1 {
   line-height: 1.6;
   text-align: left;
   width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-sans);
+}
+
+/* 「你說」/ 「Mori」 雙塊樣式 */
+.speech-block {
+  margin: 6px 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 6px;
+  width: 100%;
+  text-align: left;
+  border-left: 3px solid var(--fg-dim);
+}
+
+.speech-block.mori {
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, rgba(86, 211, 100, 0.08), var(--bg) 30%);
+}
+
+.speech-label {
+  display: block;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.speech-block.mori .speech-label {
+  color: var(--accent);
+}
+
+.speech-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-sans);

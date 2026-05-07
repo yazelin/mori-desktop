@@ -6,7 +6,8 @@ type Phase =
   | { kind: "idle" }
   | { kind: "recording"; started_at_ms: number }
   | { kind: "transcribing" }
-  | { kind: "done"; transcript: string }
+  | { kind: "responding"; transcript: string }
+  | { kind: "done"; transcript: string; response: string }
   | { kind: "error"; message: string };
 
 function App() {
@@ -80,12 +81,30 @@ function App() {
             <p className="hero-hint">Whisper turbo 通常幾秒</p>
           </>
         )}
+        {phase.kind === "responding" && (
+          <>
+            <div className="hero-dot spin" />
+            <p className="hero-text">Mori 正在思考…</p>
+            <div className="speech-block">
+              <span className="speech-label">你說</span>
+              <p className="speech-text">{phase.transcript || "(空白)"}</p>
+            </div>
+            <p className="hero-hint">gpt-oss-120b 通常 1-2 秒</p>
+          </>
+        )}
         {phase.kind === "done" && (
           <>
             <div className="hero-dot done" />
             <p className="hero-text">完成</p>
-            <p className="transcript">{phase.transcript || "(空白)"}</p>
-            <p className="hero-hint">按熱鍵錄下一段</p>
+            <div className="speech-block">
+              <span className="speech-label">你說</span>
+              <p className="speech-text">{phase.transcript || "(空白)"}</p>
+            </div>
+            <div className="speech-block mori">
+              <span className="speech-label">Mori</span>
+              <p className="speech-text">{phase.response || "(無回應)"}</p>
+            </div>
+            <p className="hero-hint">按 F8 / 按鈕錄下一段</p>
           </>
         )}
         {phase.kind === "error" && (

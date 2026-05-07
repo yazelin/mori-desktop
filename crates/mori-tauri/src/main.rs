@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use mori_core::llm::groq::GroqProvider;
-use mori_core::llm::LlmProvider;
+use mori_core::llm::{ChatMessage, LlmProvider};
+use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -27,8 +28,13 @@ pub enum Phase {
     Recording { started_at_ms: i64 },
     /// 已停止錄音,正在打 Whisper API
     Transcribing,
-    /// 拿到逐字稿
-    Done { transcript: String },
+    /// transcript 拿到了,正在問 LLM
+    Responding { transcript: String },
+    /// 完整一輪結束 — 同時帶 transcript 跟 LLM 回應
+    Done {
+        transcript: String,
+        response: String,
+    },
     /// 錯誤(任何階段都可以掉到這)
     Error { message: String },
 }
@@ -39,13 +45,15 @@ impl Default for Phase {
     }
 }
 
-#[derive(Default)]
 pub struct AppState {
     pub phase: Mutex<Phase>,
     pub recorder: Mutex<Option<Recorder>>,
     /// 透過 GroqProvider::discover_api_key() 在啟動時嘗試取得;
     /// 若無,transcribe 階段會回 Error。
     pub groq_api_key: Mutex<Option<String>>,
+    /// 長期記憶 store。Phase 1C 是 LocalMarkdownMemoryStore;
+    /// phase 7+ 換成 SyncedMemoryStore 不重寫上層程式碼。
+    pub memory: Arc<LocalMarkdownMemoryStore>,
 }
 
 impl AppState {
@@ -97,8 +105,8 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
         Phase::Recording { .. } => {
             stop_and_transcribe(app, state);
         }
-        Phase::Transcribing => {
-            tracing::info!("toggle while transcribing — ignored");
+        Phase::Transcribing | Phase::Responding { .. } => {
+            tracing::info!("toggle while busy — ignored");
         }
     }
 }
@@ -172,11 +180,13 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 
     let api_key = state.groq_api_key.lock().clone();
 
+    let memory = state.memory.clone();
+
     tauri::async_runtime::spawn(async move {
-        let result: anyhow::Result<String> = async {
+        // Stage 1: Whisper
+        let transcribe_result: anyhow::Result<(String, GroqProvider)> = async {
             let audio = recorder.stop().context("stop recorder")?;
             let duration = audio.duration_secs();
-            // 計算音量:RMS,讓我們知道是不是麥克風根本沒收到聲音
             let rms = if audio.samples.is_empty() {
                 0.0
             } else {
@@ -204,14 +214,9 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             }
 
             let wav = audio.to_wav_bytes().context("encode WAV")?;
-
-            // Debug:把最後一次錄音存到 /tmp,使用者可以播聽看
             let debug_path = std::env::temp_dir().join("mori-last-recording.wav");
-            if let Err(e) = std::fs::write(&debug_path, &wav) {
-                tracing::warn!(?e, "failed to write debug WAV");
-            } else {
-                tracing::info!(path = %debug_path.display(), "wrote debug WAV");
-            }
+            let _ = std::fs::write(&debug_path, &wav);
+            tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
             let key = api_key.context(
                 "no GROQ_API_KEY configured. \
@@ -219,27 +224,97 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             )?;
             let provider =
                 GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string());
-            let text = provider.transcribe(wav).await.context("groq transcribe")?;
-            Ok(text)
+            let transcript = provider.transcribe(wav).await.context("groq transcribe")?;
+            tracing::info!(chars = transcript.chars().count(), "transcribed");
+            Ok((transcript, provider))
         }
         .await;
 
-        match result {
-            Ok(transcript) => {
-                tracing::info!(chars = transcript.chars().count(), "transcribed");
-                state.set_phase(&app, Phase::Done { transcript });
-            }
+        let (transcript, provider) = match transcribe_result {
+            Ok(t) => t,
             Err(e) => {
-                tracing::error!(?e, "transcribe pipeline failed");
+                tracing::error!(?e, "transcribe failed");
                 state.set_phase(
                     &app,
                     Phase::Error {
                         message: format!("{e:#}"),
                     },
                 );
+                return;
+            }
+        };
+
+        // Stage 2: Mori 用 LLM 回應
+        state.set_phase(
+            &app,
+            Phase::Responding {
+                transcript: transcript.clone(),
+            },
+        );
+
+        let chat_result: anyhow::Result<String> = async {
+            let memory_context = memory.read_all_as_context().unwrap_or_default();
+            let system_prompt = build_system_prompt(&memory_context);
+            tracing::debug!(
+                memory_chars = memory_context.chars().count(),
+                "calling LLM with system prompt"
+            );
+
+            let messages = vec![
+                ChatMessage {
+                    role: "system".into(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: transcript.clone(),
+                },
+            ];
+            let resp = provider.chat(messages, vec![]).await.context("groq chat")?;
+            let text = resp
+                .content
+                .ok_or_else(|| anyhow::anyhow!("LLM returned no content"))?;
+            Ok(text)
+        }
+        .await;
+
+        match chat_result {
+            Ok(response) => {
+                tracing::info!(chars = response.chars().count(), "Mori responded");
+                state.set_phase(&app, Phase::Done { transcript, response });
+            }
+            Err(e) => {
+                tracing::error!(?e, "chat failed");
+                state.set_phase(
+                    &app,
+                    Phase::Error {
+                        message: format!("LLM 回應失敗:{e:#}"),
+                    },
+                );
             }
         }
     });
+}
+
+/// 建構 Mori 的 system prompt — 角色設定 + 當前時間 + 長期記憶。
+fn build_system_prompt(memory_context: &str) -> String {
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%a)").to_string();
+    let mut prompt = String::new();
+    prompt.push_str(
+        "你是 Mori,一個輕巧、貼心的桌面 AI 管家。背景設定:你是來自 world-tree \
+         森林的精靈,被使用者帶到桌面當日常陪伴與助手。\n\n",
+    );
+    prompt.push_str("回覆規則:\n");
+    prompt.push_str("- 一律使用繁體中文,語氣自然、簡潔\n");
+    prompt.push_str("- 不寫前言或客套(例如「好的」、「沒問題」、「以下是」)— 直接進主題\n");
+    prompt.push_str("- 若使用者問你做不到的事(例如操作系統、開檔案),老實說「目前還沒這個能力」\n");
+    prompt.push_str("- 回覆長度配合提問:閒聊就一兩句,問題要解釋才展開\n\n");
+    prompt.push_str(&format!("現在時間:{now}\n"));
+    if !memory_context.is_empty() {
+        prompt.push_str("\n");
+        prompt.push_str(memory_context);
+    }
+    prompt
 }
 
 // ─── main ───────────────────────────────────────────────────────────
@@ -254,8 +329,6 @@ fn main() {
 
     tracing::info!("Mori starting — phase {}", PHASE);
 
-    let state = Arc::new(AppState::default());
-
     // 確保 ~/.mori/config.json 存在(第一次跑就會寫一份 stub)
     let config_path = match GroqProvider::bootstrap_mori_config() {
         Ok(p) => Some(p),
@@ -264,6 +337,22 @@ fn main() {
             None
         }
     };
+
+    // 建立長期記憶 store。第一次跑會在 ~/.mori/memory/ 建空索引。
+    let memory_root = LocalMarkdownMemoryStore::default_root()
+        .expect("could not determine ~/.mori/memory path");
+    let memory = Arc::new(
+        LocalMarkdownMemoryStore::new(memory_root.clone())
+            .expect("failed to initialize memory store"),
+    );
+    tracing::info!(path = %memory_root.display(), "memory store ready");
+
+    let state = Arc::new(AppState {
+        phase: Mutex::new(Phase::default()),
+        recorder: Mutex::new(None),
+        groq_api_key: Mutex::new(None),
+        memory,
+    });
 
     if let Some(key) = GroqProvider::discover_api_key() {
         tracing::info!("found GROQ_API_KEY");
