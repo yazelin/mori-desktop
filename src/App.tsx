@@ -47,13 +47,34 @@ function App() {
       setPhase(event.payload);
       // 每次 phase 變化(尤其轉到 done 時)順便刷一下對話長度
       refreshConvLength();
+      // Done / Error 之後 banner 就不該再顯示了
+      if (event.payload.kind === "done" || event.payload.kind === "error") {
+        setRetryStatus(null);
+      }
     });
     const unlistenLevel = listen<number>("audio-level", (event) => {
       setAudioLevel(event.payload);
     });
+    const unlistenRetry = listen<{
+      attempt: number;
+      max_attempts: number;
+      wait_secs: number;
+      reason: string;
+      op: string;
+    }>("rate-limit-wait", (event) => {
+      setRetryStatus(event.payload);
+      // wait_secs + 1 後自動消失(retry 開始就會被新事件覆蓋,或 phase 結束清掉)
+      const ms = (event.payload.wait_secs + 1) * 1000;
+      setTimeout(() => {
+        setRetryStatus((curr) =>
+          curr && curr.attempt === event.payload.attempt ? null : curr
+        );
+      }, ms);
+    });
     return () => {
       unlistenPhase.then((f) => f());
       unlistenLevel.then((f) => f());
+      unlistenRetry.then((f) => f());
     };
   }, []);
 
@@ -68,6 +89,16 @@ function App() {
     return () => clearInterval(id);
   }, [phase]);
 
+  const [textInput, setTextInput] = useState<string>("");
+  const [textOpen, setTextOpen] = useState<boolean>(false);
+  const [retryStatus, setRetryStatus] = useState<{
+    attempt: number;
+    max_attempts: number;
+    wait_secs: number;
+    reason: string;
+    op: string;
+  } | null>(null);
+
   const onToggle = () => {
     invoke("toggle").catch((e) => console.error("toggle failed", e));
   };
@@ -81,12 +112,37 @@ function App() {
       .catch((e) => console.error("reset failed", e));
   };
 
+  const onSubmitText = () => {
+    const trimmed = textInput.trim();
+    if (!trimmed) return;
+    invoke("submit_text", { text: trimmed })
+      .then(() => {
+        setTextInput("");
+        setTextOpen(false);
+      })
+      .catch((e) => console.error("submit_text failed", e));
+  };
+
+  // mid-pipeline busy(Mori 在處理,使用者不能切斷)
+  const pipelineBusy =
+    phase.kind === "transcribing" || phase.kind === "responding";
+  // 文字輸入相關按鈕 — 錄音中也鎖住(沒意義同時用兩個輸入)
+  const textBusy = pipelineBusy || phase.kind === "recording";
+
   return (
     <main className="container">
       <header>
         <h1>Mori</h1>
         <p className="subtitle">森林精靈 Mori 的桌面身體</p>
       </header>
+
+      {retryStatus && (
+        <div className="retry-banner">
+          {retryStatus.reason === "rate_limit" ? "Groq 限流" : "伺服器忙"} —
+          等 {retryStatus.wait_secs}s 自動重試(第 {retryStatus.attempt}/
+          {retryStatus.max_attempts} 次,{retryStatus.op})
+        </div>
+      )}
 
       <section className={`hero hero-${phase.kind}`}>
         {phase.kind === "idle" && (
@@ -162,8 +218,16 @@ function App() {
       </section>
 
       <section className="actions">
-        <button onClick={onToggle} className="toggle-btn">
-          手動觸發(等同 F8)
+        <button onClick={onToggle} className="toggle-btn" disabled={pipelineBusy}>
+          {phase.kind === "recording" ? "停止錄音" : "手動觸發(等同 F8)"}
+        </button>
+        <button
+          onClick={() => setTextOpen((v) => !v)}
+          className="toggle-btn"
+          disabled={textBusy}
+          title="貼長文 / 打字輸入(語音不適合的場景)"
+        >
+          {textOpen ? "收起文字輸入" : "貼文字"}
         </button>
         <button
           onClick={onReset}
@@ -174,6 +238,37 @@ function App() {
           重新開始對話
         </button>
       </section>
+
+      {textOpen && (
+        <section className="text-input">
+          <textarea
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            placeholder="貼文章 / 打需求,送出後跟語音輸入走同樣 pipeline。例如:&#10;「幫我摘要這篇:[長文...]」&#10;「翻成英文:[一段話]」"
+            rows={6}
+            disabled={textBusy}
+            onKeyDown={(e) => {
+              // Ctrl/Cmd + Enter 送出
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                onSubmitText();
+              }
+            }}
+          />
+          <div className="text-input-actions">
+            <span className="text-input-hint">
+              {textInput.length} 字 · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 送出
+            </span>
+            <button
+              onClick={onSubmitText}
+              className="toggle-btn"
+              disabled={textBusy || !textInput.trim()}
+            >
+              送出
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="status">
         <div className="status-row">

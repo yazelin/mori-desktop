@@ -4,12 +4,33 @@
 //! - `POST /chat/completions` for chat
 //! - `POST /audio/transcriptions` for Whisper
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
-use reqwest::multipart;
+use reqwest::{multipart, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use super::{ChatMessage, ChatResponse, LlmProvider, ToolCall, ToolDefinition};
+
+/// Retry / 限流發生時推給觀察者的事件。可序列化方便給 UI emit。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryEvent {
+    pub attempt: usize,
+    pub max_attempts: usize,
+    pub wait_secs: u64,
+    /// "rate_limit" / "server_error" / "network"
+    pub reason: String,
+    /// 觸發 retry 的具體 endpoint(chat / transcribe)
+    pub op: String,
+}
+
+pub type RetryCallback = Arc<dyn Fn(RetryEvent) + Send + Sync>;
+
+const MAX_ATTEMPTS: usize = 5;
+/// 第 N 次失敗等待秒數(N=1..=MAX_ATTEMPTS-1)— 1, 2, 4, 8, 16
+const BACKOFF_SECS: [u64; 5] = [1, 2, 4, 8, 16];
 
 pub struct GroqProvider {
     api_key: String,
@@ -17,6 +38,7 @@ pub struct GroqProvider {
     transcribe_model: String,
     base_url: String,
     client: reqwest::Client,
+    retry_callback: Option<RetryCallback>,
 }
 
 impl GroqProvider {
@@ -31,6 +53,7 @@ impl GroqProvider {
             transcribe_model: Self::DEFAULT_TRANSCRIBE_MODEL.to_string(),
             base_url: Self::DEFAULT_BASE_URL.to_string(),
             client: reqwest::Client::new(),
+            retry_callback: None,
         }
     }
 
@@ -42,6 +65,93 @@ impl GroqProvider {
     pub fn with_transcribe_model(mut self, model: impl Into<String>) -> Self {
         self.transcribe_model = model.into();
         self
+    }
+
+    /// 設定 retry 回呼。每次因 429 / 5xx 等待重試前會呼叫一次,
+    /// 讓上層(例如 mori-tauri)有機會 emit UI event 通知使用者。
+    pub fn with_retry_callback(mut self, cb: RetryCallback) -> Self {
+        self.retry_callback = Some(cb);
+        self
+    }
+
+    /// 該不該對這個 status 重試
+    fn is_retriable(status: StatusCode) -> bool {
+        status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+    }
+
+    /// 從 `Retry-After` header 抽秒數(整數秒)
+    fn parse_retry_after_header(resp: &reqwest::Response) -> Option<u64> {
+        resp.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+    }
+
+    /// 從 Groq 429 response body 的 error message 抽「try again in X」秒數。
+    ///
+    /// Groq 訊息格式範例:
+    /// "Rate limit reached for model `xxx`. ... Please try again in 4.5s. ..."
+    /// "Please try again in 12.345s."
+    ///
+    /// 抓到 X 後 ceil 取整。
+    fn parse_retry_after_body(body: &str) -> Option<u64> {
+        let lower = body.to_lowercase();
+        let i = lower.find("try again in ")?;
+        let rest = &body[i + "try again in ".len()..];
+        let mut num = String::new();
+        for ch in rest.chars() {
+            if ch.is_ascii_digit() || ch == '.' {
+                num.push(ch);
+            } else {
+                break;
+            }
+        }
+        let secs: f64 = num.parse().ok()?;
+        if !(secs.is_finite() && secs >= 0.0) {
+            return None;
+        }
+        Some(secs.ceil() as u64)
+    }
+
+    /// 計算「該等多少秒」 — 優先順序:body parse > Retry-After header > backoff schedule。
+    /// 算出後加 +1s 緩衝(避免邊界 race),clamp 到 [1, 60]。
+    fn compute_wait_secs(
+        body: &str,
+        header_secs: Option<u64>,
+        fallback_secs: u64,
+    ) -> u64 {
+        let base = Self::parse_retry_after_body(body)
+            .or(header_secs)
+            .unwrap_or(fallback_secs);
+        (base + 1).clamp(1, 60)
+    }
+
+    /// 通報並等待。在最後一次 attempt 之後不再呼叫。
+    async fn notify_and_wait(
+        &self,
+        op: &str,
+        attempt: usize,
+        wait_secs: u64,
+        reason: &str,
+    ) {
+        tracing::warn!(
+            op,
+            attempt,
+            max = MAX_ATTEMPTS,
+            wait_secs,
+            reason,
+            "groq: backing off + retrying"
+        );
+        if let Some(cb) = &self.retry_callback {
+            cb(RetryEvent {
+                attempt,
+                max_attempts: MAX_ATTEMPTS,
+                wait_secs,
+                reason: reason.to_string(),
+                op: op.to_string(),
+            });
+        }
+        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
     }
 
     /// 嘗試從以下來源依序取得 GROQ_API_KEY:
@@ -260,19 +370,46 @@ impl LlmProvider for GroqProvider {
         let url = format!("{}/chat/completions", self.base_url);
         tracing::debug!(model = %self.model, msgs = messages.len(), "groq chat request");
 
-        let resp = self
-            .client
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .context("groq chat: send")?;
+        // Retry loop:429 / 5xx 自動退避重試
+        let body_json = serde_json::to_value(&body)
+            .context("groq chat: serialize body")?;
+        let mut text: String = String::new();
+        for attempt in 1..=MAX_ATTEMPTS {
+            let resp = self
+                .client
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .json(&body_json)
+                .send()
+                .await
+                .context("groq chat: send")?;
 
-        let status = resp.status();
-        let text = resp.text().await.context("groq chat: read body")?;
-        if !status.is_success() {
-            bail!("groq chat: HTTP {}: {}", status, text);
+            let status = resp.status();
+            if status.is_success() {
+                text = resp.text().await.context("groq chat: read body")?;
+                break;
+            }
+
+            // 失敗:先把 header 留下來,然後 consume body(讓 body 解析 + 錯誤訊息可用)
+            let header_wait = Self::parse_retry_after_header(&resp);
+            let err_body = resp.text().await.unwrap_or_default();
+
+            if !Self::is_retriable(status) || attempt == MAX_ATTEMPTS {
+                bail!("groq chat: HTTP {}: {}", status, err_body);
+            }
+
+            // 計算等待時間(body 內「try again in X」優先,header 次之,backoff 兜底,加 +1s 緩衝)
+            let wait = Self::compute_wait_secs(
+                &err_body,
+                header_wait,
+                BACKOFF_SECS[attempt - 1],
+            );
+            let reason = if status == StatusCode::TOO_MANY_REQUESTS {
+                "rate_limit"
+            } else {
+                "server_error"
+            };
+            self.notify_and_wait("chat", attempt, wait, reason).await;
         }
 
         let wire: ChatResponseWire =
@@ -313,46 +450,117 @@ impl LlmProvider for GroqProvider {
             "groq transcribe request"
         );
 
-        let part = multipart::Part::bytes(audio)
-            .file_name("audio.wav")
-            .mime_str("audio/wav")
-            .context("groq transcribe: build part")?;
+        // multipart::Form 會被 send() 消耗,所以每個 attempt 重建。
+        // language=zh + prompt 為「對 AI 助手講話」框架,避免字幕幻覺。
+        let build_form = || -> Result<multipart::Form> {
+            let part = multipart::Part::bytes(audio.clone())
+                .file_name("audio.wav")
+                .mime_str("audio/wav")
+                .context("groq transcribe: build part")?;
+            Ok(multipart::Form::new()
+                .part("file", part)
+                .text("model", self.transcribe_model.clone())
+                .text("response_format", "json")
+                .text("language", "zh")
+                .text(
+                    "prompt",
+                    "以下是使用者直接對 AI 助手 Mori 說的話,繁體中文。\
+                     常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫、\
+                     記住、提醒、行事曆、會議。",
+                ))
+        };
 
-        // language=zh 強制中文 + prompt 給「使用者直接對 AI 講話」的框架。
-        //
-        // 之前用「逐字稿」這個詞,Whisper 訓練資料裡跟 YouTube 字幕綁定,
-        // 會插入 [字幕] / 贊助商標記 / 時間戳之類的 noise,LLM 看到還會
-        // 以為使用者在貼字幕。改用「使用者對 AI 助手講的話」明確去除字幕聯想。
-        // 仍保留台灣科技用語當 vocab seed,讓 LLM 寫出在地化辭彙。
-        let form = multipart::Form::new()
-            .part("file", part)
-            .text("model", self.transcribe_model.clone())
-            .text("response_format", "json")
-            .text("language", "zh")
-            .text(
-                "prompt",
-                "以下是使用者直接對 AI 助手 Mori 說的話,繁體中文。\
-                 常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫、\
-                 記住、提醒、行事曆、會議。",
+        let mut text = String::new();
+        for attempt in 1..=MAX_ATTEMPTS {
+            let form = build_form()?;
+            let resp = self
+                .client
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .multipart(form)
+                .send()
+                .await
+                .context("groq transcribe: send")?;
+
+            let status = resp.status();
+            if status.is_success() {
+                text = resp
+                    .text()
+                    .await
+                    .context("groq transcribe: read body")?;
+                break;
+            }
+
+            let header_wait = Self::parse_retry_after_header(&resp);
+            let err_body = resp.text().await.unwrap_or_default();
+
+            if !Self::is_retriable(status) || attempt == MAX_ATTEMPTS {
+                bail!("groq transcribe: HTTP {}: {}", status, err_body);
+            }
+
+            let wait = Self::compute_wait_secs(
+                &err_body,
+                header_wait,
+                BACKOFF_SECS[attempt - 1],
             );
-
-        let resp = self
-            .client
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .multipart(form)
-            .send()
-            .await
-            .context("groq transcribe: send")?;
-
-        let status = resp.status();
-        let text = resp.text().await.context("groq transcribe: read body")?;
-        if !status.is_success() {
-            bail!("groq transcribe: HTTP {}: {}", status, text);
+            let reason = if status == StatusCode::TOO_MANY_REQUESTS {
+                "rate_limit"
+            } else {
+                "server_error"
+            };
+            self.notify_and_wait("transcribe", attempt, wait, reason).await;
         }
 
         let parsed: TranscriptionResponse =
             serde_json::from_str(&text).context("groq transcribe: parse response")?;
         Ok(parsed.text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_body_groq_format() {
+        let body = r#"{"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` in organization xxx. Limit 30000 TPM. Used 28000 TPM. Please try again in 4.5s. Visit https://...","type":"tokens_rate_limit_exceeded"}}"#;
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(5));
+    }
+
+    #[test]
+    fn parse_body_integer_seconds() {
+        let body = "Please try again in 12s.";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(12));
+    }
+
+    #[test]
+    fn parse_body_no_match() {
+        let body = "Generic 503 service unavailable";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), None);
+    }
+
+    #[test]
+    fn compute_wait_prefers_body_over_header() {
+        // body says 4.5s, header says 60 — should pick ceil(4.5)+1 = 6
+        let body = "Please try again in 4.5s";
+        assert_eq!(GroqProvider::compute_wait_secs(body, Some(60), 8), 6);
+    }
+
+    #[test]
+    fn compute_wait_falls_back_to_header() {
+        let body = "no rate hint here";
+        assert_eq!(GroqProvider::compute_wait_secs(body, Some(3), 8), 4);
+    }
+
+    #[test]
+    fn compute_wait_falls_back_to_backoff() {
+        let body = "no rate hint here";
+        assert_eq!(GroqProvider::compute_wait_secs(body, None, 8), 9);
+    }
+
+    #[test]
+    fn compute_wait_clamps_to_60() {
+        let body = "Please try again in 120s";
+        assert_eq!(GroqProvider::compute_wait_secs(body, None, 8), 60);
     }
 }

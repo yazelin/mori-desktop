@@ -20,4 +20,4 @@ pub mod voice;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 當前 phase 名稱
-pub const PHASE: &str = "1F — Conversation history + Tray + Forget/Edit";
+pub const PHASE: &str = "2 — Text skills (translate / polish / summarize / compose)";

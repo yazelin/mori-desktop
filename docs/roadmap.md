@@ -57,16 +57,19 @@
 
 **Phase 1 完整收工:Mori 已是端到端可用的 voice AI 管家。**
 
-## Phase 2 — 基礎 Skills(2026-06)
+## Phase 2 — 基礎 Skills(2026-05-08)
 
 純文字操作類,不依賴系統整合。
 
-- [ ] `TranslateSkill` — 翻譯
-- [ ] `PolishSkill` — 修詞 / 改錯字
-- [ ] `SummarizeSkill` — 摘要(輸入剪貼簿或 URL 內容)
-- [ ] `ComposeSkill` — 創作短文
+- [x] `TranslateSkill` — 翻譯(target_lang 含 zh-TW 在地化)
+- [x] `PolishSkill` — 潤稿改錯,可指定 tone(formal/casual/concise/detailed/auto)
+- [x] `SummarizeSkill` — 摘要,可指定 style(bullet_points / one_paragraph / tldr)
+- [x] `ComposeSkill` — 草擬 email / message / essay / social_post
+- [x] System prompt 加 4 個 text skills 的觸發守則
+- [x] skill.rs 拆 module(skill/{echo,remember,recall,forget,edit,translate,polish,summarize,compose}.rs)
+
+未排程:
 - [ ] Session log:每次互動寫入 `~/.mori/sessions/<timestamp>/`
-- [ ] LLM tool calling 真正接上(Groq function calling)
 - [ ] 多 provider 支援:`OllamaProvider`(隱私任務 fallback)
 
 ## Phase 3 — Context Capture / 剪貼簿 / URL Routing(2026-07)

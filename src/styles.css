@@ -48,6 +48,19 @@ header h1 {
   font-size: 13px;
 }
 
+/* Rate-limit / retry banner — 短暫顯示在 hero 上方 */
+.retry-banner {
+  margin-top: 16px;
+  padding: 8px 12px;
+  background: rgba(240, 136, 62, 0.12);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
 /* Hero panel — main visual focus, changes per phase */
 .hero {
   margin-top: 24px;
@@ -287,6 +300,10 @@ kbd {
 .actions {
   margin-top: 16px;
   text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
 }
 
 .toggle-btn {
@@ -301,13 +318,65 @@ kbd {
   transition: border-color 100ms ease, background 100ms ease;
 }
 
-.toggle-btn:hover {
+.toggle-btn:hover:not(:disabled) {
   border-color: var(--fg-dim);
   background: var(--border);
 }
 
-.toggle-btn:active {
+.toggle-btn:active:not(:disabled) {
   transform: translateY(1px);
+}
+
+.toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Text input area — 貼長文 / 打字 */
+.text-input {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.text-input textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.text-input textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.text-input textarea::placeholder {
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+}
+
+.text-input-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.text-input-hint {
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
 }
 
 /* Status footer */
