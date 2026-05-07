@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
 import {
   getCurrentWindow,
   currentMonitor,
   PhysicalPosition,
 } from "@tauri-apps/api/window";
+
+// Diagnostic helper: emit a `floating-log` event so the backend's tracing
+// subscriber picks it up and we can SSH-grep it. Webview console.log is
+// invisible without devtools.
+function dlog(...parts: unknown[]) {
+  const msg = parts
+    .map((p) => (typeof p === "string" ? p : JSON.stringify(p)))
+    .join(" ");
+  console.log("[floating]", msg);
+  emit("floating-log", msg).catch(() => {});
+}
 
 type SkillCallSummary = {
   name: string;
@@ -96,26 +107,20 @@ function FloatingMori() {
   // Same events the main window subscribes to — Tauri broadcasts to all
   // webviews, no extra IPC needed.
   useEffect(() => {
-    console.log("[floating] mounting on window:", getCurrentWindow().label);
+    dlog("mounting on window:", getCurrentWindow().label);
     invoke<Mode>("current_mode")
-      .then((m) => {
-        console.log("[floating] initial mode:", m);
-        setMode(m);
-      })
-      .catch((e) => console.error("[floating] current_mode err", e));
+      .then((m) => { dlog("initial mode:", m); setMode(m); })
+      .catch((e) => dlog("current_mode err:", String(e)));
     invoke<Phase>("current_phase")
-      .then((p) => {
-        console.log("[floating] initial phase:", p);
-        setPhase(p);
-      })
-      .catch((e) => console.error("[floating] current_phase err", e));
+      .then((p) => { dlog("initial phase:", p); setPhase(p); })
+      .catch((e) => dlog("current_phase err:", String(e)));
 
     const unlistenMode = listen<Mode>("mode-changed", (e) => {
-      console.log("[floating] mode-changed:", e.payload);
+      dlog("mode-changed:", e.payload);
       setMode(e.payload);
     });
     const unlistenPhase = listen<Phase>("phase-changed", (e) => {
-      console.log("[floating] phase-changed:", e.payload);
+      dlog("phase-changed:", e.payload);
       setPhase(e.payload);
     });
     return () => {
@@ -127,7 +132,7 @@ function FloatingMori() {
   // Track visual changes so we can confirm the sprite swap actually fires.
   useEffect(() => {
     const v = visualFor(mode, phase);
-    console.log("[floating] visual:", v, "src:", SPRITE_SRC[v]);
+    dlog("visual ->", v, "src:", SPRITE_SRC[v]);
   }, [mode, phase]);
 
   // Drag: single-click + drag moves the window. We hand control to Tauri's
