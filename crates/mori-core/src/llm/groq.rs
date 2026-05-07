@@ -318,8 +318,12 @@ impl LlmProvider for GroqProvider {
             .mime_str("audio/wav")
             .context("groq transcribe: build part")?;
 
-        // language=zh 強制中文 + prompt 偏好繁中,避免 Whisper 預設輸出簡中。
-        // prompt 也順便包進台灣常見用語,讓辭彙選擇更在地化。
+        // language=zh 強制中文 + prompt 給「使用者直接對 AI 講話」的框架。
+        //
+        // 之前用「逐字稿」這個詞,Whisper 訓練資料裡跟 YouTube 字幕綁定,
+        // 會插入 [字幕] / 贊助商標記 / 時間戳之類的 noise,LLM 看到還會
+        // 以為使用者在貼字幕。改用「使用者對 AI 助手講的話」明確去除字幕聯想。
+        // 仍保留台灣科技用語當 vocab seed,讓 LLM 寫出在地化辭彙。
         let form = multipart::Form::new()
             .part("file", part)
             .text("model", self.transcribe_model.clone())
@@ -327,8 +331,9 @@ impl LlmProvider for GroqProvider {
             .text("language", "zh")
             .text(
                 "prompt",
-                "以下是台灣繁體中文逐字稿,使用繁體中文字。\
-                 常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫。",
+                "以下是使用者直接對 AI 助手 Mori 說的話,繁體中文。\
+                 常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫、\
+                 記住、提醒、行事曆、會議。",
             );
 
         let resp = self
