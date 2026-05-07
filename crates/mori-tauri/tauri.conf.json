@@ -24,18 +24,14 @@
         "title": "Mori (floating)",
         "width": 160,
         "height": 160,
-        "x": 784,
-        "y": 54,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
-        "maximizable": false,
-        "minimizable": false,
-        "focus": false,
         "shadow": false,
-        "visible": true
+        "visible": true,
+        "center": true
       }
     ],
     "security": {

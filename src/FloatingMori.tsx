@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
-import {
-  getCurrentWindow,
-  currentMonitor,
-  PhysicalPosition,
-} from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // Diagnostic helper: emit a `floating-log` event so the backend's tracing
 // subscriber picks it up and we can SSH-grep it. Webview console.log is
@@ -115,49 +111,14 @@ function FloatingMori() {
   // Wayland sometimes drops the flag during the initial geometry dance,
   // so doing it once from JS after we're settled is more reliable than
   // trusting the conf.json `alwaysOnTop: true` alone.
-  useEffect(() => {
-    (async () => {
-      try {
-        const w = getCurrentWindow();
-        const m = await currentMonitor();
-        if (!m) return;
-
-        // tauri.conf.json declares the window 160×160 (logical CSS px).
-        // We use the *configured logical size* × monitor scale factor as
-        // the position anchor — outerSize() on GNOME Wayland for
-        // transparent borderless windows includes a hefty invisible
-        // shadow region (we measured 424×504 reported for a 160×160
-        // configured window on a 3456×2160 sf:2 monitor), which threw
-        // the centring math off by ~80 logical pixels.
-        const LOGICAL_W = 160;
-        const physW = LOGICAL_W * m.scaleFactor;
-        const x = Math.max(0, Math.round((m.size.width - physW) / 2));
-        const y = Math.max(0, Math.round(m.size.height * 0.05));
-
-        dlog(
-          "anchor: monitor",
-          { w: m.size.width, h: m.size.height, sf: m.scaleFactor },
-          "→ pos (phys)",
-          { x, y },
-        );
-
-        try {
-          await w.setPosition(new PhysicalPosition(x, y));
-          const after = await w.outerPosition();
-          dlog("after setPosition outerPosition:", { x: after.x, y: after.y });
-        } catch (e) {
-          dlog("setPosition failed:", String(e));
-        }
-        try {
-          await w.setAlwaysOnTop(true);
-        } catch (e) {
-          dlog("setAlwaysOnTop failed:", String(e));
-        }
-      } catch (outer) {
-        dlog("anchor effect threw:", String(outer));
-      }
-    })();
-  }, []);
+  // No JS positioning / alwaysOnTop manipulation:
+  // GNOME mutter on Wayland honours the conf.json `center: true` and
+  // `alwaysOnTop: true` hints **at window creation**, but treats any
+  // subsequent app-initiated setPosition / setAlwaysOnTop as "client
+  // misbehaving" and silently downgrades the window's z-order. AgentPulse
+  // works because it never touches these post-creation. We follow the
+  // same discipline now. Drag still works via the mousedown handler;
+  // initial placement is screen-centre per `center: true`.
 
   // Same events the main window subscribes to — Tauri broadcasts to all
   // webviews, no extra IPC needed.
