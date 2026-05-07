@@ -28,11 +28,27 @@
 - [x] System prompt 整合 Mori persona + core memory + 當前時間
 - [x] 單元測試:write/read roundtrip + search
 
-### Phase 1D — 後續(下個 PR)
-- [ ] `RememberSkill`:LLM tool call,讓 Mori 自己決定要不要寫記憶
-- [ ] `Skill` trait dispatch 真正接通(目前 chat 是直接 hardcode)
+### Phase 1D — Skill dispatch + RememberSkill(2026-05-08)
+- [x] `SkillRegistry`:註冊、列舉、dispatch
+- [x] `Agent::respond`:LLM tool calling 接 SkillRegistry
+- [x] `RememberSkill`:LLM 自己判斷該不該寫記憶 → 直接寫入 markdown store
+- [x] System prompt 加入 tool 使用守則(不要硬叫、寫完要確認)
+- [x] 替代原本 hardcode 的 provider.chat(),全走 Agent 路徑
+
+### Phase 1E — Multi-turn tools + Index-only context(2026-05-08)
+- [x] `ChatMessage` 擴展支援 OpenAI tool-calling 多輪協定
+      (`assistant.tool_calls` echo + `tool` role with `tool_call_id`)
+- [x] `Agent::respond` 改成多輪迴圈(MAX_ROUNDS=5,LLM 看 tool 結果再答)
+- [x] `RecallMemorySkill`:LLM 按需拉單筆記憶 body
+- [x] `read_index_as_context` 取代 `read_all_as_context`:system prompt 只送
+      索引(name + description + id),body 透過 recall_memory 拉
+- [x] System prompt 重寫:教 LLM 何時用 recall vs remember、整合 vs 新增
+
+### Phase 1F — 後續
 - [ ] 系統 tray icon(隱藏視窗時仍可叫出)
-- [ ] 對話歷史(連續對話)— 目前每次都是 stateless
+- [ ] 對話歷史(連續對話)— 目前每輪都重啟,不記得上句
+- [ ] UI 顯示「Mori 剛剛呼叫了 X skill」(`AgentTurn::skill_calls` 已就緒)
+- [ ] ForgetSkill / EditMemorySkill(讓使用者語音改 / 刪記憶)
 
 ## Phase 2 — 基礎 Skills(2026-06)
 

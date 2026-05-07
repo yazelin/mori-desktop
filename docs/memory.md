@@ -71,8 +71,8 @@ User prefers responses without:
 
 | Phase | 機制 |
 |---|---|
-| 1-4 | LLM 看 `MEMORY.md` 索引 → 判斷哪幾個檔相關 → 讀進來 |
-| 5+ | 加 `sqlite-vec` embedding 加速,大量記憶時用 |
+| 1E | **目前實作**:system prompt 只送索引(`read_index_as_context`),LLM 看到後自行判斷需要哪幾筆 → 呼叫 `recall_memory(id)` skill 拉 body(multi-turn tool call)|
+| 5+ | 加 `sqlite-vec` embedding 加速,大量記憶時 LLM 透過 `search_memory(query)` skill 走語意搜尋 |
 | 7+ | 跨裝置 CRDT 合併 |
 | 9+ | 自動分類 / 自動失效(`stale` 標記) |
 

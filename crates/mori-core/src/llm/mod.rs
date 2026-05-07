@@ -5,6 +5,11 @@
 //! - 任務 → 模型精細搭配
 //! - Fallback chain
 //! - Privacy::LocalOnly 強制本地
+//!
+//! 訊息結構支援 OpenAI tool-calling 多輪協定:
+//! - `system` / `user`:role + content
+//! - `assistant`(發起 tool_call):role + tool_calls(content 可能也有)
+//! - `tool`(回傳結果):role + content + tool_call_id + name
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,10 +18,71 @@ use serde_json::Value;
 
 pub mod groq;
 
+/// 一則訊息。
+///
+/// 用 `Option<String>` 給 content 是因為 assistant 在發起 tool_call 時可能
+/// 沒文字內容。`tool_calls` 只在 assistant 發起時非空。`tool_call_id` + `name`
+/// 只在 role="tool" 時用,把回傳結果連回對應的 tool_call。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system".into(),
+            content: Some(content.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".into(),
+            content: Some(content.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    pub fn assistant_with_tool_calls(
+        content: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    ) -> Self {
+        Self {
+            role: "assistant".into(),
+            content,
+            tool_calls,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    pub fn tool_result(
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            role: "tool".into(),
+            content: Some(content.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(call_id.into()),
+            name: Some(name.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,13 +94,15 @@ pub struct ToolDefinition {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// API 給的唯一 id(回傳 tool 結果要 reference 它)
+    pub id: String,
     pub name: String,
     pub arguments: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
-    /// LLM 自由文字回應(若沒呼叫 tool)
+    /// LLM 自由文字回應(若沒呼叫 tool 或 mid-thought)
     pub content: Option<String>,
     /// LLM 決定呼叫的 tools
     pub tool_calls: Vec<ToolCall>,
@@ -45,7 +113,7 @@ pub trait LlmProvider: Send + Sync {
     /// Provider 識別名(groq / ollama / openai / anthropic / ...)
     fn name(&self) -> &'static str;
 
-    /// 模型 id(server 端的模型代號,例:`openai/gpt-oss-120b`、`qwen3:8b`)
+    /// 模型 id
     fn model(&self) -> &str;
 
     /// 跑一輪 chat completion。

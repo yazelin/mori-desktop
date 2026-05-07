@@ -68,25 +68,28 @@ impl LocalMarkdownMemoryStore {
         self.root.join(format!("{id}.md"))
     }
 
-    /// 把 core memory 直接攤平成一段純文字,適合塞進 system prompt。
+    /// 把記憶**索引**攤平成一段純文字,塞進 system prompt。
     ///
-    /// Phase 1C 為了讓 LLM「知道你是誰」,我們會在每次 chat 時讀整個索引 +
-    /// 全部 memory 內容當作背景。如果 memory 多了會嫌長,phase 5+ 再做
-    /// 「LLM 自己挑相關 memory」邏輯。
-    pub fn read_all_as_context(&self) -> Result<String> {
+    /// 只送 name + description + id,不送 body。LLM 看到索引若覺得需要某筆
+    /// memory 的細節,呼叫 `recall_memory(id)` skill 主動拉。
+    ///
+    /// 為什麼這樣設計:不擴展把全部 memory 全文塞進 prompt(phase 1D 早期的
+    /// 做法,1000+ 筆會爆 context window)。索引行極短,即使 1000 筆也只有
+    /// ~50KB 仍可放;真正需要的 body 才透過 tool call 拉。對應 docs/memory.md
+    /// 「Phase 1-4: LLM 看索引判斷哪幾個檔相關 → 讀進來」設計。
+    pub fn read_index_as_context(&self) -> Result<String> {
         let entries = blocking_read_index(&self.index_path())?;
         if entries.is_empty() {
             return Ok(String::new());
         }
+
         let mut out = String::new();
-        out.push_str("# 你已知關於使用者的事\n\n");
+        out.push_str("# 長期記憶索引(若需細節,呼叫 recall_memory(id))\n\n");
         for entry in &entries {
-            let path = self.memory_path(&entry.id);
-            if let Ok(memory) = blocking_read_memory(&path) {
-                out.push_str(&format!("## {} ({:?})\n", memory.name, memory.memory_type));
-                out.push_str(&memory.body);
-                out.push_str("\n\n");
-            }
+            out.push_str(&format!(
+                "- id=`{}` 「{}」 — {}\n",
+                entry.id, entry.name, entry.description
+            ));
         }
         Ok(out)
     }
