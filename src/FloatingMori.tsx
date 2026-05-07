@@ -7,11 +7,6 @@ import {
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 
-// Same shape as the main App's Phase + Mode types (kept inline here so the
-// floating widget can be moved into its own bundle later if we ever split
-// the build per window — right now both windows share `main.tsx` and the
-// same dist).
-
 type SkillCallSummary = {
   name: string;
   args_brief: string;
@@ -33,7 +28,6 @@ type Phase =
 
 type Mode = "active" | "background";
 
-// Visual state — a single label so the CSS is one selector per state.
 type Visual =
   | "sleeping"
   | "idle"
@@ -72,15 +66,13 @@ function FloatingMori() {
   const [mode, setMode] = useState<Mode>("active");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
-  // Anchor bottom-right on first paint, then leave alone (user can drag).
   useEffect(() => {
     (async () => {
       const w = getCurrentWindow();
       const m = await currentMonitor();
       if (!m) return;
       const size = await w.outerSize();
-      const margin = 20;
-      // Account for typical taskbar height (~48–60 px). Leave room.
+      const margin = 24;
       const taskbarReserve = 60;
       const x = m.size.width - size.width - margin;
       const y = m.size.height - size.height - margin - taskbarReserve;
@@ -88,8 +80,6 @@ function FloatingMori() {
     })();
   }, []);
 
-  // Subscribe to backend state. Same event names the main window uses;
-  // Tauri broadcasts events to all webview windows, so no extra plumbing.
   useEffect(() => {
     invoke<Mode>("current_mode").then(setMode).catch(() => {});
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
@@ -102,15 +92,8 @@ function FloatingMori() {
     };
   }, []);
 
-  // Click → toggle the main window. Drag → moves the floating widget
-  // (handled by the data-tauri-drag-region attribute, which Tauri picks up
-  // for borderless windows).
   const onClick = async () => {
     try {
-      // We rely on the global Tauri singleton to find the main window.
-      // Using the typed api: getAllWindows() — but to keep this widget
-      // tiny, just toggle visibility via an IPC the backend already has.
-      // Falling back to the WebviewWindow class is also fine.
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const main = await WebviewWindow.getByLabel("main");
       if (!main) return;
@@ -130,14 +113,44 @@ function FloatingMori() {
 
   return (
     <div
-      className={`floating-mori floating-${visual}`}
+      className={`mori-stage mori-${visual}`}
       data-tauri-drag-region
       onClick={onClick}
-      title={`Mori — ${VISUAL_LABEL[visual]}\n(click 切顯示主視窗,長按拖曳)`}
+      title={`Mori — ${VISUAL_LABEL[visual]}\nclick 切顯示主視窗,長按拖曳`}
     >
-      <div className="floating-eye floating-eye-left" />
-      <div className="floating-eye floating-eye-right" />
-      <div className="floating-mouth" />
+      {/* 外層:狀態指示環(脈動 / 旋轉 / 暈染) */}
+      <div className="mori-aura" />
+      {/* 主體:Mori 雙圓 logo */}
+      <svg
+        className="mori-logo"
+        viewBox="0 0 100 100"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          {/* 漸層讓 logo 有立體感 */}
+          <radialGradient id="moriDark" cx="35%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#5a8a6e" />
+            <stop offset="60%" stopColor="#2d5a3f" />
+            <stop offset="100%" stopColor="#1a3a28" />
+          </radialGradient>
+          <radialGradient id="moriLight" cx="35%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#e8d8be" />
+            <stop offset="60%" stopColor="#c8b896" />
+            <stop offset="100%" stopColor="#9a8a72" />
+          </radialGradient>
+        </defs>
+        {/* 雙圓 yin-yang 風格 — 精靈與森林互抱 */}
+        <circle cx="36" cy="50" r="30" fill="url(#moriDark)" />
+        <circle cx="64" cy="50" r="30" fill="url(#moriLight)" opacity="0.85" />
+        {/* 中心一片葉子當焦點(品牌符號) */}
+        <path
+          className="mori-leaf"
+          d="M 50 35 Q 56 50 50 65 Q 44 50 50 35 Z"
+          fill="#6b8e5a"
+          stroke="#2d5a3f"
+          strokeWidth="0.8"
+        />
+      </svg>
     </div>
   );
 }
