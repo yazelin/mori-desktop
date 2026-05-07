@@ -117,34 +117,38 @@ function FloatingMori() {
   // trusting the conf.json `alwaysOnTop: true` alone.
   useEffect(() => {
     (async () => {
-      const w = getCurrentWindow();
-      const m = await currentMonitor();
-      if (!m) {
-        dlog("currentMonitor returned null — leaving default position");
-        return;
-      }
-      const size = await w.outerSize();
-      const x = Math.max(0, Math.round((m.size.width - size.width) / 2));
-      const y = Math.max(0, Math.round(m.size.height * 0.08));
-      dlog(
-        "anchor: monitor",
-        { w: m.size.width, h: m.size.height, sf: m.scaleFactor },
-        "window",
-        { w: size.width, h: size.height },
-        "→ pos",
-        { x, y },
-      );
       try {
-        await w.setPosition(new PhysicalPosition(x, y));
-        const after = await w.outerPosition();
-        dlog("after setPosition outerPosition:", { x: after.x, y: after.y });
-      } catch (e) {
-        dlog("setPosition failed:", String(e));
-      }
-      try {
-        await w.setAlwaysOnTop(true);
-      } catch (e) {
-        dlog("setAlwaysOnTop failed:", String(e));
+        dlog("anchor effect: starting");
+        const w = getCurrentWindow();
+        dlog("anchor effect: got window, calling currentMonitor");
+        const m = await currentMonitor();
+        dlog("anchor effect: currentMonitor returned", m ? "monitor" : "null");
+        if (!m) return;
+        const size = await w.outerSize();
+        const x = Math.max(0, Math.round((m.size.width - size.width) / 2));
+        const y = Math.max(0, Math.round(m.size.height * 0.08));
+        dlog(
+          "anchor: monitor",
+          { w: m.size.width, h: m.size.height, sf: m.scaleFactor },
+          "window",
+          { w: size.width, h: size.height },
+          "→ pos",
+          { x, y },
+        );
+        try {
+          await w.setPosition(new PhysicalPosition(x, y));
+          dlog("setPosition ok");
+        } catch (e) {
+          dlog("setPosition failed:", String(e));
+        }
+        try {
+          await w.setAlwaysOnTop(true);
+          dlog("setAlwaysOnTop ok");
+        } catch (e) {
+          dlog("setAlwaysOnTop failed:", String(e));
+        }
+      } catch (outer) {
+        dlog("anchor effect threw:", String(outer));
       }
     })();
   }, []);
