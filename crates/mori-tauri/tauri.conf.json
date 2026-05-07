@@ -24,6 +24,8 @@
         "title": "Mori (floating)",
         "width": 160,
         "height": 160,
+        "x": 784,
+        "y": 54,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
