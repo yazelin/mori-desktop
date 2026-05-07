@@ -21,6 +21,14 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+
+# Audio capture (cross-platform: ALSA on Linux, CoreAudio on macOS, WASAPI on Windows)
+cpal = "0.15"
+# WAV encoding (so we can ship audio bytes to Whisper without an external encoder)
+hound = "3.5"
+# Lock-free shared state for the audio callback path
+parking_lot = "0.12"
 
 [features]
 default = ["custom-protocol"]

@@ -8,15 +8,24 @@
 
 **目標**:按 Ctrl+Alt+M → 錄音 → Whisper → 螢幕顯示 transcript。
 
+### Phase 1A — Scaffold(完成 2026-05-07)
 - [x] Repo + Cargo workspace + Tauri scaffold + React 前端
 - [x] `mori-core` traits 定義(MemoryStore / Skill / Context / LlmProvider)
-- [x] `LocalMarkdownMemoryStore` 最簡實作
-- [ ] `GroqProvider`:Whisper transcription + chat completion
-- [ ] `mori-tauri`:全域熱鍵(Ctrl+Alt+M)
-- [ ] `mori-tauri`:麥克風錄音(cpal)
-- [ ] React UI:錄音狀態 + transcript 顯示
-- [ ] `EchoSkill`(LLM 看 transcript 後回個自然語言確認)
-- [ ] `RememberSkill`(把當前 transcript 寫入 memory)
+- [x] `LocalMarkdownMemoryStore` trait 骨架(read/write 留到 phase 1C)
+
+### Phase 1B — Voice pipeline 端到端(2026-05-07)
+- [x] `GroqProvider::chat`:OpenAI 相容 chat completion(含 tool calling 解析)
+- [x] `GroqProvider::transcribe`:Whisper turbo multipart upload
+- [x] `mori-tauri`:全域熱鍵 Ctrl+Alt+M
+- [x] `mori-tauri`:麥克風錄音(cpal,跨平台)+ WAV 編碼(hound)
+- [x] State machine:Idle → Recording → Transcribing → Done / Error
+- [x] React UI:phase-aware hero panel,錄音狀態動畫 + transcript 顯示
+
+### Phase 1C — 後續(下個 PR)
+- [ ] `LocalMarkdownMemoryStore` 真實 read / write
+- [ ] `EchoSkill`:把 LLM 回應接到 UI(加入 chat 階段,不只 transcribe)
+- [ ] `RememberSkill`:把當前 transcript 寫入 memory
+- [ ] 系統 tray icon(隱藏視窗時仍可叫出)
 
 ## Phase 2 — 基礎 Skills(2026-06)
 

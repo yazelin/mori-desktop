@@ -1,20 +1,22 @@
 //! Groq LLM provider — chat completion + Whisper transcription。
 //!
-//! Phase 1 提供:
-//! - chat:呼叫 `openai/gpt-oss-120b`(或設定的其他模型)
-//! - transcribe:呼叫 `whisper-large-v3-turbo`
-//!
-//! 實作 stub 在這個 PR;實際 HTTP 呼叫在下一個 PR(phase 1B)補上。
+//! 接 OpenAI 相容 API:
+//! - `POST /chat/completions` for chat
+//! - `POST /audio/transcriptions` for Whisper
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
+use reqwest::multipart;
+use serde::{Deserialize, Serialize};
 
-use super::{ChatMessage, ChatResponse, LlmProvider, ToolDefinition};
+use super::{ChatMessage, ChatResponse, LlmProvider, ToolCall, ToolDefinition};
 
 pub struct GroqProvider {
     api_key: String,
     model: String,
+    transcribe_model: String,
     base_url: String,
+    client: reqwest::Client,
 }
 
 impl GroqProvider {
@@ -26,7 +28,9 @@ impl GroqProvider {
         Self {
             api_key: api_key.into(),
             model: model.into(),
+            transcribe_model: Self::DEFAULT_TRANSCRIBE_MODEL.to_string(),
             base_url: Self::DEFAULT_BASE_URL.to_string(),
+            client: reqwest::Client::new(),
         }
     }
 
@@ -35,18 +39,27 @@ impl GroqProvider {
         self
     }
 
+    pub fn with_transcribe_model(mut self, model: impl Into<String>) -> Self {
+        self.transcribe_model = model.into();
+        self
+    }
+
     /// 嘗試從以下來源依序取得 GROQ_API_KEY:
     /// 1. `GROQ_API_KEY` 環境變數
     /// 2. `~/.pi/agent/models.json` 的 `providers.groq.apiKey`
-    /// 3. `~/.mori/config.json` 的 `groq.api_key`(phase 1B 加)
     pub fn discover_api_key() -> Option<String> {
         if let Ok(key) = std::env::var("GROQ_API_KEY") {
             if !key.is_empty() {
                 return Some(key);
             }
         }
-        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
-        let pi_config = std::path::Path::new(&home).join(".pi").join("agent").join("models.json");
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok()?;
+        let pi_config = std::path::Path::new(&home)
+            .join(".pi")
+            .join("agent")
+            .join("models.json");
         if let Ok(text) = std::fs::read_to_string(&pi_config) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(key) = json
@@ -63,6 +76,71 @@ impl GroqProvider {
     }
 }
 
+// ─── chat completion request/response wire types ────────────────────
+
+#[derive(Serialize)]
+struct ChatRequest<'a> {
+    model: &'a str,
+    messages: &'a [WireMessage<'a>],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<WireTool<'a>>,
+}
+
+#[derive(Serialize)]
+struct WireMessage<'a> {
+    role: &'a str,
+    content: &'a str,
+}
+
+#[derive(Serialize)]
+struct WireTool<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: WireFunction<'a>,
+}
+
+#[derive(Serialize)]
+struct WireFunction<'a> {
+    name: &'a str,
+    description: &'a str,
+    parameters: &'a serde_json::Value,
+}
+
+#[derive(Deserialize, Debug)]
+struct ChatResponseWire {
+    choices: Vec<ChoiceWire>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ChoiceWire {
+    message: ChoiceMessageWire,
+}
+
+#[derive(Deserialize, Debug)]
+struct ChoiceMessageWire {
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<ToolCallWire>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ToolCallWire {
+    function: ToolCallFunctionWire,
+}
+
+#[derive(Deserialize, Debug)]
+struct ToolCallFunctionWire {
+    name: String,
+    arguments: String, // OpenAI returns args as a JSON string, not object
+}
+
+// ─── transcription wire ─────────────────────────────────────────────
+
+#[derive(Deserialize, Debug)]
+struct TranscriptionResponse {
+    text: String,
+}
+
 #[async_trait]
 impl LlmProvider for GroqProvider {
     fn name(&self) -> &'static str {
@@ -75,18 +153,117 @@ impl LlmProvider for GroqProvider {
 
     async fn chat(
         &self,
-        _messages: Vec<ChatMessage>,
-        _tools: Vec<ToolDefinition>,
+        messages: Vec<ChatMessage>,
+        tools: Vec<ToolDefinition>,
     ) -> Result<ChatResponse> {
-        // TODO(phase 1B): POST {base_url}/chat/completions with Bearer api_key
-        //                 parse function-calling response into ChatResponse.
-        let _ = (&self.api_key, &self.base_url);
-        anyhow::bail!("GroqProvider::chat not yet implemented (phase 1B)")
+        let wire_messages: Vec<WireMessage> = messages
+            .iter()
+            .map(|m| WireMessage {
+                role: &m.role,
+                content: &m.content,
+            })
+            .collect();
+
+        let wire_tools: Vec<WireTool> = tools
+            .iter()
+            .map(|t| WireTool {
+                kind: "function",
+                function: WireFunction {
+                    name: &t.name,
+                    description: &t.description,
+                    parameters: &t.parameters,
+                },
+            })
+            .collect();
+
+        let body = ChatRequest {
+            model: &self.model,
+            messages: &wire_messages,
+            tools: wire_tools,
+        };
+
+        let url = format!("{}/chat/completions", self.base_url);
+        tracing::debug!(model = %self.model, "groq chat request");
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await
+            .context("groq chat: send")?;
+
+        let status = resp.status();
+        let text = resp.text().await.context("groq chat: read body")?;
+        if !status.is_success() {
+            bail!("groq chat: HTTP {}: {}", status, text);
+        }
+
+        let wire: ChatResponseWire =
+            serde_json::from_str(&text).context("groq chat: parse response")?;
+
+        let first = wire
+            .choices
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("groq chat: empty choices"))?;
+
+        let tool_calls = first
+            .message
+            .tool_calls
+            .into_iter()
+            .map(|tc| {
+                let arguments: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                ToolCall {
+                    name: tc.function.name,
+                    arguments,
+                }
+            })
+            .collect();
+
+        Ok(ChatResponse {
+            content: first.message.content,
+            tool_calls,
+        })
     }
 
-    async fn transcribe(&self, _audio: Vec<u8>) -> Result<String> {
-        // TODO(phase 1B): POST multipart/form-data to {base_url}/audio/transcriptions
-        //                 with file=audio, model=whisper-large-v3-turbo.
-        anyhow::bail!("GroqProvider::transcribe not yet implemented (phase 1B)")
+    async fn transcribe(&self, audio: Vec<u8>) -> Result<String> {
+        let url = format!("{}/audio/transcriptions", self.base_url);
+        tracing::debug!(
+            bytes = audio.len(),
+            model = %self.transcribe_model,
+            "groq transcribe request"
+        );
+
+        let part = multipart::Part::bytes(audio)
+            .file_name("audio.wav")
+            .mime_str("audio/wav")
+            .context("groq transcribe: build part")?;
+
+        let form = multipart::Form::new()
+            .part("file", part)
+            .text("model", self.transcribe_model.clone())
+            .text("response_format", "json");
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .multipart(form)
+            .send()
+            .await
+            .context("groq transcribe: send")?;
+
+        let status = resp.status();
+        let text = resp.text().await.context("groq transcribe: read body")?;
+        if !status.is_success() {
+            bail!("groq transcribe: HTTP {}: {}", status, text);
+        }
+
+        let parsed: TranscriptionResponse =
+            serde_json::from_str(&text).context("groq transcribe: parse response")?;
+        Ok(parsed.text)
     }
 }
