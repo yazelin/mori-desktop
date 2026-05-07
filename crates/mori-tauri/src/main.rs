@@ -728,6 +728,25 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
 // ─── main ───────────────────────────────────────────────────────────
 
 fn main() {
+    // ── 強制 XWayland(Linux only)──────────────────────────────────
+    // GNOME mutter 在 Wayland 下對 app 自設 alwaysOnTop / position 是「軟
+    // 提示」,別 app focused 時會被蓋。實測 yazelin/AgentPulse 在同一台
+    // GNOME Wayland 機器上**也**會被蓋,但在 X11 session 上穩穩在最上 —
+    // 證實是 display server 的 stacking 語意差別,不是 code 問題。
+    //
+    // 把 GDK 後端固定走 X11(XWayland 相容層)→ 拿回 X11 的硬 alwaysOnTop。
+    // portal 熱鍵走 DBus 不受影響,tray / 麥克風 / 剪貼簿插件也都還能用。
+    //
+    // 設成 *if not set*,讓進階使用者能用 `GDK_BACKEND=wayland mori` 覆蓋
+    // 來測試 Wayland 原生路徑。
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("GDK_BACKEND").is_none() {
+            // SAFETY: main() 進來時還是單執行緒,沒人在讀 env。
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -736,6 +755,11 @@ fn main() {
         .init();
 
     tracing::info!("Mori starting — phase {}", PHASE);
+    #[cfg(target_os = "linux")]
+    tracing::info!(
+        gdk_backend = %std::env::var("GDK_BACKEND").unwrap_or_default(),
+        "GDK backend (forced x11 unless overridden)",
+    );
 
     // 確保 ~/.mori/config.json 存在(第一次跑就會寫一份 stub)
     let config_path = match GroqProvider::bootstrap_mori_config() {
