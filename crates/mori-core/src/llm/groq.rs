@@ -275,10 +275,18 @@ impl LlmProvider for GroqProvider {
             .mime_str("audio/wav")
             .context("groq transcribe: build part")?;
 
+        // language=zh 強制中文 + prompt 偏好繁中,避免 Whisper 預設輸出簡中。
+        // prompt 也順便包進台灣常見用語,讓辭彙選擇更在地化。
         let form = multipart::Form::new()
             .part("file", part)
             .text("model", self.transcribe_model.clone())
-            .text("response_format", "json");
+            .text("response_format", "json")
+            .text("language", "zh")
+            .text(
+                "prompt",
+                "以下是台灣繁體中文逐字稿,使用繁體中文字。\
+                 常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫。",
+            );
 
         let resp = self
             .client
