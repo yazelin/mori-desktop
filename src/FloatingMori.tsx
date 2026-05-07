@@ -119,11 +119,28 @@ function FloatingMori() {
     (async () => {
       const w = getCurrentWindow();
       const m = await currentMonitor();
-      if (!m) return;
+      if (!m) {
+        dlog("currentMonitor returned null — leaving default position");
+        return;
+      }
       const size = await w.outerSize();
       const x = Math.max(0, Math.round((m.size.width - size.width) / 2));
       const y = Math.max(0, Math.round(m.size.height * 0.08));
-      await w.setPosition(new PhysicalPosition(x, y));
+      dlog(
+        "anchor: monitor",
+        { w: m.size.width, h: m.size.height, sf: m.scaleFactor },
+        "window",
+        { w: size.width, h: size.height },
+        "→ pos",
+        { x, y },
+      );
+      try {
+        await w.setPosition(new PhysicalPosition(x, y));
+        const after = await w.outerPosition();
+        dlog("after setPosition outerPosition:", { x: after.x, y: after.y });
+      } catch (e) {
+        dlog("setPosition failed:", String(e));
+      }
       try {
         await w.setAlwaysOnTop(true);
       } catch (e) {
