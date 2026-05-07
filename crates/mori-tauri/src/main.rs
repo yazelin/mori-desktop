@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod context_provider;
+#[cfg(target_os = "linux")]
+mod portal_hotkey;
 mod recording;
 
 use std::sync::Arc;
@@ -22,8 +24,9 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, WindowEvent};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri::{AppHandle, Emitter, Listener, Manager, WindowEvent};
+#[cfg(not(target_os = "linux"))]
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use recording::Recorder;
 
@@ -730,23 +733,63 @@ fn main() {
                 })
                 .build(app)?;
 
-            // ── 全域熱鍵:F8(Wayland 上常被擋,有 toggle 按鈕當 fallback)──
-            let shortcut = Shortcut::new(None, Code::F8);
-
-            let handle = app.handle().clone();
-            let state_for_handler = state_for_setup.clone();
-
-            app.global_shortcut().on_shortcut(
-                shortcut,
-                move |_app, _shortcut, event| {
-                    if event.state() != ShortcutState::Pressed {
-                        return;
+            // ── 全域熱鍵:Ctrl+Alt+Space ───────────────────────────
+            // Linux 走 xdg-desktop-portal GlobalShortcuts(Wayland 唯一可行
+            // 的路);macOS / Windows 走 tauri-plugin-global-shortcut。
+            // 兩條路最後都呼叫 handle_hotkey_toggle。
+            #[cfg(target_os = "linux")]
+            {
+                let app_for_portal = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = portal_hotkey::run(app_for_portal).await {
+                        // Not fatal — UI button still works as fallback.
+                        // Common reasons: xdg-desktop-portal-gnome not installed,
+                        // user denied the permission dialog, or no portal session
+                        // (some headless / display-less envs).
+                        tracing::error!(
+                            ?e,
+                            "portal global shortcut unavailable — use the UI \
+                             toggle button to trigger Mori"
+                        );
                     }
-                    handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
-                },
-            )?;
+                });
 
-            tracing::info!("registered global shortcut: F8 + tray icon");
+                let handle = app.handle().clone();
+                let state_for_handler = state_for_setup.clone();
+                app.listen(portal_hotkey::PORTAL_HOTKEY_EVENT, move |_event| {
+                    handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
+                });
+
+                tracing::info!(
+                    "spawned portal hotkey task (Ctrl+Alt+Space) + tray icon"
+                );
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                let shortcut = Shortcut::new(
+                    Some(Modifiers::CONTROL | Modifiers::ALT),
+                    Code::Space,
+                );
+
+                let handle = app.handle().clone();
+                let state_for_handler = state_for_setup.clone();
+
+                app.global_shortcut().on_shortcut(
+                    shortcut,
+                    move |_app, _shortcut, event| {
+                        if event.state() != ShortcutState::Pressed {
+                            return;
+                        }
+                        handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
+                    },
+                )?;
+
+                tracing::info!(
+                    "registered global shortcut: Ctrl+Alt+Space + tray icon"
+                );
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
