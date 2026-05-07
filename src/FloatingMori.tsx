@@ -1,18 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, emit } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-
-// Diagnostic helper: emit a `floating-log` event so the backend's tracing
-// subscriber picks it up and we can SSH-grep it. Webview console.log is
-// invisible without devtools.
-function dlog(...parts: unknown[]) {
-  const msg = parts
-    .map((p) => (typeof p === "string" ? p : JSON.stringify(p)))
-    .join(" ");
-  console.log("[floating]", msg);
-  emit("floating-log", msg).catch(() => {});
-}
 
 type SkillCallSummary = {
   name: string;
@@ -123,22 +112,11 @@ function FloatingMori() {
   // Same events the main window subscribes to — Tauri broadcasts to all
   // webviews, no extra IPC needed.
   useEffect(() => {
-    dlog("mounting on window:", getCurrentWindow().label);
-    invoke<Mode>("current_mode")
-      .then((m) => { dlog("initial mode:", m); setMode(m); })
-      .catch((e) => dlog("current_mode err:", String(e)));
-    invoke<Phase>("current_phase")
-      .then((p) => { dlog("initial phase:", p); setPhase(p); })
-      .catch((e) => dlog("current_phase err:", String(e)));
+    invoke<Mode>("current_mode").then(setMode).catch(() => {});
+    invoke<Phase>("current_phase").then(setPhase).catch(() => {});
 
-    const unlistenMode = listen<Mode>("mode-changed", (e) => {
-      dlog("mode-changed:", e.payload);
-      setMode(e.payload);
-    });
-    const unlistenPhase = listen<Phase>("phase-changed", (e) => {
-      dlog("phase-changed:", e.payload);
-      setPhase(e.payload);
-    });
+    const unlistenMode = listen<Mode>("mode-changed", (e) => setMode(e.payload));
+    const unlistenPhase = listen<Phase>("phase-changed", (e) => setPhase(e.payload));
     return () => {
       unlistenMode.then((f) => f());
       unlistenPhase.then((f) => f());
@@ -163,23 +141,38 @@ function FloatingMori() {
     setTransient(null);
   }, [phase]);
 
-  // Track visual changes so we can confirm the sprite swap actually fires.
-  useEffect(() => {
-    const v = visualFor(mode, phase, transient);
-    dlog("visual ->", v, "src:", SPRITE_SRC[v]);
-  }, [mode, phase, transient]);
+  // Drag vs click disambiguation. Old version called startDragging() on
+  // every mousedown — that swallowed double-click because the second
+  // click landed on a now-moving window. Threshold-based now: only fire
+  // start_dragging once the mouse has moved past 4px from its mousedown
+  // origin. Pure click / double-click never trigger a drag.
+  //
+  // We use the raw `plugin:window|start_dragging` IPC (same as
+  // yazelin/AgentPulse) because the higher-level `startDragging()` JS
+  // wrapper is flaky on GNOME Wayland transparent borderless windows.
+  const dragRef = useRef<{ x: number; y: number; armed: boolean } | null>(null);
+  const DRAG_THRESHOLD_PX = 4;
 
-  // Drag: hand the window-move to Tauri via the raw plugin invoke. The
-  // higher-level `getCurrentWindow().startDragging()` JS wrapper is
-  // unreliable on GNOME Wayland with transparent decorationless windows
-  // — events don't propagate through alpha pixels cleanly. The direct
-  // IPC call to `plugin:window|start_dragging` (same approach used in
-  // yazelin/AgentPulse) sidesteps that wrapper and works.
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.buttons !== 1) return; // primary button held only
-    invoke("plugin:window|start_dragging", { label: "floating" }).catch((err) =>
-      dlog("start_dragging failed:", String(err)),
-    );
+    dragRef.current = { x: e.clientX, y: e.clientY, armed: true };
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    const d = dragRef.current;
+    if (!d || !d.armed) return;
+    const dx = Math.abs(e.clientX - d.x);
+    const dy = Math.abs(e.clientY - d.y);
+    if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
+      d.armed = false;
+      invoke("plugin:window|start_dragging", { label: "floating" }).catch(
+        (err) => console.error("start_dragging failed", err),
+      );
+    }
+  };
+
+  const onMouseUp = () => {
+    dragRef.current = null;
   };
 
   // Double-click → toggle main window visibility. (Single-click conflicts
@@ -207,6 +200,8 @@ function FloatingMori() {
     <div
       className={`mori-stage mori-${visual}`}
       onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
       onDoubleClick={onDoubleClick}
       title={`Mori — ${VISUAL_LABEL[visual]}\n拖曳:移動 / 雙擊:切顯示主視窗`}
     >

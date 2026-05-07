@@ -912,13 +912,6 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Diagnostic bridge: floating window emits "floating-log" via
-            // the dlog() helper so we can see its lifecycle without webview
-            // devtools. Drop this listener when 4B-3 is settled.
-            app.listen("floating-log", |event| {
-                tracing::info!(payload = event.payload(), "floating");
-            });
-
             // tray label 跟著 Mode 同步:任何來源(tray 點擊、IPC、skill)改了
             // Mode 都會 emit "mode-changed",這裡統一接 → 改 label。
             app.listen("mode-changed", move |event| {
