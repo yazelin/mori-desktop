@@ -46,6 +46,14 @@ const PREFERRED_TRIGGER: &str = "CTRL+ALT+space";
 /// "manual trigger" button — there's no global shortcut, but Mori still
 /// works.
 pub async fn run(app: AppHandle) -> Result<()> {
+    // GNOME's portal-gnome looks up a `.desktop` file for our app id
+    // before letting us register. Non-flatpak dev binaries don't
+    // get one for free — write a minimal one into the user-level
+    // applications dir pointing at our current binary.
+    if let Err(e) = ensure_desktop_file() {
+        tracing::warn!(?e, "could not write user desktop entry; portal may reject registration");
+    }
+
     // Tell xdg-desktop-portal who we are. For non-flatpak apps this is
     // necessary so the portal can scope permissions to our app id;
     // flatpak'd apps inherit it from the sandbox manifest and ashpd
@@ -107,6 +115,53 @@ pub async fn run(app: AppHandle) -> Result<()> {
                 tracing::warn!(?e, "failed to emit portal-hotkey-fired event");
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Make sure `~/.local/share/applications/<APP_ID>.desktop` exists and
+/// points at the current binary. Idempotent — overwrites every run so a
+/// moved / rebuilt binary stays addressable. Without this file
+/// xdg-desktop-portal-gnome rejects host-app registration with
+/// `Could not register app ID: App info not found`.
+fn ensure_desktop_file() -> Result<()> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    let dir = std::path::PathBuf::from(home).join(".local/share/applications");
+    std::fs::create_dir_all(&dir).with_context(|| format!("mkdir {}", dir.display()))?;
+
+    let exe = std::env::current_exe().context("get current_exe")?;
+    let exe_str = exe.to_str().context("current_exe path is not valid UTF-8")?;
+
+    let path = dir.join(format!("{APP_ID}.desktop"));
+    let content = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=Mori\n\
+         Comment=森林精靈 Mori 的桌面身體\n\
+         Exec={exe_str}\n\
+         Icon=mori\n\
+         Categories=Utility;AudioVideo;\n\
+         StartupWMClass=Mori\n\
+         X-GNOME-UsesNotifications=true\n\
+         NoDisplay=false\n",
+    );
+
+    let needs_write = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing != content,
+        Err(_) => true,
+    };
+
+    if needs_write {
+        std::fs::write(&path, &content)
+            .with_context(|| format!("write {}", path.display()))?;
+        tracing::info!(path = %path.display(), exec = exe_str, "wrote desktop entry for portal");
+
+        // Best-effort cache refresh — newer GNOME picks up the file
+        // immediately, but older portals cache and need a kick.
+        let _ = std::process::Command::new("update-desktop-database")
+            .arg(&dir)
+            .status();
     }
 
     Ok(())
