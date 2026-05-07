@@ -48,6 +48,19 @@ header h1 {
   font-size: 13px;
 }
 
+/* Rate-limit / retry banner — 短暫顯示在 hero 上方 */
+.retry-banner {
+  margin-top: 16px;
+  padding: 8px 12px;
+  background: rgba(240, 136, 62, 0.12);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
 /* Hero panel — main visual focus, changes per phase */
 .hero {
   margin-top: 24px;

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use mori_core::agent::{Agent, SkillCallSummary};
 use mori_core::context::Context as MoriContext;
-use mori_core::llm::groq::GroqProvider;
+use mori_core::llm::groq::{GroqProvider, RetryEvent};
 use mori_core::llm::{ChatMessage, LlmProvider};
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
@@ -159,15 +159,33 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
             return;
         }
     };
-    let provider: Arc<dyn LlmProvider> = Arc::new(GroqProvider::new(
-        key,
-        GroqProvider::DEFAULT_CHAT_MODEL.to_string(),
-    ));
+    let provider: Arc<dyn LlmProvider> = Arc::new(
+        GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string())
+            .with_retry_callback(retry_callback_for(app.clone())),
+    );
 
     let state_clone = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         run_chat_pipeline(app, state_clone, text, provider).await;
     });
+}
+
+/// 建構一個 retry callback,把事件 emit 給前端的 "rate-limit-wait" channel。
+/// 給 GroqProvider::with_retry_callback 用。
+fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
+    Arc::new(move |evt: RetryEvent| {
+        tracing::warn!(
+            attempt = evt.attempt,
+            max = evt.max_attempts,
+            wait_secs = evt.wait_secs,
+            reason = %evt.reason,
+            op = %evt.op,
+            "rate limit / retry"
+        );
+        if let Err(e) = app.emit("rate-limit-wait", &evt) {
+            tracing::warn!(?e, "failed to emit rate-limit-wait");
+        }
+    })
 }
 
 // ─── 熱鍵 / toggle 處理 ─────────────────────────────────────────────
@@ -255,6 +273,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     state.set_phase(&app, Phase::Transcribing);
 
     let api_key = state.groq_api_key.lock().clone();
+    let app_for_provider = app.clone();
 
     tauri::async_runtime::spawn(async move {
         // Stage 1: Whisper
@@ -297,7 +316,8 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                  Edit ~/.mori/config.json or set $GROQ_API_KEY",
             )?;
             let provider =
-                GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+                GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string())
+                    .with_retry_callback(retry_callback_for(app_for_provider.clone()));
             let transcript = provider.transcribe(wav).await.context("groq transcribe")?;
             tracing::info!(chars = transcript.chars().count(), "transcribed");
             Ok((transcript, provider))
