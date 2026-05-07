@@ -107,6 +107,21 @@ impl Skill for ComposeSkill {
                  - 用繁體中文(除非主題明顯需要英文)\n\
                  - **只輸出草稿本身**,不要前言「以下是草稿:」、不要事後解釋\n\
                  - 不要硬塞「希望這對你有幫助」之類客套尾巴\n\n\
+                 **署名規則(嚴格)**:\n\
+                 - **絕對不要捏造作者姓名**(像「張偉」、「王小明」、「Alex Chen」)\n\
+                 - 使用者沒明確告訴你他叫什麼,你就不知道他叫什麼,**不准猜**\n\
+                 - 不知道時 → 用 placeholder:中文用 `[您的名字]`,英文用 `[Your Name]`\n\
+                 - 範例結尾:\n\
+                 \n\
+                 ```\n\
+                 敬上\n\
+                 [您的名字]\n\
+                 ```\n\
+                 \n\
+                 ```\n\
+                 Best regards,\n\
+                 [Your Name]\n\
+                 ```\n\n\
                  {kind_directive}\n\
                  {length_directive}\n\
                  {audience_directive}"

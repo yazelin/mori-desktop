@@ -68,6 +68,9 @@ function App() {
     return () => clearInterval(id);
   }, [phase]);
 
+  const [textInput, setTextInput] = useState<string>("");
+  const [textOpen, setTextOpen] = useState<boolean>(false);
+
   const onToggle = () => {
     invoke("toggle").catch((e) => console.error("toggle failed", e));
   };
@@ -80,6 +83,22 @@ function App() {
       })
       .catch((e) => console.error("reset failed", e));
   };
+
+  const onSubmitText = () => {
+    const trimmed = textInput.trim();
+    if (!trimmed) return;
+    invoke("submit_text", { text: trimmed })
+      .then(() => {
+        setTextInput("");
+        setTextOpen(false);
+      })
+      .catch((e) => console.error("submit_text failed", e));
+  };
+
+  const busy =
+    phase.kind === "recording" ||
+    phase.kind === "transcribing" ||
+    phase.kind === "responding";
 
   return (
     <main className="container">
@@ -162,8 +181,16 @@ function App() {
       </section>
 
       <section className="actions">
-        <button onClick={onToggle} className="toggle-btn">
+        <button onClick={onToggle} className="toggle-btn" disabled={busy}>
           手動觸發(等同 F8)
+        </button>
+        <button
+          onClick={() => setTextOpen((v) => !v)}
+          className="toggle-btn"
+          disabled={busy}
+          title="貼長文 / 打字輸入(語音不適合的場景)"
+        >
+          {textOpen ? "收起文字輸入" : "貼文字"}
         </button>
         <button
           onClick={onReset}
@@ -174,6 +201,37 @@ function App() {
           重新開始對話
         </button>
       </section>
+
+      {textOpen && (
+        <section className="text-input">
+          <textarea
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            placeholder="貼文章 / 打需求,送出後跟語音輸入走同樣 pipeline。例如:&#10;「幫我摘要這篇:[長文...]」&#10;「翻成英文:[一段話]」"
+            rows={6}
+            disabled={busy}
+            onKeyDown={(e) => {
+              // Ctrl/Cmd + Enter 送出
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                onSubmitText();
+              }
+            }}
+          />
+          <div className="text-input-actions">
+            <span className="text-input-hint">
+              {textInput.length} 字 · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 送出
+            </span>
+            <button
+              onClick={onSubmitText}
+              className="toggle-btn"
+              disabled={busy || !textInput.trim()}
+            >
+              送出
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="status">
         <div className="status-row">

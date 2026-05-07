@@ -126,6 +126,50 @@ fn conversation_length(state: tauri::State<Arc<AppState>>) -> usize {
     state.conversation.lock().len()
 }
 
+/// 直接送一段文字給 Mori(bypass 麥克風 / Whisper)。
+///
+/// 使用情境:長文摘要、貼文章、貼程式碼等不適合語音輸入的內容。
+/// 走的後續流程跟錄音版完全一樣 — 進 Phase::Responding → agent → Done。
+#[tauri::command]
+fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String) {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        tracing::warn!("submit_text called with empty input — ignored");
+        return;
+    }
+    // 不允許在 Recording / Transcribing / Responding 中切進來
+    {
+        let phase = state.phase.lock();
+        if !matches!(*phase, Phase::Idle | Phase::Done { .. } | Phase::Error { .. }) {
+            tracing::info!("submit_text while busy — ignored");
+            return;
+        }
+    }
+
+    let api_key = state.groq_api_key.lock().clone();
+    let key = match api_key {
+        Some(k) => k,
+        None => {
+            state.set_phase(
+                &app,
+                Phase::Error {
+                    message: "no GROQ_API_KEY configured. Edit ~/.mori/config.json or set $GROQ_API_KEY".into(),
+                },
+            );
+            return;
+        }
+    };
+    let provider: Arc<dyn LlmProvider> = Arc::new(GroqProvider::new(
+        key,
+        GroqProvider::DEFAULT_CHAT_MODEL.to_string(),
+    ));
+
+    let state_clone = state.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        run_chat_pipeline(app, state_clone, text, provider).await;
+    });
+}
+
 // ─── 熱鍵 / toggle 處理 ─────────────────────────────────────────────
 
 fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
@@ -212,8 +256,6 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 
     let api_key = state.groq_api_key.lock().clone();
 
-    let memory = state.memory.clone();
-
     tauri::async_runtime::spawn(async move {
         // Stage 1: Whisper
         let transcribe_result: anyhow::Result<(String, GroqProvider)> = async {
@@ -276,99 +318,113 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             }
         };
 
-        // Stage 2: Mori 用 LLM 回應
-        state.set_phase(
-            &app,
-            Phase::Responding {
-                transcript: transcript.clone(),
-            },
+        // Stage 2: 走共用 chat pipeline(submit_text 也呼叫同一份)
+        let provider_arc: Arc<dyn LlmProvider> = Arc::new(provider);
+        run_chat_pipeline(app, state, transcript, provider_arc).await;
+    });
+}
+
+/// 共用的 chat pipeline:給定 transcript + provider,進 Phase::Responding,
+/// 呼叫 Agent,把結果回 UI、append 進 conversation history。
+///
+/// 兩個入口會用到:
+/// - `stop_and_transcribe` 從 Whisper 拿到 transcript 後呼叫
+/// - `submit_text` IPC command 直接拿 user 打的 text 呼叫(bypass 麥克風)
+async fn run_chat_pipeline(
+    app: AppHandle,
+    state: Arc<AppState>,
+    transcript: String,
+    provider: Arc<dyn LlmProvider>,
+) {
+    state.set_phase(
+        &app,
+        Phase::Responding {
+            transcript: transcript.clone(),
+        },
+    );
+
+    let memory = state.memory.clone();
+    let history_snapshot = state.conversation.lock().clone();
+
+    let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
+        let memory_index = memory.read_index_as_context().unwrap_or_default();
+        let system_prompt = build_system_prompt(&memory_index);
+        tracing::debug!(
+            index_chars = memory_index.chars().count(),
+            history_msgs = history_snapshot.len(),
+            "calling agent"
         );
 
-        // 把當前 history snapshot 出來給 agent 用(避免拿著 lock 跑 await)
-        let history_snapshot = state.conversation.lock().clone();
+        // 註冊 skills
+        let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
+        let mut registry = SkillRegistry::new();
+        // Memory skills(phase 1D-1F)
+        registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
+        registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
+        registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
+        registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
+        // Text skills(phase 2)
+        registry.register(Arc::new(TranslateSkill::new(provider.clone())));
+        registry.register(Arc::new(PolishSkill::new(provider.clone())));
+        registry.register(Arc::new(SummarizeSkill::new(provider.clone())));
+        registry.register(Arc::new(ComposeSkill::new(provider.clone())));
+        let registry = Arc::new(registry);
 
-        let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
-            let memory_index = memory.read_index_as_context().unwrap_or_default();
-            let system_prompt = build_system_prompt(&memory_index);
-            tracing::debug!(
-                index_chars = memory_index.chars().count(),
-                history_msgs = history_snapshot.len(),
-                "calling agent"
+        let agent = Agent::new(provider, registry);
+        let ctx = MoriContext::default();
+        let turn = agent
+            .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
+            .await?;
+        if !turn.skill_calls.is_empty() {
+            tracing::info!(
+                n = turn.skill_calls.len(),
+                skills = ?turn.skill_calls.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+                "agent: skills executed"
             );
-
-            let provider: Arc<dyn LlmProvider> = Arc::new(provider);
-
-            // 註冊 skills
-            let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
-            let mut registry = SkillRegistry::new();
-            // Memory skills(phase 1D-1F)
-            registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
-            registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
-            registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
-            registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
-            // Text skills(phase 2)— 共用 main provider,內部跑自己的 LLM call
-            registry.register(Arc::new(TranslateSkill::new(provider.clone())));
-            registry.register(Arc::new(PolishSkill::new(provider.clone())));
-            registry.register(Arc::new(SummarizeSkill::new(provider.clone())));
-            registry.register(Arc::new(ComposeSkill::new(provider.clone())));
-            let registry = Arc::new(registry);
-
-            let agent = Agent::new(provider, registry);
-            let ctx = MoriContext::default();
-            let turn = agent
-                .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
-                .await?;
-            if !turn.skill_calls.is_empty() {
-                tracing::info!(
-                    n = turn.skill_calls.len(),
-                    skills = ?turn.skill_calls.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-                    "agent: skills executed"
-                );
-            }
-            let summaries: Vec<SkillCallSummary> =
-                turn.skill_calls.iter().map(|c| c.summary()).collect();
-            Ok((turn.response, summaries))
         }
-        .await;
+        let summaries: Vec<SkillCallSummary> =
+            turn.skill_calls.iter().map(|c| c.summary()).collect();
+        Ok((turn.response, summaries))
+    }
+    .await;
 
-        match chat_result {
-            Ok((response, skill_calls)) => {
-                tracing::info!(chars = response.chars().count(), "Mori responded");
+    match chat_result {
+        Ok((response, skill_calls)) => {
+            tracing::info!(chars = response.chars().count(), "Mori responded");
 
-                // Append 到 conversation history,trim 到 cap
-                {
-                    let mut conv = state.conversation.lock();
-                    conv.push(ChatMessage::user(transcript.clone()));
-                    conv.push(ChatMessage::assistant_with_tool_calls(
-                        Some(response.clone()),
-                        Vec::new(),
-                    ));
-                    let max_msgs = MAX_HISTORY_PAIRS * 2;
-                    while conv.len() > max_msgs {
-                        conv.remove(0);
-                    }
+            // Append 到 conversation history,trim 到 cap
+            {
+                let mut conv = state.conversation.lock();
+                conv.push(ChatMessage::user(transcript.clone()));
+                conv.push(ChatMessage::assistant_with_tool_calls(
+                    Some(response.clone()),
+                    Vec::new(),
+                ));
+                let max_msgs = MAX_HISTORY_PAIRS * 2;
+                while conv.len() > max_msgs {
+                    conv.remove(0);
                 }
+            }
 
-                state.set_phase(
-                    &app,
-                    Phase::Done {
-                        transcript,
-                        response,
-                        skill_calls,
-                    },
-                );
-            }
-            Err(e) => {
-                tracing::error!(?e, "chat failed");
-                state.set_phase(
-                    &app,
-                    Phase::Error {
-                        message: format!("LLM 回應失敗:{e:#}"),
-                    },
-                );
-            }
+            state.set_phase(
+                &app,
+                Phase::Done {
+                    transcript,
+                    response,
+                    skill_calls,
+                },
+            );
         }
-    });
+        Err(e) => {
+            tracing::error!(?e, "chat failed");
+            state.set_phase(
+                &app,
+                Phase::Error {
+                    message: format!("LLM 回應失敗:{e:#}"),
+                },
+            );
+        }
+    }
 }
 
 /// 建構 Mori 的 system prompt — 角色 + 時間 + 記憶索引 + tool 規則。
@@ -543,6 +599,7 @@ fn main() {
             toggle,
             reset_conversation,
             conversation_length,
+            submit_text,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
