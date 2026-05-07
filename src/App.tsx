@@ -75,8 +75,11 @@ function App() {
         );
       }, ms);
     });
-    // Phase 3A:Mori 在每輪開始抓 context(目前只有剪貼簿)
-    const unlistenContext = listen<{ clipboard?: string | null }>(
+    // Phase 3A + 4C:Mori 在每輪開始抓 context(剪貼簿、反白文字)
+    const unlistenContext = listen<{
+      clipboard?: string | null;
+      selected_text?: string | null;
+    }>(
       "context-captured",
       (event) => {
         setLastContext(event.payload);
@@ -129,9 +132,10 @@ function App() {
     reason: string;
     op: string;
   } | null>(null);
-  // Phase 3A:當 Mori 抓到剪貼簿等 context 時顯示
+  // Phase 3A + 4C:當 Mori 抓到剪貼簿 / 反白文字 時顯示
   const [lastContext, setLastContext] = useState<{
     clipboard?: string | null;
+    selected_text?: string | null;
   } | null>(null);
 
   const onToggle = () => {
@@ -381,6 +385,19 @@ function App() {
           >
             {lastContext?.clipboard
               ? `📋 ${lastContext.clipboard.length} 字`
+              : "—"}
+          </span>
+        </div>
+        <div className="status-row">
+          <span className="label">selection</span>
+          <span
+            className={`value ${
+              lastContext?.selected_text ? "ok" : ""
+            }`}
+            title={lastContext?.selected_text ?? "上一輪沒抓到反白文字"}
+          >
+            {lastContext?.selected_text
+              ? `🖱 ${lastContext.selected_text.length} 字`
               : "—"}
           </span>
         </div>

@@ -14,6 +14,7 @@ pub mod context;
 pub mod llm;
 pub mod memory;
 pub mod mode;
+pub mod paste;
 pub mod skill;
 pub mod voice;
 
