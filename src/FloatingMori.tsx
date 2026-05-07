@@ -135,21 +135,17 @@ function FloatingMori() {
     dlog("visual ->", v, "src:", SPRITE_SRC[v]);
   }, [mode, phase]);
 
-  // Drag: single-click + drag moves the window. We hand control to Tauri's
-  // window.startDragging() on mousedown — the call blocks until the
-  // user releases, after which the next click event is suppressed by the
-  // compositor (so a true "click" never fires after a drag — good).
-  //
-  // We avoid `data-tauri-drag-region`: it's flaky on GNOME Wayland with
-  // transparent decorationless windows (mouse events don't propagate
-  // cleanly through alpha pixels).
-  const onMouseDown = async (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    try {
-      await getCurrentWindow().startDragging();
-    } catch (err) {
-      console.error("startDragging failed", err);
-    }
+  // Drag: hand the window-move to Tauri via the raw plugin invoke. The
+  // higher-level `getCurrentWindow().startDragging()` JS wrapper is
+  // unreliable on GNOME Wayland with transparent decorationless windows
+  // — events don't propagate through alpha pixels cleanly. The direct
+  // IPC call to `plugin:window|start_dragging` (same approach used in
+  // yazelin/AgentPulse) sidesteps that wrapper and works.
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.buttons !== 1) return; // primary button held only
+    invoke("plugin:window|start_dragging", { label: "floating" }).catch((err) =>
+      dlog("start_dragging failed:", String(err)),
+    );
   };
 
   // Double-click → toggle main window visibility. (Single-click conflicts
