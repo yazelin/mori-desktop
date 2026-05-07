@@ -1,26 +1,23 @@
 //! Agent 迴圈 — 把 LLM、Skill registry、Memory store 拼成 Mori 的「大腦」。
 //!
-//! Phase 1D 採用「single round of tool use」模式:
+//! Phase 1E:多輪 tool calling 迴圈。
 //!
 //! ```text
 //!   user input
 //!      │
 //!      ▼
-//!   provider.chat(messages, tools)
-//!      │
-//!      ├─ 有 content,沒 tool_calls → 直接回傳 content
-//!      │
-//!      ├─ 有 tool_calls(可能也有 content)→
-//!      │      execute(tool_calls)
-//!      │      回傳 = LLM content(若有)+ skills 的 user_messages(疊在後面)
-//!      │
-//!      └─ 都沒有 → 回傳空字串(罕見、防禦性 fallback)
+//!   loop (max N rounds):
+//!     provider.chat(messages, tools)
+//!        │
+//!        ├─ 沒 tool_calls → 回傳 content 當 final response
+//!        │
+//!        └─ 有 tool_calls → execute each via SkillRegistry,
+//!                          把 assistant message + tool result messages
+//!                          append 進 messages,迴圈繼續(LLM 看到結果再答)
 //! ```
 //!
-//! 不做多輪 tool-call 迴圈(LLM 看到 tool 結果後再講話)— 那需要把
-//! ChatMessage 擴展成支援 assistant.tool_calls + tool.tool_call_id,留到
-//! phase 2+ 真正需要時再做。phase 1D 的 RememberSkill 是「fire and forget」,
-//! 單輪就夠了。
+//! Tool 結果回傳給 LLM 後,LLM 自然語言整合 → 給使用者最終回應。
+//! 例如:RecallMemorySkill 把 memory body 餵回 → LLM 用記憶內容答話。
 
 use std::sync::Arc;
 
@@ -29,6 +26,8 @@ use anyhow::{Context as _, Result};
 use crate::context::Context;
 use crate::llm::{ChatMessage, LlmProvider};
 use crate::skill::{SkillOutput, SkillRegistry};
+
+const MAX_ROUNDS: usize = 5;
 
 /// 一輪 agent 執行的完整結果。
 pub struct AgentTurn {
@@ -55,77 +54,101 @@ impl Agent {
         Self { provider, skills }
     }
 
-    /// 跑一輪:給定 system prompt + 使用者輸入 → 拿到 Mori 的回覆。
+    /// 跑一輪互動。多輪 tool call 迴圈最多 [`MAX_ROUNDS`] 次,超過視為異常。
     pub async fn respond(
         &self,
         system_prompt: &str,
         user_input: &str,
         ctx: &Context,
     ) -> Result<AgentTurn> {
-        let messages = vec![
-            ChatMessage {
-                role: "system".into(),
-                content: system_prompt.to_string(),
-            },
-            ChatMessage {
-                role: "user".into(),
-                content: user_input.to_string(),
-            },
+        let mut messages = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(user_input),
         ];
         let tools = self.skills.tool_definitions();
+        let mut all_skill_calls: Vec<SkillCallRecord> = Vec::new();
+
         tracing::debug!(
             tool_count = tools.len(),
             tool_names = ?tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            "agent: chat with tools"
+            "agent: starting multi-turn loop"
         );
 
-        let chat = self
-            .provider
-            .chat(messages, tools)
-            .await
-            .context("provider chat")?;
+        for round in 0..MAX_ROUNDS {
+            let chat = self
+                .provider
+                .chat(messages.clone(), tools.clone())
+                .await
+                .with_context(|| format!("provider chat (round {round})"))?;
 
-        let mut skill_calls = Vec::new();
-        let mut skill_messages = Vec::new();
+            // No tool calls → final answer
+            if chat.tool_calls.is_empty() {
+                let response = chat.content.unwrap_or_default();
+                tracing::info!(
+                    round,
+                    chars = response.chars().count(),
+                    "agent: final response"
+                );
+                return Ok(AgentTurn {
+                    response,
+                    skill_calls: all_skill_calls,
+                });
+            }
 
-        for tc in chat.tool_calls {
-            match self.skills.dispatch(&tc.name, tc.arguments.clone(), ctx).await {
-                Ok(output) => {
-                    tracing::info!(
-                        skill = %tc.name,
-                        msg = %output.user_message,
-                        "skill executed"
-                    );
-                    skill_messages.push(output.user_message.clone());
-                    skill_calls.push(SkillCallRecord {
-                        name: tc.name,
-                        args: tc.arguments,
-                        output,
-                    });
-                }
-                Err(e) => {
-                    tracing::error!(skill = %tc.name, ?e, "skill failed");
-                    skill_messages.push(format!("(skill {} 出錯:{e})", tc.name));
-                }
+            tracing::info!(
+                round,
+                n_tools = chat.tool_calls.len(),
+                names = ?chat.tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<_>>(),
+                "agent: tool calls received"
+            );
+
+            // 把 assistant 的決定 echo 回 messages(OpenAI 協定要求)
+            messages.push(ChatMessage::assistant_with_tool_calls(
+                chat.content.clone(),
+                chat.tool_calls.clone(),
+            ));
+
+            // Execute each tool, append tool result message
+            for tc in &chat.tool_calls {
+                let exec = self
+                    .skills
+                    .dispatch(&tc.name, tc.arguments.clone(), ctx)
+                    .await;
+                let result_text = match exec {
+                    Ok(output) => {
+                        let text = output.user_message.clone();
+                        all_skill_calls.push(SkillCallRecord {
+                            name: tc.name.clone(),
+                            args: tc.arguments.clone(),
+                            output,
+                        });
+                        text
+                    }
+                    Err(e) => {
+                        tracing::error!(skill = %tc.name, ?e, "skill failed");
+                        let text = format!("(error: {e})");
+                        all_skill_calls.push(SkillCallRecord {
+                            name: tc.name.clone(),
+                            args: tc.arguments.clone(),
+                            output: SkillOutput {
+                                user_message: text.clone(),
+                                data: None,
+                            },
+                        });
+                        text
+                    }
+                };
+                messages.push(ChatMessage::tool_result(
+                    tc.id.clone(),
+                    tc.name.clone(),
+                    result_text,
+                ));
             }
         }
 
-        let response = match (chat.content, skill_messages.is_empty()) {
-            // 既有 LLM 自然語言、也有 skill 結果 → 都顯示
-            (Some(content), false) if !content.trim().is_empty() => {
-                format!("{}\n\n{}", content.trim(), skill_messages.join("\n"))
-            }
-            // 只有 LLM 自然語言
-            (Some(content), true) if !content.trim().is_empty() => content,
-            // 只有 skill 結果
-            (_, false) => skill_messages.join("\n"),
-            // 空空如也(罕見,防禦性處理)
-            _ => String::new(),
-        };
-
-        Ok(AgentTurn {
-            response,
-            skill_calls,
-        })
+        // Hit MAX_ROUNDS — 防無限迴圈,但也代表 LLM 行為怪異
+        anyhow::bail!(
+            "agent exceeded max tool-call rounds ({MAX_ROUNDS}) — LLM may be looping"
+        )
     }
 }

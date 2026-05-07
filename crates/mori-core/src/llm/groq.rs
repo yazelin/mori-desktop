@@ -114,7 +114,7 @@ fn read_json_pointer(path: &std::path::Path, pointer: &str) -> Option<String> {
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,
-    messages: &'a [WireMessage<'a>],
+    messages: Vec<WireMessage<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<WireTool<'a>>,
 }
@@ -122,7 +122,31 @@ struct ChatRequest<'a> {
 #[derive(Serialize)]
 struct WireMessage<'a> {
     role: &'a str,
-    content: &'a str,
+    /// `null` 是合法的(assistant 發 tool_call 時可能 content=null)
+    content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<WireToolCallOut<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<&'a str>,
+    /// `tool` role 訊息要附 tool 名(可選但 OpenAI 標準有)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<&'a str>,
+}
+
+/// 送出時的 tool_call 結構(OpenAI 巢狀 function 格式)
+#[derive(Serialize)]
+struct WireToolCallOut<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    kind: &'static str, // always "function"
+    function: WireFunctionOut<'a>,
+}
+
+#[derive(Serialize)]
+struct WireFunctionOut<'a> {
+    name: &'a str,
+    /// arguments 必須是 JSON-encoded 字串,不是物件
+    arguments: String,
 }
 
 #[derive(Serialize)]
@@ -158,13 +182,14 @@ struct ChoiceMessageWire {
 
 #[derive(Deserialize, Debug)]
 struct ToolCallWire {
+    id: String,
     function: ToolCallFunctionWire,
 }
 
 #[derive(Deserialize, Debug)]
 struct ToolCallFunctionWire {
     name: String,
-    arguments: String, // OpenAI returns args as a JSON string, not object
+    arguments: String, // JSON string
 }
 
 // ─── transcription wire ─────────────────────────────────────────────
@@ -189,11 +214,28 @@ impl LlmProvider for GroqProvider {
         messages: Vec<ChatMessage>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ChatResponse> {
+        // ChatMessage → WireMessage(處理 tool_calls 巢狀格式)
         let wire_messages: Vec<WireMessage> = messages
             .iter()
             .map(|m| WireMessage {
                 role: &m.role,
-                content: &m.content,
+                content: m.content.as_deref(),
+                tool_calls: m
+                    .tool_calls
+                    .iter()
+                    .map(|tc| WireToolCallOut {
+                        id: &tc.id,
+                        kind: "function",
+                        function: WireFunctionOut {
+                            name: &tc.name,
+                            // 把 arguments(內部 Value)序列化成 JSON 字串
+                            arguments: serde_json::to_string(&tc.arguments)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        },
+                    })
+                    .collect(),
+                tool_call_id: m.tool_call_id.as_deref(),
+                name: m.name.as_deref(),
             })
             .collect();
 
@@ -211,12 +253,12 @@ impl LlmProvider for GroqProvider {
 
         let body = ChatRequest {
             model: &self.model,
-            messages: &wire_messages,
+            messages: wire_messages,
             tools: wire_tools,
         };
 
         let url = format!("{}/chat/completions", self.base_url);
-        tracing::debug!(model = %self.model, "groq chat request");
+        tracing::debug!(model = %self.model, msgs = messages.len(), "groq chat request");
 
         let resp = self
             .client
@@ -250,6 +292,7 @@ impl LlmProvider for GroqProvider {
                 let arguments: serde_json::Value = serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| serde_json::json!({}));
                 ToolCall {
+                    id: tc.id,
                     name: tc.function.name,
                     arguments,
                 }

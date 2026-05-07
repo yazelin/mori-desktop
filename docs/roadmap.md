@@ -35,11 +35,20 @@
 - [x] System prompt 加入 tool 使用守則(不要硬叫、寫完要確認)
 - [x] 替代原本 hardcode 的 provider.chat(),全走 Agent 路徑
 
-### Phase 1E — 後續
+### Phase 1E — Multi-turn tools + Index-only context(2026-05-08)
+- [x] `ChatMessage` 擴展支援 OpenAI tool-calling 多輪協定
+      (`assistant.tool_calls` echo + `tool` role with `tool_call_id`)
+- [x] `Agent::respond` 改成多輪迴圈(MAX_ROUNDS=5,LLM 看 tool 結果再答)
+- [x] `RecallMemorySkill`:LLM 按需拉單筆記憶 body
+- [x] `read_index_as_context` 取代 `read_all_as_context`:system prompt 只送
+      索引(name + description + id),body 透過 recall_memory 拉
+- [x] System prompt 重寫:教 LLM 何時用 recall vs remember、整合 vs 新增
+
+### Phase 1F — 後續
 - [ ] 系統 tray icon(隱藏視窗時仍可叫出)
-- [ ] 對話歷史(連續對話 + multi-turn tool call)— 目前是 stateless 單輪
+- [ ] 對話歷史(連續對話)— 目前每輪都重啟,不記得上句
 - [ ] UI 顯示「Mori 剛剛呼叫了 X skill」(`AgentTurn::skill_calls` 已就緒)
-- [ ] ForgetSkill / EditMemorySkill(讓使用者語音改記憶)
+- [ ] ForgetSkill / EditMemorySkill(讓使用者語音改 / 刪記憶)
 
 ## Phase 2 — 基礎 Skills(2026-06)
 

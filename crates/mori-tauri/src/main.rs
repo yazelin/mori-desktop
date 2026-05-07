@@ -12,7 +12,7 @@ use mori_core::llm::groq::GroqProvider;
 use mori_core::llm::LlmProvider;
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
-use mori_core::skill::{RememberSkill, SkillRegistry};
+use mori_core::skill::{RecallMemorySkill, RememberSkill, SkillRegistry};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -257,21 +257,20 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         );
 
         let chat_result: anyhow::Result<String> = async {
-            let memory_context = memory.read_all_as_context().unwrap_or_default();
-            let system_prompt = build_system_prompt(&memory_context);
+            let memory_index = memory.read_index_as_context().unwrap_or_default();
+            let system_prompt = build_system_prompt(&memory_index);
             tracing::debug!(
-                memory_chars = memory_context.chars().count(),
+                index_chars = memory_index.chars().count(),
                 "calling agent with system prompt"
             );
 
-            // 把 provider 包成 Arc<dyn LlmProvider> 給 Agent 用
             let provider: Arc<dyn LlmProvider> = Arc::new(provider);
 
-            // 註冊這次能用的 skill — phase 1D 只有 RememberSkill
+            // 註冊 phase 1E skills:remember(寫入)+ recall_memory(按需讀)
+            let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
             let mut registry = SkillRegistry::new();
-            registry.register(Arc::new(RememberSkill::new(
-                memory.clone() as Arc<dyn MemoryStore>,
-            )));
+            registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
+            registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
             let registry = Arc::new(registry);
 
             let agent = Agent::new(provider, registry);
@@ -306,10 +305,11 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     });
 }
 
-/// 建構 Mori 的 system prompt — 角色設定 + 當前時間 + 長期記憶。
-fn build_system_prompt(memory_context: &str) -> String {
+/// 建構 Mori 的 system prompt — 角色 + 時間 + 記憶索引 + tool 規則。
+fn build_system_prompt(memory_index: &str) -> String {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%a)").to_string();
     let mut prompt = String::new();
+
     prompt.push_str(
         "你是 Mori,一個輕巧、貼心的桌面 AI 管家。背景設定:你是來自 world-tree \
          森林的精靈,被使用者帶到桌面當日常陪伴與助手。\n\n",
@@ -317,43 +317,50 @@ fn build_system_prompt(memory_context: &str) -> String {
     prompt.push_str("回覆規則:\n");
     prompt.push_str("- 一律使用繁體中文,語氣自然、簡潔\n");
     prompt.push_str("- 不寫前言或客套(例如「好的」、「沒問題」、「以下是」)— 直接進主題\n");
-    prompt.push_str("- 若使用者問你做不到的事(例如操作系統、開檔案),老實說「目前還沒這個能力」\n");
+    prompt.push_str("- 若使用者問你做不到的事,老實說「目前還沒這個能力」\n");
     prompt.push_str("- 回覆長度配合提問:閒聊就一兩句,問題要解釋才展開\n\n");
-    prompt.push_str("可用工具:\n");
+
+    prompt.push_str("可用工具:\n\n");
+
+    // recall_memory — 比 remember 早講(LLM 看到 user 提問時可能要先 recall 才答)
+    prompt.push_str("**recall_memory(id)**:讀取單筆記憶的完整內容。\n");
     prompt.push_str(
-        "- `remember`:把使用者明確要你記下的事(偏好、重要日期、人名、進行中專案)\
-         寫進長期記憶。當使用者說「記住...」、「以後我都...」、「我喜歡...」、\
-         分享生日 / 紀念日,或介紹重要的人事物時呼叫。一般閒聊或回答問題不要硬叫。\n");
+        "  • system prompt 末尾有「長期記憶索引」段,只列出每筆記憶的 id、\
+         name、短描述。如果使用者問題的關鍵字在索引裡看到相關的 memory,\
+         先呼叫 recall_memory(id=該 id) 把細節拉進來,再答。\n");
+    prompt.push_str(
+        "  • 一輪可叫多次(若多筆記憶相關,各拉一次)。但只在必要時叫 — \
+         索引上看不出相關的問題就不要硬叫。\n\n");
+
+    // remember
+    prompt.push_str("**remember(title, content, category)**:寫入長期記憶。\n");
+    prompt.push_str(
+        "  • 觸發時機:使用者明確說「記住...」「以後...」「我喜歡...」、\
+         分享生日 / 紀念日 / 偏好 / 重要人事物。閒聊或一般問答不要硬叫。\n");
     prompt.push_str(
         "  • Title 規則:**穩定 + 簡潔**。日期事件用「YYYY-MM-DD 主題」\
          (例:「2026-05-11 會議」);人物 / 偏好用主題(例:「老婆生日」、\
          「常用編輯器」)。\n");
     prompt.push_str(
-        "  • **整合而非新增**:如果使用者補充 / 更正你已經記過的事(看「你已知關於\
-         使用者的事」段),呼叫 remember 時**用相同 title**,並且 content 必須是\
-         「舊內容 + 新訊息整合後的完整版本」,不可只寫新訊息(那會丟掉舊資訊)。\n");
+        "  • **整合而非新增**:若使用者補充 / 更正既有記憶(可從索引看到 title \
+         相同或相關),先呼叫 recall_memory 拿舊 content,再呼叫 remember 用\
+         **同 title** + 「舊 content + 新訊息整合後的完整版本」,不可只寫新訊息。\n");
     prompt.push_str(
-        "    範例:\n");
+        "    範例:既有「2026-05-11 會議」(content=「2026-05-11 有會議」),\
+         使用者補充「是頻譜電子的會議」→ 你應該:\n");
     prompt.push_str(
-        "    - 既有記憶 title=「2026-05-11 會議」、content=「2026-05-11 有會議」\n");
+        "      1. recall_memory(id=「2026-05-11_會議」)拿到舊 content\n");
     prompt.push_str(
-        "    - 使用者補充「是頻譜電子的會議」\n");
-    prompt.push_str(
-        "    - 正確呼叫:remember(title=「2026-05-11 會議」, \
+        "      2. remember(title=「2026-05-11 會議」, \
          content=「2026-05-11 與頻譜電子開會」)\n");
     prompt.push_str(
-        "    - 錯誤呼叫:remember(title=「2026-05-11 頻譜電子會議」, ...) \
-         ← 會新增第二筆,造成重複\n");
-    prompt.push_str(
-        "    - 錯誤呼叫:remember(title=「2026-05-11 會議」, content=「頻譜電子」) \
-         ← 會丟掉「有會議」這個既有資訊\n");
-    prompt.push_str(
-        "  • Content 一律寫**完整脈絡**(時間、人物、地點、事件全部),不要只寫片段。\n");
-    prompt.push_str("呼叫 remember 後,用一兩句自然語言確認你記下了什麼。\n\n");
+        "  • Content 一律寫**完整脈絡**(時間、人物、地點、事件),不要片段。\n");
+    prompt.push_str("  • 呼叫後用一兩句自然語言確認記下了什麼。\n\n");
+
     prompt.push_str(&format!("現在時間:{now}\n"));
-    if !memory_context.is_empty() {
+    if !memory_index.is_empty() {
         prompt.push_str("\n");
-        prompt.push_str(memory_context);
+        prompt.push_str(memory_index);
     }
     prompt
 }
