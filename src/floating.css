@@ -67,8 +67,17 @@ body.floating-window #root {
   object-fit: contain;
   pointer-events: none; /* drag/click handled by .mori-stage */
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
-  transition: transform 350ms ease, opacity 250ms ease, filter 350ms ease;
-  transform-origin: 50% 60%; /* anchor near feet so breathing looks grounded */
+  /* Explicit `none` here so each state-specific rule below is "from
+     nothing → something"; without this, switching between two named
+     animations sometimes leaves the browser stuck on the previous
+     keyframe's final transform on transition. */
+  animation: none;
+  transform: scale(1);
+  transition: opacity 300ms ease, filter 300ms ease;
+  transform-origin: 50% 50%;
+  /* Smooth scaling for the small chibi PNGs so animation doesn't shimmer */
+  image-rendering: auto;
+  -webkit-image-rendering: auto;
 }
 
 /* ─── 狀態變化 — 角色本身用 transform / filter,aura 處理光環 ──── */
@@ -144,30 +153,27 @@ body.floating-window #root {
 
 /* ─── keyframes ───────────────────────────────────────────────────── */
 
+/* Sprite-side animations stay tiny so the chibi PNG doesn't shimmer
+   from the resample at small scales. Heavier motion goes on the aura. */
+
 @keyframes mori-breathe {
   0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.03); }
+  50%      { transform: scale(1.02); }
 }
 
 @keyframes mori-doze {
-  0%, 100% { transform: translateY(0) scale(0.95); }
-  50%      { transform: translateY(2px) scale(0.93); }
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(1.5px); }
 }
 
 @keyframes mori-listen-pulse {
-  0% {
-    transform: scale(0.85);
-    opacity: 0.9;
-  }
-  100% {
-    transform: scale(1.45);
-    opacity: 0;
-  }
+  0%   { transform: scale(0.9);  opacity: 0.85; }
+  100% { transform: scale(1.35); opacity: 0; }
 }
 
 @keyframes mori-listen-bob {
-  0%, 100% { transform: scale(1.04); }
-  50%      { transform: scale(1.10); }
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
 }
 
 @keyframes mori-think-spin {
@@ -175,20 +181,20 @@ body.floating-window #root {
 }
 
 @keyframes mori-done-glow {
-  0%   { transform: scale(0.6); opacity: 0; }
-  30%  { transform: scale(1.1); opacity: 1; }
-  100% { transform: scale(1.55); opacity: 0; }
+  0%   { transform: scale(0.7); opacity: 0; }
+  30%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1.45); opacity: 0; }
 }
 
 @keyframes mori-done-bounce {
   0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.12); }
+  50%      { transform: scale(1.06); }
 }
 
 @keyframes mori-error-shake {
   0%, 100% { transform: translateX(0); }
-  20%      { transform: translateX(-4px) rotate(-3deg); }
-  40%      { transform: translateX(4px) rotate(3deg); }
-  60%      { transform: translateX(-2px) rotate(-1deg); }
-  80%      { transform: translateX(2px) rotate(1deg); }
+  20%      { transform: translateX(-2.5px); }
+  40%      { transform: translateX(2.5px); }
+  60%      { transform: translateX(-1.5px); }
+  80%      { transform: translateX(1.5px); }
 }
