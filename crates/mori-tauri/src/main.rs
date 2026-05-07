@@ -13,7 +13,8 @@ use mori_core::llm::{ChatMessage, LlmProvider};
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
 use mori_core::skill::{
-    EditMemorySkill, ForgetMemorySkill, RecallMemorySkill, RememberSkill, SkillRegistry,
+    ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
+    RememberSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
@@ -297,13 +298,19 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 
             let provider: Arc<dyn LlmProvider> = Arc::new(provider);
 
-            // 註冊 phase 1F skills:remember / recall / forget / edit
+            // 註冊 skills
             let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
             let mut registry = SkillRegistry::new();
+            // Memory skills(phase 1D-1F)
             registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
             registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
             registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
             registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
+            // Text skills(phase 2)— 共用 main provider,內部跑自己的 LLM call
+            registry.register(Arc::new(TranslateSkill::new(provider.clone())));
+            registry.register(Arc::new(PolishSkill::new(provider.clone())));
+            registry.register(Arc::new(SummarizeSkill::new(provider.clone())));
+            registry.register(Arc::new(ComposeSkill::new(provider.clone())));
             let registry = Arc::new(registry);
 
             let agent = Agent::new(provider, registry);
@@ -433,6 +440,34 @@ fn build_system_prompt(memory_index: &str) -> String {
         "  • 觸發時機:使用者**明確要求**忘掉(「忘掉那個」、「不用記了」、\
          「把 X 刪掉」)。意圖不明確就不要主動刪。\n");
     prompt.push_str("  • Destructive 操作,刪了沒救。確認 id 對。\n\n");
+
+    // 文字處理類 skills(phase 2)
+    prompt.push_str("**translate(source_text, target_lang)**:翻譯。\n");
+    prompt.push_str("  • 觸發:「幫我翻成 X 文」、「翻譯 X」、「what's X in English」\n");
+    prompt.push_str("  • target_lang 常用:zh-TW / zh-CN / en / ja / ko\n\n");
+
+    prompt.push_str("**polish(text, [tone])**:潤稿改錯。\n");
+    prompt.push_str(
+        "  • 觸發:「潤一下這段」、「改錯字」、「修文法」、「fix the grammar」\n");
+    prompt.push_str(
+        "  • tone:formal / casual / concise / detailed / auto(預設)\n\n");
+
+    prompt.push_str("**summarize(text, [style], [max_points])**:摘要長文。\n");
+    prompt.push_str(
+        "  • 觸發:「幫我摘要」、「重點是什麼」、「TLDR」、「太長了濃縮一下」\n");
+    prompt.push_str("  • style:bullet_points(預設)/ one_paragraph / tldr\n\n");
+
+    prompt.push_str("**compose(kind, topic, [audience], [length_hint])**:草擬文字。\n");
+    prompt.push_str(
+        "  • 觸發:「幫我寫」、「draft」、「草稿一下」 — 使用者要你*寫*而非答\n");
+    prompt.push_str(
+        "  • kind:email / message / essay / social_post / other\n");
+    prompt.push_str("  • length_hint:short / medium(預設)/ long\n\n");
+
+    prompt.push_str(
+        "**選 skill 的判斷**:閒聊或一般問答**直接答**,不要硬叫工具。\
+         上面這些 text skills 是當使用者**明確要求一個動作**(翻譯 / 潤稿 / \
+         摘要 / 撰寫)時才呼叫。\n\n");
 
     prompt.push_str(&format!("現在時間:{now}\n"));
     if !memory_index.is_empty() {
