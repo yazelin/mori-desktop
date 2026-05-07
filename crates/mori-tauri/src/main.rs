@@ -106,6 +106,8 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
 fn start_recording(app: &AppHandle, state: &Arc<AppState>) {
     match Recorder::start() {
         Ok(rec) => {
+            // 取得 level atomic 共享給 polling task
+            let level_handle = rec.level_arc();
             *state.recorder.lock() = Some(rec);
             let now_ms = chrono::Utc::now().timestamp_millis();
             state.set_phase(
@@ -114,6 +116,31 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) {
                     started_at_ms: now_ms,
                 },
             );
+
+            // 即時 audio-level 推送給前端,~30Hz
+            let app_clone = app.clone();
+            let state_clone = state.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_millis(33));
+                loop {
+                    interval.tick().await;
+                    // 只有錄音中才推
+                    let still_recording = matches!(
+                        *state_clone.phase.lock(),
+                        Phase::Recording { .. }
+                    );
+                    if !still_recording {
+                        // 推一次 0 結尾,UI 平滑回零
+                        let _ = app_clone.emit("audio-level", 0.0_f32);
+                        break;
+                    }
+                    let raw = level_handle
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let normalized = raw as f32 / u16::MAX as f32;
+                    let _ = app_clone.emit("audio-level", normalized);
+                }
+            });
         }
         Err(e) => {
             tracing::error!(?e, "failed to start recorder");

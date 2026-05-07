@@ -15,6 +15,7 @@ function App() {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [recElapsed, setRecElapsed] = useState<number>(0);
+  const [audioLevel, setAudioLevel] = useState<number>(0);
 
   useEffect(() => {
     invoke<string>("mori_version").then(setCoreVersion).catch(() => setCoreVersion("(unavailable)"));
@@ -22,11 +23,15 @@ function App() {
     invoke<boolean>("has_groq_key").then(setHasKey).catch(() => setHasKey(false));
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
 
-    const unlisten = listen<Phase>("phase-changed", (event) => {
+    const unlistenPhase = listen<Phase>("phase-changed", (event) => {
       setPhase(event.payload);
     });
+    const unlistenLevel = listen<number>("audio-level", (event) => {
+      setAudioLevel(event.payload);
+    });
     return () => {
-      unlisten.then((f) => f());
+      unlistenPhase.then((f) => f());
+      unlistenLevel.then((f) => f());
     };
   }, []);
 
@@ -64,6 +69,7 @@ function App() {
           <>
             <div className="hero-dot pulse" />
             <p className="hero-text">錄音中… {recElapsed}s</p>
+            <LevelMeter level={audioLevel} />
             <p className="hero-hint">再按一次熱鍵停止並送出</p>
           </>
         )}
@@ -115,6 +121,30 @@ function App() {
         </div>
       </section>
     </main>
+  );
+}
+
+// Real-time audio RMS bar. `level` is 0..=1 (linear amplitude).
+// We map to dBFS for a more useful visual scale (whisper-friendly speech is
+// usually -30..-10 dBFS, full silence is -∞).
+function LevelMeter({ level }: { level: number }) {
+  // Convert linear to a percent on a log-ish scale that puts whisper speech
+  // around 50–80% of the bar.
+  const db = level > 0 ? 20 * Math.log10(level) : -90;
+  // Map -60dB → 0%, 0dB → 100%
+  const pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+  // Color hint: green for normal speech, amber if near silence
+  const tooQuiet = db < -45;
+  return (
+    <div className="level-meter">
+      <div
+        className={`level-fill ${tooQuiet ? "quiet" : ""}`}
+        style={{ width: `${pct}%` }}
+      />
+      {tooQuiet && (
+        <p className="level-hint">音量太小,Whisper 可能會幻想 “Thank you”</p>
+      )}
+    </div>
   );
 }
 

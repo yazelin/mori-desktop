@@ -129,6 +129,44 @@ header h1 {
   font-size: 12px;
 }
 
+/* Audio level meter shown during recording */
+.level-meter {
+  width: 100%;
+  margin: 6px 0 4px;
+  position: relative;
+}
+
+.level-meter::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 8px;
+  background: var(--bg);
+  border-radius: 4px;
+  position: absolute;
+  inset: 0;
+}
+
+.level-fill {
+  position: relative;
+  height: 8px;
+  background: linear-gradient(90deg, var(--accent), #f0883e 75%, var(--rec) 100%);
+  border-radius: 4px;
+  transition: width 60ms linear;
+  min-width: 2px;
+}
+
+.level-fill.quiet {
+  background: var(--warn);
+  opacity: 0.7;
+}
+
+.level-hint {
+  margin: 4px 0 0;
+  color: var(--warn);
+  font-size: 11px;
+}
+
 .transcript {
   margin: 8px 0 0;
   padding: 12px;

@@ -18,6 +18,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -66,22 +67,40 @@ impl RecordedAudio {
 pub struct Recorder {
     handle: Option<JoinHandle<Result<RecordedAudio>>>,
     stop_tx: Option<mpsc::Sender<()>>,
+    /// 即時 RMS 等級,0..=u16::MAX。Audio callback 會持續更新。
+    /// 共享給 UI polling task 用。
+    level: Arc<AtomicU16>,
 }
 
 impl Recorder {
     /// 開始錄音。立刻回傳,實際錄音在背景 thread 進行。
     pub fn start() -> Result<Self> {
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let level = Arc::new(AtomicU16::new(0));
+        let level_for_thread = level.clone();
 
         let handle = std::thread::Builder::new()
             .name("mori-recorder".into())
-            .spawn(move || -> Result<RecordedAudio> { run_recording_thread(stop_rx) })
+            .spawn(move || -> Result<RecordedAudio> {
+                run_recording_thread(stop_rx, level_for_thread)
+            })
             .context("spawn recorder thread")?;
 
         Ok(Self {
             handle: Some(handle),
             stop_tx: Some(stop_tx),
+            level,
         })
+    }
+
+    /// 取得 0.0..=1.0 的當下 RMS 音量。供 UI 即時顯示用。
+    pub fn current_level(&self) -> f32 {
+        self.level.load(Ordering::Relaxed) as f32 / u16::MAX as f32
+    }
+
+    /// 共享 atomic 給外部(例如 polling task)直接讀,免每次經過 `&self`。
+    pub fn level_arc(&self) -> Arc<AtomicU16> {
+        self.level.clone()
     }
 
     /// 停止錄音,等到 background thread 結束,回傳錄到的音訊。
@@ -101,7 +120,10 @@ impl Recorder {
     }
 }
 
-fn run_recording_thread(stop_rx: mpsc::Receiver<()>) -> Result<RecordedAudio> {
+fn run_recording_thread(
+    stop_rx: mpsc::Receiver<()>,
+    level: Arc<AtomicU16>,
+) -> Result<RecordedAudio> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -130,16 +152,23 @@ fn run_recording_thread(stop_rx: mpsc::Receiver<()>) -> Result<RecordedAudio> {
     let stream_config: cpal::StreamConfig = config.config();
     let err_fn = |err| tracing::error!(?err, "recorder: stream error");
 
+    let level_f32 = level.clone();
+    let level_i16 = level.clone();
+    let level_u16 = level.clone();
+
     let stream = match sample_format {
         cpal::SampleFormat::F32 => device.build_input_stream(
             &stream_config,
             move |data: &[f32], _info: &cpal::InputCallbackInfo| {
                 let mut b = stream_buffer.lock();
                 b.reserve(data.len());
+                let mut sum_sq = 0.0f64;
                 for &s in data {
                     let clamped = s.clamp(-1.0, 1.0);
+                    sum_sq += (clamped as f64) * (clamped as f64);
                     b.push((clamped * i16::MAX as f32) as i16);
                 }
+                update_level(&level_f32, sum_sq, data.len());
             },
             err_fn,
             None,
@@ -149,6 +178,14 @@ fn run_recording_thread(stop_rx: mpsc::Receiver<()>) -> Result<RecordedAudio> {
             move |data: &[i16], _info: &cpal::InputCallbackInfo| {
                 let mut b = stream_buffer.lock();
                 b.extend_from_slice(data);
+                let sum_sq: f64 = data
+                    .iter()
+                    .map(|&s| {
+                        let n = s as f64 / i16::MAX as f64;
+                        n * n
+                    })
+                    .sum();
+                update_level(&level_i16, sum_sq, data.len());
             },
             err_fn,
             None,
@@ -158,10 +195,14 @@ fn run_recording_thread(stop_rx: mpsc::Receiver<()>) -> Result<RecordedAudio> {
             move |data: &[u16], _info: &cpal::InputCallbackInfo| {
                 let mut b = stream_buffer.lock();
                 b.reserve(data.len());
+                let mut sum_sq = 0.0f64;
                 for &s in data {
+                    let n = (s as f64 - 32768.0) / 32768.0;
+                    sum_sq += n * n;
                     // u16 [0, 65535] → i16 [-32768, 32767]
                     b.push((s as i32 - 32768) as i16);
                 }
+                update_level(&level_u16, sum_sq, data.len());
             },
             err_fn,
             None,
@@ -190,4 +231,15 @@ fn run_recording_thread(stop_rx: mpsc::Receiver<()>) -> Result<RecordedAudio> {
         "recorder: stopped"
     );
     Ok(audio)
+}
+
+/// 從 callback 算出 RMS,放進 atomic(0..=u16::MAX),供 UI polling 讀取。
+/// 用 sqrt 但保留 0..1 range,scale 到 u16。
+fn update_level(level: &Arc<AtomicU16>, sum_sq: f64, n: usize) {
+    if n == 0 {
+        return;
+    }
+    let rms = (sum_sq / n as f64).sqrt().clamp(0.0, 1.0);
+    let scaled = (rms * u16::MAX as f64) as u16;
+    level.store(scaled, Ordering::Relaxed);
 }
