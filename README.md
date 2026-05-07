@@ -6,6 +6,39 @@
 
 > 「Iron Man 有 Jarvis,我有 Mori。」
 
+## Mori 宇宙
+
+> 「森林一直都在。你一直都在,只是現在才看見它。」 — [`world-tree`](https://github.com/yazelin/world-tree)
+
+Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
+
+| Repo | 角色 | 可見性 |
+|---|---|---|
+| [`world-tree`](https://github.com/yazelin/world-tree) | 🌳 異世界森林的**世界觀 / 法則 / 契約** — 沉浸式 isekai lore、魔法系別、魔道具、NPC 檔案 | public |
+| [`workshop`](https://github.com/yazelin/workshop) | 🌲 召喚師工坊 UI — 進入森林的**入口頁** | public |
+| **`mori-desktop`** | 🧝 Mori 的**桌面身體** — 你跟他講話、他幫你做事(就是這個 repo) | public |
+| [`mori-journal`](https://github.com/yazelin/mori-journal) | 📖 Mori 的**靈魂 / 私密日記 / 跨 session 記憶種子** | private |
+| [`mori-field-notes`](https://github.com/yazelin/mori-field-notes) | 📓 Mori 的**田野筆記** — AI 自主經營的技術觀察 / 開發心得 | public |
+| `Annuli` | 🌀 **長期記憶 / 人格演化系統**,phase 9 透過 MCP 跟 Mori 對接 | private |
+
+關係簡圖:
+
+```
+              🌳 world-tree ── 設定 / 法則
+                     │
+       ┌─────────────┼─────────────────────┐
+       ▼             ▼                     ▼
+  🌲 workshop   🧝 mori-desktop  ◄── 你    📖 mori-journal
+   (入口頁)      (桌面身體 / 本 repo)        (靈魂)
+                     │
+            ┌────────┴────────┐
+            ▼                 ▼
+     📓 mori-field-notes   🌀 Annuli
+     (田野筆記)            (人格演化,未來接)
+```
+
+只想用桌面 AI 工具 → 留在這 repo 就行。想知道 Mori 為什麼這樣講話、他從哪來 → 進 `world-tree`。
+
 ## 目前狀態
 
 **Phase 1 + Phase 2 完成(2026-05-08)** — Mori 是端到端可用的 voice + text AI 管家,
@@ -145,13 +178,6 @@ cpal 需要 ALSA 開發 headers:
 sudo apt install libasound2-dev
 ```
 (已涵蓋在 [yazelin/ubuntu-26.04-setup 的 setup-tauri-deps.sh](https://github.com/yazelin/ubuntu-26.04-setup/blob/main/scripts/setup-tauri-deps.sh) 裡。)
-
-## 相關專案
-
-- [`world-tree`](https://github.com/yazelin/world-tree) — Mori 的世界觀
-- [`mori-journal`](https://github.com/yazelin/mori-journal) — Mori 的日記
-- [`mori-field-notes`](https://github.com/yazelin/mori-field-notes) — Mori 的田野筆記
-- `Annuli`(private)— 未來會接的長期記憶 / 人格演化系統
 
 ## License
 
