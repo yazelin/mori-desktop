@@ -8,15 +8,21 @@
 
 ## 目前狀態
 
-**Phase 1 — Scaffold(2026-05)**
+**Phase 1 完整收工(2026-05-08)** — Mori 是端到端可用的 voice AI 管家。
 
-- [x] Repo 結構 + 文件
-- [x] Cargo workspace + 兩個 crate(`mori-core` / `mori-tauri`)
-- [x] React 前端骨架(Vite)
-- [x] 核心 traits 定義(MemoryStore / Skill / Context / LlmProvider)
-- [ ] 實際的全域熱鍵 + 麥克風 + Whisper 整合(下一個 PR)
+按 F8(或 UI 按鈕)→ 講話 → Mori 聽 → 想 → 回 → 必要時自己改長期記憶。
+跨 turn 記得這個 session 講過什麼。關視窗到系統匣繼續跑。
 
-完整路線圖見 [`docs/roadmap.md`](docs/roadmap.md)。
+| | 已實作 |
+|---|---|
+| 🎙️ 聽 | 全域熱鍵 / UI 按鈕 → cpal 麥克風 → Groq Whisper turbo,即時音量條,debug WAV 存檔 |
+| 🧠 想 | gpt-oss-120b + multi-turn tool calling(MAX 5 輪),system prompt 含 persona / 時間 / 記憶索引 / 對話歷史 |
+| 💬 回 | 繁中為主、不客套,UI 顯示「你說 / Mori」雙塊 + 🔧 skill badges |
+| 📝 記 / 🔍 查 / ✏️ 改 / 🗑️ 忘 | RememberSkill / RecallMemorySkill / EditMemorySkill / ForgetMemorySkill |
+| 💭 對話歷史 | working memory 保留 10 對 user-assistant 訊息,可重置 |
+| 🪟 常駐 | 系統匣 icon(顯示 / 隱藏 / 重新對話 / 離開),關視窗 → 隱藏不殺 |
+
+完整路線圖見 [`docs/roadmap.md`](docs/roadmap.md)。Phase 2+ 規劃中(基礎 skills / TTS / context capture / 跨裝置同步 / Annuli MCP 整合)。
 
 ## 架構速覽
 
@@ -26,10 +32,11 @@ mori-desktop/
 │   ├── mori-core/       ← 純 Rust lib,無 UI 依賴。所有平台共用。
 │   │   ├── memory/      ← MemoryStore trait + LocalMarkdownMemoryStore
 │   │   ├── context.rs   ← Context struct + ContextProvider trait
-│   │   ├── skill.rs     ← Skill trait + EchoSkill / RememberSkill
+│   │   ├── skill.rs     ← Skill trait + Registry + Remember/Recall/Edit/Forget
+│   │   ├── agent.rs     ← Multi-turn tool-calling loop
 │   │   ├── llm/         ← LlmProvider trait + GroqProvider
 │   │   └── voice.rs     ← Whisper API client
-│   └── mori-tauri/      ← Tauri 2 桌面殼,只做 IPC 跟 OS 整合
+│   └── mori-tauri/      ← Tauri 2 桌面殼,IPC + 麥克風 + 系統匣 + 熱鍵
 ├── src/                 ← React 前端
 └── docs/                ← architecture / roadmap / memory 設計文件
 ```
@@ -41,7 +48,8 @@ mori-desktop/
 需求:
 - Rust 1.94+
 - Node 22+
-- (Linux)`libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`
+- (Linux)`libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev`
+  — Ubuntu 26.04 可直接用 [`yazelin/ubuntu-26.04-setup`](https://github.com/yazelin/ubuntu-26.04-setup) 的 `setup-rust.sh` + `setup-tauri-deps.sh` 一條龍裝齊
 
 ```bash
 git clone https://github.com/yazelin/mori-desktop.git
