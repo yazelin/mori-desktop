@@ -72,15 +72,29 @@
 - [ ] Session log:每次互動寫入 `~/.mori/sessions/<timestamp>/`
 - [ ] 多 provider 支援:`OllamaProvider`(隱私任務 fallback)
 
-## Phase 3 — Context Capture / 剪貼簿 / URL Routing(2026-07)
+## Phase 3 — Context Capture / 剪貼簿 / URL Routing
 
 按熱鍵時自動抓「現場資訊」,LLM 根據當下 context 決定該做什麼。
 
-- [ ] `ContextProvider` 各平台實作骨架(只先做剪貼簿、URL 偵測)
-- [ ] URL routing:剪貼簿是 YouTube / 文章 → 摘要 / 下載 quick-action
-- [ ] 「按熱鍵 + 反白文字」場景處理(macOS / Windows 用模擬 Ctrl+C)
+### Phase 3A — 剪貼簿(2026-05-08,完成)
+- [x] `TauriContextProvider` 實作 `ContextProvider` trait,讀剪貼簿文字
+- [x] `run_chat_pipeline` 每輪開始抓 context
+- [x] System prompt 注入 clipboard 內容(若有,4KB cap)
+- [x] LLM 看到 clipboard 後,使用者說「這個 / 這段」可指代
+- [x] UI 狀態列「📋 N 字 / —」+ tooltip 顯示完整內容
+- [x] `context-captured` event emit 給前端
+
+### Phase 3B — URL routing(下個 PR)
+- [ ] 剪貼簿 / 輸入裡偵測 URL,填 `ctx.urls_detected`
+- [ ] LLM 看到 YouTube URL → 自動建議 / 觸發 summarize
+- [ ] LLM 看到一般文章 URL → fetch 內容後 summarize / extract
+
+### Phase 3C — 跨 app 反白文字
+- [ ] macOS / Windows / X11:模擬 Ctrl+C 抓 selection
+- [ ] Wayland:走 xdg-desktop-portal(較難,工程量大)
+
+### Phase 3D — 其他
 - [ ] Session 自動摘要 → 寫入 archival memory
-- [ ] `RecallSkill`:LLM 主動搜尋過去記憶
 
 ## Phase 4 — 系統整合 + ExecCommand(2026-08-09)
 

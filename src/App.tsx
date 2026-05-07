@@ -71,10 +71,18 @@ function App() {
         );
       }, ms);
     });
+    // Phase 3A:Mori 在每輪開始抓 context(目前只有剪貼簿)
+    const unlistenContext = listen<{ clipboard?: string | null }>(
+      "context-captured",
+      (event) => {
+        setLastContext(event.payload);
+      },
+    );
     return () => {
       unlistenPhase.then((f) => f());
       unlistenLevel.then((f) => f());
       unlistenRetry.then((f) => f());
+      unlistenContext.then((f) => f());
     };
   }, []);
 
@@ -97,6 +105,10 @@ function App() {
     wait_secs: number;
     reason: string;
     op: string;
+  } | null>(null);
+  // Phase 3A:當 Mori 抓到剪貼簿等 context 時顯示
+  const [lastContext, setLastContext] = useState<{
+    clipboard?: string | null;
   } | null>(null);
 
   const onToggle = () => {
@@ -288,6 +300,19 @@ function App() {
         <div className="status-row">
           <span className="label">history</span>
           <span className="value">{convLength} msgs</span>
+        </div>
+        <div className="status-row">
+          <span className="label">clipboard</span>
+          <span
+            className={`value ${
+              lastContext?.clipboard ? "ok" : ""
+            }`}
+            title={lastContext?.clipboard ?? "上一輪沒抓到剪貼簿內容"}
+          >
+            {lastContext?.clipboard
+              ? `📋 ${lastContext.clipboard.length} 字`
+              : "—"}
+          </span>
         </div>
       </section>
     </main>
