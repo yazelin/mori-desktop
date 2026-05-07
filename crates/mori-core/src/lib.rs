@@ -13,6 +13,7 @@ pub mod agent;
 pub mod context;
 pub mod llm;
 pub mod memory;
+pub mod mode;
 pub mod skill;
 pub mod voice;
 
@@ -20,4 +21,4 @@ pub mod voice;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 當前 phase 名稱
-pub const PHASE: &str = "3A — Clipboard context capture";
+pub const PHASE: &str = "4B — Active / Background mode + portal hotkey";
