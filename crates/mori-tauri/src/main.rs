@@ -806,6 +806,15 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // ── Floating 視窗:Rust 端 always-on-top 初始 assert ──
+            // conf.json 的 alwaysOnTop hint 在 mutter 上是 "soft",而從 JS
+            // 端 setAlwaysOnTop 會被 mutter 視為 client 亂搞而降級。從
+            // Rust 端呼叫則是合法的 window-manager-level 訊息。AgentPulse
+            // 用同套手法穩穩釘住自己的 capsule 視窗。
+            if let Some(f) = app.get_webview_window("floating") {
+                let _ = f.set_always_on_top(true);
+            }
+
             // ── 系統匣(tray)+ 選單 ──
             // toggle_mode 項目的 label 會跟著 Mode 動態切換;事件迴圈裡也
             // listen "mode-changed" 同步更新,以免使用者經 IPC / 語音 skill
@@ -836,10 +845,27 @@ fn main() {
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
+                        // Critical: re-assert floating's always-on-top from
+                        // Rust here. mutter on GNOME Wayland silently
+                        // demotes the floating window's z-order whenever
+                        // the main window is hidden+shown again, but
+                        // accepts a fresh `set_always_on_top(true)` from
+                        // Rust as a legitimate window-manager event (not
+                        // a misbehaving client). Same trick yazelin/AgentPulse
+                        // uses on its tray show/hide handlers.
+                        if let Some(f) = app.get_webview_window("floating") {
+                            let _ = f.set_always_on_top(true);
+                        }
                     }
                     "hide" => {
                         if let Some(w) = app.get_webview_window("main") {
                             let _ = w.hide();
+                        }
+                        // After hiding main, re-elevate floating so it
+                        // doesn't sink behind whatever the user focuses
+                        // next.
+                        if let Some(f) = app.get_webview_window("floating") {
+                            let _ = f.set_always_on_top(true);
                         }
                     }
                     "toggle_mode" => {

@@ -22,7 +22,6 @@
       {
         "label": "floating",
         "title": "Mori (floating)",
-        "parent": "main",
         "width": 160,
         "height": 160,
         "decorations": false,
