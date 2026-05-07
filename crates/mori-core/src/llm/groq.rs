@@ -46,9 +46,7 @@ impl GroqProvider {
 
     /// 嘗試從以下來源依序取得 GROQ_API_KEY:
     /// 1. `GROQ_API_KEY` 環境變數
-    /// 2. `~/.mori/config.json` 的 `providers.groq.api_key`(主要設定來源)
-    /// 3. `~/.pi/agent/models.json` 的 `providers.groq.apiKey`(legacy fallback —
-    ///    若你從 Pi 切過來,key 不用搬)
+    /// 2. `~/.mori/config.json` 的 `providers.groq.api_key`
     pub fn discover_api_key() -> Option<String> {
         if let Ok(key) = std::env::var("GROQ_API_KEY") {
             if !key.is_empty() && !is_placeholder(&key) {
@@ -57,24 +55,10 @@ impl GroqProvider {
         }
 
         let home = home_dir()?;
-
-        // (2) Mori 自己的 config
-        if let Some(key) = read_json_pointer(
+        read_json_pointer(
             &home.join(".mori").join("config.json"),
             "/providers/groq/api_key",
-        ) {
-            return Some(key);
-        }
-
-        // (3) Pi legacy
-        if let Some(key) = read_json_pointer(
-            &home.join(".pi").join("agent").join("models.json"),
-            "/providers/groq/apiKey",
-        ) {
-            return Some(key);
-        }
-
-        None
+        )
     }
 
     /// 確保 `~/.mori/` 存在,若 `config.json` 不存在就寫一份 stub
