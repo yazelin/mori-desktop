@@ -1,7 +1,15 @@
 /* ─── Floating Mori widget ─────────────────────────────────────────────
-   Reset everything so the Mori SVG sits flush in the 96×96 borderless
-   window. Without this the body's default margin shifts the logo a few
-   pixels off-center.
+   The window is 96×96, borderless, transparent. We reset html+body so
+   the sprite sits flush — without this, default <body> margins push the
+   image off-axis a few pixels.
+
+   Sprite contract (so we can swap art without touching the engine):
+   - Single transparent PNG at /floating/mori-<state>.png
+   - Square aspect, character centred with ~10% silhouette padding
+   - Filename stays the same when upgraded to a 3×3 motion sheet:
+     just `cover` it as a background-image with `background-size:
+     300% 300%` + step()-animated background-position. The .mori-sprite
+     class is the only thing that needs touching at that point.
    ──────────────────────────────────────────────────────────────────── */
 
 html.floating-window,
@@ -38,7 +46,7 @@ body.floating-window #root {
   justify-content: center;
 }
 
-/* ─── aura(背景脈動 / 旋轉的圈) ─────────────────────────────────── */
+/* ─── aura(背景環 / 光暈) ──────────────────────────────────────── */
 
 .mori-aura {
   position: absolute;
@@ -46,92 +54,83 @@ body.floating-window #root {
   height: 88px;
   border-radius: 50%;
   pointer-events: none;
-  transition: opacity 250ms ease, transform 250ms ease, box-shadow 250ms ease;
+  opacity: 0;
+  transition: opacity 250ms ease;
 }
 
-/* ─── logo SVG(實際的雙圓 + 葉子) ───────────────────────────────── */
+/* ─── sprite(角色 PNG) ─────────────────────────────────────────── */
 
-.mori-logo {
+.mori-sprite {
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+  pointer-events: none; /* drag/click handled by .mori-stage */
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
   transition: transform 350ms ease, opacity 250ms ease, filter 350ms ease;
-  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45));
+  transform-origin: 50% 60%; /* anchor near feet so breathing looks grounded */
 }
 
-.mori-leaf {
-  transform-origin: 50px 50px;
-  transition: transform 350ms ease;
-}
-
-/* ─── 狀態變化 ────────────────────────────────────────────────────── */
+/* ─── 狀態變化 — 角色本身用 transform / filter,aura 處理光環 ──── */
 
 /* IDLE — 平靜呼吸 */
-.mori-idle .mori-logo {
+.mori-idle .mori-sprite {
   animation: mori-breathe 5s ease-in-out infinite;
 }
-.mori-idle .mori-aura {
-  opacity: 0;
-}
 
-/* SLEEPING(休眠)— 整體淡化、葉子下垂、輕微下沉 */
-.mori-sleeping .mori-logo {
-  opacity: 0.5;
-  filter: saturate(0.5) blur(0.4px) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+/* SLEEPING — 整體淡化 + 輕微下沉(像睡著) */
+.mori-sleeping .mori-sprite {
+  opacity: 0.7;
+  filter: saturate(0.6) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
   animation: mori-doze 6s ease-in-out infinite;
 }
-.mori-sleeping .mori-leaf {
-  transform: rotate(15deg) translate(2px, 4px);
-}
-.mori-sleeping .mori-aura {
-  opacity: 0;
-}
 
-/* RECORDING — 紅暈 + 脈動環 */
+/* RECORDING — 紅色光暈脈動 + 角色微微前傾(放大) */
 .mori-recording .mori-aura {
   opacity: 1;
   background: radial-gradient(
     circle,
-    rgba(220, 90, 90, 0.5) 0%,
-    rgba(220, 90, 90, 0.1) 50%,
-    transparent 70%
+    rgba(220, 90, 90, 0.55) 0%,
+    rgba(220, 90, 90, 0.1) 55%,
+    transparent 75%
   );
   animation: mori-listen-pulse 1.1s ease-out infinite;
 }
-.mori-recording .mori-logo {
+.mori-recording .mori-sprite {
   animation: mori-listen-bob 1.1s ease-in-out infinite;
 }
 
-/* THINKING — logo 慢轉,aura 旋轉 */
-.mori-thinking .mori-logo {
-  animation: mori-think 1.6s linear infinite;
-}
+/* THINKING — 頭頂旋轉光環,角色不動 */
 .mori-thinking .mori-aura {
   opacity: 1;
   border: 2px solid transparent;
-  border-top-color: rgba(160, 200, 160, 0.9);
-  border-right-color: rgba(160, 200, 160, 0.4);
-  animation: mori-think-spin 1s linear infinite;
+  border-top-color: rgba(170, 210, 170, 0.95);
+  border-right-color: rgba(170, 210, 170, 0.45);
+  animation: mori-think-spin 1.0s linear infinite;
+}
+.mori-thinking .mori-sprite {
+  animation: mori-breathe 4s ease-in-out infinite;
 }
 
-/* DONE — 一次溫暖光暈 */
+/* DONE — 暖光暈一閃 + 微微 bounce */
 .mori-done .mori-aura {
   opacity: 1;
   background: radial-gradient(
     circle,
-    rgba(180, 220, 180, 0.55) 0%,
-    rgba(180, 220, 180, 0.15) 60%,
+    rgba(190, 230, 190, 0.6) 0%,
+    rgba(190, 230, 190, 0.15) 60%,
     transparent 80%
   );
   animation: mori-done-glow 1.5s ease-out 1;
 }
-.mori-done .mori-logo {
+.mori-done .mori-sprite {
   animation: mori-done-bounce 0.6s ease 1;
 }
 
-/* ERROR — 紅色 hue + 抖一下 */
-.mori-error .mori-logo {
-  filter: hue-rotate(120deg) drop-shadow(0 3px 6px rgba(140, 0, 0, 0.6));
+/* ERROR — 紅色色相偏移 + 抖一下 */
+.mori-error .mori-sprite {
+  filter: hue-rotate(-30deg) saturate(1.2)
+    drop-shadow(0 3px 6px rgba(140, 0, 0, 0.5));
   animation: mori-error-shake 0.45s ease 1;
 }
 .mori-error .mori-aura {
@@ -147,12 +146,12 @@ body.floating-window #root {
 
 @keyframes mori-breathe {
   0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.04); }
+  50%      { transform: scale(1.03); }
 }
 
 @keyframes mori-doze {
-  0%, 100% { transform: translateY(0) scale(0.96); }
-  50%      { transform: translateY(2px) scale(0.94); }
+  0%, 100% { transform: translateY(0) scale(0.95); }
+  50%      { transform: translateY(2px) scale(0.93); }
 }
 
 @keyframes mori-listen-pulse {
@@ -161,7 +160,7 @@ body.floating-window #root {
     opacity: 0.9;
   }
   100% {
-    transform: scale(1.4);
+    transform: scale(1.45);
     opacity: 0;
   }
 }
@@ -171,27 +170,14 @@ body.floating-window #root {
   50%      { transform: scale(1.10); }
 }
 
-@keyframes mori-think {
-  to { transform: rotate(360deg); }
-}
-
 @keyframes mori-think-spin {
   to { transform: rotate(360deg); }
 }
 
 @keyframes mori-done-glow {
-  0% {
-    transform: scale(0.6);
-    opacity: 0;
-  }
-  30% {
-    transform: scale(1.1);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1.5);
-    opacity: 0;
-  }
+  0%   { transform: scale(0.6); opacity: 0; }
+  30%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1.55); opacity: 0; }
 }
 
 @keyframes mori-done-bounce {

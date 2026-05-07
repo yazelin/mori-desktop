@@ -62,10 +62,23 @@ const VISUAL_LABEL: Record<Visual, string> = {
   error: "出錯",
 };
 
+// Path to each sprite under /public/floating/. Vite serves /public at root.
+// Spec for the PNG drop-ins: 512×512, transparent BG, character centred
+// with ~10% padding. Swap any PNG to update Mori's look.
+const SPRITE_SRC: Record<Visual, string> = {
+  idle: "/floating/mori-idle.png",
+  sleeping: "/floating/mori-sleeping.png",
+  recording: "/floating/mori-recording.png",
+  thinking: "/floating/mori-thinking.png",
+  done: "/floating/mori-done.png",
+  error: "/floating/mori-error.png",
+};
+
 function FloatingMori() {
   const [mode, setMode] = useState<Mode>("active");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
+  // Anchor bottom-right on first paint, then leave alone (user can drag).
   useEffect(() => {
     (async () => {
       const w = getCurrentWindow();
@@ -80,6 +93,8 @@ function FloatingMori() {
     })();
   }, []);
 
+  // Same events the main window subscribes to — Tauri broadcasts to all
+  // webviews, no extra IPC needed.
   useEffect(() => {
     invoke<Mode>("current_mode").then(setMode).catch(() => {});
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
@@ -92,6 +107,8 @@ function FloatingMori() {
     };
   }, []);
 
+  // Click → toggle main window visibility (the floater doubles as a
+  // "summon / dismiss the full UI" button).
   const onClick = async () => {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -118,39 +135,16 @@ function FloatingMori() {
       onClick={onClick}
       title={`Mori — ${VISUAL_LABEL[visual]}\nclick 切顯示主視窗,長按拖曳`}
     >
-      {/* 外層:狀態指示環(脈動 / 旋轉 / 暈染) */}
+      {/* Behind the sprite: a state-coloured aura/halo that pulses or spins. */}
       <div className="mori-aura" />
-      {/* 主體:Mori 雙圓 logo */}
-      <svg
-        className="mori-logo"
-        viewBox="0 0 100 100"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          {/* 漸層讓 logo 有立體感 */}
-          <radialGradient id="moriDark" cx="35%" cy="35%" r="65%">
-            <stop offset="0%" stopColor="#5a8a6e" />
-            <stop offset="60%" stopColor="#2d5a3f" />
-            <stop offset="100%" stopColor="#1a3a28" />
-          </radialGradient>
-          <radialGradient id="moriLight" cx="35%" cy="35%" r="65%">
-            <stop offset="0%" stopColor="#e8d8be" />
-            <stop offset="60%" stopColor="#c8b896" />
-            <stop offset="100%" stopColor="#9a8a72" />
-          </radialGradient>
-        </defs>
-        {/* 雙圓 yin-yang 風格 — 精靈與森林互抱 */}
-        <circle cx="36" cy="50" r="30" fill="url(#moriDark)" />
-        <circle cx="64" cy="50" r="30" fill="url(#moriLight)" opacity="0.85" />
-        {/* 中心一片葉子當焦點(品牌符號) */}
-        <path
-          className="mori-leaf"
-          d="M 50 35 Q 56 50 50 65 Q 44 50 50 35 Z"
-          fill="#6b8e5a"
-          stroke="#2d5a3f"
-          strokeWidth="0.8"
-        />
-      </svg>
+      {/* The sprite itself — swappable PNG, see SPRITE_SRC. The CSS adds
+          per-state breathing / pulse / shake without touching the bitmap. */}
+      <img
+        className="mori-sprite"
+        src={SPRITE_SRC[visual]}
+        alt={VISUAL_LABEL[visual]}
+        draggable={false}
+      />
     </div>
   );
 }
