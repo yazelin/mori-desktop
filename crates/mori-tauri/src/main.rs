@@ -149,11 +149,46 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         let result: anyhow::Result<String> = async {
             let audio = recorder.stop().context("stop recorder")?;
             let duration = audio.duration_secs();
-            tracing::info!(duration_secs = duration, "recorded; encoding WAV");
+            // 計算音量:RMS,讓我們知道是不是麥克風根本沒收到聲音
+            let rms = if audio.samples.is_empty() {
+                0.0
+            } else {
+                let sum_sq: f64 = audio
+                    .samples
+                    .iter()
+                    .map(|&s| (s as f64 / i16::MAX as f64).powi(2))
+                    .sum();
+                (sum_sq / audio.samples.len() as f64).sqrt()
+            };
+            tracing::info!(
+                duration_secs = duration,
+                samples = audio.samples.len(),
+                rms = rms,
+                rms_db = 20.0 * rms.log10(),
+                "recorded; encoding WAV"
+            );
+            if rms < 0.005 {
+                tracing::warn!(
+                    "audio is very quiet (RMS={:.4}, ~{:.0} dBFS). \
+                     Mic likely not capturing — Whisper will hallucinate 'Thank you'.",
+                    rms,
+                    20.0 * rms.log10()
+                );
+            }
+
             let wav = audio.to_wav_bytes().context("encode WAV")?;
 
+            // Debug:把最後一次錄音存到 /tmp,使用者可以播聽看
+            let debug_path = std::env::temp_dir().join("mori-last-recording.wav");
+            if let Err(e) = std::fs::write(&debug_path, &wav) {
+                tracing::warn!(?e, "failed to write debug WAV");
+            } else {
+                tracing::info!(path = %debug_path.display(), "wrote debug WAV");
+            }
+
             let key = api_key.context(
-                "no GROQ_API_KEY configured. Set env var or ~/.pi/agent/models.json",
+                "no GROQ_API_KEY configured. \
+                 Edit ~/.mori/config.json or set $GROQ_API_KEY",
             )?;
             let provider =
                 GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string());
