@@ -47,8 +47,21 @@ type Visual =
   | "done"
   | "error";
 
-function visualFor(mode: Mode, phase: Phase): Visual {
+// Done / Error 在 floating widget 上是 transient — 顯示動畫期間後就該回
+// idle,不像主視窗會保留結果卡片。後端的 Phase 不變(主視窗仍顯示
+// 對話結果),只在 floating 端用 transient state 控制視覺生命週期。
+const TRANSIENT_DURATION_MS: Record<"done" | "error", number> = {
+  done: 1500,  // 對齊 mori-done-glow keyframe 的 1.6s
+  error: 2000, // 抖動 0.5s 後再多停一下,讓使用者有意識到
+};
+
+function visualFor(
+  mode: Mode,
+  phase: Phase,
+  transient: Visual | null,
+): Visual {
   if (mode === "background") return "sleeping";
+  if (transient) return transient;
   switch (phase.kind) {
     case "idle":
       return "idle";
@@ -58,9 +71,9 @@ function visualFor(mode: Mode, phase: Phase): Visual {
     case "responding":
       return "thinking";
     case "done":
-      return "done";
     case "error":
-      return "error";
+      // 過了 transient 時間後 fall-through 回 idle,不卡在 done/error
+      return "idle";
   }
 }
 
@@ -88,6 +101,10 @@ const SPRITE_SRC: Record<Visual, string> = {
 function FloatingMori() {
   const [mode, setMode] = useState<Mode>("active");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  // Transient visual override — only for done / error so the celebration
+  // glow / shake plays once and then we fade back to idle. Cleared by a
+  // timer on phase change.
+  const [transient, setTransient] = useState<Visual | null>(null);
 
   // Anchor bottom-right on first paint, then leave alone (user can drag).
   useEffect(() => {
@@ -129,11 +146,29 @@ function FloatingMori() {
     };
   }, []);
 
+  // 進 done / error 時:先設 transient(讓 floating 顯示對應 sprite +
+  // glow / shake),動畫結束的時間後 clear → fall-through 回 idle。
+  useEffect(() => {
+    if (phase.kind === "done") {
+      setTransient("done");
+      const t = setTimeout(() => setTransient(null), TRANSIENT_DURATION_MS.done);
+      return () => clearTimeout(t);
+    }
+    if (phase.kind === "error") {
+      setTransient("error");
+      const t = setTimeout(() => setTransient(null), TRANSIENT_DURATION_MS.error);
+      return () => clearTimeout(t);
+    }
+    // 任何其他 phase 都立刻清掉 transient,避免「上次的 done flash 跑到
+    // 下一輪 recording 中閃一下」這種視覺殘留。
+    setTransient(null);
+  }, [phase]);
+
   // Track visual changes so we can confirm the sprite swap actually fires.
   useEffect(() => {
-    const v = visualFor(mode, phase);
+    const v = visualFor(mode, phase, transient);
     dlog("visual ->", v, "src:", SPRITE_SRC[v]);
-  }, [mode, phase]);
+  }, [mode, phase, transient]);
 
   // Drag: hand the window-move to Tauri via the raw plugin invoke. The
   // higher-level `getCurrentWindow().startDragging()` JS wrapper is
@@ -167,7 +202,7 @@ function FloatingMori() {
     }
   };
 
-  const visual = visualFor(mode, phase);
+  const visual = visualFor(mode, phase, transient);
 
   return (
     <div
