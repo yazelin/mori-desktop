@@ -32,8 +32,9 @@ impl ContextProvider for TauriContextProvider {
                 }
             }
             Err(e) => {
-                // 不是 fatal — 例如剪貼簿是圖片時,read_text 會失敗
-                tracing::debug!(?e, "clipboard read_text returned err (non-text content?)");
+                // 非 fatal,但提到 warn — 之前 capabilities 漏 allow-read-text
+                // 時整個 context 一直空白,debug log 看不到根本不知道。
+                tracing::warn!(?e, "clipboard read_text failed (image content / missing permission / Wayland quirk)");
             }
         }
 

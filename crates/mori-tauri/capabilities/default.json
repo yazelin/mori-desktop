@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "clipboard-manager:default",
+    "clipboard-manager:allow-read-text",
     "global-shortcut:default"
   ]
 }

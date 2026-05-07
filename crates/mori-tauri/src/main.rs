@@ -564,21 +564,40 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
 
     // Phase 3A:當下 context(剪貼簿)。LLM 看到後可在使用者用代名詞時引用。
     if let Some(clip) = &ctx.clipboard {
-        // 太長的 clipboard 截斷避免吃 context window;預估 4KB 對 gpt-oss-120b
-        // 也只是 ~1k token,夠用又不會失控
-        const MAX_CLIPBOARD_CHARS: usize = 4000;
-        let preview: String = if clip.chars().count() > MAX_CLIPBOARD_CHARS {
-            let truncated: String = clip.chars().take(MAX_CLIPBOARD_CHARS).collect();
-            format!("{truncated}\n…(剪貼簿太長,已截斷顯示前 {MAX_CLIPBOARD_CHARS} 字)")
+        // 注意:agent multi-turn loop 每一輪都會重送 system prompt,
+        // 且 LLM 把剪貼簿塞進 tool_call args(例如 translate.source_text)後,
+        // tool_result 也是相近大小 — 全部疊起來吃 TPM 很快。
+        // Groq gpt-oss-120b on_demand TPM = 8000,實測 4000 chars 中文會 413。
+        // 1000 chars(~1500 tokens)留出足夠空間給 sys/tools schema/2nd round。
+        const MAX_CLIPBOARD_CHARS: usize = 1000;
+        let total_chars = clip.chars().count();
+        let (preview, truncated_note) = if total_chars > MAX_CLIPBOARD_CHARS {
+            let head: String = clip.chars().take(MAX_CLIPBOARD_CHARS).collect();
+            (
+                head,
+                Some(format!(
+                    "剪貼簿總長 {total_chars} 字,**只顯示前 {MAX_CLIPBOARD_CHARS} 字**(其餘已截斷)。\
+                     使用者要求處理時,**先處理可見的這 {MAX_CLIPBOARD_CHARS} 字**(不要拒做),\
+                     做完再順帶提醒「剩下 N 字沒處理到,要繼續嗎?」。"
+                )),
+            )
         } else {
-            clip.clone()
+            (clip.clone(), None)
         };
         prompt.push_str("\n# 當下剪貼簿內容\n\n");
         prompt.push_str(
-            "(使用者說「這個」/「這段」/「剛複製的」/「這篇文章」時,可能指這份內容。\n\
-             若使用者沒明確提及剪貼簿,**不要主動引用或評論這份內容**;\n\
-             只在需要時當作參考素材使用 — 例如他說「翻譯這個」就翻譯下面的內容。)\n\n",
+            "(這是使用者**剛剛複製的內容**。當使用者說「翻譯」/「摘要」/「潤稿」/\
+             「這個」/「這段」/「剛複製的」/「這篇」/「幫我寫」之類**動作型指令**\
+             但沒給原文時,**幾乎都是指下面這份剪貼簿** — 直接拿去用,不要反問\
+             「請提供原文」。\n\
+             只在**完全跟剪貼簿無關**(例如純粹閒聊、問時間、查記憶)時才忽略它。\n\
+             另外,看不到原文/失敗時也別假裝有處理。)\n\n",
         );
+        if let Some(note) = &truncated_note {
+            prompt.push_str("**注意**:");
+            prompt.push_str(note);
+            prompt.push_str("\n\n");
+        }
         prompt.push_str("```\n");
         prompt.push_str(&preview);
         prompt.push_str("\n```\n");
