@@ -96,20 +96,60 @@ function FloatingMori() {
   // Same events the main window subscribes to — Tauri broadcasts to all
   // webviews, no extra IPC needed.
   useEffect(() => {
-    invoke<Mode>("current_mode").then(setMode).catch(() => {});
-    invoke<Phase>("current_phase").then(setPhase).catch(() => {});
+    console.log("[floating] mounting on window:", getCurrentWindow().label);
+    invoke<Mode>("current_mode")
+      .then((m) => {
+        console.log("[floating] initial mode:", m);
+        setMode(m);
+      })
+      .catch((e) => console.error("[floating] current_mode err", e));
+    invoke<Phase>("current_phase")
+      .then((p) => {
+        console.log("[floating] initial phase:", p);
+        setPhase(p);
+      })
+      .catch((e) => console.error("[floating] current_phase err", e));
 
-    const unlistenMode = listen<Mode>("mode-changed", (e) => setMode(e.payload));
-    const unlistenPhase = listen<Phase>("phase-changed", (e) => setPhase(e.payload));
+    const unlistenMode = listen<Mode>("mode-changed", (e) => {
+      console.log("[floating] mode-changed:", e.payload);
+      setMode(e.payload);
+    });
+    const unlistenPhase = listen<Phase>("phase-changed", (e) => {
+      console.log("[floating] phase-changed:", e.payload);
+      setPhase(e.payload);
+    });
     return () => {
       unlistenMode.then((f) => f());
       unlistenPhase.then((f) => f());
     };
   }, []);
 
-  // Click → toggle main window visibility (the floater doubles as a
-  // "summon / dismiss the full UI" button).
-  const onClick = async () => {
+  // Track visual changes so we can confirm the sprite swap actually fires.
+  useEffect(() => {
+    const v = visualFor(mode, phase);
+    console.log("[floating] visual:", v, "src:", SPRITE_SRC[v]);
+  }, [mode, phase]);
+
+  // Drag: single-click + drag moves the window. We hand control to Tauri's
+  // window.startDragging() on mousedown — the call blocks until the
+  // user releases, after which the next click event is suppressed by the
+  // compositor (so a true "click" never fires after a drag — good).
+  //
+  // We avoid `data-tauri-drag-region`: it's flaky on GNOME Wayland with
+  // transparent decorationless windows (mouse events don't propagate
+  // cleanly through alpha pixels).
+  const onMouseDown = async (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    try {
+      await getCurrentWindow().startDragging();
+    } catch (err) {
+      console.error("startDragging failed", err);
+    }
+  };
+
+  // Double-click → toggle main window visibility. (Single-click conflicts
+  // with drag-detection on borderless windows; double-click is unambiguous.)
+  const onDoubleClick = async () => {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const main = await WebviewWindow.getByLabel("main");
@@ -131,9 +171,9 @@ function FloatingMori() {
   return (
     <div
       className={`mori-stage mori-${visual}`}
-      data-tauri-drag-region
-      onClick={onClick}
-      title={`Mori — ${VISUAL_LABEL[visual]}\nclick 切顯示主視窗,長按拖曳`}
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
+      title={`Mori — ${VISUAL_LABEL[visual]}\n拖曳:移動 / 雙擊:切顯示主視窗`}
     >
       {/* Behind the sprite: a state-coloured aura/halo that pulses or spins. */}
       <div className="mori-aura" />

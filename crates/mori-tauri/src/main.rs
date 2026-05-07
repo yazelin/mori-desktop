@@ -180,6 +180,33 @@ fn set_mode_cmd(app: AppHandle, state: tauri::State<Arc<AppState>>, mode: Mode) 
     state.set_mode(&app, mode);
 }
 
+/// 取消正在進行的錄音 — **不送 Whisper、不進 chat**,直接丟掉音檔回 Idle。
+/// UI 在 Recording 狀態下按 Esc 會打這條。
+#[tauri::command]
+fn cancel_recording(app: AppHandle, state: tauri::State<Arc<AppState>>) {
+    let phase = state.phase.lock().clone();
+    if !matches!(phase, Phase::Recording { .. }) {
+        tracing::info!(?phase, "cancel_recording called outside Recording — ignored");
+        return;
+    }
+    // Stop and discard:取出 recorder、停 stream、把 bytes 丟掉。
+    if let Some(rec) = state.recorder.lock().take() {
+        match rec.stop() {
+            Ok(audio) => {
+                let secs = audio.samples.len() as f32
+                    / (audio.sample_rate as f32 * audio.channels as f32);
+                tracing::info!(
+                    duration_secs = secs,
+                    samples = audio.samples.len(),
+                    "recording cancelled (audio discarded, never sent to Whisper)",
+                );
+            }
+            Err(e) => tracing::warn!(?e, "stop on cancel returned err"),
+        }
+    }
+    state.set_phase(&app, Phase::Idle);
+}
+
 /// 直接送一段文字給 Mori(bypass 麥克風 / Whisper)。
 ///
 /// 使用情境:長文摘要、貼文章、貼程式碼等不適合語音輸入的內容。
@@ -768,6 +795,7 @@ fn main() {
             submit_text,
             current_mode,
             set_mode_cmd,
+            cancel_recording,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
