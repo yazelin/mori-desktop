@@ -100,7 +100,7 @@ UI 在錄音時的橫向音量條會直接讓你看到:
 
 3. 還是不行就直接看 `/tmp/mori-last-recording.wav`(每次錄音都會存),用任何播放器聽看實際捕到什麼。
 
-### 全域熱鍵(Ctrl+Alt+M)沒反應
+### 全域熱鍵(F8)沒反應
 
 Wayland 為了安全把全域 keylog API 擋住了,`tauri-plugin-global-shortcut` 在 Linux Wayland 下支援不完整。當前繞法:**用 UI 上的「手動觸發」按鈕**。Phase 5+ 會接 xdg-desktop-portal 的 GlobalShortcuts API。
 

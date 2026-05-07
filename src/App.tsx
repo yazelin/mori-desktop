@@ -62,7 +62,7 @@ function App() {
           <>
             <div className="hero-dot" />
             <p className="hero-text">待命中</p>
-            <p className="hero-hint">按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd> 開始講話</p>
+            <p className="hero-hint">按 <kbd>F8</kbd> 開始講話</p>
           </>
         )}
         {phase.kind === "recording" && (

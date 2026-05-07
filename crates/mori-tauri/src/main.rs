@@ -12,7 +12,7 @@ use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 
 use recording::Recorder;
 
@@ -293,11 +293,8 @@ fn main() {
             toggle
         ])
         .setup(move |app| {
-            // 註冊全域熱鍵:Ctrl+Alt+M
-            let shortcut = Shortcut::new(
-                Some(Modifiers::CONTROL | Modifiers::ALT),
-                Code::KeyM,
-            );
+            // 全域熱鍵:F8(單鍵,衝突最少;Wayland 上單鍵攔截行為跟 combo 可能不同)
+            let shortcut = Shortcut::new(None, Code::F8);
 
             let handle = app.handle().clone();
             let state_for_handler = state_for_setup.clone();
@@ -312,7 +309,7 @@ fn main() {
                 },
             )?;
 
-            tracing::info!("registered global shortcut: Ctrl+Alt+M");
+            tracing::info!("registered global shortcut: F8");
             Ok(())
         })
         .run(tauri::generate_context!())
