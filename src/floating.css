@@ -16,8 +16,8 @@ html.floating-window,
 body.floating-window {
   margin: 0;
   padding: 0;
-  width: 96px;
-  height: 96px;
+  width: 128px;
+  height: 128px;
   background: transparent !important;
   overflow: hidden;
   user-select: none;
@@ -28,8 +28,8 @@ body.floating-window:active {
   cursor: grabbing;
 }
 body.floating-window #root {
-  width: 96px;
-  height: 96px;
+  width: 128px;
+  height: 128px;
   margin: 0;
   padding: 0;
   display: block;
@@ -50,23 +50,30 @@ body.floating-window #root {
 
 .mori-aura {
   position: absolute;
-  width: 88px;
-  height: 88px;
+  /* Larger than the sprite so the gradient feathers naturally past the
+     character silhouette. Window is 128×128, so a 116×116 aura still
+     leaves 6px breathing room on each side at scale 1, and ~3px even
+     at scale 1.1 (the new max). */
+  width: 116px;
+  height: 116px;
   border-radius: 50%;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 250ms ease;
+  /* CSS blur softens the gradient edge so the halo looks like a glow,
+     not a hard ring. */
+  filter: blur(6px);
+  transition: opacity 350ms ease;
 }
 
 /* ─── sprite(角色 PNG) ─────────────────────────────────────────── */
 
 .mori-sprite {
   position: relative;
-  width: 92px;
-  height: 92px;
+  width: 110px;
+  height: 110px;
   object-fit: contain;
   pointer-events: none; /* drag/click handled by .mori-stage */
-  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.4));
   /* Explicit `none` here so each state-specific rule below is "from
      nothing → something"; without this, switching between two named
      animations sometimes leaves the browser stuck on the previous
@@ -94,60 +101,64 @@ body.floating-window #root {
   animation: mori-doze 6s ease-in-out infinite;
 }
 
-/* RECORDING — 紅色光暈脈動 + 角色微微前傾(放大) */
+/* RECORDING — 暖紅光暈柔脈動,角色微微前傾 */
 .mori-recording .mori-aura {
   opacity: 1;
   background: radial-gradient(
     circle,
-    rgba(220, 90, 90, 0.55) 0%,
-    rgba(220, 90, 90, 0.1) 55%,
+    rgba(230, 140, 140, 0.32) 0%,
+    rgba(230, 140, 140, 0.08) 50%,
     transparent 75%
   );
-  animation: mori-listen-pulse 1.1s ease-out infinite;
+  animation: mori-listen-pulse 1.4s ease-in-out infinite;
 }
 .mori-recording .mori-sprite {
-  animation: mori-listen-bob 1.1s ease-in-out infinite;
+  animation: mori-listen-bob 1.4s ease-in-out infinite;
 }
 
-/* THINKING — 頭頂旋轉光環,角色不動 */
+/* THINKING — 旋轉柔光環,角色慢呼吸 */
 .mori-thinking .mori-aura {
-  opacity: 1;
+  opacity: 0.7;
   border: 2px solid transparent;
-  border-top-color: rgba(170, 210, 170, 0.95);
-  border-right-color: rgba(170, 210, 170, 0.45);
-  animation: mori-think-spin 1.0s linear infinite;
+  border-top-color: rgba(180, 220, 180, 0.55);
+  border-right-color: rgba(180, 220, 180, 0.25);
+  /* 旋轉時 blur 會跟著旋轉 → 反而看起來不柔。把 thinking 的 aura 拿掉 blur,
+     用 border 自帶的 anti-alias 就好 */
+  filter: none;
+  animation: mori-think-spin 1.4s linear infinite;
 }
 .mori-thinking .mori-sprite {
   animation: mori-breathe 4s ease-in-out infinite;
 }
 
-/* DONE — 暖光暈一閃 + 微微 bounce */
+/* DONE — 一次柔暖光暈 + 微 bounce */
 .mori-done .mori-aura {
   opacity: 1;
   background: radial-gradient(
     circle,
-    rgba(190, 230, 190, 0.6) 0%,
-    rgba(190, 230, 190, 0.15) 60%,
+    rgba(200, 240, 200, 0.4) 0%,
+    rgba(200, 240, 200, 0.1) 55%,
     transparent 80%
   );
-  animation: mori-done-glow 1.5s ease-out 1;
+  animation: mori-done-glow 1.6s ease-out 1;
 }
 .mori-done .mori-sprite {
-  animation: mori-done-bounce 0.6s ease 1;
+  animation: mori-done-bounce 0.7s ease 1;
 }
 
-/* ERROR — 紅色色相偏移 + 抖一下 */
+/* ERROR — 角色微紅 + 抖一下,光暈柔淡 */
 .mori-error .mori-sprite {
-  filter: hue-rotate(-30deg) saturate(1.2)
-    drop-shadow(0 3px 6px rgba(140, 0, 0, 0.5));
-  animation: mori-error-shake 0.45s ease 1;
+  filter: hue-rotate(-25deg) saturate(1.15)
+    drop-shadow(0 3px 6px rgba(140, 0, 0, 0.4));
+  animation: mori-error-shake 0.5s ease 1;
 }
 .mori-error .mori-aura {
   opacity: 1;
   background: radial-gradient(
     circle,
-    rgba(220, 80, 80, 0.4) 0%,
-    transparent 65%
+    rgba(230, 130, 130, 0.28) 0%,
+    rgba(230, 130, 130, 0.08) 50%,
+    transparent 75%
   );
 }
 
@@ -167,8 +178,10 @@ body.floating-window #root {
 }
 
 @keyframes mori-listen-pulse {
-  0%   { transform: scale(0.9);  opacity: 0.85; }
-  100% { transform: scale(1.35); opacity: 0; }
+  /* 116px aura at scale 1.05 = 122px → fits in 128px window with 3px
+     breathing on each side. Going harder clips against the window edge. */
+  0%   { transform: scale(0.92); opacity: 0.85; }
+  100% { transform: scale(1.05); opacity: 0; }
 }
 
 @keyframes mori-listen-bob {
@@ -181,9 +194,11 @@ body.floating-window #root {
 }
 
 @keyframes mori-done-glow {
-  0%   { transform: scale(0.7); opacity: 0; }
-  30%  { transform: scale(1.05); opacity: 1; }
-  100% { transform: scale(1.45); opacity: 0; }
+  /* Same containment constraint: max scale 1.05 keeps the 116px aura
+     within the 128px window, no clip on the edge. */
+  0%   { transform: scale(0.85); opacity: 0; }
+  30%  { transform: scale(1.0);  opacity: 1; }
+  100% { transform: scale(1.05); opacity: 0; }
 }
 
 @keyframes mori-done-bounce {

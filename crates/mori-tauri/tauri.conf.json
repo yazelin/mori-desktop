@@ -22,8 +22,8 @@
       {
         "label": "floating",
         "title": "Mori (floating)",
-        "width": 96,
-        "height": 96,
+        "width": 128,
+        "height": 128,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
