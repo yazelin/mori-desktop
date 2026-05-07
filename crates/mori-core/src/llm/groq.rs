@@ -32,6 +32,16 @@ const MAX_ATTEMPTS: usize = 5;
 /// 第 N 次失敗等待秒數(N=1..=MAX_ATTEMPTS-1)— 1, 2, 4, 8, 16
 const BACKOFF_SECS: [u64; 5] = [1, 2, 4, 8, 16];
 
+/// 看 429 / 5xx 之後該幹嘛。
+#[derive(Debug, PartialEq, Eq)]
+enum RetryDecision {
+    /// 等 wait_secs 秒後重試。
+    Retry { wait_secs: u64 },
+    /// 等的時間太長(> MAX_AUTOMATIC_RETRY_SECS),立刻 surface 給使用者。
+    /// `wait_secs` 是 server 告訴我們的真實等待時間,給 UI 顯示用。
+    Surface { wait_secs: u64 },
+}
+
 pub struct GroqProvider {
     api_key: String,
     model: String,
@@ -89,41 +99,105 @@ impl GroqProvider {
 
     /// 從 Groq 429 response body 的 error message 抽「try again in X」秒數。
     ///
-    /// Groq 訊息格式範例:
-    /// "Rate limit reached for model `xxx`. ... Please try again in 4.5s. ..."
-    /// "Please try again in 12.345s."
+    /// Groq 訊息格式至少有兩種:
+    ///   "Please try again in 4.5s."          (TPM,純秒)
+    ///   "Please try again in 12m12.24s."     (TPD,分+秒)
+    ///   "Please try again in 1h30m."         (理論上,沒實測)
     ///
-    /// 抓到 X 後 ceil 取整。
+    /// 全部 case 都要回**正確的總秒數**。沒有單位(舊測試 "12.345" 結尾)
+    /// 時當純秒數,維持向後相容。
     fn parse_retry_after_body(body: &str) -> Option<u64> {
         let lower = body.to_lowercase();
         let i = lower.find("try again in ")?;
         let rest = &body[i + "try again in ".len()..];
-        let mut num = String::new();
+
+        let mut total = 0.0_f64;
+        let mut current = String::new();
+        let mut saw_unit = false;
+
         for ch in rest.chars() {
             if ch.is_ascii_digit() || ch == '.' {
-                num.push(ch);
+                current.push(ch);
+            } else if matches!(ch, 'h' | 'm' | 's') {
+                let n: f64 = current.parse().unwrap_or(0.0);
+                let factor = match ch {
+                    'h' => 3600.0,
+                    'm' => 60.0,
+                    's' => 1.0,
+                    _ => unreachable!(),
+                };
+                total += n * factor;
+                current.clear();
+                saw_unit = true;
+                if ch == 's' {
+                    break; // 's' 是最末單位,後面通常是「.」或空白
+                }
+            } else if ch.is_whitespace() {
+                continue; // 「12m 12s」式留白允許
             } else {
                 break;
             }
         }
-        let secs: f64 = num.parse().ok()?;
-        if !(secs.is_finite() && secs >= 0.0) {
+
+        if !saw_unit {
+            // 沒任何單位 → 當純秒數(向後相容舊解析行為)
+            let n: f64 = current.parse().ok()?;
+            if !(n.is_finite() && n >= 0.0) {
+                return None;
+            }
+            return Some(n.ceil() as u64);
+        }
+
+        if !(total.is_finite() && total >= 0.0) {
             return None;
         }
-        Some(secs.ceil() as u64)
+        Some(total.ceil() as u64)
     }
 
-    /// 計算「該等多少秒」 — 優先順序:body parse > Retry-After header > backoff schedule。
-    /// 算出後加 +1s 緩衝(避免邊界 race),clamp 到 [1, 60]。
-    fn compute_wait_secs(
+    /// 上限:超過這個秒數就**不自動重試**,改成立刻 surface error 給使用者。
+    /// 60s 是體驗門檻 — 等更久不如告訴使用者「等不下去這麼久」並讓他決定
+    /// (例如 TPD 用完要等 12 分鐘,顯然不該卡著等)。
+    const MAX_AUTOMATIC_RETRY_SECS: u64 = 60;
+
+    /// 看 429 / 5xx 該怎辦的決策。
+    fn decide_retry(
         body: &str,
         header_secs: Option<u64>,
         fallback_secs: u64,
-    ) -> u64 {
+    ) -> RetryDecision {
         let base = Self::parse_retry_after_body(body)
             .or(header_secs)
             .unwrap_or(fallback_secs);
-        (base + 1).clamp(1, 60)
+        if base > Self::MAX_AUTOMATIC_RETRY_SECS {
+            RetryDecision::Surface { wait_secs: base }
+        } else {
+            RetryDecision::Retry {
+                wait_secs: (base + 1).clamp(1, Self::MAX_AUTOMATIC_RETRY_SECS),
+            }
+        }
+    }
+
+    /// 從 Groq 錯誤 body 萃取 friendly 提示給 UI 用,比原始 JSON 好讀。
+    fn friendly_rate_limit_hint(body: &str, parsed_wait: Option<u64>) -> String {
+        let lower = body.to_lowercase();
+        let limit = if lower.contains("tokens per day") || lower.contains("(tpd)") {
+            "今日 token 用完(TPD)"
+        } else if lower.contains("tokens per minute") || lower.contains("(tpm)") {
+            "本分鐘 token 用完(TPM)"
+        } else if lower.contains("requests per minute") || lower.contains("(rpm)") {
+            "本分鐘請求次數用完(RPM)"
+        } else {
+            "Groq 限流"
+        };
+        match parsed_wait {
+            Some(s) if s >= 60 => format!(
+                "{limit} — 需等約 {} 分鐘(超過自動重試上限)。\
+                 升級 Dev Tier 或晚點再試。",
+                (s + 59) / 60
+            ),
+            Some(s) => format!("{limit} — 需等 {s}s"),
+            None => limit.to_string(),
+        }
     }
 
     /// 通報並等待。在最後一次 attempt 之後不再呼叫。
@@ -398,8 +472,9 @@ impl LlmProvider for GroqProvider {
                 bail!("groq chat: HTTP {}: {}", status, err_body);
             }
 
-            // 計算等待時間(body 內「try again in X」優先,header 次之,backoff 兜底,加 +1s 緩衝)
-            let wait = Self::compute_wait_secs(
+            // 決策:retry 還是直接 surface。Surface 時 wait_secs 是 server
+            // 告訴我們的真實等待秒數(可能很長,例如 TPD 用完要等 12 分鐘)。
+            let decision = Self::decide_retry(
                 &err_body,
                 header_wait,
                 BACKOFF_SECS[attempt - 1],
@@ -409,7 +484,19 @@ impl LlmProvider for GroqProvider {
             } else {
                 "server_error"
             };
-            self.notify_and_wait("chat", attempt, wait, reason).await;
+            match decision {
+                RetryDecision::Retry { wait_secs } => {
+                    self.notify_and_wait("chat", attempt, wait_secs, reason).await;
+                }
+                RetryDecision::Surface { wait_secs } => {
+                    let parsed = Some(wait_secs);
+                    let hint = Self::friendly_rate_limit_hint(&err_body, parsed);
+                    bail!(
+                        "groq chat: {} (HTTP {}). 原始訊息:{}",
+                        hint, status, err_body
+                    );
+                }
+            }
         }
 
         let wire: ChatResponseWire =
@@ -498,7 +585,7 @@ impl LlmProvider for GroqProvider {
                 bail!("groq transcribe: HTTP {}: {}", status, err_body);
             }
 
-            let wait = Self::compute_wait_secs(
+            let decision = Self::decide_retry(
                 &err_body,
                 header_wait,
                 BACKOFF_SECS[attempt - 1],
@@ -508,7 +595,18 @@ impl LlmProvider for GroqProvider {
             } else {
                 "server_error"
             };
-            self.notify_and_wait("transcribe", attempt, wait, reason).await;
+            match decision {
+                RetryDecision::Retry { wait_secs } => {
+                    self.notify_and_wait("transcribe", attempt, wait_secs, reason).await;
+                }
+                RetryDecision::Surface { wait_secs } => {
+                    let hint = Self::friendly_rate_limit_hint(&err_body, Some(wait_secs));
+                    bail!(
+                        "groq transcribe: {} (HTTP {}). 原始訊息:{}",
+                        hint, status, err_body
+                    );
+                }
+            }
         }
 
         let parsed: TranscriptionResponse =
@@ -540,27 +638,89 @@ mod tests {
     }
 
     #[test]
-    fn compute_wait_prefers_body_over_header() {
-        // body says 4.5s, header says 60 — should pick ceil(4.5)+1 = 6
+    fn parse_body_min_sec_format_tpd() {
+        // 真實 Groq TPD response,以前 parser 只抓到 12 秒,實際上是 12m12s = 732s
+        let body = r#"{"error":{"message":"Rate limit reached ... Please try again in 12m12.24s. ..."}}"#;
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(733));
+    }
+
+    #[test]
+    fn parse_body_minutes_only() {
+        let body = "Please try again in 5m.";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(300));
+    }
+
+    #[test]
+    fn parse_body_hours_minutes() {
+        let body = "Please try again in 1h30m.";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(3600 + 1800));
+    }
+
+    #[test]
+    fn parse_body_with_whitespace_between_units() {
+        let body = "Please try again in 2m 30s.";
+        assert_eq!(GroqProvider::parse_retry_after_body(body), Some(150));
+    }
+
+    #[test]
+    fn decide_prefers_body_over_header_short_wait() {
         let body = "Please try again in 4.5s";
-        assert_eq!(GroqProvider::compute_wait_secs(body, Some(60), 8), 6);
+        assert_eq!(
+            GroqProvider::decide_retry(body, Some(60), 8),
+            RetryDecision::Retry { wait_secs: 6 } // ceil(4.5)+1
+        );
     }
 
     #[test]
-    fn compute_wait_falls_back_to_header() {
+    fn decide_falls_back_to_header() {
         let body = "no rate hint here";
-        assert_eq!(GroqProvider::compute_wait_secs(body, Some(3), 8), 4);
+        assert_eq!(
+            GroqProvider::decide_retry(body, Some(3), 8),
+            RetryDecision::Retry { wait_secs: 4 }
+        );
     }
 
     #[test]
-    fn compute_wait_falls_back_to_backoff() {
+    fn decide_falls_back_to_backoff() {
         let body = "no rate hint here";
-        assert_eq!(GroqProvider::compute_wait_secs(body, None, 8), 9);
+        assert_eq!(
+            GroqProvider::decide_retry(body, None, 8),
+            RetryDecision::Retry { wait_secs: 9 }
+        );
     }
 
     #[test]
-    fn compute_wait_clamps_to_60() {
+    fn decide_surfaces_when_wait_exceeds_max() {
+        // 120s > 60s threshold → Surface,不要傻等
         let body = "Please try again in 120s";
-        assert_eq!(GroqProvider::compute_wait_secs(body, None, 8), 60);
+        assert_eq!(
+            GroqProvider::decide_retry(body, None, 8),
+            RetryDecision::Surface { wait_secs: 120 }
+        );
+    }
+
+    #[test]
+    fn decide_surfaces_on_tpd_minutes_format() {
+        // 真實 TPD case:732s,遠超 60s 上限 → Surface
+        let body = "Please try again in 12m12.24s.";
+        assert_eq!(
+            GroqProvider::decide_retry(body, None, 8),
+            RetryDecision::Surface { wait_secs: 733 }
+        );
+    }
+
+    #[test]
+    fn friendly_hint_recognises_tpd() {
+        let body = "Rate limit reached ... on tokens per day (TPD): Limit 200000 ...";
+        let hint = GroqProvider::friendly_rate_limit_hint(body, Some(733));
+        assert!(hint.contains("TPD"), "expected TPD hint, got: {hint}");
+    }
+
+    #[test]
+    fn friendly_hint_recognises_tpm_short_wait() {
+        let body = "Rate limit reached ... on tokens per minute (TPM): ...";
+        let hint = GroqProvider::friendly_rate_limit_hint(body, Some(5));
+        assert!(hint.contains("TPM"));
+        assert!(hint.contains("5s"));
     }
 }

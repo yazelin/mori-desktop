@@ -1,0 +1,216 @@
+/* ─── Floating Mori widget ─────────────────────────────────────────────
+   The window is 96×96, borderless, transparent. We reset html+body so
+   the sprite sits flush — without this, default <body> margins push the
+   image off-axis a few pixels.
+
+   Sprite contract (so we can swap art without touching the engine):
+   - Single transparent PNG at /floating/mori-<state>.png
+   - Square aspect, character centred with ~10% silhouette padding
+   - Filename stays the same when upgraded to a 3×3 motion sheet:
+     just `cover` it as a background-image with `background-size:
+     300% 300%` + step()-animated background-position. The .mori-sprite
+     class is the only thing that needs touching at that point.
+   ──────────────────────────────────────────────────────────────────── */
+
+html.floating-window,
+body.floating-window {
+  margin: 0;
+  padding: 0;
+  width: 160px;
+  height: 160px;
+  background: transparent !important;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+body.floating-window:active {
+  cursor: grabbing;
+}
+body.floating-window #root {
+  width: 160px;
+  height: 160px;
+  margin: 0;
+  padding: 0;
+  display: block;
+  position: relative;
+}
+
+/* ─── stage(整個 96×96 容器) ───────────────────────────────────── */
+
+.mori-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── aura(背景環 / 光暈) ──────────────────────────────────────── */
+
+.mori-aura {
+  position: absolute;
+  /* Window is 160×160. Aura 130 + blur 8 means the visual halo
+     extends to ~146px diameter at scale 1, leaving ~7px on each
+     side. At max animation scale 1.1 → 143 + blur 8 = ~159px,
+     just inside the window with no clip. */
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  /* CSS blur softens the gradient edge so the halo reads as a glow,
+     not a hard ring. */
+  filter: blur(8px);
+  transition: opacity 350ms ease;
+}
+
+/* ─── sprite(角色 PNG) ─────────────────────────────────────────── */
+
+.mori-sprite {
+  position: relative;
+  width: 124px;
+  height: 124px;
+  object-fit: contain;
+  pointer-events: none; /* drag/click handled by .mori-stage */
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.4));
+  /* Explicit `none` here so each state-specific rule below is "from
+     nothing → something"; without this, switching between two named
+     animations sometimes leaves the browser stuck on the previous
+     keyframe's final transform on transition. */
+  animation: none;
+  transform: scale(1);
+  transition: opacity 300ms ease, filter 300ms ease;
+  transform-origin: 50% 50%;
+  /* Smooth scaling for the small chibi PNGs so animation doesn't shimmer */
+  image-rendering: auto;
+  -webkit-image-rendering: auto;
+}
+
+/* ─── 狀態變化 — 角色本身用 transform / filter,aura 處理光環 ──── */
+
+/* IDLE — 平靜呼吸 */
+.mori-idle .mori-sprite {
+  animation: mori-breathe 5s ease-in-out infinite;
+}
+
+/* SLEEPING — 整體淡化 + 輕微下沉(像睡著) */
+.mori-sleeping .mori-sprite {
+  opacity: 0.7;
+  filter: saturate(0.6) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+  animation: mori-doze 6s ease-in-out infinite;
+}
+
+/* RECORDING — 暖紅光暈柔脈動,角色微微前傾 */
+.mori-recording .mori-aura {
+  opacity: 1;
+  background: radial-gradient(
+    circle,
+    rgba(230, 140, 140, 0.32) 0%,
+    rgba(230, 140, 140, 0.08) 50%,
+    transparent 75%
+  );
+  animation: mori-listen-pulse 1.4s ease-in-out infinite;
+}
+.mori-recording .mori-sprite {
+  animation: mori-listen-bob 1.4s ease-in-out infinite;
+}
+
+/* THINKING — 旋轉柔光環,角色慢呼吸 */
+.mori-thinking .mori-aura {
+  opacity: 0.7;
+  border: 2px solid transparent;
+  border-top-color: rgba(180, 220, 180, 0.55);
+  border-right-color: rgba(180, 220, 180, 0.25);
+  /* 旋轉時 blur 會跟著旋轉 → 反而看起來不柔。把 thinking 的 aura 拿掉 blur,
+     用 border 自帶的 anti-alias 就好 */
+  filter: none;
+  animation: mori-think-spin 1.4s linear infinite;
+}
+.mori-thinking .mori-sprite {
+  animation: mori-breathe 4s ease-in-out infinite;
+}
+
+/* DONE — 一次柔暖光暈 + 微 bounce */
+.mori-done .mori-aura {
+  opacity: 1;
+  background: radial-gradient(
+    circle,
+    rgba(200, 240, 200, 0.4) 0%,
+    rgba(200, 240, 200, 0.1) 55%,
+    transparent 80%
+  );
+  animation: mori-done-glow 1.6s ease-out 1;
+}
+.mori-done .mori-sprite {
+  animation: mori-done-bounce 0.7s ease 1;
+}
+
+/* ERROR — 角色微紅 + 抖一下,光暈柔淡 */
+.mori-error .mori-sprite {
+  filter: hue-rotate(-25deg) saturate(1.15)
+    drop-shadow(0 3px 6px rgba(140, 0, 0, 0.4));
+  animation: mori-error-shake 0.5s ease 1;
+}
+.mori-error .mori-aura {
+  opacity: 1;
+  background: radial-gradient(
+    circle,
+    rgba(230, 130, 130, 0.28) 0%,
+    rgba(230, 130, 130, 0.08) 50%,
+    transparent 75%
+  );
+}
+
+/* ─── keyframes ───────────────────────────────────────────────────── */
+
+/* Sprite-side animations stay tiny so the chibi PNG doesn't shimmer
+   from the resample at small scales. Heavier motion goes on the aura. */
+
+@keyframes mori-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.02); }
+}
+
+@keyframes mori-doze {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(1.5px); }
+}
+
+@keyframes mori-listen-pulse {
+  /* 130px aura at scale 1.1 = 143px + ~8px blur extension = ~159px,
+     comfortably inside the 160px window. */
+  0%   { transform: scale(0.9);  opacity: 0.85; }
+  100% { transform: scale(1.1);  opacity: 0; }
+}
+
+@keyframes mori-listen-bob {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+@keyframes mori-think-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes mori-done-glow {
+  /* 130px aura at scale 1.1 = 143px + blur 8 = ~159px, fits inside
+     the 160px window so the warm glow fades out cleanly past the
+     character without clipping. */
+  0%   { transform: scale(0.8); opacity: 0; }
+  30%  { transform: scale(1.0); opacity: 1; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+
+@keyframes mori-done-bounce {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+
+@keyframes mori-error-shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-2.5px); }
+  40%      { transform: translateX(2.5px); }
+  60%      { transform: translateX(-1.5px); }
+  80%      { transform: translateX(1.5px); }
+}

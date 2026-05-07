@@ -180,6 +180,33 @@ fn set_mode_cmd(app: AppHandle, state: tauri::State<Arc<AppState>>, mode: Mode) 
     state.set_mode(&app, mode);
 }
 
+/// 取消正在進行的錄音 — **不送 Whisper、不進 chat**,直接丟掉音檔回 Idle。
+/// UI 在 Recording 狀態下按 Esc 會打這條。
+#[tauri::command]
+fn cancel_recording(app: AppHandle, state: tauri::State<Arc<AppState>>) {
+    let phase = state.phase.lock().clone();
+    if !matches!(phase, Phase::Recording { .. }) {
+        tracing::info!(?phase, "cancel_recording called outside Recording — ignored");
+        return;
+    }
+    // Stop and discard:取出 recorder、停 stream、把 bytes 丟掉。
+    if let Some(rec) = state.recorder.lock().take() {
+        match rec.stop() {
+            Ok(audio) => {
+                let secs = audio.samples.len() as f32
+                    / (audio.sample_rate as f32 * audio.channels as f32);
+                tracing::info!(
+                    duration_secs = secs,
+                    samples = audio.samples.len(),
+                    "recording cancelled (audio discarded, never sent to Whisper)",
+                );
+            }
+            Err(e) => tracing::warn!(?e, "stop on cancel returned err"),
+        }
+    }
+    state.set_phase(&app, Phase::Idle);
+}
+
 /// 直接送一段文字給 Mori(bypass 麥克風 / Whisper)。
 ///
 /// 使用情境:長文摘要、貼文章、貼程式碼等不適合語音輸入的內容。
@@ -701,6 +728,25 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
 // ─── main ───────────────────────────────────────────────────────────
 
 fn main() {
+    // ── 強制 XWayland(Linux only)──────────────────────────────────
+    // GNOME mutter 在 Wayland 下對 app 自設 alwaysOnTop / position 是「軟
+    // 提示」,別 app focused 時會被蓋。實測 yazelin/AgentPulse 在同一台
+    // GNOME Wayland 機器上**也**會被蓋,但在 X11 session 上穩穩在最上 —
+    // 證實是 display server 的 stacking 語意差別,不是 code 問題。
+    //
+    // 把 GDK 後端固定走 X11(XWayland 相容層)→ 拿回 X11 的硬 alwaysOnTop。
+    // portal 熱鍵走 DBus 不受影響,tray / 麥克風 / 剪貼簿插件也都還能用。
+    //
+    // 設成 *if not set*,讓進階使用者能用 `GDK_BACKEND=wayland mori` 覆蓋
+    // 來測試 Wayland 原生路徑。
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("GDK_BACKEND").is_none() {
+            // SAFETY: main() 進來時還是單執行緒,沒人在讀 env。
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -709,6 +755,11 @@ fn main() {
         .init();
 
     tracing::info!("Mori starting — phase {}", PHASE);
+    #[cfg(target_os = "linux")]
+    tracing::info!(
+        gdk_backend = %std::env::var("GDK_BACKEND").unwrap_or_default(),
+        "GDK backend (forced x11 unless overridden)",
+    );
 
     // 確保 ~/.mori/config.json 存在(第一次跑就會寫一份 stub)
     let config_path = match GroqProvider::bootstrap_mori_config() {
@@ -768,6 +819,7 @@ fn main() {
             submit_text,
             current_mode,
             set_mode_cmd,
+            cancel_recording,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -778,6 +830,11 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // 注意:**不要**在這裡 setup() 直接 call set_always_on_top —
+            // AgentPulse 沒這樣做,他們依賴 conf.json 的 alwaysOnTop hint
+            // 處理初始狀態,只在 tray show handler 才 re-assert。
+            // 我們先試一樣的紀律,看 mutter 認不認帳。
+
             // ── 系統匣(tray)+ 選單 ──
             // toggle_mode 項目的 label 會跟著 Mode 動態切換;事件迴圈裡也
             // listen "mode-changed" 同步更新,以免使用者經 IPC / 語音 skill
@@ -808,10 +865,27 @@ fn main() {
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
+                        // Critical: re-assert floating's always-on-top from
+                        // Rust here. mutter on GNOME Wayland silently
+                        // demotes the floating window's z-order whenever
+                        // the main window is hidden+shown again, but
+                        // accepts a fresh `set_always_on_top(true)` from
+                        // Rust as a legitimate window-manager event (not
+                        // a misbehaving client). Same trick yazelin/AgentPulse
+                        // uses on its tray show/hide handlers.
+                        if let Some(f) = app.get_webview_window("floating") {
+                            let _ = f.set_always_on_top(true);
+                        }
                     }
                     "hide" => {
                         if let Some(w) = app.get_webview_window("main") {
                             let _ = w.hide();
+                        }
+                        // After hiding main, re-elevate floating so it
+                        // doesn't sink behind whatever the user focuses
+                        // next.
+                        if let Some(f) = app.get_webview_window("floating") {
+                            let _ = f.set_always_on_top(true);
                         }
                     }
                     "toggle_mode" => {

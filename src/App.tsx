@@ -106,6 +106,20 @@ function App() {
     return () => clearInterval(id);
   }, [phase]);
 
+  // Esc 取消錄音(只在主視窗 focused 時生效;global cancel 之後可走 portal)。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && phase.kind === "recording") {
+        e.preventDefault();
+        invoke("cancel_recording").catch((err) =>
+          console.error("cancel_recording failed", err),
+        );
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [phase]);
+
   const [textInput, setTextInput] = useState<string>("");
   const [textOpen, setTextOpen] = useState<boolean>(false);
   const [retryStatus, setRetryStatus] = useState<{
@@ -193,7 +207,9 @@ function App() {
             <div className="hero-dot pulse" />
             <p className="hero-text">錄音中… {recElapsed}s</p>
             <LevelMeter level={audioLevel} />
-            <p className="hero-hint">再按一次熱鍵停止並送出</p>
+            <p className="hero-hint">
+              再按一次熱鍵 = 送出 / <kbd>Esc</kbd> = 取消(不送)
+            </p>
           </>
         )}
         {phase.kind === "transcribing" && (
