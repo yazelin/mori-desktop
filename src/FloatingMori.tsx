@@ -130,9 +130,7 @@ function FloatingMori() {
         // configured window on a 3456×2160 sf:2 monitor), which threw
         // the centring math off by ~80 logical pixels.
         const LOGICAL_W = 160;
-        const LOGICAL_H = 160;
         const physW = LOGICAL_W * m.scaleFactor;
-        const physH = LOGICAL_H * m.scaleFactor;
         const x = Math.max(0, Math.round((m.size.width - physW) / 2));
         const y = Math.max(0, Math.round(m.size.height * 0.05));
 
