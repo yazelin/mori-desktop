@@ -173,32 +173,31 @@ async fn dispatch_skill(
 /// 跟 mori-cli 那邊重複(不耦合到 mori-cli 跑去 query mori-tauri 才能列出
 /// help — CLI 不該依賴 server 才能顯示 help)。
 mod describe {
+    // 注意:這些 description 是 CLI args 視角的(給 LLM 看怎麼用 mori CLI),
+    // 跟 Skill::parameters_schema 內部 LLM-facing JSON schema 是不同層 —
+    // 兩邊參數 key 也故意一致(mori-cli 直接 wrap 成同名 JSON 餵 server)。
+
     pub fn translate() -> &'static str {
-        "Translate text from one language to another.\n\n\
-         Args:\n\
-         - source_text (string, required): 要翻譯的原文\n\
-         - target_lang (string, optional, default 'zh-TW'): 目標語言代碼"
+        "Translate text. CLI:\n\
+         `mori skill translate --text \"...\" --target zh-TW|en|ja|...`\n\
+         target 預設 zh-TW。"
     }
 
     pub fn polish() -> &'static str {
-        "Polish / rewrite text in a given tone.\n\n\
-         Args:\n\
-         - source_text (string, required): 要潤飾的原文\n\
-         - tone (string, optional): formal | casual | concise | friendly | neutral"
+        "Polish / rewrite text. CLI:\n\
+         `mori skill polish --text \"...\" --tone formal|casual|concise|detailed|auto`\n\
+         tone 預設 auto(保留原語氣)。"
     }
 
     pub fn summarize() -> &'static str {
-        "Summarize text into a chosen format.\n\n\
-         Args:\n\
-         - source_text (string, required): 要摘要的原文\n\
-         - style (string, optional): bullet | paragraph | tldr"
+        "Summarize text. CLI:\n\
+         `mori skill summarize --text \"...\" --style bullet_points|one_paragraph|tldr`\n\
+         style 預設 bullet_points。"
     }
 
     pub fn compose() -> &'static str {
-        "Draft new text from a brief.\n\n\
-         Args:\n\
-         - kind (string, required): email | message | essay | social_post\n\
-         - prompt (string, required): 要寫什麼的指示\n\
-         - audience (string, optional): 收件對象 / 場合"
+        "Draft new text from a topic. CLI:\n\
+         `mori skill compose --kind email|message|essay|social_post|other --topic \"...\" \
+         [--audience \"...\"] [--length-hint short|medium|long]`"
     }
 }

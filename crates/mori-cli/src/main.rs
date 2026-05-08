@@ -61,8 +61,8 @@ enum SkillCmd {
         /// 要潤飾的原文
         #[arg(short, long)]
         text: String,
-        /// 語氣 — formal | casual | concise | friendly | neutral
-        #[arg(long, default_value = "neutral")]
+        /// 語氣 — formal | casual | concise | detailed | auto
+        #[arg(long, default_value = "auto")]
         tone: String,
     },
 
@@ -71,22 +71,25 @@ enum SkillCmd {
         /// 要摘要的原文
         #[arg(short, long)]
         text: String,
-        /// 風格 — bullet | paragraph | tldr
-        #[arg(long, default_value = "bullet")]
+        /// 風格 — bullet_points | one_paragraph | tldr
+        #[arg(long, default_value = "bullet_points")]
         style: String,
     },
 
-    /// 草擬新文字(email / message / essay / social_post)。
+    /// 草擬新文字(email / message / essay / social_post / other)。
     Compose {
-        /// 種類 — email | message | essay | social_post
+        /// 種類 — email | message | essay | social_post | other
         #[arg(long)]
         kind: String,
-        /// 要寫什麼的指示
+        /// 要寫什麼的主題 / 大綱
         #[arg(short, long)]
-        prompt: String,
+        topic: String,
         /// 收件對象 / 場合(可選)
         #[arg(short, long)]
         audience: Option<String>,
+        /// 長度提示 — short | medium | long(可選,預設 medium)
+        #[arg(long)]
+        length_hint: Option<String>,
     },
 }
 
@@ -108,20 +111,26 @@ fn run() -> Result<()> {
                 json!({ "source_text": text, "target_lang": target }),
             ),
             SkillCmd::Polish { text, tone } => {
-                post_skill("polish", json!({ "source_text": text, "tone": tone }))
+                // PolishSkill 用 `text`(沒 source_ 前綴)。tone enum 也不同於 translate。
+                post_skill("polish", json!({ "text": text, "tone": tone }))
             }
-            SkillCmd::Summarize { text, style } => post_skill(
-                "summarize",
-                json!({ "source_text": text, "style": style }),
-            ),
+            SkillCmd::Summarize { text, style } => {
+                // SummarizeSkill 也用 `text`。style enum 是 bullet_points / one_paragraph / tldr。
+                post_skill("summarize", json!({ "text": text, "style": style }))
+            }
             SkillCmd::Compose {
                 kind,
-                prompt,
+                topic,
                 audience,
+                length_hint,
             } => {
-                let mut body = json!({ "kind": kind, "prompt": prompt });
+                // ComposeSkill 用 `topic` 不是 `prompt`。
+                let mut body = json!({ "kind": kind, "topic": topic });
                 if let Some(a) = audience {
                     body["audience"] = json!(a);
+                }
+                if let Some(l) = length_hint {
+                    body["length_hint"] = json!(l);
                 }
                 post_skill("compose", body)
             }
