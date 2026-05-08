@@ -266,6 +266,28 @@ impl GroqProvider {
                 //         "claude-cli"(本機 claude CLI subprocess,**chat-only**,
                 //                       不能當主 agent provider — 沒 tool calling)
                 "default_provider": "groq",
+                // 5A-3:per-skill provider routing(可選)。沒設這塊就全部
+                // 用 default_provider — 跟 5A-2 之前一樣。
+                //
+                // 用法:agent 指主 agent loop 走的 provider(必須能 tool calling
+                // — 不要用 claude-cli);skills.<name> 指該 skill 內部 chat
+                // 走的 provider,沒列到的 skill 退回 agent。
+                //
+                // 範例:agent 走 Groq tool dispatch、translate/polish/summarize
+                // 走 user 自己的 Claude Pro/Max quota,compose 走本機 ollama:
+                //   "routing": {
+                //     "agent": "groq",
+                //     "skills": {
+                //       "translate": "claude-cli",
+                //       "polish":    "claude-cli",
+                //       "summarize": "claude-cli",
+                //       "compose":   "ollama"
+                //     }
+                //   }
+                "routing": {
+                    "agent": null,
+                    "skills": {}
+                },
                 "providers": {
                     "groq": {
                         "api_key": "REPLACE_ME_WITH_YOUR_GROQ_API_KEY",
