@@ -662,27 +662,31 @@ async fn run_chat_pipeline(
     }
 }
 
-/// Phase 5E:語音輸入 pipeline。
+/// Phase 5E:語音輸入 pipeline(三段式)。
 ///
-/// 接 STT 出來的 transcript,跑「輕度 cleanup」LLM call(加標點 / 修
-/// Whisper 幻聽 / 保留原詞),最後透過 PasteController 模擬 Ctrl+V
-/// 把結果貼到使用者游標位置 — 完全跳過 agent loop,適合單純 dictation。
+/// 跳過 agent loop,把 STT 結果(可選 LLM 加標點)+ 程式化格式收尾後,
+/// 透過 PasteController 模擬 Ctrl+V 直接貼到使用者游標位置。
 ///
-/// Cleanup provider 走 `routing.skill_provider("voice_input_cleanup")`,
-/// 沒設 routing override 就 fall through 到 skill_fallback(等於 agent
-/// 或 claude-cli)。User 可以在 config 加:
+/// 三級 `cleanup_level`(讀 `~/.mori/config.json` 的 `voice_input.cleanup_level`):
+/// - **smart**(預設):LLM 加標點 + segmentation,**然後** `programmatic_cleanup`
+///   收一致性。LLM 做 irreducible 智能,程式守格式跨 provider。
+/// - **minimal**:跳 LLM,只跑 `programmatic_cleanup`。最快(~ms 級)但
+///   Whisper 不出標點所以會是「一長串字」,適合自己後加標點型 user。
+/// - **none**:Whisper 出來的字直接 paste,跳所有 cleanup。
 ///
+/// LLM cleanup provider 走 `routing.skill_provider("voice_input_cleanup")`,
+/// 預設 fall through 到 skill_fallback。可在 config 釘到 ollama / groq / claude:
 /// ```json
-/// "routing": { "skills": { "voice_input_cleanup": "ollama" } }
+/// "routing": { "skills": { "voice_input_cleanup": "groq" } }
 /// ```
-///
-/// 把 cleanup 釘在本機 ollama 之類降延遲。
 async fn run_voice_input_pipeline(
     app: AppHandle,
     state: Arc<AppState>,
     transcript: String,
     routing: Arc<mori_core::llm::Routing>,
 ) {
+    use mori_core::voice_cleanup::{programmatic_cleanup, read_cleanup_level, CleanupLevel};
+
     state.set_phase(
         &app,
         Phase::Responding {
@@ -690,69 +694,96 @@ async fn run_voice_input_pipeline(
         },
     );
 
-    let cleanup_result: anyhow::Result<String> = async {
-        if transcript.trim().is_empty() {
-            return Ok(String::new());
-        }
-        let provider = routing.skill_provider("voice_input_cleanup");
-        tracing::info!(
-            provider = %provider.name(),
-            chars_in = transcript.chars().count(),
-            "voice-input cleanup"
+    if transcript.trim().is_empty() {
+        state.set_phase(
+            &app,
+            Phase::Error {
+                message: "(空白音訊,沒東西可貼)".into(),
+            },
         );
-        let messages = vec![
-            ChatMessage::system(
-                "你是語音輸入清理員。你只做這件事:\n\
-                 - 給 ASR(Whisper)的原始輸出加上**正確的中英文標點**(,。?!:、— 全形;\
-                   英文用半形)\n\
-                 - 修正明顯的 Whisper 幻聽(例如 \"thank you for watching\"、\"請訂閱\"、\
-                   \"請按讚\")\n\
-                 - 修正常見同音字錯字(只在你**極有把握**時改,寧可少改不要多改)\n\
-                 - 保留使用者原本的**用詞、語氣、口語助詞**(例如「啊」「呢」「嗯」)\n\
-                 - 適當補上換行 / 段落,讓段落自然斷開\n\
-                 \n\
-                 你**絕對不能**:\n\
-                 - 改寫句子讓它更「漂亮」、更「正式」\n\
-                 - 縮短或擴寫內容\n\
-                 - 加上你的解釋(像「以下是清理過的版本」)\n\
-                 - 用引號包住整段輸出\n\
-                 - 翻譯到其他語言\n\
-                 \n\
-                 **只輸出清理後的純文字**。不要前言、不要後記、不要 Markdown 標題。",
-            ),
-            ChatMessage::user(transcript.clone()),
-        ];
-        let resp = provider
-            .chat(messages, vec![])
-            .await
-            .context("voice-input cleanup chat")?;
-        let cleaned = resp.content.unwrap_or_default().trim().to_string();
-        Ok(cleaned)
+        return;
     }
-    .await;
 
-    let cleaned_text = match cleanup_result {
-        Ok(t) if !t.is_empty() => t,
-        Ok(_) => {
-            state.set_phase(
-                &app,
-                Phase::Error {
-                    message: "(空白音訊,沒東西可貼)".into(),
-                },
-            );
-            return;
+    let level = read_cleanup_level();
+    tracing::info!(
+        cleanup_level = level.as_str(),
+        chars_in = transcript.chars().count(),
+        "voice-input pipeline start",
+    );
+
+    // Step 1:LLM cleanup(只在 smart 等級才走)
+    let after_llm: anyhow::Result<String> = match level {
+        CleanupLevel::None | CleanupLevel::Minimal => Ok(transcript.clone()),
+        CleanupLevel::Smart => {
+            let provider = routing.skill_provider("voice_input_cleanup");
+            tracing::info!(provider = %provider.name(), "voice-input LLM cleanup");
+            let messages = vec![
+                ChatMessage::system(
+                    "你是語音輸入清理員。你只做這件事:\n\
+                     - 給 ASR(Whisper)的原始輸出加上**標點 + 段落切分**\n\
+                     - 修正明顯的 Whisper 幻聽(例如 \"thank you for watching\"、\
+                       \"請訂閱\"、\"請按讚\")\n\
+                     - 修正同音字錯字(僅在**極有把握**時,寧可少改不多改)\n\
+                     - 保留使用者原本的**用詞、語氣、口語助詞**(「啊」「呢」「嗯」)\n\
+                     - 中文一律繁體;標點:中文鄰近用全形(,。?!:、),英文用半形\n\
+                     \n\
+                     **絕對禁止**:\n\
+                     - 改寫句子(例:「我覺得這方案 OK」→「我認為此方案可行」← 不可)\n\
+                     - 縮短 / 擴寫\n\
+                     - 加任何解釋、前言、後記\n\
+                     - 用引號包整段\n\
+                     - 翻譯到其他語言\n\
+                     \n\
+                     **只輸出清理後的純文字**。",
+                ),
+                ChatMessage::user(transcript.clone()),
+            ];
+            provider
+                .chat(messages, vec![])
+                .await
+                .context("voice-input LLM cleanup chat")
+                .map(|r| r.content.unwrap_or_default().trim().to_string())
         }
+    };
+
+    let after_llm = match after_llm {
+        Ok(t) => t,
         Err(e) => {
-            tracing::error!(?e, "voice-input cleanup failed");
+            tracing::error!(?e, "voice-input LLM cleanup failed");
             state.set_phase(
                 &app,
                 Phase::Error {
-                    message: format!("輸入清理失敗:{e:#}"),
+                    message: format!("LLM 清理失敗:{e:#}"),
                 },
             );
             return;
         }
     };
+
+    // Step 2:程式化 post-process(none 等級跳過)
+    let cleaned_text = match level {
+        CleanupLevel::None => after_llm,
+        CleanupLevel::Minimal | CleanupLevel::Smart => {
+            let after = programmatic_cleanup(&after_llm);
+            tracing::debug!(
+                level = level.as_str(),
+                chars_in = after_llm.chars().count(),
+                chars_out = after.chars().count(),
+                "voice-input programmatic cleanup",
+            );
+            after
+        }
+    };
+
+    if cleaned_text.is_empty() {
+        state.set_phase(
+            &app,
+            Phase::Error {
+                message: "(cleanup 後輸出為空,沒東西可貼)".into(),
+            },
+        );
+        return;
+    }
 
     // 把結果送到游標位置 — Linux 用既有的 LinuxPasteController(arboard 寫
     // primary clipboard + ydotool 模擬 Ctrl+V)。其他平台未來補。

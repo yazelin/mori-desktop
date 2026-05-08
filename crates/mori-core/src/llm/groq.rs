@@ -273,6 +273,13 @@ impl GroqProvider {
                 // 接受值:"groq"(預設,Whisper API)
                 //         "whisper-local"(whisper.cpp,需事先下載 ggml model)
                 "default_transcribe_provider": "groq",
+                // 5E:語音輸入模式(VoiceInput mode)的清理層級。
+                // - "smart"(預設):LLM 加標點 + 程式 post-process(簡→繁、半→全形)
+                // - "minimal":只跑程式 post-process,不過 LLM(快但無標點)
+                // - "none":raw Whisper 直貼
+                "voice_input": {
+                    "cleanup_level": "smart"
+                },
                 // 5A-3:per-skill provider routing(可選)。沒設這塊就全部
                 // 用 default_provider — 跟 5A-2 之前一樣。
                 //
