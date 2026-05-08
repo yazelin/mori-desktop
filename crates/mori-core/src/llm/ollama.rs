@@ -50,9 +50,12 @@ impl OllamaProvider {
     pub const DEFAULT_MODEL: &'static str = "qwen3:8b";
 
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
-        // 較寬鬆 timeout — 本機 LLM 第一次 load model 可能要 10-30s,後續才秒回。
+        // 寬鬆 timeout — 第一次請求要 cold-load 模型到 RAM,5-8GB 模型在
+        // Intel CPU(沒 GPU 加速)上可能 60s+;qwen3 又預設啟 thinking
+        // mode,prefill 大 system prompt(我們現在 ~3-4K tokens)再搭一輪
+        // tool calling 動輒分鐘級。300s 是上限不是常態,熱起來後通常 5-15s。
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(300))
             .build()
             .expect("reqwest client");
         let base_url = base_url.into();
@@ -63,6 +66,45 @@ impl OllamaProvider {
             base_url,
             model: model.into(),
         }
+    }
+
+    /// 啟動時呼叫一次的 warm-up。走 Ollama 原生 `/api/generate` + 空 prompt
+    /// 讓 server 只 load model 不跑推理 — 比經 OpenAI-compat 發 1-token chat
+    /// 健壯太多:
+    /// - 不會被 qwen3 thinking mode 燒 CPU 燒到 timeout(實測 8b 模型 thinking
+    ///   mode 處理一個 "ok" 也可以跑 2 分鐘以上)
+    /// - 設 `keep_alive: "30m"` 把模型保活延長到 30 分鐘,user 中午吃飯回來
+    ///   也不必再等冷啟動(預設只 5 分鐘)
+    /// - 取消 `stream` 拿單一 JSON 回應,簡單判斷成敗
+    ///
+    /// 等到 server 回應(2xx)才 return Ok,讓呼叫端能在「真的載完」
+    /// 時通知 UI。失敗(daemon 沒跑、model 沒下載、port 不對、HTTP
+    /// 非 2xx)回 Err — 呼叫端決定是無聲忽略還是發 UI 事件。
+    pub async fn warm_up(base_url: &str, model: &str) -> Result<()> {
+        let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+        let body = serde_json::json!({
+            "model": model,
+            "prompt": "",
+            "stream": false,
+            "keep_alive": "30m",
+        });
+        let client = Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+            .context("ollama warm-up: build client")?;
+        let resp = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("ollama warm-up: send (daemon not running?)")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("ollama warm-up: HTTP {}: {}", status, body);
+        }
+        tracing::info!(model, "ollama warm-up complete (model resident in RAM, keep_alive=30m)");
+        Ok(())
     }
 }
 

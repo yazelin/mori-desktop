@@ -23,6 +23,21 @@ type Phase =
 
 type Mode = "active" | "background";
 
+type BuildInfo = {
+  sha: string;
+  dirty: boolean;
+  build_time: string;
+  phase: string;
+  version: string;
+};
+
+type WarmupState = "loading" | "ready" | "failed";
+type ChatProviderInfo = {
+  name: string;
+  model: string;
+  warmup: WarmupState | null;
+};
+
 function App() {
   const [coreVersion, setCoreVersion] = useState<string>("");
   const [phaseLabel, setPhaseLabel] = useState<string>("");
@@ -32,6 +47,11 @@ function App() {
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [convLength, setConvLength] = useState<number>(0);
   const [mode, setMode] = useState<Mode>("active");
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
+  const [chatProvider, setChatProvider] = useState<ChatProviderInfo | null>(null);
+  const [warmup, setWarmup] = useState<WarmupState | null>(null);
+  const [warmupStartedAt, setWarmupStartedAt] = useState<number | null>(null);
+  const [warmupElapsed, setWarmupElapsed] = useState<number>(0);
 
   const refreshConvLength = () => {
     invoke<number>("conversation_length")
@@ -45,6 +65,19 @@ function App() {
     invoke<boolean>("has_groq_key").then(setHasKey).catch(() => setHasKey(false));
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
     invoke<Mode>("current_mode").then(setMode).catch(() => {});
+    invoke<BuildInfo>("build_info").then(setBuildInfo).catch(() => setBuildInfo(null));
+    invoke<ChatProviderInfo>("chat_provider_info")
+      .then((info) => {
+        setChatProvider(info);
+        // 後到 race:warm-up 可能在 React mount 前就完成,event 已經 emit 過。
+        // 直接從 IPC 拿到的 snapshot 補一次,後續再靠 event 收 transition。
+        if (info.warmup) {
+          setWarmup(info.warmup);
+          // mount 時就在 loading → 開始計時(approximate;不知道實際 start)
+          if (info.warmup === "loading") setWarmupStartedAt(Date.now());
+        }
+      })
+      .catch(() => setChatProvider(null));
     refreshConvLength();
 
     const unlistenPhase = listen<Phase>("phase-changed", (event) => {
@@ -89,12 +122,24 @@ function App() {
     const unlistenMode = listen<Mode>("mode-changed", (event) => {
       setMode(event.payload);
     });
+    // Phase 5A-1 hot-fix:啟動時若 default_provider=ollama,Tauri 會跑 warm-up
+    // 並 emit 這個事件,UI 顯示「載入中 → 就緒/失敗」讓 user 看到 warm-up 真的有在動
+    const unlistenWarmup = listen<WarmupState>("ollama-warmup", (event) => {
+      setWarmup(event.payload);
+      // 進 loading 時開始計時;結束時(ready/failed)凍結 elapsed 但保留顯示
+      if (event.payload === "loading") {
+        setWarmupStartedAt(Date.now());
+      } else {
+        setWarmupStartedAt(null);
+      }
+    });
     return () => {
       unlistenPhase.then((f) => f());
       unlistenLevel.then((f) => f());
       unlistenRetry.then((f) => f());
       unlistenContext.then((f) => f());
       unlistenMode.then((f) => f());
+      unlistenWarmup.then((f) => f());
     };
   }, []);
 
@@ -108,6 +153,18 @@ function App() {
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, [phase]);
+
+  // Warm-up elapsed timer — user 看得到 loading 已經幾秒,判斷是真在動還是 stuck
+  useEffect(() => {
+    if (warmupStartedAt === null) {
+      setWarmupElapsed(0);
+      return;
+    }
+    const tick = () => setWarmupElapsed(Math.floor((Date.now() - warmupStartedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [warmupStartedAt]);
 
   // Esc 取消錄音(只在主視窗 focused 時生效;global cancel 之後可走 portal)。
   useEffect(() => {
@@ -360,15 +417,71 @@ function App() {
           <span className="value">{phaseLabel || "..."}</span>
         </div>
         <div className="status-row">
+          <span className="label">build</span>
+          <span
+            className="value"
+            title={
+              buildInfo
+                ? `built ${buildInfo.build_time}${buildInfo.dirty ? " · 含未提交變更" : ""}`
+                : undefined
+            }
+          >
+            {buildInfo
+              ? `${buildInfo.sha}${buildInfo.dirty ? "*" : ""} · ${buildInfo.build_time}`
+              : "..."}
+          </span>
+        </div>
+        <div className="status-row">
           <span className="label">mode</span>
           <span className={`value ${mode === "background" ? "warn" : "ok"}`}>
             {mode === "background" ? "💤 休眠" : "🟢 清醒"}
           </span>
         </div>
         <div className="status-row">
-          <span className="label">groq</span>
-          <span className={`value ${hasKey ? "ok" : "warn"}`}>
-            {hasKey === null ? "..." : hasKey ? "ready" : "no key"}
+          <span className="label">chat</span>
+          <span
+            className={`value ${
+              chatProvider?.name === "groq"
+                ? hasKey
+                  ? "ok"
+                  : "warn"
+                : warmup === "ready"
+                ? "ok"
+                : warmup === "failed"
+                ? "warn"
+                : ""
+            }`}
+            title={
+              chatProvider?.name === "groq"
+                ? hasKey
+                  ? "Groq API key 已就緒"
+                  : "沒設 GROQ_API_KEY"
+                : warmup === "ready"
+                ? "Ollama 模型已載入,首次 chat 應該秒回"
+                : warmup === "loading"
+                ? "Ollama 正在把模型載進 RAM,完成後才不會 cold-start timeout"
+                : warmup === "failed"
+                ? "Ollama warm-up 失敗 — daemon 沒跑?model 沒下載?"
+                : undefined
+            }
+          >
+            {chatProvider
+              ? `${chatProvider.name} · ${chatProvider.model}${
+                  chatProvider.name === "ollama"
+                    ? warmup === "loading"
+                      ? ` · 🔄 載入中 ${warmupElapsed}s`
+                      : warmup === "ready"
+                      ? " · ✅ 就緒"
+                      : warmup === "failed"
+                      ? " · ⚠️ 失敗"
+                      : ""
+                    : hasKey === null
+                    ? ""
+                    : hasKey
+                    ? " · ready"
+                    : " · no key"
+                }`
+              : "..."}
           </span>
         </div>
         <div className="status-row">

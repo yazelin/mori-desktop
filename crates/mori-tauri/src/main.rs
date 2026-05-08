@@ -86,6 +86,11 @@ pub struct AppState {
     /// Phase 對應「使用者的這一輪對話進行到哪」,Mode 是「Mori 整體的工作狀態」,
     /// 兩者正交。Phase 變回 Idle 不會動 Mode。
     pub mode: Mutex<Mode>,
+    /// Ollama warm-up 狀態(僅當 default_provider=ollama 時有值):
+    /// "loading" | "ready" | "failed",其他 provider 為 None。
+    /// 存在 state 是因為 warm-up 可能在 React 還沒掛上 listener 前就完成,
+    /// 用 IPC 把當下狀態回給前端就不會錯過 transition。
+    pub ollama_warmup: Mutex<Option<&'static str>>,
 }
 
 impl AppState {
@@ -140,6 +145,38 @@ fn mori_version() -> String {
 #[tauri::command]
 fn mori_phase() -> String {
     PHASE.to_string()
+}
+
+/// build SHA / dirty / 時間 / phase / version。值由 build.rs 在 compile
+/// time 經 cargo:rustc-env 注入,所以重 build 才會更新。前端用這個秀
+/// 在 status panel 上,user 一眼就能分辨「我跑的是哪個 build」。
+#[tauri::command]
+fn build_info() -> serde_json::Value {
+    serde_json::json!({
+        "sha": env!("MORI_GIT_SHA"),
+        "dirty": !env!("MORI_GIT_DIRTY").is_empty(),
+        "build_time": env!("MORI_BUILD_TIME"),
+        "phase": PHASE,
+        "version": VERSION,
+    })
+}
+
+/// 目前生效的 chat provider + model + Ollama warm-up 狀態。讀
+/// ~/.mori/config.json,跟 build_chat_provider() 走同一條 fallback。
+/// 前端拿來秀 status row,user 不用 grep config 就知道是 groq 還是 ollama。
+///
+/// `warmup` 從 AppState 取目前快照(loading/ready/failed/null),
+/// 解決 React listener 來不及訂閱就錯過 emit 的 race。後續 transition
+/// 仍走 `ollama-warmup` event。
+#[tauri::command]
+fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
+    let snap = mori_core::llm::active_chat_provider_snapshot();
+    let warmup = *state.ollama_warmup.lock();
+    serde_json::json!({
+        "name": snap.name,
+        "model": snap.model,
+        "warmup": warmup,
+    })
 }
 
 #[tauri::command]
@@ -871,6 +908,7 @@ fn main() {
         memory,
         conversation: Mutex::new(Vec::new()),
         mode: Mutex::new(Mode::Active),
+        ollama_warmup: Mutex::new(None),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -896,6 +934,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mori_version,
             mori_phase,
+            build_info,
+            chat_provider_info,
             current_phase,
             has_groq_key,
             toggle,
@@ -1008,6 +1048,46 @@ fn main() {
                 };
                 if let Err(e) = toggle_mode_for_handler.set_text(label) {
                     tracing::warn!(?e, "tray toggle_mode set_text failed");
+                }
+            });
+
+            // ── Ollama warm-up(僅當 default_provider=ollama)─────
+            // qwen3:8b 5.2GB 在 Intel CPU 沒 GPU 加速首次載入可能要分鐘級。
+            // 啟動就背景發一個 1-token chat 觸發 model load,使用者第一次按
+            // 熱鍵時模型已熱。Groq 路徑直接 no-op。
+            //
+            // 兩個地方記狀態:
+            // 1. AppState.ollama_warmup — 給後到的 React 訂閱者用
+            //   (model 已熱時 warm-up 1 秒就完成,React 還沒 listen 到時
+            //    event 已經 emit 過了)。
+            // 2. emit `ollama-warmup` event — 給已經訂閱的訂閱者收 transition。
+            let app_for_warmup = app.handle().clone();
+            let state_for_warmup = state_for_setup.clone();
+            tauri::async_runtime::spawn(async move {
+                let snap = mori_core::llm::active_chat_provider_snapshot();
+                if snap.name != "ollama" {
+                    return;
+                }
+                let Some(base_url) = snap.base_url else {
+                    return;
+                };
+                *state_for_warmup.ollama_warmup.lock() = Some("loading");
+                let _ = app_for_warmup.emit("ollama-warmup", "loading");
+                match mori_core::llm::ollama::OllamaProvider::warm_up(
+                    &base_url,
+                    &snap.model,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        *state_for_warmup.ollama_warmup.lock() = Some("ready");
+                        let _ = app_for_warmup.emit("ollama-warmup", "ready");
+                    }
+                    Err(e) => {
+                        tracing::warn!(?e, "ollama warm-up failed");
+                        *state_for_warmup.ollama_warmup.lock() = Some("failed");
+                        let _ = app_for_warmup.emit("ollama-warmup", "failed");
+                    }
                 }
             });
 
