@@ -39,10 +39,15 @@ impl Skill for TranslateSkill {
                 "source_text": { "type": "string", "description": "要翻譯的原文" },
                 "target_lang": {
                     "type": "string",
-                    "description": "目標語言。常用:zh-TW(繁中)、zh-CN(簡中)、en、ja、ko"
+                    "description": "目標語言。常用:zh-TW(繁中)、zh-CN(簡中)、en、ja、ko。\
+                                   **省略時預設 zh-TW**(我們主要使用者是繁中講者)。"
                 }
             },
-            "required": ["source_text", "target_lang"]
+            // `target_lang` 故意不放 required — Groq 的 tool validator 會
+            // 擋掉「LLM 漏帶 required」的整個 call(HTTP 400 tool_use_failed),
+            // 即使使用者講「翻譯成中文」LLM 仍偶爾會省略此欄。允許省略 +
+            // 預設 zh-TW 比 hard fail 友善很多。
+            "required": ["source_text"]
         })
     }
 
@@ -53,12 +58,13 @@ impl Skill for TranslateSkill {
             .ok_or_else(|| anyhow!("missing source_text"))?
             .trim()
             .to_string();
+        // target_lang 缺省 → 預設 zh-TW(對齊 schema description 的承諾)
         let target_lang = args
             .get("target_lang")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("missing target_lang"))?
-            .trim()
-            .to_string();
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "zh-TW".to_string());
 
         let messages = vec![
             ChatMessage::system(
