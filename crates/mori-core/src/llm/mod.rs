@@ -152,17 +152,24 @@ pub struct Routing {
     /// 不支援會 warn 但不 fail。
     pub agent: Arc<dyn LlmProvider>,
     /// Skill 名字 → provider 的 override map。Map 沒列到的 skill 用
-    /// `agent` 當 fallback。
+    /// `skill_fallback`(通常 = agent,但 agent 是 agent-only 型(如
+    /// bash-cli-agent)時會自動切到 claude-cli 防遞迴)。
     pub skills: HashMap<String, Arc<dyn LlmProvider>>,
+    /// 當 skill 沒在 `skills` map 內時用這個。預設 = `agent`,但 agent 是
+    /// `bash-cli-agent` 那種「自己會 spawn AI CLI 當 agent」型 provider 時
+    /// 會自動 fallback 到 chat-only(claude-cli)避免:
+    ///   bash-cli-agent → spawn claude → claude call mori skill polish →
+    ///   PolishSkill.exec → bash-cli-agent → spawn claude → … (無限遞迴)
+    pub skill_fallback: Arc<dyn LlmProvider>,
 }
 
 impl Routing {
-    /// 取 skill `name` 該用的 provider — 先看 override 再 fallback 到 agent。
+    /// 取 skill `name` 該用的 provider — 先看 override,再用 skill_fallback。
     pub fn skill_provider(&self, name: &str) -> Arc<dyn LlmProvider> {
         self.skills
             .get(name)
             .cloned()
-            .unwrap_or_else(|| self.agent.clone())
+            .unwrap_or_else(|| self.skill_fallback.clone())
     }
 
     /// 從 `~/.mori/config.json` 的 `routing` block 蓋出整套 routing。
@@ -221,15 +228,49 @@ impl Routing {
             })
             .collect();
 
+        // Anti-recursion guard:bash-cli-agent 是「我就是 spawn CLI 當 agent」
+        // 型,當 skill provider 會無限遞迴 spawn claude → polish skill →
+        // 又 spawn claude →…。自動 fallback 到 claude-cli(chat-only,不會自己
+        // 再 spawn 別的)。User 仍可在 routing.skills 顯式覆寫。
+        let skill_fallback = if agent.name() == "bash-cli-agent" {
+            let fallback_name = "claude-cli";
+            let p = match built.get(fallback_name) {
+                Some(p) => p.clone(),
+                None => {
+                    let p = build_named_provider(fallback_name, None)
+                        .with_context(|| {
+                            "auto-build claude-cli as skill fallback for bash-cli-agent agent"
+                        })?;
+                    built.insert(fallback_name.into(), p.clone());
+                    p
+                }
+            };
+            tracing::warn!(
+                agent = %agent_name,
+                fallback = %fallback_name,
+                "agent is bash-cli-agent — auto-fallback skills to '{}' to avoid recursion. \
+                 Set routing.skills.<name> in config to override per skill.",
+                fallback_name,
+            );
+            p
+        } else {
+            agent.clone()
+        };
+
         tracing::info!(
             agent = %agent_name,
             agent_model = %agent.model(),
             agent_tools = agent.supports_tool_calling(),
+            skill_fallback = %skill_fallback.name(),
             skill_overrides = ?cfg.skills,
             "routing built"
         );
 
-        Ok(Self { agent, skills })
+        Ok(Self {
+            agent,
+            skills,
+            skill_fallback,
+        })
     }
 }
 
