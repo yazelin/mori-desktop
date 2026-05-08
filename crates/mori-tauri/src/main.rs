@@ -512,7 +512,20 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                     return;
                 }
             };
-        run_chat_pipeline(app, state, transcript, routing).await;
+
+        // Stage 3:依當下 Mode 決定 transcript 後的 flow。
+        // - Active     → 走 agent loop(LLM 決定 dispatch 哪個 skill / 直接回應)
+        // - VoiceInput → 跳過 agent,LLM 輕度 cleanup → 直接 paste 到游標位置
+        // - Background → 不該到這(start_recording 已 refuse),但守一道
+        let current_mode = *state.mode.lock();
+        match current_mode {
+            Mode::VoiceInput => {
+                run_voice_input_pipeline(app, state, transcript, routing).await;
+            }
+            Mode::Active | Mode::Background => {
+                run_chat_pipeline(app, state, transcript, routing).await;
+            }
+        }
     });
 }
 
@@ -647,6 +660,135 @@ async fn run_chat_pipeline(
             );
         }
     }
+}
+
+/// Phase 5E:語音輸入 pipeline。
+///
+/// 接 STT 出來的 transcript,跑「輕度 cleanup」LLM call(加標點 / 修
+/// Whisper 幻聽 / 保留原詞),最後透過 PasteController 模擬 Ctrl+V
+/// 把結果貼到使用者游標位置 — 完全跳過 agent loop,適合單純 dictation。
+///
+/// Cleanup provider 走 `routing.skill_provider("voice_input_cleanup")`,
+/// 沒設 routing override 就 fall through 到 skill_fallback(等於 agent
+/// 或 claude-cli)。User 可以在 config 加:
+///
+/// ```json
+/// "routing": { "skills": { "voice_input_cleanup": "ollama" } }
+/// ```
+///
+/// 把 cleanup 釘在本機 ollama 之類降延遲。
+async fn run_voice_input_pipeline(
+    app: AppHandle,
+    state: Arc<AppState>,
+    transcript: String,
+    routing: Arc<mori_core::llm::Routing>,
+) {
+    state.set_phase(
+        &app,
+        Phase::Responding {
+            transcript: transcript.clone(),
+        },
+    );
+
+    let cleanup_result: anyhow::Result<String> = async {
+        if transcript.trim().is_empty() {
+            return Ok(String::new());
+        }
+        let provider = routing.skill_provider("voice_input_cleanup");
+        tracing::info!(
+            provider = %provider.name(),
+            chars_in = transcript.chars().count(),
+            "voice-input cleanup"
+        );
+        let messages = vec![
+            ChatMessage::system(
+                "你是語音輸入清理員。你只做這件事:\n\
+                 - 給 ASR(Whisper)的原始輸出加上**正確的中英文標點**(,。?!:、— 全形;\
+                   英文用半形)\n\
+                 - 修正明顯的 Whisper 幻聽(例如 \"thank you for watching\"、\"請訂閱\"、\
+                   \"請按讚\")\n\
+                 - 修正常見同音字錯字(只在你**極有把握**時改,寧可少改不要多改)\n\
+                 - 保留使用者原本的**用詞、語氣、口語助詞**(例如「啊」「呢」「嗯」)\n\
+                 - 適當補上換行 / 段落,讓段落自然斷開\n\
+                 \n\
+                 你**絕對不能**:\n\
+                 - 改寫句子讓它更「漂亮」、更「正式」\n\
+                 - 縮短或擴寫內容\n\
+                 - 加上你的解釋(像「以下是清理過的版本」)\n\
+                 - 用引號包住整段輸出\n\
+                 - 翻譯到其他語言\n\
+                 \n\
+                 **只輸出清理後的純文字**。不要前言、不要後記、不要 Markdown 標題。",
+            ),
+            ChatMessage::user(transcript.clone()),
+        ];
+        let resp = provider
+            .chat(messages, vec![])
+            .await
+            .context("voice-input cleanup chat")?;
+        let cleaned = resp.content.unwrap_or_default().trim().to_string();
+        Ok(cleaned)
+    }
+    .await;
+
+    let cleaned_text = match cleanup_result {
+        Ok(t) if !t.is_empty() => t,
+        Ok(_) => {
+            state.set_phase(
+                &app,
+                Phase::Error {
+                    message: "(空白音訊,沒東西可貼)".into(),
+                },
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!(?e, "voice-input cleanup failed");
+            state.set_phase(
+                &app,
+                Phase::Error {
+                    message: format!("輸入清理失敗:{e:#}"),
+                },
+            );
+            return;
+        }
+    };
+
+    // 把結果送到游標位置 — Linux 用既有的 LinuxPasteController(arboard 寫
+    // primary clipboard + ydotool 模擬 Ctrl+V)。其他平台未來補。
+    #[cfg(target_os = "linux")]
+    let paste_result = {
+        let controller = crate::selection::LinuxPasteController::new(app.clone());
+        controller.paste_back(&cleaned_text).await
+    };
+    #[cfg(not(target_os = "linux"))]
+    let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(
+        "voice-input paste-back not implemented on this platform yet"
+    ));
+
+    if let Err(e) = paste_result {
+        tracing::error!(?e, "voice-input paste-back failed");
+        state.set_phase(
+            &app,
+            Phase::Error {
+                message: format!("貼到游標位置失敗:{e:#}"),
+            },
+        );
+        return;
+    }
+
+    tracing::info!(
+        chars_out = cleaned_text.chars().count(),
+        "voice-input pipeline complete"
+    );
+    state.set_phase(
+        &app,
+        Phase::Done {
+            transcript,
+            response: cleaned_text,
+            skill_calls: vec![],
+        },
+    );
 }
 
 /// 建構 Mori 的 system prompt — 角色 + 時間 + 記憶索引 + 當下 context + tool 規則。
@@ -860,6 +1002,25 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     prompt
 }
 
+/// 把 tray 三個 mode 選單上的 label 重畫,在當下 mode 那條前面打 ✓。
+fn refresh_mode_menu_labels(
+    active: &MenuItem<tauri::Wry>,
+    voice_input: &MenuItem<tauri::Wry>,
+    background: &MenuItem<tauri::Wry>,
+    current: Mode,
+) {
+    let mark = |is_current: bool, base: &str| -> String {
+        if is_current {
+            format!("✓ {base}")
+        } else {
+            format!("   {base}")
+        }
+    };
+    let _ = active.set_text(mark(current == Mode::Active, "對話模式"));
+    let _ = voice_input.set_text(mark(current == Mode::VoiceInput, "語音輸入模式"));
+    let _ = background.set_text(mark(current == Mode::Background, "休眠(關麥克風)"));
+}
+
 // ─── main ───────────────────────────────────────────────────────────
 
 fn main() {
@@ -979,24 +1140,41 @@ fn main() {
             // 我們先試一樣的紀律,看 mutter 認不認帳。
 
             // ── 系統匣(tray)+ 選單 ──
-            // toggle_mode 項目的 label 會跟著 Mode 動態切換;事件迴圈裡也
-            // listen "mode-changed" 同步更新,以免使用者經 IPC / 語音 skill
-            // 切了 mode 後 tray label 跟實際狀態對不上。
-            let toggle_mode_item =
-                MenuItem::with_id(app, "toggle_mode", "休眠(關麥克風)", true, None::<&str>)?;
+            // 5E 起 mode 從 2 態(Active / Background)變 3 態(+ VoiceInput),
+            // 改用 3 個獨立 menu item 顯示三種模式,目前的那個會在 label
+            // 前面打 ✓。改 mode 後 mode-changed listener 會 refresh labels。
+            let mode_active_item =
+                MenuItem::with_id(app, "mode_active", "對話模式", true, None::<&str>)?;
+            let mode_voice_input_item =
+                MenuItem::with_id(app, "mode_voice_input", "語音輸入模式", true, None::<&str>)?;
+            let mode_background_item =
+                MenuItem::with_id(app, "mode_background", "休眠(關麥克風)", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[
                     &MenuItem::with_id(app, "show", "顯示 Mori", true, None::<&str>)?,
                     &MenuItem::with_id(app, "hide", "隱藏", true, None::<&str>)?,
-                    &toggle_mode_item,
+                    &mode_active_item,
+                    &mode_voice_input_item,
+                    &mode_background_item,
                     &MenuItem::with_id(app, "reset", "重新開始對話", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "離開", true, None::<&str>)?,
                 ],
             )?;
 
             let state_for_tray = state_for_setup.clone();
-            let toggle_mode_for_handler = toggle_mode_item.clone();
+            let mode_items_for_handler = (
+                mode_active_item.clone(),
+                mode_voice_input_item.clone(),
+                mode_background_item.clone(),
+            );
+            // 啟動時就把 ✓ 標到目前 mode 上
+            refresh_mode_menu_labels(
+                &mode_items_for_handler.0,
+                &mode_items_for_handler.1,
+                &mode_items_for_handler.2,
+                *state_for_tray.mode.lock(),
+            );
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Mori")
@@ -1031,16 +1209,9 @@ fn main() {
                             let _ = f.set_always_on_top(true);
                         }
                     }
-                    "toggle_mode" => {
-                        let cur = *state_for_tray.mode.lock();
-                        let next = match cur {
-                            Mode::Active => Mode::Background,
-                            Mode::Background => Mode::Active,
-                        };
-                        state_for_tray.set_mode(app, next);
-                        // label 由「mode-changed」listener 統一更新,不要在這
-                        // 裡重複寫,避免兩條路徑不一致。
-                    }
+                    "mode_active" => state_for_tray.set_mode(app, Mode::Active),
+                    "mode_voice_input" => state_for_tray.set_mode(app, Mode::VoiceInput),
+                    "mode_background" => state_for_tray.set_mode(app, Mode::Background),
                     "reset" => {
                         let mut conv = state_for_tray.conversation.lock();
                         let n = conv.len();
@@ -1055,18 +1226,19 @@ fn main() {
                 })
                 .build(app)?;
 
-            // tray label 跟著 Mode 同步:任何來源(tray 點擊、IPC、skill)改了
-            // Mode 都會 emit "mode-changed",這裡統一接 → 改 label。
+            // tray labels 跟著 Mode 同步:任何來源(tray 點擊、IPC、skill)改了
+            // Mode 都 emit "mode-changed",這裡統一接 → 把 ✓ 標到正確的 menu item。
+            let (active_item, voice_input_item, background_item) = mode_items_for_handler;
             app.listen("mode-changed", move |event| {
                 let payload = event.payload();
-                let label = if payload.contains("\"background\"") {
-                    "醒醒(開麥克風)"
+                let target = if payload.contains("\"voice_input\"") {
+                    Mode::VoiceInput
+                } else if payload.contains("\"background\"") {
+                    Mode::Background
                 } else {
-                    "休眠(關麥克風)"
+                    Mode::Active
                 };
-                if let Err(e) = toggle_mode_for_handler.set_text(label) {
-                    tracing::warn!(?e, "tray toggle_mode set_text failed");
-                }
+                refresh_mode_menu_labels(&active_item, &voice_input_item, &background_item, target);
             });
 
             // ── Skill HTTP server(5D)─────────────────────────────

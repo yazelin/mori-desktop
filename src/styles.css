@@ -332,6 +332,29 @@ kbd {
   cursor: not-allowed;
 }
 
+/* 5E:三態 mode 選擇器 — 對話 / 輸入 / 休眠 */
+.mode-radio {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mode-radio .toggle-btn {
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  padding: 6px 10px;
+}
+.mode-radio .toggle-btn:last-child {
+  border-right: none;
+}
+.mode-radio .toggle-btn.mode-on {
+  background: var(--border);
+  color: var(--fg);
+  font-weight: 600;
+}
+
 /* Text input area — 貼長文 / 打字 */
 .text-input {
   margin-top: 12px;

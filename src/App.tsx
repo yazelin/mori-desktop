@@ -21,7 +21,7 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
-type Mode = "active" | "background";
+type Mode = "active" | "voice_input" | "background";
 
 type BuildInfo = {
   sha: string;
@@ -225,8 +225,7 @@ function App() {
       .catch((e) => console.error("submit_text failed", e));
   };
 
-  const onToggleMode = () => {
-    const next: Mode = mode === "active" ? "background" : "active";
+  const requestMode = (next: Mode) => {
     invoke("set_mode_cmd", { mode: next }).catch((e) =>
       console.error("set_mode_cmd failed", e),
     );
@@ -258,11 +257,17 @@ function App() {
           <>
             <div className="hero-dot" />
             <p className="hero-text">
-              {mode === "background" ? "休眠中(麥克風已關)" : "待命中"}
+              {mode === "background"
+                ? "休眠中(麥克風已關)"
+                : mode === "voice_input"
+                ? "語音輸入模式 — 對著游標講"
+                : "待命中"}
             </p>
             <p className="hero-hint">
               {mode === "background" ? (
                 <>按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 叫醒並開始講話</>
+              ) : mode === "voice_input" ? (
+                <>把游標放輸入框 → 按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> → 講話 → 結果直接貼進去</>
               ) : (
                 <>按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 開始講話</>
               )}
@@ -361,17 +366,38 @@ function App() {
         >
           {textOpen ? "收起文字輸入" : "貼文字"}
         </button>
-        <button
-          onClick={onToggleMode}
-          className="toggle-btn"
-          title={
-            mode === "active"
-              ? "讓 Mori 休眠 — 麥克風完全關閉,背景排程仍跑"
-              : "叫醒 Mori — 重新允許麥克風"
-          }
-        >
-          {mode === "active" ? "休眠(關麥克風)" : "醒醒(開麥克風)"}
-        </button>
+        <div className="mode-radio" role="radiogroup" aria-label="運作模式">
+          <button
+            onClick={() => requestMode("active")}
+            className={`toggle-btn ${mode === "active" ? "mode-on" : ""}`}
+            disabled={pipelineBusy}
+            role="radio"
+            aria-checked={mode === "active"}
+            title="對話模式 — 熱鍵 → 語音 → Mori 想 → 回應 / 叫 skill"
+          >
+            {mode === "active" ? "✓ " : ""}對話
+          </button>
+          <button
+            onClick={() => requestMode("voice_input")}
+            className={`toggle-btn ${mode === "voice_input" ? "mode-on" : ""}`}
+            disabled={pipelineBusy}
+            role="radio"
+            aria-checked={mode === "voice_input"}
+            title="語音輸入 — 熱鍵 → 語音 → 輕度清理(標點 / 修幻聽) → 直接貼到游標位置(跳過 agent loop)"
+          >
+            {mode === "voice_input" ? "✓ " : ""}輸入
+          </button>
+          <button
+            onClick={() => requestMode("background")}
+            className={`toggle-btn ${mode === "background" ? "mode-on" : ""}`}
+            disabled={pipelineBusy}
+            role="radio"
+            aria-checked={mode === "background"}
+            title="休眠 — 麥克風完全關,UI 隱藏(privacy)"
+          >
+            {mode === "background" ? "✓ " : ""}休眠
+          </button>
+        </div>
         <button
           onClick={onReset}
           className="toggle-btn reset-btn"
@@ -440,7 +466,11 @@ function App() {
         <div className="status-row">
           <span className="label">mode</span>
           <span className={`value ${mode === "background" ? "warn" : "ok"}`}>
-            {mode === "background" ? "💤 休眠" : "🟢 清醒"}
+            {mode === "background"
+              ? "💤 休眠"
+              : mode === "voice_input"
+              ? "⌨️ 輸入模式"
+              : "🟢 對話模式"}
           </span>
         </div>
         <div className="status-row">
