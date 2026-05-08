@@ -1011,6 +1011,14 @@ fn main() {
                 }
             });
 
+            // ── Ollama warm-up(僅當 default_provider=ollama)─────
+            // qwen3:8b 5.2GB 在 Intel CPU 沒 GPU 加速首次載入可能要分鐘級。
+            // 啟動就背景發一個 1-token chat 觸發 model load,使用者第一次按
+            // 熱鍵時模型已熱。Groq 路徑直接 no-op。
+            tauri::async_runtime::spawn(async {
+                mori_core::llm::warm_up_default_provider().await;
+            });
+
             // ── 全域熱鍵:Ctrl+Alt+Space ───────────────────────────
             // Linux 走 xdg-desktop-portal GlobalShortcuts(Wayland 唯一可行
             // 的路);macOS / Windows 走 tauri-plugin-global-shortcut。

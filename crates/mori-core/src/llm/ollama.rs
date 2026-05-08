@@ -50,9 +50,12 @@ impl OllamaProvider {
     pub const DEFAULT_MODEL: &'static str = "qwen3:8b";
 
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
-        // 較寬鬆 timeout — 本機 LLM 第一次 load model 可能要 10-30s,後續才秒回。
+        // 寬鬆 timeout — 第一次請求要 cold-load 模型到 RAM,5-8GB 模型在
+        // Intel CPU(沒 GPU 加速)上可能 60s+;qwen3 又預設啟 thinking
+        // mode,prefill 大 system prompt(我們現在 ~3-4K tokens)再搭一輪
+        // tool calling 動輒分鐘級。300s 是上限不是常態,熱起來後通常 5-15s。
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(300))
             .build()
             .expect("reqwest client");
         let base_url = base_url.into();
@@ -62,6 +65,36 @@ impl OllamaProvider {
             client,
             base_url,
             model: model.into(),
+        }
+    }
+
+    /// 啟動時呼叫一次的 best-effort warm-up。發一個 1-token 的 chat
+    /// 讓 Ollama 把 model 載進 RAM,使用者第一次按熱鍵時就不用等
+    /// cold start。失敗(daemon 沒跑、model 沒下載、port 不對)默默
+    /// 吞掉 — 真正用到時 user 會看到正常 error path。
+    pub async fn warm_up(base_url: &str, model: &str) {
+        let url = format!(
+            "{}/v1/chat/completions",
+            base_url.trim_end_matches('/')
+        );
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": "ok" }],
+            "max_tokens": 1,
+        });
+        let client = match Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        match client.post(&url).json(&body).send().await {
+            Ok(_) => tracing::info!(
+                model,
+                "ollama warm-up dispatched (model is loading into RAM)"
+            ),
+            Err(e) => tracing::debug!(?e, "ollama warm-up failed (daemon down? non-fatal)"),
         }
     }
 }

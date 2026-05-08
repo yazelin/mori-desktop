@@ -85,6 +85,33 @@ pub fn build_chat_provider(
     }
 }
 
+/// 啟動時的 best-effort warm-up:若使用者把 `default_provider` 設成 ollama,
+/// 背景發一個 1-token 的 chat 把模型載進 RAM,使用者第一次按熱鍵時就不用
+/// 等 cold start(qwen3:8b 5.2GB 在 Intel CPU 沒 GPU 加速可能要分鐘級)。
+///
+/// Provider 是 groq 時直接 no-op(網路 LLM 沒 cold start)。
+pub async fn warm_up_default_provider() {
+    let default = mori_config_path()
+        .as_deref()
+        .and_then(|p| groq::read_json_pointer(p, "/default_provider"))
+        .unwrap_or_else(|| "groq".to_string());
+
+    if default != "ollama" {
+        return;
+    }
+
+    let base_url = mori_config_path()
+        .as_deref()
+        .and_then(|p| groq::read_json_pointer(p, "/providers/ollama/base_url"))
+        .unwrap_or_else(|| ollama::OllamaProvider::DEFAULT_BASE_URL.to_string());
+    let model = mori_config_path()
+        .as_deref()
+        .and_then(|p| groq::read_json_pointer(p, "/providers/ollama/model"))
+        .unwrap_or_else(|| ollama::OllamaProvider::DEFAULT_MODEL.to_string());
+
+    ollama::OllamaProvider::warm_up(&base_url, &model).await;
+}
+
 fn mori_config_path() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
