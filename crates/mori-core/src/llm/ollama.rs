@@ -68,11 +68,13 @@ impl OllamaProvider {
         }
     }
 
-    /// 啟動時呼叫一次的 best-effort warm-up。發一個 1-token 的 chat
-    /// 讓 Ollama 把 model 載進 RAM,使用者第一次按熱鍵時就不用等
-    /// cold start。失敗(daemon 沒跑、model 沒下載、port 不對)默默
-    /// 吞掉 — 真正用到時 user 會看到正常 error path。
-    pub async fn warm_up(base_url: &str, model: &str) {
+    /// 啟動時呼叫一次的 warm-up。發一個 1-token 的 chat 讓 Ollama 把
+    /// model 載進 RAM,使用者第一次按熱鍵時就不用等 cold start。
+    ///
+    /// 等到 server 回應(2xx)才 return Ok,讓呼叫端能在「真的載完」
+    /// 時通知 UI。失敗(daemon 沒跑、model 沒下載、port 不對、HTTP
+    /// 非 2xx)回 Err — 呼叫端決定是無聲忽略還是發 UI 事件。
+    pub async fn warm_up(base_url: &str, model: &str) -> Result<()> {
         let url = format!(
             "{}/v1/chat/completions",
             base_url.trim_end_matches('/')
@@ -82,20 +84,23 @@ impl OllamaProvider {
             "messages": [{ "role": "user", "content": "ok" }],
             "max_tokens": 1,
         });
-        let client = match Client::builder()
+        let client = Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
-        {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        match client.post(&url).json(&body).send().await {
-            Ok(_) => tracing::info!(
-                model,
-                "ollama warm-up dispatched (model is loading into RAM)"
-            ),
-            Err(e) => tracing::debug!(?e, "ollama warm-up failed (daemon down? non-fatal)"),
+            .context("ollama warm-up: build client")?;
+        let resp = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("ollama warm-up: send (daemon not running?)")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("ollama warm-up: HTTP {}: {}", status, body);
         }
+        tracing::info!(model, "ollama warm-up complete (model resident in RAM)");
+        Ok(())
     }
 }
 

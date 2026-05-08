@@ -142,6 +142,32 @@ fn mori_phase() -> String {
     PHASE.to_string()
 }
 
+/// build SHA / dirty / 時間 / phase / version。值由 build.rs 在 compile
+/// time 經 cargo:rustc-env 注入,所以重 build 才會更新。前端用這個秀
+/// 在 status panel 上,user 一眼就能分辨「我跑的是哪個 build」。
+#[tauri::command]
+fn build_info() -> serde_json::Value {
+    serde_json::json!({
+        "sha": env!("MORI_GIT_SHA"),
+        "dirty": !env!("MORI_GIT_DIRTY").is_empty(),
+        "build_time": env!("MORI_BUILD_TIME"),
+        "phase": PHASE,
+        "version": VERSION,
+    })
+}
+
+/// 目前生效的 chat provider + model。讀 ~/.mori/config.json,跟
+/// build_chat_provider() 走同一條 fallback 路徑。前端拿來秀 status
+/// row,user 不用 grep config 就知道是 groq 還是 ollama。
+#[tauri::command]
+fn chat_provider_info() -> serde_json::Value {
+    let snap = mori_core::llm::active_chat_provider_snapshot();
+    serde_json::json!({
+        "name": snap.name,
+        "model": snap.model,
+    })
+}
+
 #[tauri::command]
 fn current_phase(state: tauri::State<Arc<AppState>>) -> Phase {
     state.phase.lock().clone()
@@ -896,6 +922,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mori_version,
             mori_phase,
+            build_info,
+            chat_provider_info,
             current_phase,
             has_groq_key,
             toggle,
@@ -1015,8 +1043,33 @@ fn main() {
             // qwen3:8b 5.2GB 在 Intel CPU 沒 GPU 加速首次載入可能要分鐘級。
             // 啟動就背景發一個 1-token chat 觸發 model load,使用者第一次按
             // 熱鍵時模型已熱。Groq 路徑直接 no-op。
-            tauri::async_runtime::spawn(async {
-                mori_core::llm::warm_up_default_provider().await;
+            //
+            // 同時 emit `ollama-warmup` 事件讓 UI 顯示 loading → ready/failed,
+            // user 看得到 warm-up 真的在動,不是只記到 log。
+            let app_for_warmup = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let snap = mori_core::llm::active_chat_provider_snapshot();
+                if snap.name != "ollama" {
+                    return;
+                }
+                let Some(base_url) = snap.base_url else {
+                    return;
+                };
+                let _ = app_for_warmup.emit("ollama-warmup", "loading");
+                match mori_core::llm::ollama::OllamaProvider::warm_up(
+                    &base_url,
+                    &snap.model,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        let _ = app_for_warmup.emit("ollama-warmup", "ready");
+                    }
+                    Err(e) => {
+                        tracing::warn!(?e, "ollama warm-up failed");
+                        let _ = app_for_warmup.emit("ollama-warmup", "failed");
+                    }
+                }
             });
 
             // ── 全域熱鍵:Ctrl+Alt+Space ───────────────────────────
