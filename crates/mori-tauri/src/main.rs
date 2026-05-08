@@ -86,6 +86,11 @@ pub struct AppState {
     /// Phase 對應「使用者的這一輪對話進行到哪」,Mode 是「Mori 整體的工作狀態」,
     /// 兩者正交。Phase 變回 Idle 不會動 Mode。
     pub mode: Mutex<Mode>,
+    /// Ollama warm-up 狀態(僅當 default_provider=ollama 時有值):
+    /// "loading" | "ready" | "failed",其他 provider 為 None。
+    /// 存在 state 是因為 warm-up 可能在 React 還沒掛上 listener 前就完成,
+    /// 用 IPC 把當下狀態回給前端就不會錯過 transition。
+    pub ollama_warmup: Mutex<Option<&'static str>>,
 }
 
 impl AppState {
@@ -156,15 +161,21 @@ fn build_info() -> serde_json::Value {
     })
 }
 
-/// 目前生效的 chat provider + model。讀 ~/.mori/config.json,跟
-/// build_chat_provider() 走同一條 fallback 路徑。前端拿來秀 status
-/// row,user 不用 grep config 就知道是 groq 還是 ollama。
+/// 目前生效的 chat provider + model + Ollama warm-up 狀態。讀
+/// ~/.mori/config.json,跟 build_chat_provider() 走同一條 fallback。
+/// 前端拿來秀 status row,user 不用 grep config 就知道是 groq 還是 ollama。
+///
+/// `warmup` 從 AppState 取目前快照(loading/ready/failed/null),
+/// 解決 React listener 來不及訂閱就錯過 emit 的 race。後續 transition
+/// 仍走 `ollama-warmup` event。
 #[tauri::command]
-fn chat_provider_info() -> serde_json::Value {
+fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
     let snap = mori_core::llm::active_chat_provider_snapshot();
+    let warmup = *state.ollama_warmup.lock();
     serde_json::json!({
         "name": snap.name,
         "model": snap.model,
+        "warmup": warmup,
     })
 }
 
@@ -897,6 +908,7 @@ fn main() {
         memory,
         conversation: Mutex::new(Vec::new()),
         mode: Mutex::new(Mode::Active),
+        ollama_warmup: Mutex::new(None),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -1044,9 +1056,13 @@ fn main() {
             // 啟動就背景發一個 1-token chat 觸發 model load,使用者第一次按
             // 熱鍵時模型已熱。Groq 路徑直接 no-op。
             //
-            // 同時 emit `ollama-warmup` 事件讓 UI 顯示 loading → ready/failed,
-            // user 看得到 warm-up 真的在動,不是只記到 log。
+            // 兩個地方記狀態:
+            // 1. AppState.ollama_warmup — 給後到的 React 訂閱者用
+            //   (model 已熱時 warm-up 1 秒就完成,React 還沒 listen 到時
+            //    event 已經 emit 過了)。
+            // 2. emit `ollama-warmup` event — 給已經訂閱的訂閱者收 transition。
             let app_for_warmup = app.handle().clone();
+            let state_for_warmup = state_for_setup.clone();
             tauri::async_runtime::spawn(async move {
                 let snap = mori_core::llm::active_chat_provider_snapshot();
                 if snap.name != "ollama" {
@@ -1055,6 +1071,7 @@ fn main() {
                 let Some(base_url) = snap.base_url else {
                     return;
                 };
+                *state_for_warmup.ollama_warmup.lock() = Some("loading");
                 let _ = app_for_warmup.emit("ollama-warmup", "loading");
                 match mori_core::llm::ollama::OllamaProvider::warm_up(
                     &base_url,
@@ -1063,10 +1080,12 @@ fn main() {
                 .await
                 {
                     Ok(_) => {
+                        *state_for_warmup.ollama_warmup.lock() = Some("ready");
                         let _ = app_for_warmup.emit("ollama-warmup", "ready");
                     }
                     Err(e) => {
                         tracing::warn!(?e, "ollama warm-up failed");
+                        *state_for_warmup.ollama_warmup.lock() = Some("failed");
                         let _ = app_for_warmup.emit("ollama-warmup", "failed");
                     }
                 }

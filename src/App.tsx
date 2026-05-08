@@ -31,8 +31,12 @@ type BuildInfo = {
   version: string;
 };
 
-type ChatProviderInfo = { name: string; model: string };
 type WarmupState = "loading" | "ready" | "failed";
+type ChatProviderInfo = {
+  name: string;
+  model: string;
+  warmup: WarmupState | null;
+};
 
 function App() {
   const [coreVersion, setCoreVersion] = useState<string>("");
@@ -61,7 +65,12 @@ function App() {
     invoke<Mode>("current_mode").then(setMode).catch(() => {});
     invoke<BuildInfo>("build_info").then(setBuildInfo).catch(() => setBuildInfo(null));
     invoke<ChatProviderInfo>("chat_provider_info")
-      .then(setChatProvider)
+      .then((info) => {
+        setChatProvider(info);
+        // 後到 race:warm-up 可能在 React mount 前就完成,event 已經 emit 過。
+        // 直接從 IPC 拿到的 snapshot 補一次,後續再靠 event 收 transition。
+        if (info.warmup) setWarmup(info.warmup);
+      })
       .catch(() => setChatProvider(null));
     refreshConvLength();
 
