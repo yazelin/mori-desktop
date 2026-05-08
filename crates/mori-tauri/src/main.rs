@@ -717,17 +717,26 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     if let Some(sel) = &ctx.selected_text {
         prompt.push_str("\n# 當下反白文字\n\n");
         prompt.push_str(
-            "**這段是使用者在別的 app 裡剛反白的文字。**\n\n\
-             **硬規則**(如果這段存在,以下優先於剪貼簿規則):\n\
-             - 動詞型指令(翻譯 / 潤稿 / 摘要 / 改寫 / 英文化 / 改短 / \
-             改成 X 語氣 ...)的 source_text **一律**用這段反白,**不要**\
-             用剪貼簿(就算剪貼簿看起來內容更多更相關,也不要)。剪貼簿只\
-             是「沒反白時的 fallback」。\n\
-             - 處理完成後**必須**呼叫 `paste_selection_back(text=結果)`,\
-             把結果貼回使用者反白的位置。**不調用 = 任務沒完成**,\
-             使用者會以為 Mori 什麼都沒做。\n\
-             - 例外:使用者只是**問問題**(「這在講什麼」「為什麼這樣寫」\
-             「what does this mean」)→ 在 chat 回答即可,不要 paste。\n\n",
+            "**使用者在別的 app 裡剛反白了下面這段文字。**\n\n\
+             ## 嚴格時序(這段存在時的流程,不可繞過)\n\n\
+             **動詞型指令**(翻譯 / 潤稿 / 摘要 / 改寫 / 英文化 / 改短 / \
+             改成 X 語氣 / ...)→ 走這個**兩輪固定流程**:\n\n\
+             1. **Round 0**:呼叫 translate / polish / summarize / compose,\
+             `source_text` **一律**填這段反白(**不要**用對話歷史、**不要**\
+             用剪貼簿、**不要**用 Mori 上輪的回答 — 即使它們看起來更相關)。\n\
+             2. **Round 1**:看到 step 1 的結果後,**立刻**呼叫 \
+             `paste_selection_back(text=step1 的結果)`,**完整把結果原樣傳入**。\n\
+             3. 結束 turn,用一句話回覆使用者「已貼回」就好。\n\n\
+             **禁止**:\n\
+             - **禁止**對同一段文字連續呼叫兩次 action skill(polish 完不要再 polish,\
+             translate 完不要再 translate)。step 1 的結果就是最終答案,直接 paste-back。\n\
+             - **禁止**漏掉 step 2(paste_selection_back)。漏 = 整件事 = 沒做。\
+             使用者語音說「潤一下」期待看到反白被取代,沒貼回他完全感覺不到 Mori 動了什麼。\n\
+             - **禁止**把 source_text 改用對話歷史或 Mori 上輪的回應。哪怕你覺得歷史比較相關,\
+             也只用反白。\n\n\
+             **問句型指令**(「這在講什麼」、「為什麼這樣寫」、「what does this mean」\
+             — 沒有改寫意圖,只是問)→ 直接在 chat 回答,**不**呼叫 paste_selection_back,\
+             **不**動使用者編輯區。\n\n",
         );
         prompt.push_str("```\n");
         prompt.push_str(sel);
