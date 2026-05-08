@@ -33,12 +33,18 @@ parking_lot = "0.12"
 # Async stream utilities — needed to consume ashpd's GlobalShortcuts signal stream.
 futures-util = "0.3"
 
-# Linux-only: xdg-desktop-portal client. Wayland blocks the X11-style
-# global-shortcut path that tauri-plugin-global-shortcut uses, so we go
-# through `org.freedesktop.portal.GlobalShortcuts` instead. ashpd is the
-# canonical Rust wrapper.
+# Linux-only deps:
+# - ashpd: xdg-desktop-portal client for the global-shortcut hotkey
+#   (Wayland blocks the X11-style keyboard grab tauri-plugin uses).
+# - arboard: read X11 PRIMARY selection directly. We were shelling out
+#   to `wl-paste --primary`, which on GNOME Wayland triggers an
+#   "unknown wl-clipboard wants clipboard access" portal prompt every
+#   single round — flow killer. arboard goes through XWayland's X11
+#   selection API (we force GDK_BACKEND=x11), no portal involvement,
+#   no prompt.
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+arboard = "3"
 
 [features]
 default = ["custom-protocol"]

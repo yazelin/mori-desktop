@@ -157,6 +157,9 @@ mod translate;
 // Phase 4B-2: 模式控制(Active / Background)
 mod set_mode;
 
+// Phase 4C: 反白 → 講話 → 結果貼回
+mod paste_selection;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -169,6 +172,7 @@ pub use summarize::SummarizeSkill;
 pub use translate::TranslateSkill;
 
 pub use set_mode::SetModeSkill;
+pub use paste_selection::PasteSelectionBackSkill;
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 

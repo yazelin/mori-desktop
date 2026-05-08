@@ -41,8 +41,9 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B 完成(2026-05-07)** — Mori 終於在 Wayland 上**真的可以當管家用**:
-全域熱鍵通了、UI 不偷焦點、剪貼簿自動抓、休眠 / 醒醒兩態。
+**Phase 1 + 2 + 3A + 4B + 4C 完成(2026-05-08)** — Mori 在 Wayland 上**真的可以當管家用**:
+全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、休眠 / 醒醒兩態,
+而且**反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)。
 
 按 `Ctrl+Alt+Space`(任何 app focus 都行)→ 講話 → Mori 聽 → 想 → 回。
 跨 session 記得你是誰、跨任務跟著你的工作模式走。
@@ -61,6 +62,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 | 📋 摘要 | SummarizeSkill — bullet / paragraph / tldr 三種風格 |
 | 📨 草擬 | ComposeSkill — email / message / essay / social post,不會捏造署名 |
 | 📋 剪貼簿感知 | 每輪自動讀剪貼簿(1KB cap),「翻譯這個」「摘要這段」可直接指代 |
+| 🖱 反白即改寫 | Linux 自動讀滑鼠反白(`wl-paste --primary`,1.5KB cap),「翻譯成英文」「潤一下」處理完 `ydotool` 模擬 Ctrl+V 把結果貼回原視窗 — ZeroType / Typeless 等價流程。Ask 模式(「這在講什麼」)只回 chat,不動編輯區 |
 | 🌳 floating Mori | 桌面常駐小視窗(160×160 透明、不偷焦點),依狀態切表情 + 光暈,可拖、雙擊切顯示主視窗 |
 | 💤 休眠 / 醒醒 | tray 選單 / UI 按鈕 / 語音「晚安」「醒醒」三條路徑都能切。休眠時麥克風 **完全關**(privacy),背景排程仍跑(Phase 5+) |
 | 💭 對話歷史 | working memory 保留 10 對 user-assistant 訊息,可重置 |
@@ -73,7 +75,6 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ❌ 反白即改寫 | 反白文字 + 講話 → 結果直接貼回反白(ZeroType / Typeless 招牌動作) | Phase 4C(`wl-paste --primary` + `ydotool`) |
 | ❌ App-aware tone | 在 Slack 用閒聊、在 Outlook 用正式 — Mori 知道你在哪 | Phase 4D |
 | ❌ URL routing | YouTube 連結 → 自動摘要 / 文章 → fetch + 摘要 | Phase 3B |
 | ❌ 背景排程 | 「每小時提醒喝水」「每天 9 點晨報」— 真正的常駐 agent | Phase 5 |

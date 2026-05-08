@@ -1,8 +1,8 @@
 //! Tauri 平台的 ContextProvider 實作。
 //!
-//! Phase 3A:只先抓**剪貼簿文字**。其他欄位(selected_text、cursor_position、
-//! active_window 等)留 phase 3B/4 各平台再實作 — 那些跨 app 在 Wayland 上
-//! 受沙箱限制較多,需走 xdg-desktop-portal,工程量較大。
+//! Phase 3A:剪貼簿文字。
+//! Phase 4C:Linux primary selection(`wl-paste --primary` shell out)— 給
+//!          反白即改寫流程用。
 
 use async_trait::async_trait;
 use mori_core::context::{Context, ContextProvider};
@@ -32,9 +32,17 @@ impl ContextProvider for TauriContextProvider {
                 }
             }
             Err(e) => {
-                // 非 fatal,但提到 warn — 之前 capabilities 漏 allow-read-text
-                // 時整個 context 一直空白,debug log 看不到根本不知道。
                 tracing::warn!(?e, "clipboard read_text failed (image content / missing permission / Wayland quirk)");
+            }
+        }
+
+        // Phase 4C:讀 primary selection(滑鼠反白)。Linux only;其他
+        // 平台這條路徑回 None,fall through 不影響功能。
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(sel) = crate::selection::read_primary_selection() {
+                tracing::info!(chars = sel.chars().count(), "captured primary selection");
+                ctx.selected_text = Some(sel);
             }
         }
 

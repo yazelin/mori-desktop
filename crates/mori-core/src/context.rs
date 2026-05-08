@@ -11,7 +11,9 @@ pub struct Context {
     /// 使用者語音(原始音訊位元組,通常 wav/opus)
     pub voice_audio: Option<Vec<u8>>,
 
-    /// 反白選中的文字(跨 app 抓取,Wayland 不支援)
+    /// 反白選中的文字。Linux 走 Wayland primary selection
+    /// (`wl-paste --primary`)或 X11 PRIMARY。macOS / Windows 待實作
+    /// (沒 primary 概念,要走 Accessibility API 或模擬 Cmd/Ctrl+C)。
     pub selected_text: Option<String>,
 
     /// 剪貼簿內容

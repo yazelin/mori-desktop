@@ -2248,6 +2248,7 @@ name = "mori-tauri"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "arboard",
  "ashpd",
  "async-trait",
  "chrono",
