@@ -68,21 +68,25 @@ impl OllamaProvider {
         }
     }
 
-    /// 啟動時呼叫一次的 warm-up。發一個 1-token 的 chat 讓 Ollama 把
-    /// model 載進 RAM,使用者第一次按熱鍵時就不用等 cold start。
+    /// 啟動時呼叫一次的 warm-up。走 Ollama 原生 `/api/generate` + 空 prompt
+    /// 讓 server 只 load model 不跑推理 — 比經 OpenAI-compat 發 1-token chat
+    /// 健壯太多:
+    /// - 不會被 qwen3 thinking mode 燒 CPU 燒到 timeout(實測 8b 模型 thinking
+    ///   mode 處理一個 "ok" 也可以跑 2 分鐘以上)
+    /// - 設 `keep_alive: "30m"` 把模型保活延長到 30 分鐘,user 中午吃飯回來
+    ///   也不必再等冷啟動(預設只 5 分鐘)
+    /// - 取消 `stream` 拿單一 JSON 回應,簡單判斷成敗
     ///
     /// 等到 server 回應(2xx)才 return Ok,讓呼叫端能在「真的載完」
     /// 時通知 UI。失敗(daemon 沒跑、model 沒下載、port 不對、HTTP
     /// 非 2xx)回 Err — 呼叫端決定是無聲忽略還是發 UI 事件。
     pub async fn warm_up(base_url: &str, model: &str) -> Result<()> {
-        let url = format!(
-            "{}/v1/chat/completions",
-            base_url.trim_end_matches('/')
-        );
+        let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
         let body = serde_json::json!({
             "model": model,
-            "messages": [{ "role": "user", "content": "ok" }],
-            "max_tokens": 1,
+            "prompt": "",
+            "stream": false,
+            "keep_alive": "30m",
         });
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
@@ -99,7 +103,7 @@ impl OllamaProvider {
             let body = resp.text().await.unwrap_or_default();
             bail!("ollama warm-up: HTTP {}: {}", status, body);
         }
-        tracing::info!(model, "ollama warm-up complete (model resident in RAM)");
+        tracing::info!(model, "ollama warm-up complete (model resident in RAM, keep_alive=30m)");
         Ok(())
     }
 }

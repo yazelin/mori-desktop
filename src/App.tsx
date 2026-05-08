@@ -50,6 +50,8 @@ function App() {
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
   const [chatProvider, setChatProvider] = useState<ChatProviderInfo | null>(null);
   const [warmup, setWarmup] = useState<WarmupState | null>(null);
+  const [warmupStartedAt, setWarmupStartedAt] = useState<number | null>(null);
+  const [warmupElapsed, setWarmupElapsed] = useState<number>(0);
 
   const refreshConvLength = () => {
     invoke<number>("conversation_length")
@@ -69,7 +71,11 @@ function App() {
         setChatProvider(info);
         // 後到 race:warm-up 可能在 React mount 前就完成,event 已經 emit 過。
         // 直接從 IPC 拿到的 snapshot 補一次,後續再靠 event 收 transition。
-        if (info.warmup) setWarmup(info.warmup);
+        if (info.warmup) {
+          setWarmup(info.warmup);
+          // mount 時就在 loading → 開始計時(approximate;不知道實際 start)
+          if (info.warmup === "loading") setWarmupStartedAt(Date.now());
+        }
       })
       .catch(() => setChatProvider(null));
     refreshConvLength();
@@ -120,6 +126,12 @@ function App() {
     // 並 emit 這個事件,UI 顯示「載入中 → 就緒/失敗」讓 user 看到 warm-up 真的有在動
     const unlistenWarmup = listen<WarmupState>("ollama-warmup", (event) => {
       setWarmup(event.payload);
+      // 進 loading 時開始計時;結束時(ready/failed)凍結 elapsed 但保留顯示
+      if (event.payload === "loading") {
+        setWarmupStartedAt(Date.now());
+      } else {
+        setWarmupStartedAt(null);
+      }
     });
     return () => {
       unlistenPhase.then((f) => f());
@@ -141,6 +153,18 @@ function App() {
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, [phase]);
+
+  // Warm-up elapsed timer — user 看得到 loading 已經幾秒,判斷是真在動還是 stuck
+  useEffect(() => {
+    if (warmupStartedAt === null) {
+      setWarmupElapsed(0);
+      return;
+    }
+    const tick = () => setWarmupElapsed(Math.floor((Date.now() - warmupStartedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [warmupStartedAt]);
 
   // Esc 取消錄音(只在主視窗 focused 時生效;global cancel 之後可走 portal)。
   useEffect(() => {
@@ -445,7 +469,7 @@ function App() {
               ? `${chatProvider.name} · ${chatProvider.model}${
                   chatProvider.name === "ollama"
                     ? warmup === "loading"
-                      ? " · 🔄 載入中"
+                      ? ` · 🔄 載入中 ${warmupElapsed}s`
                       : warmup === "ready"
                       ? " · ✅ 就緒"
                       : warmup === "failed"
