@@ -1,13 +1,13 @@
 //! Mori 的大腦。平台無關、UI 無關。
 //!
-//! 對外暴露的能力建構在四個 trait 上:
+//! 對外暴露的能力建構在五個 trait 上:
 //! - [`memory::MemoryStore`] — 長期記憶
 //! - [`context::ContextProvider`] — 環境資訊抓取
 //! - [`skill::Skill`] — LLM 可呼叫的工具
-//! - [`llm::LlmProvider`] — LLM 通訊抽象
+//! - [`llm::LlmProvider`] — chat / tool-calling 抽象
+//! - [`llm::transcribe::TranscriptionProvider`] — speech-to-text 抽象(5C 起拆出來)
 //!
-//! Phase 1 只實作每個 trait 的最小可運作骨架。後續 phase 加 module / 加 impl
-//! 即可,trait 定義穩定,核心邏輯一行不動。
+//! 後續 phase 加 module / 加 impl 即可,trait 定義穩定,核心邏輯一行不動。
 
 pub mod agent;
 pub mod context;
@@ -16,7 +16,6 @@ pub mod memory;
 pub mod mode;
 pub mod paste;
 pub mod skill;
-pub mod voice;
 
 /// crate 版本(供 UI 顯示)
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
