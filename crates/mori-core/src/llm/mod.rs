@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod claude_cli;
 pub mod groq;
 pub mod ollama;
 mod openai_compat;
@@ -56,6 +57,23 @@ pub fn build_chat_provider(
             tracing::info!(provider = "ollama", model = %model, base_url = %base_url, "chat provider selected");
             Ok(Arc::new(ollama::OllamaProvider::new(base_url, model)))
         }
+        "claude-cli" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-cli/binary"))
+                .unwrap_or_else(|| claude_cli::ClaudeCliProvider::DEFAULT_BINARY.to_string());
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-cli/model"));
+            tracing::info!(
+                provider = "claude-cli",
+                model = ?model,
+                binary = %binary,
+                "chat provider selected — note: chat-only, no tool calling. \
+                 Use only for skill-internal chat, not main agent dispatch."
+            );
+            Ok(Arc::new(claude_cli::ClaudeCliProvider::new(binary, model)))
+        }
         other => {
             if other != "groq" {
                 tracing::warn!(
@@ -66,7 +84,8 @@ pub fn build_chat_provider(
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
                     "no GROQ_API_KEY configured. Edit ~/.mori/config.json or set $GROQ_API_KEY \
-                     (or set default_provider to 'ollama' if you want to use local LLM only)"
+                     (or set default_provider to 'ollama' / 'claude-cli' if you want to use \
+                      a local provider)"
                 )
             })?;
             let model = mori_config_path()
@@ -115,6 +134,17 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 name: "ollama".into(),
                 model,
                 base_url: Some(base_url),
+            }
+        }
+        "claude-cli" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-cli/model"))
+                .unwrap_or_else(|| "(claude-cli default)".to_string());
+            ProviderSnapshot {
+                name: "claude-cli".into(),
+                model,
+                base_url: None,
             }
         }
         _ => {

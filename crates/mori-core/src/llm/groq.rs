@@ -263,7 +263,8 @@ impl GroqProvider {
                 // 哪個 provider 服務 chat / 主 agent loop。
                 // 接受值:"groq"(雲端 Groq Whisper + GPT-OSS 系列)
                 //         "ollama"(本機 Ollama,需先 `ollama serve`)
-                // 之後 phase 5A-2 會加 "claude_cli"(本機 claude CLI)。
+                //         "claude-cli"(本機 claude CLI subprocess,**chat-only**,
+                //                       不能當主 agent provider — 沒 tool calling)
                 "default_provider": "groq",
                 "providers": {
                     "groq": {
@@ -274,6 +275,12 @@ impl GroqProvider {
                     "ollama": {
                         "base_url": super::ollama::OllamaProvider::DEFAULT_BASE_URL,
                         "model":    super::ollama::OllamaProvider::DEFAULT_MODEL
+                    },
+                    "claude-cli": {
+                        // PATH 上的 binary 名稱;絕對路徑也 OK
+                        "binary": super::claude_cli::ClaudeCliProvider::DEFAULT_BINARY,
+                        // null = 讓 claude CLI 用預設 model;指定值如 "sonnet" / "opus" / 完整 model id
+                        "model": null
                     }
                 }
             });
