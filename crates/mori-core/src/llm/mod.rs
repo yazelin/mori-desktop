@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod bash_cli_agent;
 pub mod claude_cli;
 pub mod groq;
 pub mod ollama;
@@ -63,6 +64,27 @@ pub fn build_named_provider(
                 .and_then(|p| groq::read_json_pointer(p, "/providers/claude-cli/model"));
             Ok(Arc::new(claude_cli::ClaudeCliProvider::new(binary, model)))
         }
+        "claude-bash" => {
+            // 5D:Bash CLI proxy。claude (或將來 codex/gemini) 走它們自己的
+            // 內部 reasoning,透過 Bash 工具呼叫 mori CLI dispatch skill。
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/binary"))
+                .unwrap_or_else(|| {
+                    bash_cli_agent::BashCliAgentProvider::DEFAULT_BINARY.to_string()
+                });
+            let mori_cli = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/mori_cli_path"))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(bash_cli_agent::BashCliAgentProvider::detect_mori_cli);
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(
+                binary, mori_cli, model,
+            )))
+        }
         "groq" => {
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -102,7 +124,7 @@ pub fn build_chat_provider(
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     let default = read_default_provider();
     let resolved = match default.as_str() {
-        "groq" | "ollama" | "claude-cli" => default.as_str(),
+        "groq" | "ollama" | "claude-cli" | "claude-bash" => default.as_str(),
         other => {
             tracing::warn!(
                 provider = other,
@@ -130,17 +152,24 @@ pub struct Routing {
     /// 不支援會 warn 但不 fail。
     pub agent: Arc<dyn LlmProvider>,
     /// Skill 名字 → provider 的 override map。Map 沒列到的 skill 用
-    /// `agent` 當 fallback。
+    /// `skill_fallback`(通常 = agent,但 agent 是 agent-only 型(如
+    /// bash-cli-agent)時會自動切到 claude-cli 防遞迴)。
     pub skills: HashMap<String, Arc<dyn LlmProvider>>,
+    /// 當 skill 沒在 `skills` map 內時用這個。預設 = `agent`,但 agent 是
+    /// `bash-cli-agent` 那種「自己會 spawn AI CLI 當 agent」型 provider 時
+    /// 會自動 fallback 到 chat-only(claude-cli)避免:
+    ///   bash-cli-agent → spawn claude → claude call mori skill polish →
+    ///   PolishSkill.exec → bash-cli-agent → spawn claude → … (無限遞迴)
+    pub skill_fallback: Arc<dyn LlmProvider>,
 }
 
 impl Routing {
-    /// 取 skill `name` 該用的 provider — 先看 override 再 fallback 到 agent。
+    /// 取 skill `name` 該用的 provider — 先看 override,再用 skill_fallback。
     pub fn skill_provider(&self, name: &str) -> Arc<dyn LlmProvider> {
         self.skills
             .get(name)
             .cloned()
-            .unwrap_or_else(|| self.agent.clone())
+            .unwrap_or_else(|| self.skill_fallback.clone())
     }
 
     /// 從 `~/.mori/config.json` 的 `routing` block 蓋出整套 routing。
@@ -199,15 +228,49 @@ impl Routing {
             })
             .collect();
 
+        // Anti-recursion guard:bash-cli-agent 是「我就是 spawn CLI 當 agent」
+        // 型,當 skill provider 會無限遞迴 spawn claude → polish skill →
+        // 又 spawn claude →…。自動 fallback 到 claude-cli(chat-only,不會自己
+        // 再 spawn 別的)。User 仍可在 routing.skills 顯式覆寫。
+        let skill_fallback = if agent.name() == "bash-cli-agent" {
+            let fallback_name = "claude-cli";
+            let p = match built.get(fallback_name) {
+                Some(p) => p.clone(),
+                None => {
+                    let p = build_named_provider(fallback_name, None)
+                        .with_context(|| {
+                            "auto-build claude-cli as skill fallback for bash-cli-agent agent"
+                        })?;
+                    built.insert(fallback_name.into(), p.clone());
+                    p
+                }
+            };
+            tracing::warn!(
+                agent = %agent_name,
+                fallback = %fallback_name,
+                "agent is bash-cli-agent — auto-fallback skills to '{}' to avoid recursion. \
+                 Set routing.skills.<name> in config to override per skill.",
+                fallback_name,
+            );
+            p
+        } else {
+            agent.clone()
+        };
+
         tracing::info!(
             agent = %agent_name,
             agent_model = %agent.model(),
             agent_tools = agent.supports_tool_calling(),
+            skill_fallback = %skill_fallback.name(),
             skill_overrides = ?cfg.skills,
             "routing built"
         );
 
-        Ok(Self { agent, skills })
+        Ok(Self {
+            agent,
+            skills,
+            skill_fallback,
+        })
     }
 }
 
@@ -398,6 +461,17 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 .unwrap_or_else(|| "(claude-cli default)".to_string());
             ProviderSnapshot {
                 name: "claude-cli".into(),
+                model,
+                base_url: None,
+            }
+        }
+        "claude-bash" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/model"))
+                .unwrap_or_else(|| "(agent CLI default)".to_string());
+            ProviderSnapshot {
+                name: "claude-bash".into(),
                 model,
                 base_url: None,
             }

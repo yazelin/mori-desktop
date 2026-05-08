@@ -311,6 +311,17 @@ impl GroqProvider {
                         // null = 讓 claude CLI 用預設 model;指定值如 "sonnet" / "opus" / 完整 model id
                         "model": null
                     },
+                    "claude-bash": {
+                        // 5D — Bash CLI proxy:把 claude / codex / gemini 當主 agent loop,
+                        // 透過它們的 Bash tool 跑本機 `mori` CLI dispatch skill。
+                        // - binary:agent CLI(可換成 codex / gemini)
+                        // - model:null 走 default;否則指定 model alias
+                        // - mori_cli_path:null 自動偵測(target/<profile>/mori 旁邊),
+                        //   或寫絕對路徑
+                        "binary": super::bash_cli_agent::BashCliAgentProvider::DEFAULT_BINARY,
+                        "model": null,
+                        "mori_cli_path": null
+                    },
                     "whisper-local": {
                         // ggml `.bin` model file。要先從 huggingface 抓:
                         //   wget -O ~/.mori/models/ggml-small.bin \
