@@ -17,6 +17,80 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod groq;
+pub mod ollama;
+mod openai_compat;
+
+// ─── Provider factory ───────────────────────────────────────────────
+//
+// `build_chat_provider` 讀 `~/.mori/config.json` 的 `default_provider`
+// 欄位,構造對應 LlmProvider 回傳。Groq / Ollama 走不同 default。
+// retry_callback 只對 Groq 有意義(Ollama 本機沒 rate limit)。
+
+use std::sync::Arc;
+
+/// 從 `~/.mori/config.json` 蓋出 chat provider。
+/// 配置:
+/// - `default_provider`: "groq"(預設) | "ollama"
+/// - `providers.groq.{api_key, chat_model}`
+/// - `providers.ollama.{base_url, model}`
+///
+/// retry_callback 只在 Groq 路徑套用(Ollama 本機沒 rate-limit)。
+pub fn build_chat_provider(
+    retry_cb: Option<groq::RetryCallback>,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    let default = mori_config_path()
+        .as_deref()
+        .and_then(|p| groq::read_json_pointer(p, "/default_provider"))
+        .unwrap_or_else(|| "groq".to_string());
+
+    match default.as_str() {
+        "ollama" => {
+            let base_url = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/ollama/base_url"))
+                .unwrap_or_else(|| ollama::OllamaProvider::DEFAULT_BASE_URL.to_string());
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/ollama/model"))
+                .unwrap_or_else(|| ollama::OllamaProvider::DEFAULT_MODEL.to_string());
+            tracing::info!(provider = "ollama", model = %model, base_url = %base_url, "chat provider selected");
+            Ok(Arc::new(ollama::OllamaProvider::new(base_url, model)))
+        }
+        other => {
+            if other != "groq" {
+                tracing::warn!(
+                    provider = other,
+                    "unknown default_provider — falling back to 'groq'",
+                );
+            }
+            let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no GROQ_API_KEY configured. Edit ~/.mori/config.json or set $GROQ_API_KEY \
+                     (or set default_provider to 'ollama' if you want to use local LLM only)"
+                )
+            })?;
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+            tracing::info!(provider = "groq", model = %model, "chat provider selected");
+            let p = groq::GroqProvider::new(key, model);
+            let p = if let Some(cb) = retry_cb {
+                p.with_retry_callback(cb)
+            } else {
+                p
+            };
+            Ok(Arc::new(p))
+        }
+    }
+}
+
+fn mori_config_path() -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(|h| std::path::PathBuf::from(h).join(".mori").join("config.json"))
+}
 
 /// 一則訊息。
 ///

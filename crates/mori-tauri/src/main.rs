@@ -235,23 +235,21 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
         }
     }
 
-    let api_key = state.groq_api_key.lock().clone();
-    let key = match api_key {
-        Some(k) => k,
-        None => {
+    // Phase 5A-1: chat provider 走 config-driven factory
+    // (default_provider="groq" / "ollama"),retry callback 只對 Groq 有意義
+    // 也透傳進 factory(內部會 ignore 給 Ollama)。
+    let provider = match mori_core::llm::build_chat_provider(Some(retry_callback_for(app.clone()))) {
+        Ok(p) => p,
+        Err(e) => {
             state.set_phase(
                 &app,
                 Phase::Error {
-                    message: "no GROQ_API_KEY configured. Edit ~/.mori/config.json or set $GROQ_API_KEY".into(),
+                    message: format!("{e:#}"),
                 },
             );
             return;
         }
     };
-    let provider: Arc<dyn LlmProvider> = Arc::new(
-        GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string())
-            .with_retry_callback(retry_callback_for(app.clone())),
-    );
 
     let state_clone = state.inner().clone();
     tauri::async_runtime::spawn(async move {
@@ -380,8 +378,10 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     let app_for_provider = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        // Stage 1: Whisper
-        let transcribe_result: anyhow::Result<(String, GroqProvider)> = async {
+        // Stage 1: Whisper transcribe — **永遠走 Groq**,因為目前只有
+        // GroqProvider 實作 transcribe()。Local STT(whisper-rs)會在 phase
+        // 5C 接入,屆時這邊也走 factory pattern。
+        let transcribe_result: anyhow::Result<String> = async {
             let audio = recorder.stop().context("stop recorder")?;
             let duration = audio.duration_secs();
             let rms = if audio.samples.is_empty() {
@@ -419,16 +419,16 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                 "no GROQ_API_KEY configured. \
                  Edit ~/.mori/config.json or set $GROQ_API_KEY",
             )?;
-            let provider =
+            let stt =
                 GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string())
                     .with_retry_callback(retry_callback_for(app_for_provider.clone()));
-            let transcript = provider.transcribe(wav).await.context("groq transcribe")?;
+            let transcript = stt.transcribe(wav).await.context("groq transcribe")?;
             tracing::info!(chars = transcript.chars().count(), "transcribed");
-            Ok((transcript, provider))
+            Ok(transcript)
         }
         .await;
 
-        let (transcript, provider) = match transcribe_result {
+        let transcript = match transcribe_result {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!(?e, "transcribe failed");
@@ -442,8 +442,22 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             }
         };
 
-        // Stage 2: 走共用 chat pipeline(submit_text 也呼叫同一份)
-        let provider_arc: Arc<dyn LlmProvider> = Arc::new(provider);
+        // Stage 2: chat provider 走 config-driven factory(可能 Groq、可能
+        // Ollama,phase 5A-2 後也可能 Claude CLI)。STT 跟 chat 解耦了,語音
+        // 一定走 Groq Whisper,但接 chat 那輪可以 free-pick。
+        let provider_arc =
+            match mori_core::llm::build_chat_provider(Some(retry_callback_for(app.clone()))) {
+                Ok(p) => p,
+                Err(e) => {
+                    state.set_phase(
+                        &app,
+                        Phase::Error {
+                            message: format!("{e:#}"),
+                        },
+                    );
+                    return;
+                }
+            };
         run_chat_pipeline(app, state, transcript, provider_arc).await;
     });
 }

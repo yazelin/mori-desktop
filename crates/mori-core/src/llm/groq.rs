@@ -246,7 +246,11 @@ impl GroqProvider {
     }
 
     /// 確保 `~/.mori/` 存在,若 `config.json` 不存在就寫一份 stub
-    /// (含 placeholder,使用者編輯一次後就可用)。
+    /// (含 placeholder + 所有可用 provider 的 default 欄位,使用者編輯
+    /// 一次後就可用)。
+    ///
+    /// **不會覆寫**已存在的 config — 既有 user 的設定保留,新欄位若缺
+    /// 由各 provider 的 default 填補(`OllamaProvider::DEFAULT_*` 等)。
     pub fn bootstrap_mori_config() -> anyhow::Result<std::path::PathBuf> {
         let home = home_dir()
             .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
@@ -256,11 +260,20 @@ impl GroqProvider {
         let config = dir.join("config.json");
         if !config.exists() {
             let stub = serde_json::json!({
+                // 哪個 provider 服務 chat / 主 agent loop。
+                // 接受值:"groq"(雲端 Groq Whisper + GPT-OSS 系列)
+                //         "ollama"(本機 Ollama,需先 `ollama serve`)
+                // 之後 phase 5A-2 會加 "claude_cli"(本機 claude CLI)。
+                "default_provider": "groq",
                 "providers": {
                     "groq": {
                         "api_key": "REPLACE_ME_WITH_YOUR_GROQ_API_KEY",
-                        "chat_model": GroqProvider::DEFAULT_CHAT_MODEL,
-                        "transcribe_model": GroqProvider::DEFAULT_TRANSCRIBE_MODEL
+                        "chat_model": super::groq::GroqProvider::DEFAULT_CHAT_MODEL,
+                        "transcribe_model": super::groq::GroqProvider::DEFAULT_TRANSCRIBE_MODEL
+                    },
+                    "ollama": {
+                        "base_url": super::ollama::OllamaProvider::DEFAULT_BASE_URL,
+                        "model":    super::ollama::OllamaProvider::DEFAULT_MODEL
                     }
                 }
             });
@@ -283,7 +296,7 @@ fn is_placeholder(s: &str) -> bool {
     upper.starts_with("REPLACE") || upper.contains("YOUR_GROQ") || upper == "TODO"
 }
 
-fn read_json_pointer(path: &std::path::Path, pointer: &str) -> Option<String> {
+pub(crate) fn read_json_pointer(path: &std::path::Path, pointer: &str) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     let key = json.pointer(pointer)?.as_str()?;
@@ -293,90 +306,14 @@ fn read_json_pointer(path: &std::path::Path, pointer: &str) -> Option<String> {
     Some(key.to_string())
 }
 
-// ─── chat completion request/response wire types ────────────────────
+// ─── chat completion wire types — shared with other OpenAI-compat
+// providers(Ollama, OpenAI, OpenRouter, ...)— see super::openai_compat.
+use super::openai_compat::{
+    ChatRequest, ChatResponseWire, WireFunction, WireFunctionOut, WireMessage, WireTool,
+    WireToolCallOut,
+};
 
-#[derive(Serialize)]
-struct ChatRequest<'a> {
-    model: &'a str,
-    messages: Vec<WireMessage<'a>>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    tools: Vec<WireTool<'a>>,
-}
-
-#[derive(Serialize)]
-struct WireMessage<'a> {
-    role: &'a str,
-    /// `null` 是合法的(assistant 發 tool_call 時可能 content=null)
-    content: Option<&'a str>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    tool_calls: Vec<WireToolCallOut<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<&'a str>,
-    /// `tool` role 訊息要附 tool 名(可選但 OpenAI 標準有)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<&'a str>,
-}
-
-/// 送出時的 tool_call 結構(OpenAI 巢狀 function 格式)
-#[derive(Serialize)]
-struct WireToolCallOut<'a> {
-    id: &'a str,
-    #[serde(rename = "type")]
-    kind: &'static str, // always "function"
-    function: WireFunctionOut<'a>,
-}
-
-#[derive(Serialize)]
-struct WireFunctionOut<'a> {
-    name: &'a str,
-    /// arguments 必須是 JSON-encoded 字串,不是物件
-    arguments: String,
-}
-
-#[derive(Serialize)]
-struct WireTool<'a> {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    function: WireFunction<'a>,
-}
-
-#[derive(Serialize)]
-struct WireFunction<'a> {
-    name: &'a str,
-    description: &'a str,
-    parameters: &'a serde_json::Value,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChatResponseWire {
-    choices: Vec<ChoiceWire>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChoiceWire {
-    message: ChoiceMessageWire,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChoiceMessageWire {
-    content: Option<String>,
-    #[serde(default)]
-    tool_calls: Vec<ToolCallWire>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ToolCallWire {
-    id: String,
-    function: ToolCallFunctionWire,
-}
-
-#[derive(Deserialize, Debug)]
-struct ToolCallFunctionWire {
-    name: String,
-    arguments: String, // JSON string
-}
-
-// ─── transcription wire ─────────────────────────────────────────────
+// ─── transcription wire(Groq-specific)──────────────────────────────
 
 #[derive(Deserialize, Debug)]
 struct TranscriptionResponse {
