@@ -41,10 +41,11 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 完成(2026-05-08)** — Mori 在 Wayland 上
-**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM**:
-- 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、休眠 / 醒醒兩態
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5E 完成(2026-05-08)** — Mori 在 Wayland 上
+**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
+- 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(對話 / 輸入 / 休眠)
 - **反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)
+- **語音輸入模式**:把游標放輸入框 → 按熱鍵 → 講話 → LLM 加標點 + 程式守格式 → 直接貼到游標位置(跳過 agent loop,純 dictation)
 - **整套 LLM 可換**:Groq / 本機 Ollama / Claude CLI / 「claude 當 agent 走 Bash CLI proxy」四種,per-skill 還能獨立指定
 - **STT 可離線**:Groq Whisper API 或本機 whisper.cpp(`ggml-small.bin` 中文 466MB 夠用)
 - **token 省**:claude 當 agent 不靠 MCP(全部 schema 預載)而是靠 Bash tool 呼叫本機 `mori` CLI,實際用到才執行,~10x 縮減
@@ -72,7 +73,9 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 | 🌳 floating Mori | 桌面常駐小視窗(160×160 透明、不偷焦點),依狀態切表情 + 光暈,可拖、雙擊切顯示主視窗 |
 | 💤 休眠 / 醒醒 | tray 選單 / UI 按鈕 / 語音「晚安」「醒醒」三條路徑都能切。休眠時麥克風 **完全關**(privacy),背景排程仍跑(Phase 5+) |
 | 💭 對話歷史 | working memory 保留 10 對 user-assistant 訊息,可重置 |
-| 🪟 常駐 | 系統匣 icon(顯示 / 隱藏 / 休眠↔醒醒 / 重新對話 / 離開),關視窗 → 隱藏不殺 |
+| 🪟 常駐 | 系統匣 icon(顯示 / 隱藏 / 對話↔輸入↔休眠 3 個 mode 切換 / 重新對話 / 離開),關視窗 → 隱藏不殺 |
+| ⌨️ 語音輸入模式(5E) | tray / UI 切到「輸入模式」→ 游標放任一輸入框 → 按熱鍵講話 → 跳過 agent loop,結果**直接貼到游標位置**(把 Mori 變成 LLM 加持的 dictation)|
+| 🧹 三級 cleanup(5E) | `voice_input.cleanup_level` 配置:**smart**(LLM 加標點 + 程式守格式)/ **minimal**(只跑程式 strip 幻聽 + 半→全形 normalize,~ms 級)/ **none**(raw 直貼)。Cleanup provider 走 `routing.skills.voice_input_cleanup` 可獨立指定 |
 | 🛠️ Skill HTTP 服務 | mori-tauri 啟動時 bind 127.0.0.1:RANDOM,寫 port + auth token 到 `~/.mori/runtime.json`,讓本機 `mori` CLI(以及 claude 透過 Bash 呼叫的 mori CLI)能連回主程式 dispatch skill |
 | ⏱️ 智慧限流退避 | Groq 429 → 解析 body 多單位格式(「12m12s」式),> 60s 直接 surface 不傻等;UI 顯示「今日 token 用完(TPD)」之類友善訊息 |
 | 🔄 Ollama warm-up | 啟動時自動發 1-token chat 觸發 model load(避免使用者第一次按熱鍵還在等模型進 RAM),`keep_alive=30m` |
@@ -85,6 +88,8 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 | ⏳ Tighten claude-bash system prompt | claude 還會在潤稿後加「(主要是補了標點...)」這種解說,違反 system prompt 的「直接給結果」 | 5D-2 |
 | ⏳ codex / gemini CLI 適配 | 證明「Bash CLI proxy 換 binary 就行」這個賣點。架構已通用,需實測 | 5D-2 |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
+| ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
+| ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
 | ❌ App-aware tone | Slack 閒聊、Outlook 正式 — 需要活躍視窗偵測 | Phase 4D |
 | ❌ URL routing | YouTube 連結 → 自動摘要 / 文章 → fetch + 摘要 | Phase 3B |
 | ❌ 背景排程 | 「每小時提醒喝水」「每天 9 點晨報」— 真正的常駐 agent | Phase 5 |
@@ -104,9 +109,10 @@ mori-desktop/
 │   ├── mori-core/                    ← 純 Rust lib,無 UI 依賴。所有平台共用。
 │   │   ├── memory/                   ← MemoryStore trait + LocalMarkdownMemoryStore
 │   │   ├── context.rs                ← Context struct + ContextProvider trait
-│   │   ├── mode.rs                   ← Mode enum (Active / Background) + ModeController
+│   │   ├── mode.rs                   ← Mode enum (Active / VoiceInput / Background)
 │   │   ├── paste.rs                  ← PasteController trait(平台 inject 由殼 crate)
 │   │   ├── runtime.rs                ← `~/.mori/runtime.json` schema(port + auth token)
+│   │   ├── voice_cleanup.rs          ← 程式化 cleanup(strip 幻聽 / 半→全形 / 5E)
 │   │   ├── skill/                    ← 每 skill 一檔,加新的不撞:
 │   │   │                               translate / polish / summarize / compose /
 │   │   │                               remember / recall / forget / edit /
@@ -271,6 +277,29 @@ agent 跟個別 skill 可走不同 provider:
 ```
 
 省 Groq TPD,把重活分給其他 provider。沒設 `routing` 整套退回 `default_provider`。
+
+### 進階:語音輸入 cleanup_level + 專屬 provider(5E)
+
+從 tray / UI 切到「**輸入**」模式後,熱鍵語意改成 dictation。Cleanup 三級可挑:
+
+```json
+{
+  "voice_input": {
+    "cleanup_level": "smart"
+  },
+  "routing": {
+    "skills": {
+      "voice_input_cleanup": "groq"
+    }
+  }
+}
+```
+
+- `cleanup_level: "smart"`(預設):LLM 加標點 + 程式 post-process。Whisper 不出標點,LLM 是必須的;但 prompt 嚴格鎖在「加標點 / 修幻聽 / 切段」不准改詞
+- `cleanup_level: "minimal"`:跳 LLM,純程式處理(strip 幻聽 + 半→全形 + normalize)。`~ms` 級延遲、0 token,但**沒標點**
+- `cleanup_level: "none"`:raw whisper 直貼
+
+`voice_input_cleanup` provider 推薦 `groq`(gpt-oss-120b 1-2 秒 + 中文標點品質好,dictation 場景最划算)。釘 `claude-cli` 跑 user 自己 quota 也行。
 
 ### Key 探測順序
 
