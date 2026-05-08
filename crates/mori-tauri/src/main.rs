@@ -681,17 +681,19 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     // Paste-back skill(phase 4C):反白即改寫的回填動作
     prompt.push_str("**paste_selection_back(text)**:把處理過的文字貼回使用者反白範圍。\n");
     prompt.push_str(
-        "  • **觸發前提**:當下 context 有「反白文字」段(`# 當下反白文字`),\
-         且使用者意圖是**修改**這段反白(動詞:翻譯 / 潤稿 / 摘要 / 改寫 / \
-         改短 / 改成 X 語氣)。\n");
+        "  • **硬規則**:只要 system prompt 有 `# 當下反白文字` 段 + 使用者用\
+         動詞(翻譯 / 潤稿 / 摘要 / 改寫 / 改短 / 改成 X 語氣 / 英文化…),\
+         **流程是固定的**:\n");
     prompt.push_str(
-        "  • **流程**:先 translate / polish / summarize 把反白文字當 \
-         source_text 處理,**拿到結果之後**再呼叫 paste_selection_back \
-         (text=結果),把答案貼回使用者編輯區的反白範圍。\n");
+        "      1. translate / polish / summarize / compose 處理反白文字,\
+         source_text **一律**填那段反白(忽略剪貼簿)。\n");
+    prompt.push_str(
+        "      2. 拿到結果**立刻**呼叫 `paste_selection_back(text=結果)` —\
+         **這步不可省略**,沒 paste 等於整件事沒完成,使用者會以為 Mori 沒做事。\n");
     prompt.push_str(
         "  • **不要叫的情境**:使用者只是**問問題**(「這在講什麼」、\
-         「what does this mean」、「這段為什麼這樣寫」)— 那種是回 chat,\
-         **不要**動使用者的編輯區。\n");
+         「what does this mean」、「這段為什麼這樣寫」)→ 直接 chat 回答,\
+         **不**呼叫這個 skill,**不**動使用者編輯區。\n");
     prompt.push_str(
         "  • Linux only — 其他平台沒這個 skill,不會出現在 tool 清單。\n\n");
 
@@ -715,12 +717,17 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     if let Some(sel) = &ctx.selected_text {
         prompt.push_str("\n# 當下反白文字\n\n");
         prompt.push_str(
-            "(使用者**目前**在另一個 app 裡反白選中了下面這段文字。當他說\n\
-             「這個 / 這段 / 剛選的」配上**動詞**(翻譯 / 潤稿 / 摘要 / 改\n\
-             寫)時,**這份反白優先於剪貼簿**作為 source_text。\n\
-             處理完之後若意圖是**修改**反白本身,記得呼叫\n\
-             `paste_selection_back(text=結果)` 把結果貼回去 — 不要只在\n\
-             chat 回答,使用者期待看到編輯區直接被改掉。)\n\n",
+            "**這段是使用者在別的 app 裡剛反白的文字。**\n\n\
+             **硬規則**(如果這段存在,以下優先於剪貼簿規則):\n\
+             - 動詞型指令(翻譯 / 潤稿 / 摘要 / 改寫 / 英文化 / 改短 / \
+             改成 X 語氣 ...)的 source_text **一律**用這段反白,**不要**\
+             用剪貼簿(就算剪貼簿看起來內容更多更相關,也不要)。剪貼簿只\
+             是「沒反白時的 fallback」。\n\
+             - 處理完成後**必須**呼叫 `paste_selection_back(text=結果)`,\
+             把結果貼回使用者反白的位置。**不調用 = 任務沒完成**,\
+             使用者會以為 Mori 什麼都沒做。\n\
+             - 例外:使用者只是**問問題**(「這在講什麼」「為什麼這樣寫」\
+             「what does this mean」)→ 在 chat 回答即可,不要 paste。\n\n",
         );
         prompt.push_str("```\n");
         prompt.push_str(sel);
