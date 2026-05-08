@@ -1,12 +1,13 @@
-//! SetModeSkill — toggle Mori between Active and Background.
+//! SetModeSkill — toggle Mori between Active / VoiceInput / Background.
 //!
 //! Voice cues:
 //! - Background:「晚安」「先休眠」「安靜」「我先離開了」「下班了」
 //! - Active:    「醒醒」「起來」「回來」「在嗎」「我回來了」
+//! - VoiceInput:「切到輸入模式」「我要打字」「我要 dictation」
 //!
 //! Setting Background hard-stops the mic; the user can be sure no audio
-//! is captured. Setting Active does NOT auto-start recording — that's
-//! still a separate hotkey press.
+//! is captured. Setting Active or VoiceInput does NOT auto-start
+//! recording — that's still a separate hotkey press。
 
 use std::sync::Arc;
 
@@ -35,14 +36,13 @@ impl Skill for SetModeSkill {
     }
 
     fn description(&self) -> &'static str {
-        "Switch Mori between Active (mic ready, UI visible) and Background \
-         (mic OFF, UI hidden — privacy mode). Call when the user clearly \
-         signals they're done talking for now (e.g. '晚安','先休眠', \
-         '我去開會了','安靜一下') with mode='background', or wants \
-         Mori back (e.g. '醒醒','回來','我回來了','起來') with \
-         mode='active'. Don't call it for ambiguous statements — only \
-         when the user's intent is explicit. Setting 'active' does NOT \
-         start a recording — that's still a separate user action."
+        "Switch Mori between three modes:\n\
+         - 'active' — 對話模式(預設):熱鍵錄音 → STT → agent loop。\n\
+         - 'voice_input' — 語音輸入模式:熱鍵錄音 → STT → 輕度清理 → \
+           直接貼到游標位置(跳過 agent)。適合在編輯器/瀏覽器裡聽寫。\n\
+         - 'background' — 休眠:麥克風完全關閉(privacy)。\n\
+         Voice cues:'晚安' / '先休眠' → background;'醒醒' / '回來' → \
+         active;'切到輸入模式' / '我要 dictation' → voice_input。"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -51,7 +51,7 @@ impl Skill for SetModeSkill {
             "properties": {
                 "mode": {
                     "type": "string",
-                    "enum": ["active", "background"],
+                    "enum": ["active", "voice_input", "background"],
                     "description": "Target operating mode."
                 }
             },
@@ -67,6 +67,7 @@ impl Skill for SetModeSkill {
 
         let target = match raw {
             "active" => Mode::Active,
+            "voice_input" => Mode::VoiceInput,
             "background" => Mode::Background,
             other => return Err(anyhow!("invalid mode: {other}")),
         };
@@ -76,6 +77,7 @@ impl Skill for SetModeSkill {
             return Ok(SkillOutput {
                 user_message: match target {
                     Mode::Active => "我醒著呢。".to_string(),
+                    Mode::VoiceInput => "已經在輸入模式了。".to_string(),
                     Mode::Background => "我已經在休眠了。".to_string(),
                 },
                 data: Some(serde_json::json!({
@@ -92,6 +94,7 @@ impl Skill for SetModeSkill {
 
         let user_message = match target {
             Mode::Active => "醒了,我在這。".to_string(),
+            Mode::VoiceInput => "切到輸入模式 — 接下來的話會直接貼到游標位置。".to_string(),
             Mode::Background => "好,我先閉眼,叫我就回來。".to_string(),
         };
 
