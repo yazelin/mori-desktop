@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use mori_core::agent::{Agent, SkillCallSummary};
 use mori_core::context::{Context as MoriContext, ContextProvider};
 use mori_core::llm::groq::{GroqProvider, RetryEvent};
-use mori_core::llm::{ChatMessage, LlmProvider};
+use mori_core::llm::ChatMessage;
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
 use mori_core::mode::{Mode, ModeController};
@@ -175,12 +175,18 @@ fn build_info() -> serde_json::Value {
 fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
     let snap = mori_core::llm::active_chat_provider_snapshot();
     let routing = mori_core::llm::read_routing_config();
+    let stt = mori_core::llm::transcribe::active_transcribe_snapshot();
     let warmup = *state.ollama_warmup.lock();
     serde_json::json!({
         "name": snap.name,
         "model": snap.model,
         "warmup": warmup,
         "skill_overrides": routing.skills,
+        "stt": {
+            "name": stt.name,
+            "model": stt.model,
+            "language": stt.language,
+        },
     })
 }
 
@@ -418,13 +424,13 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 
     state.set_phase(&app, Phase::Transcribing);
 
-    let api_key = state.groq_api_key.lock().clone();
     let app_for_provider = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        // Stage 1: Whisper transcribe — **永遠走 Groq**,因為目前只有
-        // GroqProvider 實作 transcribe()。Local STT(whisper-rs)會在 phase
-        // 5C 接入,屆時這邊也走 factory pattern。
+        // Stage 1: Whisper transcribe — 5C 起走 TranscriptionProvider factory,
+        // 預設 Groq Whisper API,可在 config 把 default_transcribe_provider
+        // 改成 "whisper-local" 走 whisper.cpp 離線推理(配上本機 chat
+        // provider 就 100% Groq-free)。
         let transcribe_result: anyhow::Result<String> = async {
             let audio = recorder.stop().context("stop recorder")?;
             let duration = audio.duration_secs();
@@ -459,15 +465,19 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let _ = std::fs::write(&debug_path, &wav);
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
-            let key = api_key.context(
-                "no GROQ_API_KEY configured. \
-                 Edit ~/.mori/config.json or set $GROQ_API_KEY",
-            )?;
-            let stt =
-                GroqProvider::new(key, GroqProvider::DEFAULT_CHAT_MODEL.to_string())
-                    .with_retry_callback(retry_callback_for(app_for_provider.clone()));
-            let transcript = stt.transcribe(wav).await.context("groq transcribe")?;
-            tracing::info!(chars = transcript.chars().count(), "transcribed");
+            let stt = mori_core::llm::transcribe::build_transcription_provider(Some(
+                retry_callback_for(app_for_provider.clone()),
+            ))
+            .context("build transcription provider")?;
+            let transcript = stt
+                .transcribe(wav)
+                .await
+                .with_context(|| format!("{} transcribe", stt.name()))?;
+            tracing::info!(
+                provider = stt.name(),
+                chars = transcript.chars().count(),
+                "transcribed"
+            );
             Ok(transcript)
         }
         .await;

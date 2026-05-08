@@ -32,10 +32,16 @@ type BuildInfo = {
 };
 
 type WarmupState = "loading" | "ready" | "failed";
+type SttInfo = {
+  name: string;
+  model: string;
+  language: string | null;
+};
 type ChatProviderInfo = {
   name: string;
   model: string;
   warmup: WarmupState | null;
+  stt: SttInfo;
 };
 
 function App() {
@@ -485,6 +491,27 @@ function App() {
           </span>
         </div>
         <div className="status-row">
+          <span className="label">stt</span>
+          <span
+            className={`value ${
+              chatProvider?.stt?.name === "whisper-local" ? "ok" : ""
+            }`}
+            title={
+              chatProvider?.stt?.name === "whisper-local"
+                ? `本機 whisper.cpp${
+                    chatProvider.stt.language ? ` · 語言 ${chatProvider.stt.language}` : ""
+                  } · ${chatProvider.stt.model}`
+                : `Groq Whisper API · ${chatProvider?.stt?.model ?? ""}`
+            }
+          >
+            {chatProvider?.stt
+              ? chatProvider.stt.name === "whisper-local"
+                ? `🏠 ${shortBasename(chatProvider.stt.model)}`
+                : `☁ ${chatProvider.stt.model}`
+              : "..."}
+          </span>
+        </div>
+        <div className="status-row">
           <span className="label">history</span>
           <span className="value">{convLength} msgs</span>
         </div>
@@ -517,6 +544,12 @@ function App() {
       </section>
     </main>
   );
+}
+
+// 把長路徑(如 /home/.../models/ggml-small.bin)縮成 ggml-small.bin 顯示用
+function shortBasename(path: string): string {
+  const last = path.split("/").pop() ?? path;
+  return last;
 }
 
 // Real-time audio RMS bar. `level` is 0..=1 (linear amplitude).

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use reqwest::{multipart, StatusCode};
 use serde::{Deserialize, Serialize};
 
+use super::transcribe::TranscriptionProvider;
 use super::{ChatMessage, ChatResponse, LlmProvider, ToolCall, ToolDefinition};
 
 /// Retry / 限流發生時推給觀察者的事件。可序列化方便給 UI emit。
@@ -266,6 +267,12 @@ impl GroqProvider {
                 //         "claude-cli"(本機 claude CLI subprocess,**chat-only**,
                 //                       不能當主 agent provider — 沒 tool calling)
                 "default_provider": "groq",
+                // 5C:STT 跟 chat 解耦。STT provider 獨立配置,可以
+                // 「STT 走 Groq Whisper、chat 走 ollama」或反過來,
+                // 或兩邊都本機(100% Groq-free)。
+                // 接受值:"groq"(預設,Whisper API)
+                //         "whisper-local"(whisper.cpp,需事先下載 ggml model)
+                "default_transcribe_provider": "groq",
                 // 5A-3:per-skill provider routing(可選)。沒設這塊就全部
                 // 用 default_provider — 跟 5A-2 之前一樣。
                 //
@@ -303,6 +310,17 @@ impl GroqProvider {
                         "binary": super::claude_cli::ClaudeCliProvider::DEFAULT_BINARY,
                         // null = 讓 claude CLI 用預設 model;指定值如 "sonnet" / "opus" / 完整 model id
                         "model": null
+                    },
+                    "whisper-local": {
+                        // ggml `.bin` model file。要先從 huggingface 抓:
+                        //   wget -O ~/.mori/models/ggml-small.bin \
+                        //     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+                        // 中文場景建議 small(466MB);CPU 慢可以用 base(142MB)。
+                        "model_path": super::whisper_local::default_model_path()
+                            .to_string_lossy()
+                            .into_owned(),
+                        // null / "auto" = whisper 自偵測;也可寫 "zh" / "en" 等。
+                        "language": "zh"
                     }
                 }
             });
@@ -493,6 +511,13 @@ impl LlmProvider for GroqProvider {
             content: first.message.content,
             tool_calls,
         })
+    }
+}
+
+#[async_trait]
+impl TranscriptionProvider for GroqProvider {
+    fn name(&self) -> &'static str {
+        "groq"
     }
 
     async fn transcribe(&self, audio: Vec<u8>) -> Result<String> {

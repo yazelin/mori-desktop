@@ -20,6 +20,8 @@ pub mod claude_cli;
 pub mod groq;
 pub mod ollama;
 mod openai_compat;
+pub mod transcribe;
+pub mod whisper_local;
 
 // ─── Provider factory ───────────────────────────────────────────────
 //
@@ -552,9 +554,7 @@ pub trait LlmProvider: Send + Sync {
         messages: Vec<ChatMessage>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ChatResponse>;
-
-    /// 音訊轉文字(支援的 provider 才有,如 Groq Whisper)
-    async fn transcribe(&self, _audio: Vec<u8>) -> Result<String> {
-        anyhow::bail!("provider {} does not support transcription", self.name());
-    }
 }
+
+// transcribe 已從這個 trait 移到 [`super::transcribe::TranscriptionProvider`]
+// (5C)— 該 trait 跟 chat 解耦,LocalWhisper 可以只做 STT 不必假裝會 chat。
