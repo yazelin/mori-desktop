@@ -7,6 +7,7 @@ mod portal_hotkey;
 mod recording;
 #[cfg(target_os = "linux")]
 mod selection;
+mod skill_server;
 
 use std::sync::Arc;
 
@@ -1065,6 +1066,21 @@ fn main() {
                 };
                 if let Err(e) = toggle_mode_for_handler.set_text(label) {
                     tracing::warn!(?e, "tray toggle_mode set_text failed");
+                }
+            });
+
+            // ── Skill HTTP server(5D)─────────────────────────────
+            // bind 127.0.0.1:RANDOM,寫 ~/.mori/runtime.json,讓 mori CLI
+            // (以及外部 AI agent 透過 Bash tool 呼叫的 mori CLI)能連回來
+            // dispatch skill。失敗只 warn 不卡啟動 — Tauri UI 跟語音/chat
+            // pipeline 沒這個 server 也能用。
+            tauri::async_runtime::spawn(async {
+                match crate::skill_server::start().await {
+                    Ok(info) => tracing::info!(
+                        port = info.port,
+                        "skill HTTP server started — Bash CLI proxy ready"
+                    ),
+                    Err(e) => tracing::warn!(?e, "skill HTTP server failed to start"),
                 }
             });
 

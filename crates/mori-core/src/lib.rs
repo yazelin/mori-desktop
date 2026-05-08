@@ -15,6 +15,7 @@ pub mod llm;
 pub mod memory;
 pub mod mode;
 pub mod paste;
+pub mod runtime;
 pub mod skill;
 
 /// crate 版本(供 UI 顯示)

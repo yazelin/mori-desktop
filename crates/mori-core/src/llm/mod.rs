@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod bash_cli_agent;
 pub mod claude_cli;
 pub mod groq;
 pub mod ollama;
@@ -63,6 +64,27 @@ pub fn build_named_provider(
                 .and_then(|p| groq::read_json_pointer(p, "/providers/claude-cli/model"));
             Ok(Arc::new(claude_cli::ClaudeCliProvider::new(binary, model)))
         }
+        "claude-bash" => {
+            // 5D:Bash CLI proxy。claude (或將來 codex/gemini) 走它們自己的
+            // 內部 reasoning,透過 Bash 工具呼叫 mori CLI dispatch skill。
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/binary"))
+                .unwrap_or_else(|| {
+                    bash_cli_agent::BashCliAgentProvider::DEFAULT_BINARY.to_string()
+                });
+            let mori_cli = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/mori_cli_path"))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(bash_cli_agent::BashCliAgentProvider::detect_mori_cli);
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(
+                binary, mori_cli, model,
+            )))
+        }
         "groq" => {
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -102,7 +124,7 @@ pub fn build_chat_provider(
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     let default = read_default_provider();
     let resolved = match default.as_str() {
-        "groq" | "ollama" | "claude-cli" => default.as_str(),
+        "groq" | "ollama" | "claude-cli" | "claude-bash" => default.as_str(),
         other => {
             tracing::warn!(
                 provider = other,
@@ -398,6 +420,17 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 .unwrap_or_else(|| "(claude-cli default)".to_string());
             ProviderSnapshot {
                 name: "claude-cli".into(),
+                model,
+                base_url: None,
+            }
+        }
+        "claude-bash" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/model"))
+                .unwrap_or_else(|| "(agent CLI default)".to_string());
+            ProviderSnapshot {
+                name: "claude-bash".into(),
                 model,
                 base_url: None,
             }

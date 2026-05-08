@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/mori-core",
     "crates/mori-tauri",
+    "crates/mori-cli",
 ]
 
 [workspace.package]

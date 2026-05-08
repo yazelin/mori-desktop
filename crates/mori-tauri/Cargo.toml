@@ -24,6 +24,12 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 
+# Phase 5D — local HTTP skill server for Bash CLI proxy。
+# 啟動時 bind 127.0.0.1:RANDOM,把 port + token 寫到 ~/.mori/runtime.json,
+# 讓 mori CLI(以及外部 AI agent 透過 Bash tool 呼叫 mori CLI)能連回來
+# dispatch skill。
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio"] }
+
 # Audio capture (cross-platform: ALSA on Linux, CoreAudio on macOS, WASAPI on Windows)
 cpal = "0.15"
 # WAV encoding (so we can ship audio bytes to Whisper without an external encoder)
