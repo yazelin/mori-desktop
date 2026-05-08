@@ -21,6 +21,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use arboard::{Clipboard, GetExtLinux, LinuxClipboardKind};
 use async_trait::async_trait;
 use mori_core::paste::{PasteController, PasteResult};
 use tauri::AppHandle;
@@ -31,27 +32,38 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 /// 大概 5-6K total,留有餘地給 Groq gpt-oss-120b TPM)。
 const MAX_SELECTION_CHARS: usize = 1500;
 
-/// 讀 Wayland primary selection(滑鼠反白文字)。
-/// 失敗時回 None — 反白為空、wl-paste 不在 PATH、Wayland session 沒有
-/// primary 等情況都當「沒抓到」處理,**不要** fatal。
+/// 讀 X11 PRIMARY selection(滑鼠反白文字)。
+///
+/// 走 `arboard` 的 X11 backend — 我們強制 `GDK_BACKEND=x11` 讓 Mori 跑
+/// 在 XWayland 相容層,XWayland 自動把 Wayland primary selection 同步到
+/// X11 PRIMARY,所以從 X11 client 視角讀就拿到使用者的反白。**完全不
+/// 走 Wayland portal**,GNOME 不會跳「未知 wl-clipboard 要求剪貼簿存
+/// 取」對話框。
+///
+/// 失敗 / 反白為空 → 回 None。**不**做 fatal。
 pub fn read_primary_selection() -> Option<String> {
-    let output = Command::new("wl-paste")
-        .args(["--primary", "--no-newline"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        // 反白為空時 wl-paste 會 exit code != 0,完全正常,不要 warn。
-        return None;
-    }
-
-    let text = String::from_utf8(output.stdout).ok()?;
+    let mut clipboard = match Clipboard::new() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::debug!(?e, "arboard Clipboard::new failed (no display?)");
+            return None;
+        }
+    };
+    let text = match clipboard.get().clipboard(LinuxClipboardKind::Primary).text() {
+        Ok(t) => t,
+        Err(e) => {
+            // 反白為空 / 不是文字(圖片) / 沒 selection owner 都會 Err,
+            // 全部當「沒抓到」即可,不要 warn 洗 log。
+            tracing::trace!(?e, "primary selection unavailable");
+            return None;
+        }
+    };
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    // Cap 過長的選取(整篇文章不該整個塞 LLM context)。
+    // Cap 過長選取(整篇文章不該整個塞 LLM context)。
     let truncated = if trimmed.chars().count() > MAX_SELECTION_CHARS {
         let head: String = trimmed.chars().take(MAX_SELECTION_CHARS).collect();
         tracing::info!(
@@ -142,9 +154,10 @@ impl PasteController for LinuxPasteController {
 /// Mori 還是能跑(語音、剪貼簿、記憶都不受影響)。只是讓 user 早點
 /// 知道為何 paste-back 待會會 fallback 到 ClipboardOnly。
 pub fn warn_if_setup_missing() {
-    // wl-copy 不再需要 — 我們改走 Tauri 剪貼簿插件寫剪貼簿,只剩 wl-paste
-    // (讀 primary selection)和 ydotool(Ctrl+V 模擬)是 shell-out 路徑。
-    for tool in ["wl-paste", "ydotool"] {
+    // 寫剪貼簿走 Tauri plugin(arboard),讀 primary 也走 arboard,
+    // 兩者都是 in-process X11/XWayland API。剩下的 shell-out 只有 ydotool
+    // (Ctrl+V 模擬,沒有更乾淨的替代)。
+    for tool in ["ydotool"] {
         let ok = Command::new("which")
             .arg(tool)
             .stdout(Stdio::null())
