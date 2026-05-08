@@ -17,13 +17,14 @@
 //! user unit. Reboot once for input-group membership to take effect on
 //! the systemd manager.
 
-use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use mori_core::paste::{PasteController, PasteResult};
+use tauri::AppHandle;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 最大允許的反白字數 — 太長就視為使用者選了整篇，不適合直接送 Whisper /
 /// LLM tool args。1500 是經驗值(中文 ~2000 token,加上提示 + 結果輸出
@@ -66,39 +67,38 @@ pub fn read_primary_selection() -> Option<String> {
     Some(truncated)
 }
 
-/// PasteController 的 Linux 實作:`wl-copy <text> && ydotool key Ctrl+V`。
-pub struct LinuxPasteController;
+/// PasteController 的 Linux 實作:**Tauri 剪貼簿插件**寫剪貼簿(用
+/// Mori 自己 process 走 portal,不會跳「未知 wl-clipboard 要求權限」對話
+/// 框)+ ydotool 模擬 Ctrl+V。
+///
+/// 之前用 `wl-copy` shell-out 會在 GNOME 50 的 xdg-desktop-portal
+/// 跳「未知 wl-clipboard」權限對話框,使用者每次都要手動點允許 — 改
+/// 走 Tauri plugin 之後 Mori 是已註冊的 host app(via portal_hotkey
+/// 的 register_host_app),GNOME 就視為 trusted。
+pub struct LinuxPasteController {
+    app: AppHandle,
+}
+
+impl LinuxPasteController {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
 
 #[async_trait]
 impl PasteController for LinuxPasteController {
     async fn paste_back(&self, text: &str) -> Result<PasteResult> {
-        // ── Step 1:寫入 Wayland 剪貼簿 ────────────────────────────
+        // ── Step 1:寫入 Wayland 剪貼簿(走 Tauri plugin,不 shell-out)──
         // 這步如果壞了等於 paste-back 整套沒希望(連 user 手動 Ctrl+V
         // 都救不了)。Bail out 為 hard error。
-        let mut child = Command::new("wl-copy")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context(
-                "spawn wl-copy (is wl-clipboard installed? \
-                 run setup-wayland-input.sh)",
-            )?;
-        {
-            let stdin = child
-                .stdin
-                .as_mut()
-                .ok_or_else(|| anyhow!("wl-copy stdin"))?;
-            stdin.write_all(text.as_bytes()).context("write to wl-copy stdin")?;
-        }
-        let status = child.wait().context("wl-copy wait")?;
-        if !status.success() {
-            anyhow::bail!("wl-copy exited non-zero ({status})");
-        }
+        self.app
+            .clipboard()
+            .write_text(text.to_string())
+            .context("Tauri clipboard write_text (capability allow-write-text granted?)")?;
 
         // ── Step 2:讓合成器消化一下 selection 變更 ───────────────
-        // 太快送 ydotool 偶爾會在 wl-copy 的 daemon 還沒設好 selection
-        // 之前就觸發 paste,目標 app 抓到「上一個」剪貼簿值。80ms 夠。
+        // 太快送 ydotool 偶爾會在 selection 還沒設好之前就觸發 paste,
+        // 目標 app 抓到「上一個」剪貼簿值。80ms 夠。
         tokio::time::sleep(Duration::from_millis(80)).await;
 
         // ── Step 3:ydotool 模擬 Ctrl+V ────────────────────────────
@@ -142,7 +142,9 @@ impl PasteController for LinuxPasteController {
 /// Mori 還是能跑(語音、剪貼簿、記憶都不受影響)。只是讓 user 早點
 /// 知道為何 paste-back 待會會 fallback 到 ClipboardOnly。
 pub fn warn_if_setup_missing() {
-    for tool in ["wl-paste", "wl-copy", "ydotool"] {
+    // wl-copy 不再需要 — 我們改走 Tauri 剪貼簿插件寫剪貼簿,只剩 wl-paste
+    // (讀 primary selection)和 ydotool(Ctrl+V 模擬)是 shell-out 路徑。
+    for tool in ["wl-paste", "ydotool"] {
         let ok = Command::new("which")
             .arg(tool)
             .stdout(Stdio::null())

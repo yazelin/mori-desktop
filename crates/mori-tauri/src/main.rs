@@ -519,7 +519,7 @@ async fn run_chat_pipeline(
         #[cfg(target_os = "linux")]
         {
             let paste_controller: Arc<dyn PasteController> =
-                Arc::new(crate::selection::LinuxPasteController);
+                Arc::new(crate::selection::LinuxPasteController::new(app.clone()));
             registry.register(Arc::new(PasteSelectionBackSkill::new(paste_controller)));
         }
         let registry = Arc::new(registry);
