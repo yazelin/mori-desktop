@@ -161,21 +161,26 @@ fn build_info() -> serde_json::Value {
     })
 }
 
-/// 目前生效的 chat provider + model + Ollama warm-up 狀態。讀
-/// ~/.mori/config.json,跟 build_chat_provider() 走同一條 fallback。
-/// 前端拿來秀 status row,user 不用 grep config 就知道是 groq 還是 ollama。
+/// 目前生效的 chat provider + model + Ollama warm-up 狀態 + 5A-3 routing
+/// overrides。讀 ~/.mori/config.json,跟 Routing::build_from_config 走同一條
+/// fallback。前端拿來秀 status row + tooltip 顯示 skill 級別的路由。
 ///
-/// `warmup` 從 AppState 取目前快照(loading/ready/failed/null),
-/// 解決 React listener 來不及訂閱就錯過 emit 的 race。後續 transition
-/// 仍走 `ollama-warmup` event。
+/// `warmup` 從 AppState 取目前快照(loading/ready/failed/null),解決 React
+/// listener 來不及訂閱就錯過 emit 的 race。後續 transition 仍走
+/// `ollama-warmup` event。
+///
+/// `skill_overrides` 是 routing.skills 的原始 mapping(skill name → provider name)。
+/// 沒設 routing 就回空物件,等於「全部用 agent」。
 #[tauri::command]
 fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
     let snap = mori_core::llm::active_chat_provider_snapshot();
+    let routing = mori_core::llm::read_routing_config();
     let warmup = *state.ollama_warmup.lock();
     serde_json::json!({
         "name": snap.name,
         "model": snap.model,
         "warmup": warmup,
+        "skill_overrides": routing.skills,
     })
 }
 
@@ -272,11 +277,12 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
         }
     }
 
-    // Phase 5A-1: chat provider 走 config-driven factory
-    // (default_provider="groq" / "ollama"),retry callback 只對 Groq 有意義
-    // 也透傳進 factory(內部會 ignore 給 Ollama)。
-    let provider = match mori_core::llm::build_chat_provider(Some(retry_callback_for(app.clone()))) {
-        Ok(p) => p,
+    // Phase 5A-3: routing 拆出 agent provider + per-skill provider override。
+    // Agent 走 `routing.agent`(可走 tool calling 的:groq / ollama);個別 skill
+    // 可在 `routing.skills.<name>` 指到 chat-only provider(claude-cli)用 user
+    // 自己的 quota。沒設 routing 時整套退化成全部用 default_provider。
+    let routing = match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone()))) {
+        Ok(r) => r,
         Err(e) => {
             state.set_phase(
                 &app,
@@ -287,10 +293,11 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
             return;
         }
     };
+    let routing = Arc::new(routing);
 
     let state_clone = state.inner().clone();
     tauri::async_runtime::spawn(async move {
-        run_chat_pipeline(app, state_clone, text, provider).await;
+        run_chat_pipeline(app, state_clone, text, routing).await;
     });
 }
 
@@ -479,12 +486,11 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             }
         };
 
-        // Stage 2: chat provider 走 config-driven factory(可能 Groq、可能
-        // Ollama,phase 5A-2 後也可能 Claude CLI)。STT 跟 chat 解耦了,語音
-        // 一定走 Groq Whisper,但接 chat 那輪可以 free-pick。
-        let provider_arc =
-            match mori_core::llm::build_chat_provider(Some(retry_callback_for(app.clone()))) {
-                Ok(p) => p,
+        // Stage 2: routing 拆 agent + per-skill provider(5A-3)。STT 一定走 Groq
+        // Whisper(stage 1),但 chat 跟 skill 各自的 provider 由 routing 決定。
+        let routing =
+            match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone()))) {
+                Ok(r) => Arc::new(r),
                 Err(e) => {
                     state.set_phase(
                         &app,
@@ -495,7 +501,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                     return;
                 }
             };
-        run_chat_pipeline(app, state, transcript, provider_arc).await;
+        run_chat_pipeline(app, state, transcript, routing).await;
     });
 }
 
@@ -509,7 +515,7 @@ async fn run_chat_pipeline(
     app: AppHandle,
     state: Arc<AppState>,
     transcript: String,
-    provider: Arc<dyn LlmProvider>,
+    routing: Arc<mori_core::llm::Routing>,
 ) {
     state.set_phase(
         &app,
@@ -553,11 +559,12 @@ async fn run_chat_pipeline(
         registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
         registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
         registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
-        // Text skills(phase 2)
-        registry.register(Arc::new(TranslateSkill::new(provider.clone())));
-        registry.register(Arc::new(PolishSkill::new(provider.clone())));
-        registry.register(Arc::new(SummarizeSkill::new(provider.clone())));
-        registry.register(Arc::new(ComposeSkill::new(provider.clone())));
+        // Text skills(phase 2)— 5A-3 起每個 skill 走自己的 routing override,
+        // 沒設 override 就 fallback 到 routing.agent。
+        registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
+        registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
+        registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
+        registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
         // Mode 控制 skill(phase 4B-2):「晚安」/「醒醒」走這條
         let mode_controller: Arc<dyn ModeController> = Arc::new(StateModeController {
             state: state.clone(),
@@ -575,7 +582,7 @@ async fn run_chat_pipeline(
         }
         let registry = Arc::new(registry);
 
-        let agent = Agent::new(provider, registry);
+        let agent = Agent::new(routing.agent.clone(), registry);
         let turn = agent
             .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
             .await?;

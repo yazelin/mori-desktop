@@ -27,24 +27,19 @@ mod openai_compat;
 // 欄位,構造對應 LlmProvider 回傳。Groq / Ollama 走不同 default。
 // retry_callback 只對 Groq 有意義(Ollama 本機沒 rate limit)。
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-/// 從 `~/.mori/config.json` 蓋出 chat provider。
-/// 配置:
-/// - `default_provider`: "groq"(預設) | "ollama"
-/// - `providers.groq.{api_key, chat_model}`
-/// - `providers.ollama.{base_url, model}`
+/// 由名字蓋一個 LlmProvider。`name` 是 config 裡的 provider key
+/// ("groq" / "ollama" / "claude-cli")。retry_cb 只在 Groq 用上,其他 ignore。
 ///
-/// retry_callback 只在 Groq 路徑套用(Ollama 本機沒 rate-limit)。
-pub fn build_chat_provider(
+/// 不知道的 name 會回 Err,讓呼叫端能看到錯字 — 不像 `build_chat_provider`
+/// 把未知值 silently fallback 到 groq。Routing 路徑要嚴一點。
+pub fn build_named_provider(
+    name: &str,
     retry_cb: Option<groq::RetryCallback>,
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
-    let default = mori_config_path()
-        .as_deref()
-        .and_then(|p| groq::read_json_pointer(p, "/default_provider"))
-        .unwrap_or_else(|| "groq".to_string());
-
-    match default.as_str() {
+    match name {
         "ollama" => {
             let base_url = mori_config_path()
                 .as_deref()
@@ -54,7 +49,6 @@ pub fn build_chat_provider(
                 .as_deref()
                 .and_then(|p| groq::read_json_pointer(p, "/providers/ollama/model"))
                 .unwrap_or_else(|| ollama::OllamaProvider::DEFAULT_MODEL.to_string());
-            tracing::info!(provider = "ollama", model = %model, base_url = %base_url, "chat provider selected");
             Ok(Arc::new(ollama::OllamaProvider::new(base_url, model)))
         }
         "claude-cli" => {
@@ -65,34 +59,18 @@ pub fn build_chat_provider(
             let model = mori_config_path()
                 .as_deref()
                 .and_then(|p| groq::read_json_pointer(p, "/providers/claude-cli/model"));
-            tracing::info!(
-                provider = "claude-cli",
-                model = ?model,
-                binary = %binary,
-                "chat provider selected — note: chat-only, no tool calling. \
-                 Use only for skill-internal chat, not main agent dispatch."
-            );
             Ok(Arc::new(claude_cli::ClaudeCliProvider::new(binary, model)))
         }
-        other => {
-            if other != "groq" {
-                tracing::warn!(
-                    provider = other,
-                    "unknown default_provider — falling back to 'groq'",
-                );
-            }
+        "groq" => {
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "no GROQ_API_KEY configured. Edit ~/.mori/config.json or set $GROQ_API_KEY \
-                     (or set default_provider to 'ollama' / 'claude-cli' if you want to use \
-                      a local provider)"
+                    "no GROQ_API_KEY configured. Edit ~/.mori/config.json or set $GROQ_API_KEY"
                 )
             })?;
             let model = mori_config_path()
                 .as_deref()
                 .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
                 .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
-            tracing::info!(provider = "groq", model = %model, "chat provider selected");
             let p = groq::GroqProvider::new(key, model);
             let p = if let Some(cb) = retry_cb {
                 p.with_retry_callback(cb)
@@ -101,8 +79,283 @@ pub fn build_chat_provider(
             };
             Ok(Arc::new(p))
         }
+        other => anyhow::bail!(
+            "unknown provider name '{}' — supported: groq, ollama, claude-cli",
+            other
+        ),
     }
 }
+
+/// 從 `~/.mori/config.json` 蓋出**主 chat provider**。配置:
+/// - `default_provider`: "groq"(預設) | "ollama" | "claude-cli"
+/// - `providers.<name>.<...>` 各 provider 細節
+///
+/// 未知 default_provider 會 silently fallback 到 groq + warn(舊行為,
+/// 不破壞既有 user)。retry_callback 只在 Groq 路徑套用。
+///
+/// **Note**:5A-3 起若有 `routing` 區塊,主 agent 應該用 [`Routing`]
+/// 而不是這個函式;這個只給沒設 routing 的舊路徑用。
+pub fn build_chat_provider(
+    retry_cb: Option<groq::RetryCallback>,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    let default = read_default_provider();
+    let resolved = match default.as_str() {
+        "groq" | "ollama" | "claude-cli" => default.as_str(),
+        other => {
+            tracing::warn!(
+                provider = other,
+                "unknown default_provider — falling back to 'groq'",
+            );
+            "groq"
+        }
+    };
+    let p = build_named_provider(resolved, retry_cb)?;
+    tracing::info!(provider = %p.name(), model = %p.model(), "chat provider selected");
+    Ok(p)
+}
+
+/// 5A-3:per-skill provider routing。Mori agent loop 跟每個 skill 內部
+/// chat 都可以指定不同 provider,用來:
+/// - 讓 agent 走 Groq tool-calling(快、會 dispatch tool),skill 內部
+///   推理走 Claude CLI(quota 用 user 自己的 Pro/Max)或 Ollama(本機免錢)
+/// - 之後加 fallback chain(5A-3b)時也以這個結構為基礎
+///
+/// 沒有 `routing` block 的 config 會退化成全部用 `default_provider`,
+/// 跟 5A-2 之前的行為一致。
+pub struct Routing {
+    /// 主 agent loop 的 provider。**必須** supports_tool_calling,否則
+    /// skill dispatch 會失效(只會拿到純文字 fallback)— build 時若
+    /// 不支援會 warn 但不 fail。
+    pub agent: Arc<dyn LlmProvider>,
+    /// Skill 名字 → provider 的 override map。Map 沒列到的 skill 用
+    /// `agent` 當 fallback。
+    pub skills: HashMap<String, Arc<dyn LlmProvider>>,
+}
+
+impl Routing {
+    /// 取 skill `name` 該用的 provider — 先看 override 再 fallback 到 agent。
+    pub fn skill_provider(&self, name: &str) -> Arc<dyn LlmProvider> {
+        self.skills
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| self.agent.clone())
+    }
+
+    /// 從 `~/.mori/config.json` 的 `routing` block 蓋出整套 routing。
+    ///
+    /// retry_cb 只會 attach 到構造出的 Groq 實例 — 即便 routing 用了多個
+    /// provider,Groq 那個會收到 callback,其他不會。
+    pub fn build_from_config(
+        retry_cb: Option<groq::RetryCallback>,
+    ) -> anyhow::Result<Self> {
+        let default = read_default_provider();
+        let cfg = read_routing_config();
+
+        let agent_name = cfg
+            .agent
+            .clone()
+            .unwrap_or_else(|| default.clone());
+
+        // 收集所有需要構造的 provider names — agent + 所有 skill override values
+        let mut needed: HashSet<String> = HashSet::new();
+        needed.insert(agent_name.clone());
+        for v in cfg.skills.values() {
+            needed.insert(v.clone());
+        }
+
+        // 蓋出每個 unique provider。retry_cb 只發給 groq;其他 None。
+        let mut built: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
+        for name in &needed {
+            let cb = if name == "groq" { retry_cb.clone() } else { None };
+            let p = build_named_provider(name, cb)
+                .with_context(|| format!("build provider '{}'", name))?;
+            built.insert(name.clone(), p);
+        }
+
+        let agent = built
+            .get(&agent_name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("agent provider '{}' not built", agent_name))?;
+
+        if !agent.supports_tool_calling() {
+            tracing::warn!(
+                agent = %agent_name,
+                "configured agent provider does not support tool calling — \
+                 main agent loop will get text-only fallback responses, skill \
+                 dispatch will not fire. Use 'groq' or 'ollama' for agent, \
+                 keep chat-only providers (claude-cli) for skill overrides."
+            );
+        }
+
+        let skills: HashMap<String, Arc<dyn LlmProvider>> = cfg
+            .skills
+            .iter()
+            .filter_map(|(skill_name, provider_name)| {
+                built
+                    .get(provider_name)
+                    .map(|p| (skill_name.clone(), p.clone()))
+            })
+            .collect();
+
+        tracing::info!(
+            agent = %agent_name,
+            agent_model = %agent.model(),
+            agent_tools = agent.supports_tool_calling(),
+            skill_overrides = ?cfg.skills,
+            "routing built"
+        );
+
+        Ok(Self { agent, skills })
+    }
+}
+
+/// `routing` block 解析快照 — 結構簡單,純 String 對應。給 IPC / log /
+/// `Routing::build_from_config` 用。
+#[derive(Default, Debug, Clone)]
+pub struct RoutingConfig {
+    /// `routing.agent`(可選),沒設就退化成 `default_provider`
+    pub agent: Option<String>,
+    /// `routing.skills` 的 skill→provider 對應表
+    pub skills: HashMap<String, String>,
+}
+
+fn read_default_provider() -> String {
+    mori_config_path()
+        .as_deref()
+        .and_then(|p| groq::read_json_pointer(p, "/default_provider"))
+        .unwrap_or_else(|| "groq".to_string())
+}
+
+/// 讀 `routing.agent` + `routing.skills` 子物件。沒檔案 / 沒 routing /
+/// 解析失敗都回 default(空 routing,等於沿用 default_provider 行為)。
+pub fn read_routing_config() -> RoutingConfig {
+    match mori_config_path() {
+        Some(path) => read_routing_config_at(&path),
+        None => RoutingConfig::default(),
+    }
+}
+
+/// 純函式版本(可測):從指定 path 讀 routing block。
+pub fn read_routing_config_at(path: &std::path::Path) -> RoutingConfig {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return RoutingConfig::default();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return RoutingConfig::default();
+    };
+
+    let agent = json
+        .pointer("/routing/agent")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let skills: HashMap<String, String> = json
+        .pointer("/routing/skills")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    RoutingConfig { agent, skills }
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_config(json: &str) -> tempfile::TempDir {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json"), json).unwrap();
+        dir
+    }
+
+    #[test]
+    fn nonexistent_file_returns_default() {
+        let dir = tempdir().unwrap();
+        let cfg = read_routing_config_at(&dir.path().join("nope.json"));
+        assert!(cfg.agent.is_none());
+        assert!(cfg.skills.is_empty());
+    }
+
+    #[test]
+    fn malformed_json_returns_default() {
+        let dir = write_config("{ invalid json");
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert!(cfg.agent.is_none());
+        assert!(cfg.skills.is_empty());
+    }
+
+    #[test]
+    fn missing_routing_block_returns_default() {
+        let dir = write_config(r#"{"default_provider":"groq"}"#);
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert!(cfg.agent.is_none());
+        assert!(cfg.skills.is_empty());
+    }
+
+    #[test]
+    fn agent_only_no_skills() {
+        let dir = write_config(r#"{"routing":{"agent":"ollama"}}"#);
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert_eq!(cfg.agent.as_deref(), Some("ollama"));
+        assert!(cfg.skills.is_empty());
+    }
+
+    #[test]
+    fn skills_only_no_agent() {
+        let dir = write_config(
+            r#"{"routing":{"skills":{"translate":"claude-cli","polish":"ollama"}}}"#,
+        );
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert!(cfg.agent.is_none());
+        assert_eq!(cfg.skills.len(), 2);
+        assert_eq!(cfg.skills.get("translate").map(String::as_str), Some("claude-cli"));
+        assert_eq!(cfg.skills.get("polish").map(String::as_str), Some("ollama"));
+    }
+
+    #[test]
+    fn null_agent_treated_as_unset() {
+        let dir = write_config(r#"{"routing":{"agent":null,"skills":{}}}"#);
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert!(cfg.agent.is_none());
+    }
+
+    #[test]
+    fn full_routing_block() {
+        let dir = write_config(
+            r#"{
+                "default_provider":"groq",
+                "routing":{
+                    "agent":"groq",
+                    "skills":{
+                        "translate":"claude-cli",
+                        "polish":"claude-cli",
+                        "summarize":"ollama"
+                    }
+                }
+            }"#,
+        );
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert_eq!(cfg.agent.as_deref(), Some("groq"));
+        assert_eq!(cfg.skills.len(), 3);
+    }
+
+    #[test]
+    fn non_string_skill_value_filtered_out() {
+        // 例如 user 誤打成 number — 不該炸,只 skip 那個 key
+        let dir = write_config(r#"{"routing":{"skills":{"a":"groq","b":42}}}"#);
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert_eq!(cfg.skills.len(), 1);
+        assert!(cfg.skills.contains_key("a"));
+        assert!(!cfg.skills.contains_key("b"));
+    }
+}
+
+use anyhow::Context as _;
 
 /// 目前生效的 chat provider 設定快照。給 UI / IPC / warm-up 用,
 /// 避免各處重複讀 config + 各自落 fallback。
@@ -115,12 +368,12 @@ pub struct ProviderSnapshot {
 }
 
 pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
-    let default = mori_config_path()
-        .as_deref()
-        .and_then(|p| groq::read_json_pointer(p, "/default_provider"))
-        .unwrap_or_else(|| "groq".to_string());
+    // 5A-3 起:agent 走 `routing.agent`(若設)→ `default_provider`(若設)→ "groq"
+    let routing = read_routing_config();
+    let default = read_default_provider();
+    let active = routing.agent.unwrap_or_else(|| default.clone());
 
-    match default.as_str() {
+    match active.as_str() {
         "ollama" => {
             let base_url = mori_config_path()
                 .as_deref()
@@ -283,6 +536,15 @@ pub trait LlmProvider: Send + Sync {
 
     /// 模型 id
     fn model(&self) -> &str;
+
+    /// 這個 provider 是否能 dispatch tool calls。
+    /// `true`(default):可以當主 agent loop 的 provider。
+    /// `false`:只能拿來做 skill 內部 chat — 例如 Claude CLI 沒有 OpenAI 風格
+    /// 的 function-calling channel。Routing 在挑 agent provider 時會檢查這個
+    /// 旗標,若使用者誤把 chat-only provider 配給 agent 會 warn(或 fail)。
+    fn supports_tool_calling(&self) -> bool {
+        true
+    }
 
     /// 跑一輪 chat completion。
     async fn chat(

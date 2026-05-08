@@ -105,6 +105,10 @@ impl LlmProvider for ClaudeCliProvider {
         self.model.as_deref().unwrap_or("(claude-cli default)")
     }
 
+    fn supports_tool_calling(&self) -> bool {
+        false
+    }
+
     async fn chat(
         &self,
         messages: Vec<ChatMessage>,
