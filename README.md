@@ -84,7 +84,8 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ⏳ codex / gemini CLI 適配 | 證明「Bash CLI proxy 換 binary 就行」這個賣點。架構已通用,需實測 | 5D-2 |
+| ⏳ codex / gemini CLI 適配(agent 模式) | 證明「Bash CLI proxy 換 binary 就行」這個賣點。gemini:`-p "" --yolo --output-format text` / codex:`exec --dangerously-bypass-approvals-and-sandbox`。system prompt 嵌 stdin 頂部(兩者都沒有 `--system-prompt` flag) | 5D-2 |
+| ⏳ gemini-cli / codex-cli(chat-only 模式) | 讓 routing.skills 也能指定 gemini/codex 當 skill 內部 LLM(類似 claude-cli)。目前 chat-only 沒有乾淨的 flag,gemini 靠省略 `--yolo`、codex 無明確分法,暫用 claude-cli 頂替 | 5D-3 |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
 | ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
