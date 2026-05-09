@@ -108,6 +108,14 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
+## Phase 5D-3 — gemini-cli + codex-cli chat-only(2026-05-09,完成)
+
+- [x] `CliProtocol::GeminiChat` / `CodexChat`:省略 agent 旗標,non-TTY 下 tool 執行無法被核准 → chat-only
+- [x] `BashCliAgentProvider::new_with_protocol()`:顯式指定 protocol,不靠 binary 名稱偵測
+- [x] `supports_tool_calling() = false` → 可安全用於 `routing.skills`,不觸發 anti-recursion guard
+- [x] `build_named_provider` 新增 `"gemini-cli"` / `"codex-cli"` provider key
+- [x] README 補 config 範例
+
 ## Phase 5 — 記憶加速 + UI 美感(2026-10-11)
 
 - [ ] `MemoryStore` 加 `sqlite-vec` 加速層(向量搜尋)
