@@ -31,17 +31,43 @@ use tokio::process::Command;
 
 use super::{ChatMessage, ChatResponse, LlmProvider, ToolCall, ToolDefinition};
 
+/// 各 AI CLI 的呼叫協定差異。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliProtocol {
+    /// `claude --print --no-session-persistence --allowedTools ... --system-prompt ...`
+    Claude,
+    /// `gemini -p "" --yolo --output-format text`，system prompt 嵌 stdin 頂部
+    Gemini,
+    /// `codex exec --dangerously-bypass-approvals-and-sandbox`，system prompt 嵌 stdin 頂部
+    Codex,
+}
+
+impl CliProtocol {
+    /// 從 binary 檔名自動偵測協定。
+    fn detect(binary: &str) -> Self {
+        let name = std::path::Path::new(binary)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(binary);
+        match name {
+            "gemini" => Self::Gemini,
+            "codex" => Self::Codex,
+            _ => Self::Claude,
+        }
+    }
+}
+
 pub struct BashCliAgentProvider {
-    /// agent CLI binary("claude" / "codex" / "gemini" / 自訂)
+    /// agent CLI binary("claude" / "gemini" / "codex" / 自訂)
     binary: String,
-    /// mori CLI binary 路徑(絕對 path 比較穩),會在 system prompt + allowedTools
-    /// 裡 reference。
+    /// mori CLI binary 路徑(絕對 path 比較穩)
     mori_cli_path: PathBuf,
-    /// `--model` 可選 override(claude 才有意義)
+    /// `--model` 可選 override
     model: Option<String>,
-    /// `--allowedTools` 用的 binary 名稱(從 mori_cli_path 取 file_name)。
-    /// claude 把這個塞進 `Bash(mori_basename *)` 做白名單。
+    /// mori binary 的檔名(claude allowedTools 白名單用)
     mori_basename: String,
+    /// 從 binary 名稱自動偵測的呼叫協定
+    protocol: CliProtocol,
 }
 
 impl BashCliAgentProvider {
@@ -53,16 +79,19 @@ impl BashCliAgentProvider {
         mori_cli_path: PathBuf,
         model: Option<String>,
     ) -> Self {
+        let binary = binary.into();
+        let protocol = CliProtocol::detect(&binary);
         let mori_basename = mori_cli_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("mori")
             .to_string();
         Self {
-            binary: binary.into(),
+            binary,
             mori_cli_path,
             model,
             mori_basename,
+            protocol,
         }
     }
 
@@ -122,8 +151,11 @@ impl BashCliAgentProvider {
 #[async_trait]
 impl LlmProvider for BashCliAgentProvider {
     fn name(&self) -> &'static str {
-        // 對外回的 name 是固定的(LlmProvider trait 要 &'static),實際 binary 在 log 用 binary 欄位露出。
-        "bash-cli-agent"
+        match self.protocol {
+            CliProtocol::Claude => "bash-cli-agent",
+            CliProtocol::Gemini => "gemini-bash",
+            CliProtocol::Codex  => "codex-bash",
+        }
     }
 
     fn model(&self) -> &str {
@@ -143,45 +175,78 @@ impl LlmProvider for BashCliAgentProvider {
     ) -> Result<ChatResponse> {
         // Tools 列表故意忽略 — 我們把 dispatch 的決策外包給 CLI,Mori 內部
         // 看到的是 single-shot chat。CLI 收 system prompt 知道有 mori CLI 可用。
-        let transcript = format_transcript(&messages);
         let system_prompt = self.system_prompt();
+        let transcript = format_transcript(&messages);
 
-        let allowed_tools = format!("Bash({} *)", self.mori_basename);
-        let mut cmd = Command::new(&self.binary);
-        cmd.arg("--print")
-            .arg("--no-session-persistence")
-            .arg("--allowedTools")
-            .arg(&allowed_tools)
-            .arg("--system-prompt")
-            .arg(&system_prompt);
-        if let Some(model) = &self.model {
-            cmd.arg("--model").arg(model);
-        }
-        // mori CLI 需要在 PATH 找得到,或者使用絕對路徑被 Bash 直接執行。
-        // 讓 claude 子程序繼承我們的 PATH,並補上 mori-cli 所在 dir。
+        // PATH 注入:讓子程序能找到 mori CLI binary。
         let extra_path = self
             .mori_cli_path
             .parent()
             .map(|p| p.to_path_buf())
             .filter(|p| !p.as_os_str().is_empty());
-        if let Some(extra) = extra_path {
+        let patched_path = extra_path.map(|extra| {
             let cur = std::env::var("PATH").unwrap_or_default();
-            let new_path = if cur.is_empty() {
+            if cur.is_empty() {
                 extra.to_string_lossy().into_owned()
             } else {
                 format!("{}:{}", extra.display(), cur)
-            };
-            cmd.env("PATH", new_path);
+            }
+        });
+
+        let (mut cmd, stdin_bytes, suppress_stderr) = match self.protocol {
+            CliProtocol::Claude => {
+                let allowed_tools = format!("Bash({} *)", self.mori_basename);
+                let mut c = Command::new(&self.binary);
+                c.arg("--print")
+                    .arg("--no-session-persistence")
+                    .arg("--allowedTools").arg(&allowed_tools)
+                    .arg("--system-prompt").arg(&system_prompt);
+                if let Some(model) = &self.model {
+                    c.arg("--model").arg(model);
+                }
+                (c, transcript.into_bytes(), false)
+            }
+            CliProtocol::Gemini => {
+                // system prompt 嵌進 stdin 頂部;YOLO 警告走 stderr → 丟掉。
+                let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
+                let mut c = Command::new(&self.binary);
+                c.arg("-p").arg("")
+                    .arg("--yolo")
+                    .arg("--output-format").arg("text");
+                if let Some(model) = &self.model {
+                    c.arg("--model").arg(model);
+                }
+                (c, stdin_content.into_bytes(), true)
+            }
+            CliProtocol::Codex => {
+                // codex 走 `codex exec` subcommand；system prompt 嵌進 stdin 頂部。
+                let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
+                let mut c = Command::new(&self.binary);
+                c.arg("exec")
+                    .arg("--dangerously-bypass-approvals-and-sandbox");
+                if let Some(model) = &self.model {
+                    c.arg("--model").arg(model);
+                }
+                (c, stdin_content.into_bytes(), false)
+            }
+        };
+
+        if let Some(path) = patched_path {
+            cmd.env("PATH", path);
         }
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            .stderr(if suppress_stderr {
+                std::process::Stdio::null()
+            } else {
+                std::process::Stdio::piped()
+            });
 
         tracing::debug!(
             binary = %self.binary,
+            protocol = ?self.protocol,
             mori_cli = %self.mori_cli_path.display(),
-            allowed_tools = %allowed_tools,
-            transcript_chars = transcript.len(),
+            stdin_chars = stdin_bytes.len(),
             "bash-cli-agent chat request",
         );
 
@@ -191,9 +256,9 @@ impl LlmProvider for BashCliAgentProvider {
 
         if let Some(mut stdin) = child.stdin.take() {
             stdin
-                .write_all(transcript.as_bytes())
+                .write_all(&stdin_bytes)
                 .await
-                .context("write transcript to agent CLI stdin")?;
+                .context("write to agent CLI stdin")?;
         }
 
         let output = child
@@ -207,7 +272,7 @@ impl LlmProvider for BashCliAgentProvider {
                 "{} CLI failed (exit={}): {}",
                 self.binary,
                 output.status,
-                stderr.trim()
+                if stderr.is_empty() { "(stderr suppressed)" } else { stderr.trim() }
             );
         }
 
@@ -221,6 +286,11 @@ impl LlmProvider for BashCliAgentProvider {
             tool_calls: Vec::<ToolCall>::new(),
         })
     }
+}
+
+/// Gemini / Codex 沒有 `--system-prompt` flag，把 system prompt 嵌進 stdin 頂部。
+fn format_stdin_with_system(system: &str, transcript: &str) -> String {
+    format!("## Instructions\n{system}\n\n{transcript}")
 }
 
 /// 把 messages 拍平成 user/assistant 對話 transcript。跟 ClaudeCliProvider
@@ -268,35 +338,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn name_default_model() {
-        let p = BashCliAgentProvider::new(
-            "claude",
-            PathBuf::from("/tmp/mori"),
-            None,
-        );
-        assert_eq!(p.name(), "bash-cli-agent");
-        assert_eq!(p.model(), "(agent CLI default)");
-        assert!(p.supports_tool_calling());
+    fn protocol_detected_from_binary() {
+        let claude = BashCliAgentProvider::new("claude", PathBuf::from("/tmp/mori"), None);
+        assert_eq!(claude.protocol, CliProtocol::Claude);
+        assert_eq!(claude.name(), "bash-cli-agent");
+
+        let gemini = BashCliAgentProvider::new("gemini", PathBuf::from("/tmp/mori"), None);
+        assert_eq!(gemini.protocol, CliProtocol::Gemini);
+        assert_eq!(gemini.name(), "gemini-bash");
+
+        let codex = BashCliAgentProvider::new("codex", PathBuf::from("/tmp/mori"), None);
+        assert_eq!(codex.protocol, CliProtocol::Codex);
+        assert_eq!(codex.name(), "codex-bash");
+    }
+
+    #[test]
+    fn unknown_binary_defaults_to_claude_protocol() {
+        let p = BashCliAgentProvider::new("my-custom-ai", PathBuf::from("/tmp/mori"), None);
+        assert_eq!(p.protocol, CliProtocol::Claude);
     }
 
     #[test]
     fn explicit_model_shows_through() {
-        let p = BashCliAgentProvider::new(
-            "claude",
-            PathBuf::from("/tmp/mori"),
-            Some("opus".into()),
-        );
+        let p = BashCliAgentProvider::new("claude", PathBuf::from("/tmp/mori"), Some("opus".into()));
         assert_eq!(p.model(), "opus");
+        assert!(p.supports_tool_calling());
     }
 
     #[test]
     fn mori_basename_extracted() {
-        let p = BashCliAgentProvider::new(
-            "claude",
-            PathBuf::from("/usr/local/bin/mori-tool"),
-            None,
-        );
+        let p = BashCliAgentProvider::new("claude", PathBuf::from("/usr/local/bin/mori-tool"), None);
         assert_eq!(p.mori_basename, "mori-tool");
+    }
+
+    #[test]
+    fn format_stdin_with_system_prepends_instructions() {
+        let result = format_stdin_with_system("你是 Mori", "User: 你好");
+        assert!(result.starts_with("## Instructions\n你是 Mori\n\n"));
+        assert!(result.ends_with("User: 你好"));
     }
 
     #[test]
