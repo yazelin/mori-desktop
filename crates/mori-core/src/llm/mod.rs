@@ -85,6 +85,36 @@ pub fn build_named_provider(
                 binary, mori_cli, model,
             )))
         }
+        "gemini-bash" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-bash/binary"))
+                .unwrap_or_else(|| "gemini".to_string());
+            let mori_cli = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-bash/mori_cli_path"))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(bash_cli_agent::BashCliAgentProvider::detect_mori_cli);
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-bash/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(binary, mori_cli, model)))
+        }
+        "codex-bash" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-bash/binary"))
+                .unwrap_or_else(|| "codex".to_string());
+            let mori_cli = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-bash/mori_cli_path"))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(bash_cli_agent::BashCliAgentProvider::detect_mori_cli);
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-bash/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(binary, mori_cli, model)))
+        }
         "groq" => {
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -124,7 +154,7 @@ pub fn build_chat_provider(
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     let default = read_default_provider();
     let resolved = match default.as_str() {
-        "groq" | "ollama" | "claude-cli" | "claude-bash" => default.as_str(),
+        "groq" | "ollama" | "claude-cli" | "claude-bash" | "gemini-bash" | "codex-bash" => default.as_str(),
         other => {
             tracing::warn!(
                 provider = other,
@@ -228,11 +258,14 @@ impl Routing {
             })
             .collect();
 
-        // Anti-recursion guard:bash-cli-agent 是「我就是 spawn CLI 當 agent」
-        // 型,當 skill provider 會無限遞迴 spawn claude → polish skill →
-        // 又 spawn claude →…。自動 fallback 到 claude-cli(chat-only,不會自己
-        // 再 spawn 別的)。User 仍可在 routing.skills 顯式覆寫。
-        let skill_fallback = if agent.name() == "bash-cli-agent" {
+        // Anti-recursion guard:bash-cli 系列 provider(bash-cli-agent /
+        // gemini-bash / codex-bash)是「spawn 外部 AI CLI」型,若當 skill
+        // provider 會無限遞迴:agent spawn gemini → gemini call mori skill
+        // translate → TranslateSkill 用 gemini-bash → 又 spawn gemini →…。
+        // 自動 fallback 到 claude-cli(chat-only,不再 spawn)。
+        // User 仍可在 routing.skills 顯式覆寫個別 skill。
+        let is_bash_cli = matches!(agent.name(), "bash-cli-agent" | "gemini-bash" | "codex-bash");
+        let skill_fallback = if is_bash_cli {
             let fallback_name = "claude-cli";
             let p = match built.get(fallback_name) {
                 Some(p) => p.clone(),
@@ -248,7 +281,7 @@ impl Routing {
             tracing::warn!(
                 agent = %agent_name,
                 fallback = %fallback_name,
-                "agent is bash-cli-agent — auto-fallback skills to '{}' to avoid recursion. \
+                "agent is bash-cli type — auto-fallback skills to '{}' to avoid recursion. \
                  Set routing.skills.<name> in config to override per skill.",
                 fallback_name,
             );
@@ -470,11 +503,21 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 .as_deref()
                 .and_then(|p| groq::read_json_pointer(p, "/providers/claude-bash/model"))
                 .unwrap_or_else(|| "(agent CLI default)".to_string());
-            ProviderSnapshot {
-                name: "claude-bash".into(),
-                model,
-                base_url: None,
-            }
+            ProviderSnapshot { name: "claude-bash".into(), model, base_url: None }
+        }
+        "gemini-bash" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-bash/model"))
+                .unwrap_or_else(|| "(gemini default)".to_string());
+            ProviderSnapshot { name: "gemini-bash".into(), model, base_url: None }
+        }
+        "codex-bash" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-bash/model"))
+                .unwrap_or_else(|| "(codex default)".to_string());
+            ProviderSnapshot { name: "codex-bash".into(), model, base_url: None }
         }
         _ => {
             let model = mori_config_path()
