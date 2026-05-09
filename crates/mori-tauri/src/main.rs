@@ -1277,8 +1277,9 @@ fn main() {
             // (以及外部 AI agent 透過 Bash tool 呼叫的 mori CLI)能連回來
             // dispatch skill。失敗只 warn 不卡啟動 — Tauri UI 跟語音/chat
             // pipeline 沒這個 server 也能用。
-            tauri::async_runtime::spawn(async {
-                match crate::skill_server::start().await {
+            let memory_for_server = state_for_setup.memory.clone();
+            tauri::async_runtime::spawn(async move {
+                match crate::skill_server::start(memory_for_server).await {
                     Ok(info) => tracing::info!(
                         port = info.port,
                         "skill HTTP server started — Bash CLI proxy ready"

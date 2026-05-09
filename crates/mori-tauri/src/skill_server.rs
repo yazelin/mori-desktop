@@ -27,13 +27,18 @@ use axum::{
     Json, Router,
 };
 use mori_core::context::Context as MoriContext;
+use mori_core::memory::MemoryStore;
 use mori_core::runtime::{generate_auth_token, RuntimeInfo};
-use mori_core::skill::{ComposeSkill, PolishSkill, Skill, SummarizeSkill, TranslateSkill};
+use mori_core::skill::{
+    ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
+    RememberSkill, Skill, SummarizeSkill, TranslateSkill,
+};
 use serde_json::{json, Value};
 
 #[derive(Clone)]
 pub struct SkillServerState {
     pub auth_token: Arc<str>,
+    pub memory: Arc<dyn MemoryStore>,
 }
 
 /// 啟動 skill HTTP server。
@@ -45,7 +50,7 @@ pub struct SkillServerState {
 ///
 /// 失敗會回 Err 但不該卡 Mori 啟動 — 呼叫端記 log 後繼續就好(只是
 /// 失去 Bash CLI proxy 能力)。
-pub async fn start() -> Result<RuntimeInfo> {
+pub async fn start(memory: Arc<dyn MemoryStore>) -> Result<RuntimeInfo> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .context("bind skill server to 127.0.0.1:0")?;
@@ -54,6 +59,7 @@ pub async fn start() -> Result<RuntimeInfo> {
     let token = generate_auth_token();
     let state = SkillServerState {
         auth_token: token.clone().into(),
+        memory,
     };
 
     let app = Router::new()
@@ -109,15 +115,16 @@ async fn list_skills(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     check_auth(&headers, &state.auth_token)?;
-    // 5D-1 MVP:先曝光 4 個純 LLM-only 的 text skill。memory / paste / mode
-    // 那幾個有 Mori 平台 state 依賴(memory store / paste controller /
-    // mode controller),5D-2 再 wire 上。
     Ok(Json(json!({
         "skills": [
-            {"name": "translate", "description": describe::translate()},
-            {"name": "polish",    "description": describe::polish()},
-            {"name": "summarize", "description": describe::summarize()},
-            {"name": "compose",   "description": describe::compose()},
+            {"name": "translate",     "description": describe::translate()},
+            {"name": "polish",        "description": describe::polish()},
+            {"name": "summarize",     "description": describe::summarize()},
+            {"name": "compose",       "description": describe::compose()},
+            {"name": "remember",      "description": describe::remember()},
+            {"name": "recall_memory", "description": describe::recall_memory()},
+            {"name": "forget_memory", "description": describe::forget_memory()},
+            {"name": "edit_memory",   "description": describe::edit_memory()},
         ],
     })))
 }
@@ -146,13 +153,17 @@ async fn dispatch_skill(
         "polish" => Box::new(PolishSkill::new(provider.clone())),
         "summarize" => Box::new(SummarizeSkill::new(provider.clone())),
         "compose" => Box::new(ComposeSkill::new(provider.clone())),
-        // memory / paste / mode skill 5D-2 再加(需要把 Mori state 共享進來)
+        "remember" => Box::new(RememberSkill::new(state.memory.clone())),
+        "recall_memory" => Box::new(RecallMemorySkill::new(state.memory.clone())),
+        "forget_memory" => Box::new(ForgetMemorySkill::new(state.memory.clone())),
+        "edit_memory" => Box::new(EditMemorySkill::new(state.memory.clone())),
         _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 format!(
-                    "unknown or not-yet-exposed skill: {name}\n\
-                     available: translate, polish, summarize, compose"
+                    "unknown skill: {name}\n\
+                     available: translate, polish, summarize, compose, \
+                     remember, recall_memory, forget_memory, edit_memory"
                 ),
             ));
         }
@@ -199,5 +210,29 @@ mod describe {
         "Draft new text from a topic. CLI:\n\
          `mori skill compose --kind email|message|essay|social_post|other --topic \"...\" \
          [--audience \"...\"] [--length-hint short|medium|long]`"
+    }
+
+    pub fn remember() -> &'static str {
+        "Save a fact to Mori's long-term memory. CLI:\n\
+         `mori skill remember --title \"...\" --content \"...\" \
+         --category user_identity|preference|project|reference|other`"
+    }
+
+    pub fn recall_memory() -> &'static str {
+        "Read the full body of a memory by id. CLI:\n\
+         `mori skill recall-memory --id \"<memory-id>\"`\n\
+         id = filename without .md from the memory index."
+    }
+
+    pub fn forget_memory() -> &'static str {
+        "Delete a memory by id (destructive). CLI:\n\
+         `mori skill forget-memory --id \"<memory-id>\"`"
+    }
+
+    pub fn edit_memory() -> &'static str {
+        "Update an existing memory's body. CLI:\n\
+         `mori skill edit-memory --id \"<memory-id>\" --content \"...\" \
+         [--description \"...\"]`\n\
+         Tip: recall first, then edit with the merged content."
     }
 }
