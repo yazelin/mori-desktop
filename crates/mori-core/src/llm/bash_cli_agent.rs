@@ -86,8 +86,7 @@ impl BashCliAgentProvider {
              \n\
              ## 你有一個 `{cli}` CLI 可以透過 Bash 工具呼叫\n\
              \n\
-             用它來 dispatch Mori 的內建技能(translate / polish / summarize / compose)。\n\
-             不要自己翻譯/潤稿/摘要 — 一律走這個 CLI,因為 Mori 的版本會跟使用者偏好對齊。\n\
+             用它來 dispatch Mori 的內建技能,不要自己做 — 一律走這個 CLI,Mori 的版本會跟使用者偏好對齊。\n\
              \n\
              查詢可用技能:\n\
              ```\n\
@@ -96,18 +95,24 @@ impl BashCliAgentProvider {
              \n\
              常用呼叫範例:\n\
              ```\n\
-             {cli} skill translate --text \"你好\" --target en\n\
-             {cli} skill polish    --text \"...\" --tone formal\n\
-             {cli} skill summarize --text \"...\" --style bullet\n\
-             {cli} skill compose   --kind email --prompt \"...\" --audience \"...\"\n\
+             {cli} skill translate   --text \"你好\" --target en\n\
+             {cli} skill polish      --text \"...\" --tone formal\n\
+             {cli} skill summarize   --text \"...\" --style bullet_points\n\
+             {cli} skill compose     --kind email --topic \"...\" --audience \"...\"\n\
+             {cli} skill remember    --title \"...\" --content \"...\" --category preference\n\
+             {cli} skill recall-memory  --id \"<memory-id>\"\n\
+             {cli} skill forget-memory  --id \"<memory-id>\"\n\
+             {cli} skill edit-memory    --id \"<memory-id>\" --content \"...\"\n\
              ```\n\
              \n\
-             指令需要更多參數時跑 `{cli} skill <name> --help`。\n\
+             不確定參數時跑 `{cli} skill <name> --help`。\n\
              \n\
-             ## 回應規則\n\
-             - 直接給最終結果。不要寫「我來幫你翻譯」、「以下是...」這種前言。\n\
-             - 不要把 CLI 的指令貼出來,把它的 stdout 當作給使用者的答案就好。\n\
-             - 一般閒聊不要呼叫 CLI,直接回。\n\
+             ## 回應規則(嚴格遵守)\n\
+             - **CLI 的 stdout 就是你給使用者的完整回應。原樣輸出,一字不改。**\n\
+             - 禁止在 CLI 結果後面加任何括號說明、補充、解釋或評語。\n\
+             - 禁止前言(「我來幫你翻譯」「以下是」「好的」等)。\n\
+             - 禁止把 CLI 指令本身貼出來。\n\
+             - 一般閒聊不呼叫 CLI,直接回。\n\
              - 對話歷史在後面附上。",
             cli = self.mori_basename,
         )
@@ -304,6 +309,11 @@ mod tests {
         let sys = p.system_prompt();
         assert!(sys.contains("mori skill list"));
         assert!(sys.contains("mori skill translate"));
+        assert!(sys.contains("mori skill remember"));
+        assert!(sys.contains("mori skill recall-memory"));
+        assert!(sys.contains("mori skill forget-memory"));
+        assert!(sys.contains("mori skill edit-memory"));
+        assert!(sys.contains("禁止在 CLI 結果後面加任何括號說明"));
     }
 
     #[test]
