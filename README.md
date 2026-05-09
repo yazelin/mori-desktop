@@ -41,7 +41,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5E 完成(2026-05-09)** — Mori 在 Wayland 上
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5E 完成(2026-05-09，持續更新)** — Mori 在 Wayland 上
 **可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
 - 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(對話 / 輸入 / 休眠)
 - **反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)
@@ -60,7 +60,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 | 🎙️ 聽 | `Ctrl+Alt+Space` 全域熱鍵(Linux 走 xdg-desktop-portal,GNOME Wayland 不偷焦點)/ UI 按鈕 / 「貼文字」textarea(`Ctrl+Enter` 送出) |
 | 🛑 取消 | 錄音中按 `Esc` = 丟掉音檔不送 Whisper |
 | 🗣️ STT | **可選** Groq Whisper API(`whisper-large-v3-turbo`,雲)或本機 whisper.cpp(`ggml-small.bin`,離線、開機 cold load 5-15s) |
-| 🧠 想 | **可選 4 種 LLM**:Groq gpt-oss-120b / 本機 Ollama qwen3:8b / Claude CLI subprocess / **claude-bash**(claude 當 agent 透過 Bash tool 跑本機 `mori` CLI dispatch skill)。multi-turn tool calling MAX 5 輪 |
+| 🧠 想 | **可選 6 種 LLM**:Groq gpt-oss-120b / 本機 Ollama qwen3:8b / Claude CLI subprocess / **claude-bash** / **gemini-bash** / **codex-bash**。後三者皆透過 Bash tool 呼叫本機 `mori` CLI dispatch skill，multi-turn tool calling MAX 5 輪 |
 | 🎚️ Per-skill 路由 | `routing.skills.<name>` 可獨立指定每個 skill 該用哪個 provider(e.g. translate 走 Claude Pro/Max、compose 走 Ollama) |
 | 💬 回 | 繁中為主、不客套,UI 顯示「你說 / Mori」雙塊 + 🔧 skill badges + status panel(build SHA / chat provider / STT provider / warm-up state / clipboard / selection) |
 | 📝 記 / 🔍 查 / ✏️ 改 / 🗑️ 忘 | RememberSkill / RecallMemorySkill / EditMemorySkill / ForgetMemorySkill(走 LlmProvider trait,任何 provider 都能 dispatch;**5D-2 起也接上 Bash CLI proxy** — `mori skill remember/recall-memory/forget-memory/edit-memory`) |
@@ -84,7 +84,6 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ⏳ codex / gemini CLI 適配(agent 模式) | 證明「Bash CLI proxy 換 binary 就行」這個賣點。gemini:`-p "" --yolo --output-format text` / codex:`exec --dangerously-bypass-approvals-and-sandbox`。system prompt 嵌 stdin 頂部(兩者都沒有 `--system-prompt` flag) | 5D-2 |
 | ⏳ gemini-cli / codex-cli(chat-only 模式) | 讓 routing.skills 也能指定 gemini/codex 當 skill 內部 LLM(類似 claude-cli)。目前 chat-only 沒有乾淨的 flag,gemini 靠省略 `--yolo`、codex 無明確分法,暫用 claude-cli 頂替 | 5D-3 |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
