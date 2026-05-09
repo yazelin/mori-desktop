@@ -91,6 +91,46 @@ enum SkillCmd {
         #[arg(long)]
         length_hint: Option<String>,
     },
+
+    /// 把一件事存進 Mori 的長期記憶。
+    Remember {
+        /// 簡短標題(3-15 字)
+        #[arg(short, long)]
+        title: String,
+        /// 完整內容
+        #[arg(short, long)]
+        content: String,
+        /// 類別 — user_identity | preference | project | reference | other
+        #[arg(long, default_value = "other")]
+        category: String,
+    },
+
+    /// 讀取單筆記憶的完整內容。
+    RecallMemory {
+        /// Memory id(檔名不含 .md)
+        #[arg(long)]
+        id: String,
+    },
+
+    /// 刪除一筆記憶(destructive)。
+    ForgetMemory {
+        /// Memory id(檔名不含 .md)
+        #[arg(long)]
+        id: String,
+    },
+
+    /// 更新既有記憶的內容。
+    EditMemory {
+        /// Memory id(檔名不含 .md)
+        #[arg(long)]
+        id: String,
+        /// 整合後的完整新內容
+        #[arg(short, long)]
+        content: String,
+        /// 更新索引行的短描述(可選,不給則保留舊的)
+        #[arg(long)]
+        description: Option<String>,
+    },
 }
 
 fn main() {
@@ -124,7 +164,6 @@ fn run() -> Result<()> {
                 audience,
                 length_hint,
             } => {
-                // ComposeSkill 用 `topic` 不是 `prompt`。
                 let mut body = json!({ "kind": kind, "topic": topic });
                 if let Some(a) = audience {
                     body["audience"] = json!(a);
@@ -133,6 +172,22 @@ fn run() -> Result<()> {
                     body["length_hint"] = json!(l);
                 }
                 post_skill("compose", body)
+            }
+            SkillCmd::Remember { title, content, category } => {
+                post_skill("remember", json!({ "title": title, "content": content, "category": category }))
+            }
+            SkillCmd::RecallMemory { id } => {
+                post_skill("recall_memory", json!({ "id": id }))
+            }
+            SkillCmd::ForgetMemory { id } => {
+                post_skill("forget_memory", json!({ "id": id }))
+            }
+            SkillCmd::EditMemory { id, content, description } => {
+                let mut body = json!({ "id": id, "new_content": content });
+                if let Some(d) = description {
+                    body["new_description"] = json!(d);
+                }
+                post_skill("edit_memory", body)
             }
         },
     }
