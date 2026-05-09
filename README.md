@@ -41,7 +41,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5E 完成(2026-05-08)** — Mori 在 Wayland 上
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5E 完成(2026-05-09)** — Mori 在 Wayland 上
 **可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
 - 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(對話 / 輸入 / 休眠)
 - **反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)
@@ -63,7 +63,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 | 🧠 想 | **可選 4 種 LLM**:Groq gpt-oss-120b / 本機 Ollama qwen3:8b / Claude CLI subprocess / **claude-bash**(claude 當 agent 透過 Bash tool 跑本機 `mori` CLI dispatch skill)。multi-turn tool calling MAX 5 輪 |
 | 🎚️ Per-skill 路由 | `routing.skills.<name>` 可獨立指定每個 skill 該用哪個 provider(e.g. translate 走 Claude Pro/Max、compose 走 Ollama) |
 | 💬 回 | 繁中為主、不客套,UI 顯示「你說 / Mori」雙塊 + 🔧 skill badges + status panel(build SHA / chat provider / STT provider / warm-up state / clipboard / selection) |
-| 📝 記 / 🔍 查 / ✏️ 改 / 🗑️ 忘 | RememberSkill / RecallMemorySkill / EditMemorySkill / ForgetMemorySkill(走 LlmProvider trait,任何 provider 都能 dispatch;5D-1 還沒接到 Bash CLI proxy,5D-2 補) |
+| 📝 記 / 🔍 查 / ✏️ 改 / 🗑️ 忘 | RememberSkill / RecallMemorySkill / EditMemorySkill / ForgetMemorySkill(走 LlmProvider trait,任何 provider 都能 dispatch;**5D-2 起也接上 Bash CLI proxy** — `mori skill remember/recall-memory/forget-memory/edit-memory`) |
 | 🌐 翻譯 | TranslateSkill — zh-TW 在地化、source/target lang 可指定 |
 | ✏️ 潤稿 | PolishSkill — 直接改寫(不給建議),tone: formal/casual/concise/detailed/auto |
 | 📋 摘要 | SummarizeSkill — bullet_points / one_paragraph / tldr 三種風格 |
@@ -76,7 +76,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 | 🪟 常駐 | 系統匣 icon(顯示 / 隱藏 / 對話↔輸入↔休眠 3 個 mode 切換 / 重新對話 / 離開),關視窗 → 隱藏不殺 |
 | ⌨️ 語音輸入模式(5E) | tray / UI 切到「輸入模式」→ 游標放任一輸入框 → 按熱鍵講話 → 跳過 agent loop,結果**直接貼到游標位置**(把 Mori 變成 LLM 加持的 dictation)|
 | 🧹 三級 cleanup(5E) | `voice_input.cleanup_level` 配置:**smart**(LLM 加標點 + 程式守格式)/ **minimal**(只跑程式 strip 幻聽 + 半→全形 normalize,~ms 級)/ **none**(raw 直貼)。Cleanup provider 走 `routing.skills.voice_input_cleanup` 可獨立指定 |
-| 🛠️ Skill HTTP 服務 | mori-tauri 啟動時 bind 127.0.0.1:RANDOM,寫 port + auth token 到 `~/.mori/runtime.json`,讓本機 `mori` CLI(以及 claude 透過 Bash 呼叫的 mori CLI)能連回主程式 dispatch skill |
+| 🛠️ Skill HTTP 服務 | mori-tauri 啟動時 bind 127.0.0.1:RANDOM,寫 port + auth token 到 `~/.mori/runtime.json`,讓本機 `mori` CLI(以及 claude 透過 Bash 呼叫的 mori CLI)能連回主程式 dispatch skill。**5D-2 起共 8 個 skill 全部暴露**(translate / polish / summarize / compose / remember / recall_memory / forget_memory / edit_memory) |
 | ⏱️ 智慧限流退避 | Groq 429 → 解析 body 多單位格式(「12m12s」式),> 60s 直接 surface 不傻等;UI 顯示「今日 token 用完(TPD)」之類友善訊息 |
 | 🔄 Ollama warm-up | 啟動時自動發 1-token chat 觸發 model load(避免使用者第一次按熱鍵還在等模型進 RAM),`keep_alive=30m` |
 
@@ -84,7 +84,6 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ⏳ memory / paste / mode skills 的 Bash CLI proxy | 完整 100% Groq-free + skills 都工作,要把這 6 個 skill 也接到 mori CLI(現在只 4 個 LLM-only 接了) | 5D-2 |
 | ⏳ Tighten claude-bash system prompt | claude 還會在潤稿後加「(主要是補了標點...)」這種解說,違反 system prompt 的「直接給結果」 | 5D-2 |
 | ⏳ codex / gemini CLI 適配 | 證明「Bash CLI proxy 換 binary 就行」這個賣點。架構已通用,需實測 | 5D-2 |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
