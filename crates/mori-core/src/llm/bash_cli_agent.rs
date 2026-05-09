@@ -40,6 +40,12 @@ pub enum CliProtocol {
     Gemini,
     /// `codex exec --dangerously-bypass-approvals-and-sandbox`，system prompt 嵌 stdin 頂部
     Codex,
+    /// `gemini -p "" --output-format text`(省略 `--yolo`)— chat-only。
+    /// non-TTY 下無法核准 tool 執行 → 實質只輸出文字,不 dispatch shell tool。
+    GeminiChat,
+    /// `codex exec`(省略 `--dangerously-bypass-approvals-and-sandbox`)— chat-only。
+    /// 純文字任務 codex 不會嘗試執行 shell 命令,且 non-TTY 下也無法取得核准。
+    CodexChat,
 }
 
 impl CliProtocol {
@@ -95,6 +101,30 @@ impl BashCliAgentProvider {
         }
     }
 
+    /// Chat-only 變體(gemini-cli / codex-cli)用 — 由呼叫端顯式指定 protocol,
+    /// 不靠 binary 名稱自動偵測。mori_cli_path 不使用(PATH 不注入,system prompt
+    /// 也不帶 mori CLI 說明),傳 `PathBuf::from("mori")` 做 dummy 即可。
+    pub fn new_with_protocol(
+        binary: impl Into<String>,
+        mori_cli_path: PathBuf,
+        model: Option<String>,
+        protocol: CliProtocol,
+    ) -> Self {
+        let binary = binary.into();
+        let mori_basename = mori_cli_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("mori")
+            .to_string();
+        Self {
+            binary,
+            mori_cli_path,
+            model,
+            mori_basename,
+            protocol,
+        }
+    }
+
     /// 嘗試自動找 mori CLI:先看 `current_exe()` 旁邊(dev:`target/debug/mori`),
     /// 找不到 fallback 到 PATH 上的 `mori`。
     pub fn detect_mori_cli() -> PathBuf {
@@ -110,6 +140,13 @@ impl BashCliAgentProvider {
     }
 
     fn system_prompt(&self) -> String {
+        // chat-only 變體不透過 mori CLI dispatch,system prompt 簡化成純對話規則。
+        if matches!(self.protocol, CliProtocol::GeminiChat | CliProtocol::CodexChat) {
+            return "你是 Mori — 使用者的個人 AI 管家精靈,繁體中文為主、不客套。\n\
+                    直接輸出結果,禁止前言(「我來幫你」「以下是」「好的」等),\
+                    禁止尾綴補充說明,禁止執行任何 shell 命令。"
+                .into();
+        }
         format!(
             "你是 Mori — 使用者的個人 AI 管家精靈,繁體中文為主、不客套、不用 Markdown 標題。\n\
              \n\
@@ -152,9 +189,11 @@ impl BashCliAgentProvider {
 impl LlmProvider for BashCliAgentProvider {
     fn name(&self) -> &'static str {
         match self.protocol {
-            CliProtocol::Claude => "bash-cli-agent",
-            CliProtocol::Gemini => "gemini-bash",
-            CliProtocol::Codex  => "codex-bash",
+            CliProtocol::Claude     => "bash-cli-agent",
+            CliProtocol::Gemini     => "gemini-bash",
+            CliProtocol::Codex      => "codex-bash",
+            CliProtocol::GeminiChat => "gemini-cli",
+            CliProtocol::CodexChat  => "codex-cli",
         }
     }
 
@@ -163,9 +202,9 @@ impl LlmProvider for BashCliAgentProvider {
     }
 
     fn supports_tool_calling(&self) -> bool {
-        // 假性 true:Mori agent loop 一輪 round-trip 結束;但 CLI 內部會做
-        // 真正的 reasoning + tool dispatch,所以可以當主 agent provider。
-        true
+        // Agent 變體(Claude/Gemini/Codex):內部有 Bash tool loop → 可當主 agent。
+        // Chat-only 變體(GeminiChat/CodexChat):純文字 in/out → 只能當 skill 內部 LLM。
+        !matches!(self.protocol, CliProtocol::GeminiChat | CliProtocol::CodexChat)
     }
 
     async fn chat(
@@ -224,6 +263,29 @@ impl LlmProvider for BashCliAgentProvider {
                 let mut c = Command::new(&self.binary);
                 c.arg("exec")
                     .arg("--dangerously-bypass-approvals-and-sandbox");
+                if let Some(model) = &self.model {
+                    c.arg("--model").arg(model);
+                }
+                (c, stdin_content.into_bytes(), false)
+            }
+            CliProtocol::GeminiChat => {
+                // chat-only:省略 --yolo → gemini 不自動執行 tool;
+                // non-TTY 下無法取得使用者核准 → 實質只輸出文字。
+                let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
+                let mut c = Command::new(&self.binary);
+                c.arg("-p").arg("")
+                    .arg("--output-format").arg("text");
+                if let Some(model) = &self.model {
+                    c.arg("--model").arg(model);
+                }
+                (c, stdin_content.into_bytes(), true)
+            }
+            CliProtocol::CodexChat => {
+                // chat-only:省略 --dangerously-bypass-approvals-and-sandbox →
+                // tool 執行需手動核准;non-TTY 下核准不可得 → 純文字任務實質 chat-only。
+                let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
+                let mut c = Command::new(&self.binary);
+                c.arg("exec");
                 if let Some(model) = &self.model {
                     c.arg("--model").arg(model);
                 }
@@ -342,14 +404,60 @@ mod tests {
         let claude = BashCliAgentProvider::new("claude", PathBuf::from("/tmp/mori"), None);
         assert_eq!(claude.protocol, CliProtocol::Claude);
         assert_eq!(claude.name(), "bash-cli-agent");
+        assert!(claude.supports_tool_calling());
 
         let gemini = BashCliAgentProvider::new("gemini", PathBuf::from("/tmp/mori"), None);
         assert_eq!(gemini.protocol, CliProtocol::Gemini);
         assert_eq!(gemini.name(), "gemini-bash");
+        assert!(gemini.supports_tool_calling());
 
         let codex = BashCliAgentProvider::new("codex", PathBuf::from("/tmp/mori"), None);
         assert_eq!(codex.protocol, CliProtocol::Codex);
         assert_eq!(codex.name(), "codex-bash");
+        assert!(codex.supports_tool_calling());
+    }
+
+    #[test]
+    fn chat_only_variants_via_new_with_protocol() {
+        let g = BashCliAgentProvider::new_with_protocol(
+            "gemini",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::GeminiChat,
+        );
+        assert_eq!(g.name(), "gemini-cli");
+        assert!(!g.supports_tool_calling(), "gemini-cli must be chat-only");
+
+        let c = BashCliAgentProvider::new_with_protocol(
+            "codex",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::CodexChat,
+        );
+        assert_eq!(c.name(), "codex-cli");
+        assert!(!c.supports_tool_calling(), "codex-cli must be chat-only");
+    }
+
+    #[test]
+    fn chat_only_system_prompt_has_no_mori_cli_instructions() {
+        let g = BashCliAgentProvider::new_with_protocol(
+            "gemini",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::GeminiChat,
+        );
+        let sys = g.system_prompt();
+        assert!(!sys.contains("mori skill"), "chat-only prompt must not reference mori CLI");
+        assert!(sys.contains("Mori"), "should still identify as Mori");
+
+        let c = BashCliAgentProvider::new_with_protocol(
+            "codex",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::CodexChat,
+        );
+        let sys = c.system_prompt();
+        assert!(!sys.contains("mori skill"), "chat-only prompt must not reference mori CLI");
     }
 
     #[test]
@@ -409,5 +517,63 @@ mod tests {
         assert!(t.starts_with("User: hi"));
         assert!(t.contains("Assistant: hello!"));
         assert!(t.ends_with("translate this"));
+    }
+
+    /// gemini-cli chat-only 真實呼叫。需要 `gemini` 在 PATH 且已登入。
+    /// `cargo test -p mori-core --lib -- --ignored integration_gemini_cli` 觸發。
+    #[tokio::test]
+    #[ignore]
+    async fn integration_gemini_cli_real_binary() {
+        let p = BashCliAgentProvider::new_with_protocol(
+            "gemini",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::GeminiChat,
+        );
+        let resp = p
+            .chat(
+                vec![
+                    ChatMessage::system("Answer in one short English word, no punctuation."),
+                    ChatMessage::user("What color is grass?"),
+                ],
+                vec![],
+            )
+            .await
+            .expect("gemini-cli chat should succeed");
+        let answer = resp.content.expect("content").to_lowercase();
+        assert!(
+            answer.contains("green"),
+            "expected 'green', got: {answer:?}"
+        );
+        assert!(resp.tool_calls.is_empty(), "gemini-cli must not return tool_calls");
+    }
+
+    /// codex-cli chat-only 真實呼叫。需要 `codex` 在 PATH 且已登入。
+    /// `cargo test -p mori-core --lib -- --ignored integration_codex_cli` 觸發。
+    #[tokio::test]
+    #[ignore]
+    async fn integration_codex_cli_real_binary() {
+        let p = BashCliAgentProvider::new_with_protocol(
+            "codex",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::CodexChat,
+        );
+        let resp = p
+            .chat(
+                vec![
+                    ChatMessage::system("Answer in one short English word, no punctuation."),
+                    ChatMessage::user("What color is grass?"),
+                ],
+                vec![],
+            )
+            .await
+            .expect("codex-cli chat should succeed");
+        let answer = resp.content.expect("content").to_lowercase();
+        assert!(
+            answer.contains("green"),
+            "expected 'green', got: {answer:?}"
+        );
+        assert!(resp.tool_calls.is_empty(), "codex-cli must not return tool_calls");
     }
 }

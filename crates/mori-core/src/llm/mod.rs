@@ -115,6 +115,39 @@ pub fn build_named_provider(
                 .and_then(|p| groq::read_json_pointer(p, "/providers/codex-bash/model"));
             Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(binary, mori_cli, model)))
         }
+        // 5D-3:chat-only 變體 — 類似 claude-cli,但走 gemini / codex binary。
+        // 省略 agent 旗標(--yolo / --dangerously-bypass-approvals-and-sandbox)→
+        // non-TTY 下 tool 執行無法被核准 → 純文字 in/out,可用於 routing.skills。
+        "gemini-cli" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-cli/binary"))
+                .unwrap_or_else(|| "gemini".to_string());
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-cli/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new_with_protocol(
+                binary,
+                std::path::PathBuf::from("mori"),
+                model,
+                bash_cli_agent::CliProtocol::GeminiChat,
+            )))
+        }
+        "codex-cli" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-cli/binary"))
+                .unwrap_or_else(|| "codex".to_string());
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-cli/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new_with_protocol(
+                binary,
+                std::path::PathBuf::from("mori"),
+                model,
+                bash_cli_agent::CliProtocol::CodexChat,
+            )))
+        }
         "groq" => {
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -134,7 +167,8 @@ pub fn build_named_provider(
             Ok(Arc::new(p))
         }
         other => anyhow::bail!(
-            "unknown provider name '{}' — supported: groq, ollama, claude-cli",
+            "unknown provider name '{}' — supported: groq, ollama, claude-cli, \
+             claude-bash, gemini-bash, codex-bash, gemini-cli, codex-cli",
             other
         ),
     }
@@ -154,7 +188,8 @@ pub fn build_chat_provider(
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     let default = read_default_provider();
     let resolved = match default.as_str() {
-        "groq" | "ollama" | "claude-cli" | "claude-bash" | "gemini-bash" | "codex-bash" => default.as_str(),
+        "groq" | "ollama" | "claude-cli" | "claude-bash"
+        | "gemini-bash" | "codex-bash" | "gemini-cli" | "codex-cli" => default.as_str(),
         other => {
             tracing::warn!(
                 provider = other,
@@ -518,6 +553,20 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 .and_then(|p| groq::read_json_pointer(p, "/providers/codex-bash/model"))
                 .unwrap_or_else(|| "(codex default)".to_string());
             ProviderSnapshot { name: "codex-bash".into(), model, base_url: None }
+        }
+        "gemini-cli" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-cli/model"))
+                .unwrap_or_else(|| "(gemini default)".to_string());
+            ProviderSnapshot { name: "gemini-cli".into(), model, base_url: None }
+        }
+        "codex-cli" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/codex-cli/model"))
+                .unwrap_or_else(|| "(codex default)".to_string());
+            ProviderSnapshot { name: "codex-cli".into(), model, base_url: None }
         }
         _ => {
             let model = mori_config_path()
