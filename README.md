@@ -84,7 +84,6 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ⏳ Tighten claude-bash system prompt | claude 還會在潤稿後加「(主要是補了標點...)」這種解說,違反 system prompt 的「直接給結果」 | 5D-2 |
 | ⏳ codex / gemini CLI 適配 | 證明「Bash CLI proxy 換 binary 就行」這個賣點。架構已通用,需實測 | 5D-2 |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
