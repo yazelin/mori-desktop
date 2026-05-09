@@ -540,10 +540,11 @@ mod tests {
             )
             .await
             .expect("gemini-cli chat should succeed");
-        let answer = resp.content.expect("content").to_lowercase();
+        let answer = resp.content.expect("content");
+        // system prompt 要求英文,但 chat-only 的繁中 persona 可能仍回中文
         assert!(
-            answer.contains("green"),
-            "expected 'green', got: {answer:?}"
+            answer.to_lowercase().contains("green") || answer.contains("綠"),
+            "expected color answer containing 'green' or '綠', got: {answer:?}"
         );
         assert!(resp.tool_calls.is_empty(), "gemini-cli must not return tool_calls");
     }
@@ -569,10 +570,10 @@ mod tests {
             )
             .await
             .expect("codex-cli chat should succeed");
-        let answer = resp.content.expect("content").to_lowercase();
+        let answer = resp.content.expect("content");
         assert!(
-            answer.contains("green"),
-            "expected 'green', got: {answer:?}"
+            answer.to_lowercase().contains("green") || answer.contains("綠"),
+            "expected color answer containing 'green' or '綠', got: {answer:?}"
         );
         assert!(resp.tool_calls.is_empty(), "codex-cli must not return tool_calls");
     }
