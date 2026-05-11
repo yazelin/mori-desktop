@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "linux")]
+mod action_skills;
 mod context_provider;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
@@ -8,8 +10,6 @@ mod recording;
 #[cfg(target_os = "linux")]
 mod selection;
 mod skill_server;
-#[cfg(target_os = "linux")]
-mod voice_input_tools;
 
 use std::sync::Arc;
 
@@ -801,6 +801,28 @@ async fn run_agent_pipeline(
                 let paste_controller: Arc<dyn PasteController> =
                     Arc::new(crate::selection::LinuxPasteController::new(app.clone()));
                 registry.register(Arc::new(PasteSelectionBackSkill::new(paste_controller)));
+            }
+            // 5G-6: Action skills（xdg-open / ydotool / gtk-launch）
+            if allows("open_url") {
+                registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
+            }
+            if allows("open_app") {
+                registry.register(Arc::new(crate::action_skills::OpenAppSkill));
+            }
+            if allows("send_keys") {
+                registry.register(Arc::new(crate::action_skills::SendKeysSkill));
+            }
+            if allows("google_search") {
+                registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
+            }
+            if allows("ask_chatgpt") {
+                registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
+            }
+            if allows("ask_gemini") {
+                registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
+            }
+            if allows("find_youtube") {
+                registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
             }
         }
         let registry = Arc::new(registry);
