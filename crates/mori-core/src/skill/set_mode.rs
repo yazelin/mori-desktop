@@ -51,7 +51,7 @@ impl Skill for SetModeSkill {
             "properties": {
                 "mode": {
                     "type": "string",
-                    "enum": ["active", "voice_input", "background"],
+                    "enum": ["agent", "voice_input", "background"],
                     "description": "Target operating mode."
                 }
             },
@@ -66,7 +66,7 @@ impl Skill for SetModeSkill {
             .ok_or_else(|| anyhow!("missing mode"))?;
 
         let target = match raw {
-            "active" => Mode::Active,
+            "agent" | "active" => Mode::Agent, // "active" 為 5G 前的 alias
             "voice_input" => Mode::VoiceInput,
             "background" => Mode::Background,
             other => return Err(anyhow!("invalid mode: {other}")),
@@ -76,7 +76,7 @@ impl Skill for SetModeSkill {
         if current == target {
             return Ok(SkillOutput {
                 user_message: match target {
-                    Mode::Active => "我醒著呢。".to_string(),
+                    Mode::Agent => "我醒著呢。".to_string(),
                     Mode::VoiceInput => "已經在輸入模式了。".to_string(),
                     Mode::Background => "我已經在休眠了。".to_string(),
                 },
@@ -93,7 +93,7 @@ impl Skill for SetModeSkill {
             .context("set mode")?;
 
         let user_message = match target {
-            Mode::Active => "醒了,我在這。".to_string(),
+            Mode::Agent => "醒了,我在這。".to_string(),
             Mode::VoiceInput => "切到輸入模式 — 接下來的話會直接貼到游標位置。".to_string(),
             Mode::Background => "好,我先閉眼,叫我就回來。".to_string(),
         };

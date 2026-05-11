@@ -108,7 +108,72 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
-## Phase 5F — ZeroType 相容語音輸入 Profile 系統(2026-05,進行中)
+## Phase 5G — 雙模式架構(VoiceInput + Agent)(2026-05-12,進行中)
+
+5F 把 voice input 同時做 dictation + agent 結果走太多坑（Gemini 3 thought_signature、
+Groq parse_failed、Chrome extension 焦點時序、5G 一系列 retroactive 改造）。
+**5G 把責任邊界畫乾淨**：
+
+```
+Alt + 0~9         → VoiceInput profile（dictation，永遠單輪 LLM）
+Ctrl+Alt + 0~9    → Agent profile（multi-turn agent，可呼叫 skill 做動作）
+Ctrl+Alt + Space  → toggle 錄音（兩 mode 共用）
+```
+
+VoiceInput 只做「字」（文字轉換 + 貼游標），Agent 做「事」（chat + 動作）。
+
+### 5G-1 — Revert voice agent loop
+- [x] `run_voice_input_pipeline` 移除 agent loop / has_type_b_flags 分支
+- [x] VoiceInput 永遠單輪 LLM cleanup → paste
+
+### 5G-2 — `Mode::Active` → `Mode::Agent` 改名
+- [x] mori-core/src/mode.rs enum + as_str
+- [x] mori-tauri main.rs 所有 Mode::Active 引用
+- [x] mori-core/src/skill/set_mode.rs（接受 "active" 為 alias，向下相容）
+- [x] frontend src/FloatingMori.tsx + src/App.tsx Mode 型別
+
+### 5G-3 — Agent profile parser
+- [ ] `~/.mori/agent/AGENT-XX.主題.md` 目錄結構
+- [ ] frontmatter 共用 voice_input_profile parser
+- [ ] 新增 `enabled_skills: []` 鍵控制 SkillRegistry
+
+### 5G-4 — Ctrl+Alt+0~9 熱鍵註冊
+- [ ] `portal_hotkey.rs` 加 `agent-slot-0` ~ `agent-slot-9`
+- [ ] emit `portal-agent-slot` 事件（payload: u8）
+
+### 5G-5 — `handle_agent_profile_slot(N)`
+- [ ] 切到 `Mode::Agent` + 套對應 profile
+- [ ] floating widget 顯示「Agent · 程式助理」
+
+### 5G-6 — 動作工具搬 mori-core/skill
+- [ ] OpenUrlSkill / OpenAppSkill / SendKeysSkill / GoogleSearchSkill /
+      AskChatGptSkill / AskGeminiSkill / FindYouTubeSkill
+- [ ] RunShellSkill 含 `run_shell_whitelist`
+- [ ] 從 `mori-tauri/src/voice_input_tools.rs` 搬實作邏輯
+
+### 5G-7 — Profile 動態 SkillRegistry
+- [ ] Agent profile 載入時依 `enabled_skills` 篩選 skill
+- [ ] Routing per-skill provider 跟 profile 結合
+
+### 5G-8 — `#file:` 預處理
+- [ ] profile body 掃 `#file:path` → 讀檔 inline
+- [ ] 路徑必須在 `$HOME` 子樹（防 traversal）
+- [ ] 單檔 / 全部加總大小上限
+- [ ] frontmatter `enable_read: true` opt-in
+
+### 5G-9 — Floating widget 顯示模式
+- [ ] 切換 profile 時 label 顯示「VoiceInput · 朋友閒聊」/「Agent · 程式助理」
+- [ ] 配色區分兩種模式
+
+### 5G-10 — 自動遷移
+- [ ] 偵測 voice_input/ 內含 type-B flag 的 profile
+- [ ] 啟動時搬到 agent/，通知使用者
+
+### 5G-11 — README + roadmap 更新
+- [x] README 5G 雙模式架構說明
+- [x] roadmap 5G 章節
+
+## Phase 5F — ZeroType 相容語音輸入 Profile 系統(2026-05,完成)
 
 ### Phase 5F-1 — Profile 系統核心 + Context 注入
 - [ ] `~/.mori/voice_input/` 目錄 + 首次啟動自動生成預設檔案

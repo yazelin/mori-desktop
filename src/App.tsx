@@ -21,7 +21,7 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
-type Mode = "active" | "voice_input" | "background";
+type Mode = "agent" | "voice_input" | "background";
 
 type BuildInfo = {
   sha: string;
@@ -52,7 +52,7 @@ function App() {
   const [recElapsed, setRecElapsed] = useState<number>(0);
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [convLength, setConvLength] = useState<number>(0);
-  const [mode, setMode] = useState<Mode>("active");
+  const [mode, setMode] = useState<Mode>("agent");
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
   const [chatProvider, setChatProvider] = useState<ChatProviderInfo | null>(null);
   const [warmup, setWarmup] = useState<WarmupState | null>(null);
@@ -368,14 +368,14 @@ function App() {
         </button>
         <div className="mode-radio" role="radiogroup" aria-label="運作模式">
           <button
-            onClick={() => requestMode("active")}
-            className={`toggle-btn ${mode === "active" ? "mode-on" : ""}`}
+            onClick={() => requestMode("agent")}
+            className={`toggle-btn ${mode === "agent" ? "mode-on" : ""}`}
             disabled={pipelineBusy}
             role="radio"
-            aria-checked={mode === "active"}
+            aria-checked={mode === "agent"}
             title="對話模式 — 熱鍵 → 語音 → Mori 想 → 回應 / 叫 skill"
           >
-            {mode === "active" ? "✓ " : ""}對話
+            {mode === "agent" ? "✓ " : ""}對話
           </button>
           <button
             onClick={() => requestMode("voice_input")}

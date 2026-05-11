@@ -1,21 +1,20 @@
 //! Operating mode — orthogonal to the conversation phase.
 //!
-//! - `Active` — Mori is "here":對話模式。floating UI visible, mic
-//!   available for the hotkey, scheduler running。熱鍵 → 錄音 → STT →
-//!   走 **agent loop**(LLM 決定 dispatch 哪個 skill,或直接回應)。
-//! - `VoiceInput` — 語音輸入模式(Phase 5E)。熱鍵 → 錄音 → STT → **跳過
-//!   agent loop**,走輕度 LLM cleanup(標點 / 幻聽修正,保留原詞)→ 用
-//!   `PasteController` 把結果直接貼到游標位置。把 Mori 變成一個 LLM
-//!   加持的 dictation 工具,適合在瀏覽器 / 編輯器裡聽寫長文。
-//! - `Background` — 休眠:mic completely off, UI hidden except for the
-//!   tray icon, scheduler still ticking. Privacy-first:the user can be
-//!   sure no microphone capture happens in this mode.
+//! 5G 起 mori 有兩種「動作模式」+ 一種「休眠」：
 //!
-//! Mode transitions are user-initiated (tray menu, UI button, voice
-//! command「晚安」/「醒醒」). The shell crate (mori-tauri) owns the
-//! actual state; mori-core just exposes the [`ModeController`] trait
-//! so a [`crate::skill::Skill`] can change mode without depending on
-//! Tauri.
+//! - `Agent` — Mori 模式：熱鍵 → 錄音 → STT → agent loop（LLM 決定
+//!   dispatch 哪個 skill / 直接對話 / 執行動作）。對應 Ctrl+Alt+N profile。
+//!   名字之所以是 Agent 而非 Active：強調 Mori 在「做事」+ 有 agency，
+//!   不只是「醒著」。
+//! - `VoiceInput` — 語音輸入模式：熱鍵 → 錄音 → STT → 單輪 LLM cleanup
+//!   → `PasteController` 直接貼到游標。對應 Alt+N profile。永遠單輪，
+//!   不做動作，只做「字」。
+//! - `Background` — 休眠：mic 硬關，UI 隱藏。privacy-first。
+//!
+//! ## 鍵盤直覺
+//! - Alt+N         → VoiceInput profile（「我要輸入字」）
+//! - Ctrl+Alt+N    → Agent profile（「我要叫 Mori 做事」）
+//! - Ctrl+Alt+Space → toggle 錄音（兩個 mode 共用）
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -23,27 +22,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// 對話模式:熱鍵 → STT → agent loop → chat / skill dispatch。
-    Active,
-    /// 語音輸入模式:熱鍵 → STT → 輕度清理 → 貼到游標位置(跳過 agent)。
+    /// Agent 模式：STT → agent loop → chat / skill dispatch / action。
+    /// 5G 前叫 Active；改名為 Agent 強調「Mori 在做事」非「醒著」。
+    Agent,
+    /// 語音輸入模式：STT → 單輪 LLM cleanup → 貼游標。永遠單輪，
+    /// 不做 tool calling、不做動作。
     VoiceInput,
-    /// 休眠:麥克風完全關閉。
+    /// 休眠：麥克風完全關閉。
     Background,
 }
 
 impl Mode {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Mode::Active => "active",
+            Mode::Agent => "agent",
             Mode::VoiceInput => "voice_input",
             Mode::Background => "background",
         }
     }
 
-    /// 麥克風能不能在這個 mode 下開。VoiceInput 跟 Active 一樣需要
-    /// 收音;Background 才硬關。
+    /// 麥克風能不能在這個 mode 下開。Agent / VoiceInput 都需要;Background 才硬關。
     pub fn allows_mic(&self) -> bool {
-        matches!(self, Mode::Active | Mode::VoiceInput)
+        matches!(self, Mode::Agent | Mode::VoiceInput)
     }
 }
 

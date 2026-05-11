@@ -341,9 +341,9 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 /// - slot 1~9 → 切到 VoiceInput mode + 對應 profile，floating 顯示 profile 名稱
 fn handle_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
     if slot == 0 {
-        if !matches!(*state.mode.lock(), Mode::Active) {
+        if !matches!(*state.mode.lock(), Mode::Agent) {
             tracing::info!("Alt+0 — switching back to Active (chat) mode");
-            state.set_mode(&app, Mode::Active);
+            state.set_mode(&app, Mode::Agent);
         }
         let _ = app.emit("voice-input-profile-switched", "對話模式");
         return;
@@ -427,7 +427,7 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
     // 會進到 start_recording。
     if matches!(*state.mode.lock(), Mode::Background) {
         tracing::info!("hotkey while Background → wake to Active + start recording");
-        state.set_mode(&app, Mode::Active);
+        state.set_mode(&app, Mode::Agent);
     }
 
     let current = state.phase.lock().clone();
@@ -650,7 +650,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             Mode::VoiceInput => {
                 run_voice_input_pipeline(app, state, transcript, routing).await;
             }
-            Mode::Active | Mode::Background => {
+            Mode::Agent | Mode::Background => {
                 run_chat_pipeline(app, state, transcript, routing).await;
             }
         }
@@ -807,77 +807,6 @@ async fn run_chat_pipeline(
 /// ```json
 /// "routing": { "skills": { "voice_input_cleanup": "groq" } }
 /// ```
-/// Voice input agent loop（5F-4）— 給 type-B ENABLE flag 開啟時用。
-/// LLM 可呼叫工具（open_url / open_app / send_keys / google_search 等）執行
-/// 動作。多輪迴圈最多 MAX_ROUNDS 次，避免 LLM 卡無限呼叫。最後一輪的 LLM
-/// 文字回應拿來做最終 paste（如果有的話）。
-#[cfg(target_os = "linux")]
-async fn run_voice_input_agent_loop(
-    provider: &std::sync::Arc<dyn mori_core::llm::LlmProvider>,
-    initial_messages: Vec<ChatMessage>,
-    tools: Vec<mori_core::llm::ToolDefinition>,
-) -> anyhow::Result<String> {
-    const MAX_ROUNDS: usize = 5;
-    let mut messages = initial_messages;
-
-    for round in 0..MAX_ROUNDS {
-        let resp = provider
-            .chat(messages.clone(), tools.clone())
-            .await
-            .with_context(|| format!("voice-input agent round {round}"))?;
-
-        tracing::info!(
-            round,
-            content_chars = resp.content.as_deref().map(str::len).unwrap_or(0),
-            tool_calls = resp.tool_calls.len(),
-            "voice-input agent assistant response",
-        );
-
-        // LLM 沒呼叫工具 → 結束，回傳文字（或空字串）
-        if resp.tool_calls.is_empty() {
-            return Ok(resp.content.unwrap_or_default().trim().to_string());
-        }
-
-        // 把 assistant 訊息（含 tool_calls）加進歷史
-        messages.push(ChatMessage::assistant_with_tool_calls(
-            resp.content.clone(),
-            resp.tool_calls.clone(),
-        ));
-
-        // 依序執行每個工具，把結果以 tool role 加回訊息
-        for tc in &resp.tool_calls {
-            let result = match voice_input_tools::execute_tool(&tc.name, tc.arguments.clone())
-                .await
-            {
-                Ok(v) => v,
-                Err(e) => serde_json::json!({ "error": format!("{e:#}") }),
-            };
-            tracing::info!(
-                tool = %tc.name,
-                result = %result,
-                "voice-input agent tool executed",
-            );
-            messages.push(ChatMessage::tool_result(
-                tc.id.clone(),
-                tc.name.clone(),
-                result.to_string(),
-            ));
-        }
-    }
-
-    tracing::warn!(MAX_ROUNDS, "voice-input agent loop hit max rounds");
-    Ok(String::new())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn run_voice_input_agent_loop(
-    _provider: &std::sync::Arc<dyn mori_core::llm::LlmProvider>,
-    _initial_messages: Vec<ChatMessage>,
-    _tools: Vec<mori_core::llm::ToolDefinition>,
-) -> anyhow::Result<String> {
-    anyhow::bail!("voice input agent loop is Linux-only for now")
-}
-
 async fn run_voice_input_pipeline(
     app: AppHandle,
     state: Arc<AppState>,
@@ -962,43 +891,35 @@ async fn run_voice_input_pipeline(
         let _ = app.emit("voice-input-status", format!("⚡ 處理中 · {}", provider_label));
     }
 
-    // 5F-4: 判斷是否走 agent loop — 只有 type-B flag 才觸發（open_url / send_keys 等
-    // 真正的「動作」工具）。smart_paste / auto_enter 是 Type A，沒 type-B 時不需要
-    // 工具 calling，pipeline 走簡單路徑就好。
-    let agent_mode = profile.frontmatter.has_type_b_flags();
-    #[cfg(target_os = "linux")]
-    let tools = if agent_mode {
-        voice_input_tools::build_tool_list(&profile.frontmatter)
-    } else {
-        vec![]
-    };
-    #[cfg(not(target_os = "linux"))]
-    let tools: Vec<mori_core::llm::ToolDefinition> = vec![];
+    // 5G-1: VoiceInput 永遠單輪，純文字轉換。需要動作（open_url / send_keys 等）
+    // 請用 Agent 模式（Ctrl+Alt+N），VoiceInput 只做「字」不做「事」。
+    if profile.frontmatter.has_type_b_flags() {
+        tracing::warn!(
+            profile = %profile.name,
+            "voice input profile has action flags (open_url / send_keys / etc.) — \
+             these are ignored in VoiceInput mode. Move this profile to ~/.mori/agent/ \
+             and use Ctrl+Alt+N to invoke as Agent profile.",
+        );
+    }
 
-    // Step 1: LLM cleanup（agent_mode 多輪 / 否則單輪文字轉換；minimal/none 跳 LLM）
+    // Step 1: LLM cleanup（單輪純文字轉換；minimal/none 跳 LLM）
     let after_llm: anyhow::Result<String> = match level {
         CleanupLevel::None | CleanupLevel::Minimal => Ok(transcript.clone()),
         CleanupLevel::Smart => {
             tracing::info!(
                 provider = %llm_provider.name(),
                 model = %llm_provider.model(),
-                agent_mode,
-                tool_count = tools.len(),
-                "voice-input LLM stage start",
+                "voice-input LLM cleanup",
             );
-            let initial_messages = vec![
+            let messages = vec![
                 ChatMessage::system(rendered_system),
                 ChatMessage::user(transcript.clone()),
             ];
-            if agent_mode {
-                run_voice_input_agent_loop(&llm_provider, initial_messages, tools).await
-            } else {
-                llm_provider
-                    .chat(initial_messages, vec![])
-                    .await
-                    .context("voice-input LLM cleanup chat")
-                    .map(|r| r.content.unwrap_or_default().trim().to_string())
-            }
+            llm_provider
+                .chat(messages, vec![])
+                .await
+                .context("voice-input LLM cleanup chat")
+                .map(|r| r.content.unwrap_or_default().trim().to_string())
         }
     };
 
@@ -1031,21 +952,7 @@ async fn run_voice_input_pipeline(
         }
     };
 
-    // 5F-4: agent_mode 下若 LLM 只呼叫工具沒回文字，cleaned_text 會是空。
-    // 不算錯誤 — 工具已執行完了（例如開瀏覽器）。直接結束 pipeline 即可。
     if cleaned_text.is_empty() {
-        if agent_mode {
-            tracing::info!("agent_mode: LLM 只呼叫工具沒回最終文字，跳過 paste");
-            state.set_phase(
-                &app,
-                Phase::Done {
-                    transcript,
-                    response: String::new(),
-                    skill_calls: vec![],
-                },
-            );
-            return;
-        }
         state.set_phase(
             &app,
             Phase::Error {
@@ -1333,7 +1240,7 @@ fn refresh_mode_menu_labels(
             format!("   {base}")
         }
     };
-    let _ = active.set_text(mark(current == Mode::Active, "對話模式"));
+    let _ = active.set_text(mark(current == Mode::Agent, "對話模式"));
     let _ = voice_input.set_text(mark(current == Mode::VoiceInput, "語音輸入模式"));
     let _ = background.set_text(mark(current == Mode::Background, "休眠(關麥克風)"));
 }
@@ -1406,7 +1313,7 @@ fn main() {
         groq_api_key: Mutex::new(None),
         memory,
         conversation: Mutex::new(Vec::new()),
-        mode: Mutex::new(Mode::Active),
+        mode: Mutex::new(Mode::Agent),
         ollama_warmup: Mutex::new(None),
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
     });
@@ -1530,7 +1437,7 @@ fn main() {
                             let _ = f.set_always_on_top(true);
                         }
                     }
-                    "mode_active" => state_for_tray.set_mode(app, Mode::Active),
+                    "mode_active" => state_for_tray.set_mode(app, Mode::Agent),
                     "mode_voice_input" => state_for_tray.set_mode(app, Mode::VoiceInput),
                     "mode_background" => state_for_tray.set_mode(app, Mode::Background),
                     "reset" => {
@@ -1557,7 +1464,7 @@ fn main() {
                 } else if payload.contains("\"background\"") {
                     Mode::Background
                 } else {
-                    Mode::Active
+                    Mode::Agent
                 };
                 refresh_mode_menu_labels(&active_item, &voice_input_item, &background_item, target);
             });

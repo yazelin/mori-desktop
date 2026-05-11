@@ -21,7 +21,7 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
-type Mode = "active" | "voice_input" | "background";
+type Mode = "agent" | "voice_input" | "background";
 
 type Visual =
   | "sleeping"
@@ -91,7 +91,7 @@ const SPRITE_SRC: Record<Visual, string> = {
 };
 
 function FloatingMori() {
-  const [mode, setMode] = useState<Mode>("active");
+  const [mode, setMode] = useState<Mode>("agent");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [transient, setTransient] = useState<Visual | null>(null);
 
@@ -205,7 +205,7 @@ function FloatingMori() {
       return () => clearTimeout(t);
     }
 
-    if (mode === "active" && phase.response.trim()) {
+    if (mode === "agent" && phase.response.trim()) {
       const MAX = 60;
       const text = phase.response.trim();
       showInfo(text.length > MAX ? text.slice(0, MAX - 1) + "…" : text);

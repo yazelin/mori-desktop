@@ -41,9 +41,24 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E 完成 / 5F 進行中(2026-05-11)** — Mori 在 Wayland 上
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F 完成 / 5G 進行中(2026-05-12)** — Mori 在 Wayland 上
 **可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
-- 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(對話 / 輸入 / 休眠)
+
+### 5G 起的雙模式架構
+
+```
+Alt + 0~9        → VoiceInput profile：「我要輸入字」
+Ctrl+Alt + 0~9   → Agent profile：「我要叫 Mori 做事」
+Ctrl+Alt + Space → toggle 錄音（兩個模式共用）
+```
+
+- **VoiceInput 模式**（Alt+N）：STT → 單輪 LLM cleanup → 貼到游標位置。只做「字」，profile body 可用 `#file:` 內嵌參考檔
+- **Agent 模式**（Ctrl+Alt+N）：STT → Mori agent loop → chat 回應 / 執行動作（開瀏覽器、send_keys、查資料）。Mori 自己判斷
+- **熱鍵 + profile 二維**：前綴鍵選模式，數字選 profile。20 個熱鍵共構出豐富情境組合
+
+### 既有特色（5F 為止）
+
+- 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(Agent / VoiceInput / Background)
 - **反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)
 - **語音輸入模式**:把游標放輸入框 → 按熱鍵 → 講話 → LLM 加標點 + 程式守格式 → 直接貼到游標位置(跳過 agent loop,純 dictation)
 - **整套 LLM 可換**:Groq / 本機 Ollama / Claude CLI / 「claude 當 agent 走 Bash CLI proxy」四種,per-skill 還能獨立指定
@@ -84,10 +99,11 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ⏳ **ZeroType 相容 profile 系統** | SYSTEM.md + USER-*.md + context 注入（PROCESS_NAME / WINDOW_TITLE / SELECTED_TEXT）— 核心架構 | **5F-1** |
-| ⏳ **Alt+1~9 全域切換熱鍵** | 不用滑鼠選選單，直接切 voice input prompt | **5F-2** |
-| ⏳ **Floating widget 強化** | 錄音紅光隨音量跳動 + 轉錄原文泡泡 + prompt 名稱顯示 | **5F-3** |
-| ⏳ **ENABLE flags + voice agent loop** | 讓 voice input profile 能呼叫工具（send_keys / open_url / run_shell 等），對齊 ZeroType 能力 | **5F-4** |
+| ⏳ **Agent profile 系統 + Ctrl+Alt+N 熱鍵** | `~/.mori/agent/AGENT-XX.md` + 10 個 chat 模式 profile 熱鍵，讓使用者快速切換 Mori 的人格 / 能力組合 | **5G-3~5** |
+| ⏳ **動作工具搬到 chat skill** | OpenUrl / OpenApp / SendKeys / GoogleSearch 等變成 mori-core skill，給 Agent 模式呼叫 | **5G-6** |
+| ⏳ **Profile 動態 SkillRegistry** | Agent profile frontmatter `enabled_skills` 控制每個 profile 暴露哪些 skill | **5G-7** |
+| ⏳ **`#file:` 預處理** | profile body 內 `#file:path/to/x.md` 自動讀檔 inline，引用團隊規範 / 模板 | **5G-8** |
+| ⏳ **Profile 自動遷移** | 既有 voice profile 含 action flag 的自動搬到 `agent/` | **5G-10** |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
 | ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
