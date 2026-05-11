@@ -1778,3 +1778,121 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chinese_weekday_maps_all_seven() {
+        assert_eq!(chinese_weekday("Monday"), "星期一");
+        assert_eq!(chinese_weekday("Tuesday"), "星期二");
+        assert_eq!(chinese_weekday("Wednesday"), "星期三");
+        assert_eq!(chinese_weekday("Thursday"), "星期四");
+        assert_eq!(chinese_weekday("Friday"), "星期五");
+        assert_eq!(chinese_weekday("Saturday"), "星期六");
+        assert_eq!(chinese_weekday("Sunday"), "星期日");
+        assert_eq!(chinese_weekday("Funday"), "?");
+    }
+
+    fn empty_win_ctx() -> HotkeyWindowContext {
+        HotkeyWindowContext::default()
+    }
+
+    fn empty_mori_ctx() -> MoriContext {
+        MoriContext::default()
+    }
+
+    #[test]
+    fn context_section_always_includes_time() {
+        // 5J 的關鍵保證:Mori 永遠知道現在幾點(以前 voice_input / agent
+        // 漏注入導致「不知道時間」)
+        let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), None);
+        assert!(out.contains("時間"), "missing 時間 marker in: {out}");
+        // 至少含一個 4 位數年份
+        assert!(out.contains("20"), "year missing in: {out}");
+        // 含中文星期
+        assert!(out.contains("星期"), "weekday missing in: {out}");
+    }
+
+    #[test]
+    fn context_section_includes_os() {
+        let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), None);
+        assert!(out.contains("作業系統"));
+        assert!(out.contains(std::env::consts::OS));
+    }
+
+    #[test]
+    fn context_section_shows_unknown_when_window_empty() {
+        let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), None);
+        assert!(out.contains("(未知)"), "should show 未知 for empty window: {out}");
+    }
+
+    #[test]
+    fn context_section_shows_actual_window_fields() {
+        let win = HotkeyWindowContext {
+            process_name: "code".into(),
+            window_title: "main.rs - VS Code".into(),
+            selected_text: String::new(),
+        };
+        let out = build_context_section(&win, &empty_mori_ctx(), None);
+        assert!(out.contains("process: code"));
+        assert!(out.contains("title: main.rs - VS Code"));
+    }
+
+    #[test]
+    fn context_section_shows_clipboard_when_present() {
+        let mut ctx = empty_mori_ctx();
+        ctx.clipboard = Some("hello world".into());
+        let out = build_context_section(&empty_win_ctx(), &ctx, None);
+        assert!(out.contains("剪貼簿: hello world"));
+    }
+
+    #[test]
+    fn context_section_falls_back_to_mori_ctx_selected_when_win_ctx_empty() {
+        // win_ctx.selected_text 是熱鍵當下抓的;mori_ctx.selected_text 是 ContextProvider 抓的
+        // 5J: 兩個都檢查,win_ctx 優先,空才退到 mori_ctx
+        let mut mctx = empty_mori_ctx();
+        mctx.selected_text = Some("from mori ctx".into());
+        let out = build_context_section(&empty_win_ctx(), &mctx, None);
+        assert!(out.contains("反白文字: from mori ctx"));
+    }
+
+    #[test]
+    fn context_section_win_ctx_selected_wins_over_mori_ctx() {
+        let win = HotkeyWindowContext {
+            selected_text: "from win ctx".into(),
+            ..Default::default()
+        };
+        let mut mctx = empty_mori_ctx();
+        mctx.selected_text = Some("from mori ctx".into());
+        let out = build_context_section(&win, &mctx, None);
+        assert!(out.contains("反白文字: from win ctx"));
+        assert!(!out.contains("from mori ctx"));
+    }
+
+    #[test]
+    fn context_section_omits_memory_when_none() {
+        // VoiceInput 不傳 memory_index — 該段完全不該出現
+        let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), None);
+        assert!(!out.contains("長期記憶索引"), "memory section leaked: {out}");
+    }
+
+    #[test]
+    fn context_section_includes_memory_when_some() {
+        let out = build_context_section(
+            &empty_win_ctx(),
+            &empty_mori_ctx(),
+            Some("- mem1: about user\n- mem2: ..."),
+        );
+        assert!(out.contains("長期記憶索引"));
+        assert!(out.contains("mem1: about user"));
+    }
+
+    #[test]
+    fn context_section_empty_memory_shows_placeholder() {
+        let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), Some("  \n"));
+        assert!(out.contains("長期記憶索引"));
+        assert!(out.contains("目前沒有記憶"));
+    }
+}

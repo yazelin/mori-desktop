@@ -157,3 +157,41 @@ impl LlmProvider for GenericOpenAiProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_defaults_to_openai_compat() {
+        let p = GenericOpenAiProvider::new("https://api.example.com/v1", "k", "m");
+        assert_eq!(p.name(), "openai-compat");
+    }
+
+    #[test]
+    fn with_name_overrides_display_name() {
+        let p = GenericOpenAiProvider::new("https://api.example.com/v1", "k", "m")
+            .with_name("gemini");
+        assert_eq!(p.name(), "gemini");
+    }
+
+    #[test]
+    fn api_base_trailing_slash_stripped() {
+        // 避免後面 join "/chat/completions" 變成 "//chat/completions"
+        let p = GenericOpenAiProvider::new("https://api.example.com/v1/", "k", "m");
+        assert_eq!(p.api_base, "https://api.example.com/v1");
+    }
+
+    #[test]
+    fn model_accessor_returns_configured_model() {
+        let p = GenericOpenAiProvider::new("https://api.example.com/v1", "k", "gemini-3.1-flash-lite-preview");
+        assert_eq!(p.model(), "gemini-3.1-flash-lite-preview");
+    }
+
+    #[test]
+    fn supports_tool_calling_true() {
+        // OpenAI-compat 端點都宣告 tool calling — Gemini / Groq / OpenAI 都 OK
+        let p = GenericOpenAiProvider::new("https://api.example.com/v1", "k", "m");
+        assert!(p.supports_tool_calling());
+    }
+}

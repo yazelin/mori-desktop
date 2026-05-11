@@ -206,13 +206,17 @@ pub(crate) const GEMINI_DEFAULT_MODEL: &str = "gemini-3.1-flash-lite-preview";
 /// 從 OS env var 或 ~/.mori/config.json `api_keys.<name>` 取 API key。
 /// env var 優先；空字串視為未設。
 pub(crate) fn resolve_api_key(key_env_name: &str) -> Option<String> {
+    resolve_api_key_at(mori_config_path().as_deref(), key_env_name)
+}
+
+/// 純函式版本（可測）：給定 config path（可能為 None）+ key 環境變數名。
+pub(crate) fn resolve_api_key_at(config_path: Option<&std::path::Path>, key_env_name: &str) -> Option<String> {
     if let Ok(v) = std::env::var(key_env_name) {
         if !v.is_empty() {
             return Some(v);
         }
     }
-    mori_config_path()
-        .as_deref()
+    config_path
         .and_then(|p| groq::read_json_pointer(p, &format!("/api_keys/{key_env_name}")))
         .filter(|s| !s.is_empty())
 }
@@ -537,6 +541,138 @@ mod routing_tests {
         assert_eq!(cfg.skills.len(), 1);
         assert!(cfg.skills.contains_key("a"));
         assert!(!cfg.skills.contains_key("b"));
+    }
+
+    // ─── 5J: resolve_api_key 與 gemini provider 常數 ───────────────────────
+
+    /// 把 env var 暫存 / 還原，避免 test 之間互相污染。
+    /// 留意：cargo test 預設多 thread,呼叫端要自己保證 key name 在不同 test 互不相干
+    /// （這 5J 系列 test 都用獨立 key name 解決）。
+    struct EnvGuard {
+        key: String,
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key: key.into(), prev }
+        }
+        fn unset(key: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key: key.into(), prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(&self.key, v),
+                None => std::env::remove_var(&self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_api_key_env_var_wins() {
+        let _g = EnvGuard::set("MORI_TEST_KEY_ENV_WINS", "from-env");
+        let dir = write_config(r#"{"api_keys":{"MORI_TEST_KEY_ENV_WINS":"from-config"}}"#);
+        let got = resolve_api_key_at(Some(&dir.path().join("config.json")), "MORI_TEST_KEY_ENV_WINS");
+        assert_eq!(got.as_deref(), Some("from-env"));
+    }
+
+    #[test]
+    fn resolve_api_key_falls_back_to_config() {
+        let _g = EnvGuard::unset("MORI_TEST_KEY_CONFIG_FALLBACK");
+        let dir = write_config(r#"{"api_keys":{"MORI_TEST_KEY_CONFIG_FALLBACK":"from-config"}}"#);
+        let got = resolve_api_key_at(Some(&dir.path().join("config.json")), "MORI_TEST_KEY_CONFIG_FALLBACK");
+        assert_eq!(got.as_deref(), Some("from-config"));
+    }
+
+    #[test]
+    fn resolve_api_key_empty_env_falls_back() {
+        // 空字串 env var 應視為未設,讓 config 接手
+        let _g = EnvGuard::set("MORI_TEST_KEY_EMPTY_ENV", "");
+        let dir = write_config(r#"{"api_keys":{"MORI_TEST_KEY_EMPTY_ENV":"from-config"}}"#);
+        let got = resolve_api_key_at(Some(&dir.path().join("config.json")), "MORI_TEST_KEY_EMPTY_ENV");
+        assert_eq!(got.as_deref(), Some("from-config"));
+    }
+
+    #[test]
+    fn resolve_api_key_empty_config_value_returns_none() {
+        let _g = EnvGuard::unset("MORI_TEST_KEY_EMPTY_CONFIG");
+        let dir = write_config(r#"{"api_keys":{"MORI_TEST_KEY_EMPTY_CONFIG":""}}"#);
+        let got = resolve_api_key_at(Some(&dir.path().join("config.json")), "MORI_TEST_KEY_EMPTY_CONFIG");
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn resolve_api_key_missing_returns_none() {
+        let _g = EnvGuard::unset("MORI_TEST_KEY_MISSING");
+        let dir = write_config(r#"{"api_keys":{}}"#);
+        let got = resolve_api_key_at(Some(&dir.path().join("config.json")), "MORI_TEST_KEY_MISSING");
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn resolve_api_key_no_config_no_env() {
+        let _g = EnvGuard::unset("MORI_TEST_KEY_NO_CONFIG");
+        let got = resolve_api_key_at(None, "MORI_TEST_KEY_NO_CONFIG");
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn gemini_defaults_are_openai_compat_endpoint() {
+        // OpenAI-compat 端點長相,不能變成原生 Google AI Studio 路徑
+        assert!(GEMINI_DEFAULT_API_BASE.contains("generativelanguage.googleapis.com"));
+        assert!(GEMINI_DEFAULT_API_BASE.contains("openai"));
+        // model 預設應是個非空字串
+        assert!(!GEMINI_DEFAULT_MODEL.is_empty());
+    }
+
+    // `build_named_provider("gemini", ...)` 讀 GEMINI_API_KEY env + $HOME。
+    // env var 是 process-global,cargo test 預設多 thread 會 race。
+    // 用 Mutex 序列化所有會動這兩個 env 的 test。
+    static GEMINI_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn build_named_provider_gemini_fails_without_key() {
+        let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = EnvGuard::unset("GEMINI_API_KEY");
+        // 暫時把 HOME 指到一個沒有 .mori/config.json 的 tempdir
+        let home_dir = tempdir().unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home_dir.path());
+        let result = build_named_provider("gemini", None);
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        // Arc<dyn LlmProvider> 沒 Debug,不能用 expect_err
+        let err = match result {
+            Ok(_) => panic!("expected build_named_provider(\"gemini\") to fail without GEMINI_API_KEY"),
+            Err(e) => e,
+        };
+        let msg = format!("{err:#}");
+        assert!(msg.contains("GEMINI_API_KEY"), "error should mention GEMINI_API_KEY, got: {msg}");
+    }
+
+    #[test]
+    fn build_named_provider_gemini_succeeds_with_env_key() {
+        let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = EnvGuard::set("GEMINI_API_KEY", "test-key-12345");
+        let home_dir = tempdir().unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home_dir.path());
+        let result = build_named_provider("gemini", None);
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let p = result.expect("should build with env key");
+        assert_eq!(p.name(), "gemini");
+        assert!(p.supports_tool_calling());
+        assert_eq!(p.model(), GEMINI_DEFAULT_MODEL);
     }
 }
 
