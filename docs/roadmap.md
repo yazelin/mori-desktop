@@ -108,7 +108,24 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
-## Phase 5G — 雙模式架構(VoiceInput + Agent)(2026-05-12,進行中)
+## Phase 5H — 使用者自訂 shell skill (2026-05-12,完成)
+
+「mori 變成 LLM 加持的個人 CLI dispatcher」— profile 裡定義一段 shell_skills，
+裝在系統 PATH 的任何 CLI（gh / docker / kubectl / yt-dlp / 自家 script）
+都能變成 Mori 可呼叫的工具，不用改 Rust 程式碼。
+
+- [x] `serde_yml` workspace 依賴，用真正 YAML parser 解析 frontmatter
+- [x] `ShellSkillDef` / `ParamDef` 加進 AgentFrontmatter
+- [x] `mori-tauri/src/shell_skill.rs` — ShellSkill 實作 mori_core Skill trait
+- [x] `Box::leak` workaround for `&'static str` name/description（profile 切換頻率低）
+- [x] `{{param}}` 替換邏輯（純字串，無 shell parsing → 無 injection）
+- [x] timeout（預設 30 秒，可設）+ stdout/stderr 截斷（4KB / 1KB）
+- [x] working_dir + success_message 模板
+- [x] 範例 `AGENT-01.工作流範例.md`：gh_pr_list / docker_ps_filter / open_blog 等
+- [x] 9 個 unit tests（含 shell injection 測試確認 LLM 無法 escape）
+- [x] README + roadmap 更新
+
+## Phase 5G — 雙模式架構(VoiceInput + Agent)(2026-05-12,完成)
 
 5F 把 voice input 同時做 dictation + agent 結果走太多坑（Gemini 3 thought_signature、
 Groq parse_failed、Chrome extension 焦點時序、5G 一系列 retroactive 改造）。

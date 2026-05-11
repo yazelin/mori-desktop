@@ -9,6 +9,7 @@ mod portal_hotkey;
 mod recording;
 #[cfg(target_os = "linux")]
 mod selection;
+mod shell_skill;
 mod skill_server;
 
 use std::sync::Arc;
@@ -830,6 +831,14 @@ async fn run_agent_pipeline(
                 registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
             }
         }
+
+        // 5H: profile 自訂的 shell skills — 不受 enabled_skills filter 影響。
+        // 寫進 shell_skills: 就是要用的（filter 只篩 built-in skill 子集）。
+        for def in &agent_profile.frontmatter.shell_skills {
+            tracing::info!(skill = %def.name, "registering shell_skill from profile");
+            registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
+        }
+
         let registry = Arc::new(registry);
 
         let agent = Agent::new(agent_provider.clone(), registry);

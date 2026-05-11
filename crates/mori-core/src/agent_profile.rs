@@ -8,15 +8,19 @@
 //! 對應 VoiceInput profile (`~/.mori/voice_input/USER-XX.md`)，但任務不同：
 //! VoiceInput 處理「字」，Agent 處理「事」。
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
+
+use serde::Deserialize;
 
 use crate::voice_input_profile::SlotSwitchInfo;
 
 // ─── Frontmatter ──────────────────────────────────────────────────────────
 
 /// 從 AGENT-XX.md 的 YAML frontmatter 解析出來的設定。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct AgentFrontmatter {
     /// LLM provider（claude-bash / groq / ollama / claude-cli / ...）
     /// None → 用 ~/.mori/config.json 的 default_provider
@@ -27,6 +31,60 @@ pub struct AgentFrontmatter {
     pub enabled_skills: Vec<String>,
     /// 啟用 profile body 的 #file: 預處理
     pub enable_read: bool,
+    /// 5H: 使用者自訂的 shell skills（依附此 profile，切走就消失）
+    pub shell_skills: Vec<ShellSkillDef>,
+}
+
+/// 5H: profile 中自訂的 shell skill 定義。每次 profile 切換時動態建立成
+/// `Skill` trait 物件註冊到 SkillRegistry 給 LLM 呼叫。
+///
+/// **安全**：
+/// - `command` 是 array，第一個元素是 binary，其餘是 args。**永遠不走 shell**
+///   (沒有 `; && | $()` 解析)，所以 LLM 即使把奇怪內容塞進參數也無法 escape。
+/// - 參數值用 `{{name}}` 在 array 元素內替換，仍是字面字串。
+/// - profile 由使用者撰寫（信任來源），LLM 沒能力動 `command` 的內容。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShellSkillDef {
+    /// 唯一 skill 名（給 LLM 用，OpenAI tool_calls 的 function name 規則）
+    pub name: String,
+    /// LLM 看到的描述：什麼時候該呼叫這個工具
+    pub description: String,
+    /// 參數定義（給 LLM 看 schema，給 mori 看怎麼驗證）
+    #[serde(default)]
+    pub parameters: HashMap<String, ParamDef>,
+    /// 實際執行的 binary + args；元素可含 `{{param_name}}` 替換
+    pub command: Vec<String>,
+    /// 工作目錄（可選，含 ~ 展開）
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    /// 執行 timeout（秒），預設 30
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+    /// 執行成功後給 LLM 的訊息（可含 `{{stdout}}`），預設「已執行 <name>」
+    #[serde(default)]
+    pub success_message: Option<String>,
+}
+
+fn default_timeout_secs() -> u64 {
+    30
+}
+
+/// 單一參數的 schema 定義。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ParamDef {
+    /// JSON Schema type：目前只支援 "string"
+    #[serde(rename = "type", default = "default_param_type")]
+    pub kind: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
+fn default_param_type() -> String {
+    "string".to_string()
 }
 
 impl AgentFrontmatter {
@@ -93,48 +151,14 @@ pub fn parse_agent_profile(name: &str, content: &str) -> AgentProfile {
 }
 
 fn parse_agent_frontmatter(s: &str) -> AgentFrontmatter {
-    let mut fm = AgentFrontmatter::default();
-    for line in s.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some(colon) = line.find(':') else { continue };
-        let key = line[..colon].trim().to_lowercase();
-        let value = line[colon + 1..].trim();
-
-        match key.as_str() {
-            "provider" => fm.provider = non_empty(value),
-            "stt_provider" => fm.stt_provider = non_empty(value),
-            "enable_read" => fm.enable_read = parse_bool(value),
-            "enabled_skills" => {
-                fm.enabled_skills = parse_list(value);
-            }
-            _ => {} // 未知鍵靜默忽略
+    // 5H: 改用 serde_yml 解析完整 YAML，支援 shell_skills 之類的巢狀結構。
+    match serde_yml::from_str::<AgentFrontmatter>(s) {
+        Ok(fm) => fm,
+        Err(e) => {
+            tracing::warn!(?e, "agent profile frontmatter YAML parse failed, using defaults");
+            AgentFrontmatter::default()
         }
     }
-    fm
-}
-
-fn parse_bool(s: &str) -> bool {
-    matches!(s.to_lowercase().as_str(), "true" | "yes" | "1")
-}
-
-fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
-}
-
-/// 解析 YAML 風格的 inline list：`[a, b, c]` 或 `a, b, c`。
-fn parse_list(s: &str) -> Vec<String> {
-    let trimmed = s.trim().trim_start_matches('[').trim_end_matches(']');
-    if trimmed.is_empty() {
-        return vec![];
-    }
-    trimmed
-        .split(',')
-        .map(|item| item.trim().trim_matches('"').trim_matches('\'').to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
 }
 
 // ─── File I/O ─────────────────────────────────────────────────────────────
@@ -408,12 +432,30 @@ mod tests {
     }
 
     #[test]
-    fn parse_list_inline_and_quoted() {
-        assert_eq!(parse_list("[a, b, c]"), vec!["a", "b", "c"]);
-        assert_eq!(parse_list("a, b, c"), vec!["a", "b", "c"]);
-        assert_eq!(parse_list("[\"open_url\", \"send_keys\"]"), vec!["open_url", "send_keys"]);
-        assert!(parse_list("[]").is_empty());
-        assert!(parse_list("").is_empty());
+    fn parse_enabled_skills_list_serde_yml() {
+        // serde_yml 支援 YAML inline list 跟 block list 兩種寫法
+        let inline = parse_agent_profile("t", "---\nenabled_skills: [a, b, c]\n---\nbody");
+        assert_eq!(inline.frontmatter.enabled_skills, vec!["a", "b", "c"]);
+
+        let block = parse_agent_profile(
+            "t",
+            "---\nenabled_skills:\n  - a\n  - b\n  - c\n---\nbody",
+        );
+        assert_eq!(block.frontmatter.enabled_skills, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn parse_shell_skills_full() {
+        let yaml = "---\nshell_skills:\n  - name: gh_pr_list\n    description: List PRs\n    command: [gh, pr, list]\n  - name: ssh_to\n    description: SSH somewhere\n    parameters:\n      host: { type: string, required: true }\n    command: [ssh, \"{{host}}\"]\n    timeout_secs: 60\n---\nbody";
+        let p = parse_agent_profile("t", yaml);
+        assert_eq!(p.frontmatter.shell_skills.len(), 2);
+        assert_eq!(p.frontmatter.shell_skills[0].name, "gh_pr_list");
+        assert_eq!(p.frontmatter.shell_skills[0].command, vec!["gh", "pr", "list"]);
+        assert_eq!(p.frontmatter.shell_skills[1].name, "ssh_to");
+        assert_eq!(p.frontmatter.shell_skills[1].command, vec!["ssh", "{{host}}"]);
+        assert_eq!(p.frontmatter.shell_skills[1].timeout_secs, 60);
+        let host = p.frontmatter.shell_skills[1].parameters.get("host").unwrap();
+        assert!(host.required);
     }
 
     #[test]
