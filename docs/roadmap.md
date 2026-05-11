@@ -108,7 +108,23 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
-## Phase 5L — 主視窗 Config UI(規劃中)
+## Phase 5M — 主視窗 UI 重設計(規劃中)
+
+5L 要加 Config UI、未來 Memory / Skills 分頁也要塞,目前小聊天框尺寸不夠。
+先做主視窗 layout 重設計,再蓋功能。
+
+- [ ] 視窗預設拉大(~800×600),resizable
+- [ ] 左側 sidebar 分頁:Chat / Profiles / Config / Memory / Skills
+- [ ] Chat tab:保留現有對話 panel + 麥克風 + 文字輸入
+- [ ] Profiles tab:VoiceInput + Agent profile list + 切換 + 編輯入口
+- [ ] Config tab(銜接 5L):config.json 表單編輯
+- [ ] Memory tab:browse / search / edit ~/.mori/memory/
+- [ ] Skills tab:當前 profile 啟用的 built-in skill + shell_skill 列表
+- [ ] 動工前先做 mockup 跟 user 確認風格
+
+順序：5K(picker)→ 5M(主視窗重設計)→ 5L(config UI 真正塞進去)。
+
+## Phase 5L — 主視窗 Config UI(規劃中,依賴 5M)
 
 目前 `~/.mori/` 內所有設定(config.json / voice_input/USER-XX.md / agent/AGENT-XX.md /
 corrections.md)都要手動改檔,使用者門檻高。5L 在主視窗加 Config 分頁(或 modal)
