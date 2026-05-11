@@ -108,6 +108,34 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
+## Phase 5L — 主視窗 Config UI(規劃中)
+
+目前 `~/.mori/` 內所有設定(config.json / voice_input/USER-XX.md / agent/AGENT-XX.md /
+corrections.md)都要手動改檔,使用者門檻高。5L 在主視窗加 Config 分頁(或 modal)
+讓所有設定可從 UI 編輯。
+
+- [ ] Tauri IPC:`read_config` / `write_config` / `list_profiles` / `read_profile` /
+      `write_profile` / `read_corrections` / `write_corrections`
+- [ ] 前端 Config 分頁,子分頁:Global / VoiceInput Profiles / Agent Profiles / Corrections
+- [ ] config.json 表單 — provider / stt_provider / providers.* / api_keys / routing
+- [ ] Profile 編輯器 — frontmatter 表單 + body 編輯器(monaco 或簡易 textarea)
+- [ ] shell_skills 表格編輯器(含 ParamDef)
+- [ ] corrections.md 編輯器 — `舊 -> 新` 表格 / raw markdown 兩種模式
+- [ ] 寫入後 hot reload(`load_active_profile()` 已是讀檔即時,無需重啟)
+- [ ] 安全:寫入前 validate frontmatter parse;失敗回 diff 顯示
+
+優先序:5K(picker)→ 5L(config UI)→ 後續 features。
+
+## Phase 5K — Profile Picker UI + Tray submenu(規劃中)
+
+10 個 slot 不夠用,11+ profile 無法以熱鍵選擇。
+
+- [ ] **5K-1 Picker UI overlay** — 新熱鍵(例 Ctrl+Alt+P)開 list overlay,
+      方向鍵選 / Enter 確認 / Esc 取消。新 Tauri window + portal hotkey +
+      鍵盤事件路由
+- [ ] **5K-2 Tray submenu** — 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」
+      子選單,掃 ~/.mori/voice_input/ + ~/.mori/agent/ 列出全部 .md
+
 ## Phase 5J — 單層 profile + Rust 統一 context 注入 + gemini provider (2026-05-12,完成)
 
 5G/5H 後遺症收尾。voice_input 還保留 SYSTEM.md（`{{CONTEXT.*}}` 模板）+ USER.md 雙層
