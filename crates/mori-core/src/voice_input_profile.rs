@@ -89,6 +89,8 @@ pub struct VoiceInputFrontmatter {
     /// mori 具名 provider 快捷（groq / ollama / claude-bash / ...）
     /// 若與 zerotype_api_base 並存，以 zerotype_api_base 為準（保留原始意圖）
     pub provider: Option<String>,
+    /// 覆蓋此 profile 的 STT provider（groq / whisper-local）
+    pub stt_provider: Option<String>,
     /// 覆蓋全域 cleanup_level
     pub cleanup_level: Option<CleanupLevel>,
 }
@@ -112,6 +114,7 @@ impl Default for VoiceInputFrontmatter {
             enable_read: false,
             enable_run_shell: false,
             provider: None,
+            stt_provider: None,
             cleanup_level: None,
         }
     }
@@ -273,6 +276,7 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
             "ENABLE_READ" => fm.enable_read = parse_bool(value),
             "ENABLE_RUN_SHELL" => fm.enable_run_shell = parse_bool(value),
             "provider" => fm.provider = non_empty(value),
+            "stt_provider" => fm.stt_provider = non_empty(value),
             "cleanup_level" => {
                 fm.cleanup_level = match value {
                     "smart" => Some(CleanupLevel::Smart),

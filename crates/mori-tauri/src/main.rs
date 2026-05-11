@@ -519,9 +519,19 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     state.set_phase(&app, Phase::Transcribing);
 
     // 5F: 通知 floating widget 顯示轉錄狀態（包含 STT provider 名稱）
+    // 若 profile 有覆蓋 stt_provider 則顯示它，否則顯示全域預設
     {
-        let stt = mori_core::llm::transcribe::active_transcribe_snapshot();
-        let _ = app.emit("voice-input-status", format!("📝 轉錄中 · {}", stt.name));
+        let name = if matches!(*state.mode.lock(), Mode::VoiceInput) {
+            mori_core::voice_input_profile::load_active_profile()
+                .frontmatter
+                .stt_provider
+                .unwrap_or_else(|| {
+                    mori_core::llm::transcribe::active_transcribe_snapshot().name
+                })
+        } else {
+            mori_core::llm::transcribe::active_transcribe_snapshot().name
+        };
+        let _ = app.emit("voice-input-status", format!("📝 轉錄中 · {}", name));
     }
 
     let app_for_provider = app.clone();
@@ -565,10 +575,27 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let _ = std::fs::write(&debug_path, &wav);
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
-            let stt = mori_core::llm::transcribe::build_transcription_provider(Some(
-                retry_callback_for(app_for_provider.clone()),
-            ))
-            .context("build transcription provider")?;
+            // 5F: VoiceInput mode 時，profile 可用 stt_provider 覆蓋全域 STT 設定
+            let stt_override: Option<String> =
+                if matches!(*state.mode.lock(), Mode::VoiceInput) {
+                    mori_core::voice_input_profile::load_active_profile()
+                        .frontmatter
+                        .stt_provider
+                } else {
+                    None
+                };
+
+            let stt = match stt_override.as_deref() {
+                Some(name) => mori_core::llm::transcribe::build_named_transcription_provider(
+                    name,
+                    Some(retry_callback_for(app_for_provider.clone())),
+                )
+                .with_context(|| format!("build STT provider '{name}' (profile override)"))?,
+                None => mori_core::llm::transcribe::build_transcription_provider(Some(
+                    retry_callback_for(app_for_provider.clone()),
+                ))
+                .context("build transcription provider")?,
+            };
             let transcript = stt
                 .transcribe(wav)
                 .await

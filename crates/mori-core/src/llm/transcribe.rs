@@ -100,6 +100,57 @@ pub fn build_transcription_provider(
     }
 }
 
+/// 跟 [`build_transcription_provider`] 一樣，但**直接指定 provider 名稱**，
+/// 不讀 config 的 `default_transcribe_provider`。給 voice input profile 覆蓋用：
+/// profile frontmatter 設 `stt_provider: whisper-local` 時呼叫這個。
+pub fn build_named_transcription_provider(
+    name: &str,
+    retry_cb: Option<groq::RetryCallback>,
+) -> Result<Arc<dyn TranscriptionProvider>> {
+    match name {
+        "whisper-local" => {
+            let p = super::whisper_local::LocalWhisperProvider::from_config()?;
+            tracing::info!(
+                provider = "whisper-local",
+                model_path = %p.model_path().display(),
+                "transcription provider selected (profile override)",
+            );
+            Ok(Arc::new(p))
+        }
+        "groq" => {
+            let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no GROQ_API_KEY for STT override. Set GROQ_API_KEY or providers.groq.api_key"
+                )
+            })?;
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/transcribe_model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_TRANSCRIBE_MODEL.to_string());
+            let chat_model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+            tracing::info!(
+                provider = "groq",
+                model = %model,
+                "transcription provider selected (profile override)",
+            );
+            let p = groq::GroqProvider::new(key, chat_model).with_transcribe_model(model);
+            let p = if let Some(cb) = retry_cb {
+                p.with_retry_callback(cb)
+            } else {
+                p
+            };
+            Ok(Arc::new(p))
+        }
+        other => anyhow::bail!(
+            "unknown STT provider '{}' — supported: groq, whisper-local",
+            other
+        ),
+    }
+}
+
 /// 給 IPC `chat_provider_info` / log 用 — 不需要構造 provider 就能知道
 /// 目前生效的 transcribe provider 設定。
 #[derive(Debug, Clone)]
