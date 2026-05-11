@@ -23,7 +23,7 @@ use crate::voice_input_profile::SlotSwitchInfo;
 #[serde(default)]
 pub struct AgentFrontmatter {
     /// LLM provider（claude-bash / groq / ollama / claude-cli / ...）
-    /// None → 用 ~/.mori/config.json 的 default_provider
+    /// None → 用 ~/.mori/config.json 的 provider
     pub provider: Option<String>,
     /// STT provider override
     pub stt_provider: Option<String>,

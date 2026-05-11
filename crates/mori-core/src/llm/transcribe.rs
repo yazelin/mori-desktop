@@ -38,15 +38,15 @@ pub trait TranscriptionProvider: Send + Sync {
 /// 從 `~/.mori/config.json` 蓋出 transcription provider。
 ///
 /// 配置:
-/// - `default_transcribe_provider`: "groq"(預設) | "whisper-local"
-/// - `providers.groq.{api_key, transcribe_model}` (Groq 路徑)
+/// - `stt_provider`: "groq"(預設) | "whisper-local"
+/// - `providers.groq.{api_key, stt_model}` (Groq 路徑)
 /// - `providers.whisper-local.{model_path, language}` (本機 whisper 路徑)
 ///
 /// retry_callback 只在 Groq 路徑套用(本機 Whisper 沒 rate-limit)。
 pub fn build_transcription_provider(
     retry_cb: Option<groq::RetryCallback>,
 ) -> Result<Arc<dyn TranscriptionProvider>> {
-    let default = read_default_transcribe_provider();
+    let default = read_stt_provider_config();
 
     match default.as_str() {
         "whisper-local" => {
@@ -63,33 +63,33 @@ pub fn build_transcription_provider(
             if other != "groq" {
                 tracing::warn!(
                     provider = other,
-                    "unknown default_transcribe_provider — falling back to 'groq'",
+                    "unknown stt_provider — falling back to 'groq'",
                 );
             }
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
                 anyhow::anyhow!(
                     "no GROQ_API_KEY configured for STT. Edit ~/.mori/config.json or set \
-                     $GROQ_API_KEY (or set default_transcribe_provider to 'whisper-local' \
+                     $GROQ_API_KEY (or set stt_provider to 'whisper-local' \
                      for local STT)"
                 )
             })?;
             let model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/transcribe_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_TRANSCRIBE_MODEL.to_string());
-            let chat_model = mori_config_path()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/stt_model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_STT_MODEL.to_string());
+            let llm_model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_MODEL.to_string());
             tracing::info!(
                 provider = "groq",
                 model = %model,
                 "transcription provider selected",
             );
-            // GroqProvider 用一個構造同時帶 chat_model + transcribe_model;
-            // 我們這只用 transcribe 路徑,但建構時還是要給 chat_model(沒空值)。
-            let p = groq::GroqProvider::new(key, chat_model)
-                .with_transcribe_model(model);
+            // GroqProvider 構造同時帶 LLM model + stt_model;
+            // 我們這只用 STT 路徑,但建構時還是要給 LLM model(沒空值)。
+            let p = groq::GroqProvider::new(key, llm_model)
+                .with_stt_model(model);
             let p = if let Some(cb) = retry_cb {
                 p.with_retry_callback(cb)
             } else {
@@ -101,7 +101,7 @@ pub fn build_transcription_provider(
 }
 
 /// 跟 [`build_transcription_provider`] 一樣，但**直接指定 provider 名稱**，
-/// 不讀 config 的 `default_transcribe_provider`。給 voice input profile 覆蓋用：
+/// 不讀 config 的 `stt_provider`。給 voice input profile 覆蓋用：
 /// profile frontmatter 設 `stt_provider: whisper-local` 時呼叫這個。
 pub fn build_named_transcription_provider(
     name: &str,
@@ -125,18 +125,18 @@ pub fn build_named_transcription_provider(
             })?;
             let model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/transcribe_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_TRANSCRIBE_MODEL.to_string());
-            let chat_model = mori_config_path()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/stt_model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_STT_MODEL.to_string());
+            let llm_model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_MODEL.to_string());
             tracing::info!(
                 provider = "groq",
                 model = %model,
                 "transcription provider selected (profile override)",
             );
-            let p = groq::GroqProvider::new(key, chat_model).with_transcribe_model(model);
+            let p = groq::GroqProvider::new(key, llm_model).with_stt_model(model);
             let p = if let Some(cb) = retry_cb {
                 p.with_retry_callback(cb)
             } else {
@@ -163,7 +163,7 @@ pub struct TranscribeSnapshot {
 }
 
 pub fn active_transcribe_snapshot() -> TranscribeSnapshot {
-    let default = read_default_transcribe_provider();
+    let default = read_stt_provider_config();
     match default.as_str() {
         "whisper-local" => {
             let model_path = mori_config_path()
@@ -186,8 +186,8 @@ pub fn active_transcribe_snapshot() -> TranscribeSnapshot {
         _ => {
             let model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/transcribe_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_TRANSCRIBE_MODEL.to_string());
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/stt_model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_STT_MODEL.to_string());
             TranscribeSnapshot {
                 name: "groq".into(),
                 model,
@@ -197,10 +197,10 @@ pub fn active_transcribe_snapshot() -> TranscribeSnapshot {
     }
 }
 
-fn read_default_transcribe_provider() -> String {
+fn read_stt_provider_config() -> String {
     mori_config_path()
         .as_deref()
-        .and_then(|p| groq::read_json_pointer(p, "/default_transcribe_provider"))
+        .and_then(|p| groq::read_json_pointer(p, "/stt_provider"))
         .unwrap_or_else(|| "groq".to_string())
 }
 

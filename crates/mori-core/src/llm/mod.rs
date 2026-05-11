@@ -27,7 +27,7 @@ pub mod whisper_local;
 
 // ─── Provider factory ───────────────────────────────────────────────
 //
-// `build_chat_provider` 讀 `~/.mori/config.json` 的 `default_provider`
+// `build_chat_provider` 讀 `~/.mori/config.json` 的 `provider`
 // 欄位,構造對應 LlmProvider 回傳。Groq / Ollama 走不同 default。
 // retry_callback 只對 Groq 有意義(Ollama 本機沒 rate limit)。
 
@@ -157,8 +157,8 @@ pub fn build_named_provider(
             })?;
             let model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_MODEL.to_string());
             let p = groq::GroqProvider::new(key, model);
             let p = if let Some(cb) = retry_cb {
                 p.with_retry_callback(cb)
@@ -185,10 +185,10 @@ pub fn build_openai_compat_provider(
 }
 
 /// 從 `~/.mori/config.json` 蓋出**主 chat provider**。配置:
-/// - `default_provider`: "groq"(預設) | "ollama" | "claude-cli"
+/// - `provider`: "groq"(預設) | "ollama" | "claude-cli"
 /// - `providers.<name>.<...>` 各 provider 細節
 ///
-/// 未知 default_provider 會 silently fallback 到 groq + warn(舊行為,
+/// 未知 provider 會 silently fallback 到 groq + warn(舊行為,
 /// 不破壞既有 user)。retry_callback 只在 Groq 路徑套用。
 ///
 /// **Note**:5A-3 起若有 `routing` 區塊,主 agent 應該用 [`Routing`]
@@ -196,14 +196,14 @@ pub fn build_openai_compat_provider(
 pub fn build_chat_provider(
     retry_cb: Option<groq::RetryCallback>,
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
-    let default = read_default_provider();
+    let default = read_provider_config();
     let resolved = match default.as_str() {
         "groq" | "ollama" | "claude-cli" | "claude-bash"
         | "gemini-bash" | "codex-bash" | "gemini-cli" | "codex-cli" => default.as_str(),
         other => {
             tracing::warn!(
                 provider = other,
-                "unknown default_provider — falling back to 'groq'",
+                "unknown provider — falling back to 'groq'",
             );
             "groq"
         }
@@ -219,7 +219,7 @@ pub fn build_chat_provider(
 ///   推理走 Claude CLI(quota 用 user 自己的 Pro/Max)或 Ollama(本機免錢)
 /// - 之後加 fallback chain(5A-3b)時也以這個結構為基礎
 ///
-/// 沒有 `routing` block 的 config 會退化成全部用 `default_provider`,
+/// 沒有 `routing` block 的 config 會退化成全部用 `provider`,
 /// 跟 5A-2 之前的行為一致。
 pub struct Routing {
     /// 主 agent loop 的 provider。**必須** supports_tool_calling,否則
@@ -254,7 +254,7 @@ impl Routing {
     pub fn build_from_config(
         retry_cb: Option<groq::RetryCallback>,
     ) -> anyhow::Result<Self> {
-        let default = read_default_provider();
+        let default = read_provider_config();
         let cfg = read_routing_config();
 
         let agent_name = cfg
@@ -356,21 +356,21 @@ impl Routing {
 /// `Routing::build_from_config` 用。
 #[derive(Default, Debug, Clone)]
 pub struct RoutingConfig {
-    /// `routing.agent`(可選),沒設就退化成 `default_provider`
+    /// `routing.agent`(可選),沒設就退化成 `provider`
     pub agent: Option<String>,
     /// `routing.skills` 的 skill→provider 對應表
     pub skills: HashMap<String, String>,
 }
 
-fn read_default_provider() -> String {
+fn read_provider_config() -> String {
     mori_config_path()
         .as_deref()
-        .and_then(|p| groq::read_json_pointer(p, "/default_provider"))
+        .and_then(|p| groq::read_json_pointer(p, "/provider"))
         .unwrap_or_else(|| "groq".to_string())
 }
 
 /// 讀 `routing.agent` + `routing.skills` 子物件。沒檔案 / 沒 routing /
-/// 解析失敗都回 default(空 routing,等於沿用 default_provider 行為)。
+/// 解析失敗都回 default(空 routing,等於沿用 provider 行為)。
 pub fn read_routing_config() -> RoutingConfig {
     match mori_config_path() {
         Some(path) => read_routing_config_at(&path),
@@ -434,7 +434,7 @@ mod routing_tests {
 
     #[test]
     fn missing_routing_block_returns_default() {
-        let dir = write_config(r#"{"default_provider":"groq"}"#);
+        let dir = write_config(r#"{"provider":"groq"}"#);
         let cfg = read_routing_config_at(&dir.path().join("config.json"));
         assert!(cfg.agent.is_none());
         assert!(cfg.skills.is_empty());
@@ -471,7 +471,7 @@ mod routing_tests {
     fn full_routing_block() {
         let dir = write_config(
             r#"{
-                "default_provider":"groq",
+                "provider":"groq",
                 "routing":{
                     "agent":"groq",
                     "skills":{
@@ -511,9 +511,9 @@ pub struct ProviderSnapshot {
 }
 
 pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
-    // 5A-3 起:agent 走 `routing.agent`(若設)→ `default_provider`(若設)→ "groq"
+    // 5A-3 起:agent 走 `routing.agent`(若設)→ `provider`(若設)→ "groq"
     let routing = read_routing_config();
-    let default = read_default_provider();
+    let default = read_provider_config();
     let active = routing.agent.unwrap_or_else(|| default.clone());
 
     match active.as_str() {
@@ -581,8 +581,8 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
         _ => {
             let model = mori_config_path()
                 .as_deref()
-                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/chat_model"))
-                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_CHAT_MODEL.to_string());
+                .and_then(|p| groq::read_json_pointer(p, "/providers/groq/model"))
+                .unwrap_or_else(|| groq::GroqProvider::DEFAULT_MODEL.to_string());
             ProviderSnapshot {
                 name: "groq".into(),
                 model,
@@ -592,13 +592,13 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
     }
 }
 
-/// 啟動時的 best-effort warm-up:若使用者把 `default_provider` 設成 ollama,
+/// 啟動時的 best-effort warm-up:若使用者把 `provider` 設成 ollama,
 /// 背景發一個 1-token 的 chat 把模型載進 RAM,使用者第一次按熱鍵時就不用
 /// 等 cold start(qwen3:8b 5.2GB 在 Intel CPU 沒 GPU 加速可能要分鐘級)。
 ///
 /// Provider 是 groq 時直接 no-op(網路 LLM 沒 cold start)。
 /// 失敗無聲忽略 — UI 想知道狀態的話走 mori-tauri 那邊發事件版本。
-pub async fn warm_up_default_provider() {
+pub async fn warm_up_provider() {
     let snap = active_chat_provider_snapshot();
     if snap.name != "ollama" {
         return;

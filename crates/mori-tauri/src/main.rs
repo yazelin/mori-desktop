@@ -90,7 +90,7 @@ pub struct AppState {
     /// Phase 對應「使用者的這一輪對話進行到哪」,Mode 是「Mori 整體的工作狀態」,
     /// 兩者正交。Phase 變回 Idle 不會動 Mode。
     pub mode: Mutex<Mode>,
-    /// Ollama warm-up 狀態(僅當 default_provider=ollama 時有值):
+    /// Ollama warm-up 狀態(僅當 provider=ollama 時有值):
     /// "loading" | "ready" | "failed",其他 provider 為 None。
     /// 存在 state 是因為 warm-up 可能在 React 還沒掛上 listener 前就完成,
     /// 用 IPC 把當下狀態回給前端就不會錯過 transition。
@@ -294,7 +294,7 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
     // Phase 5A-3: routing 拆出 agent provider + per-skill provider override。
     // Agent 走 `routing.agent`(可走 tool calling 的:groq / ollama);個別 skill
     // 可在 `routing.skills.<name>` 指到 chat-only provider(claude-cli)用 user
-    // 自己的 quota。沒設 routing 時整套退化成全部用 default_provider。
+    // 自己的 quota。沒設 routing 時整套退化成全部用 provider。
     let routing = match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone()))) {
         Ok(r) => r,
         Err(e) => {
@@ -560,7 +560,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 
     tauri::async_runtime::spawn(async move {
         // Stage 1: Whisper transcribe — 5C 起走 TranscriptionProvider factory,
-        // 預設 Groq Whisper API,可在 config 把 default_transcribe_provider
+        // 預設 Groq Whisper API,可在 config 把 stt_provider
         // 改成 "whisper-local" 走 whisper.cpp 離線推理(配上本機 chat
         // provider 就 100% Groq-free)。
         let transcribe_result: anyhow::Result<String> = async {
@@ -1593,7 +1593,7 @@ fn main() {
                 }
             });
 
-            // ── Ollama warm-up(僅當 default_provider=ollama)─────
+            // ── Ollama warm-up(僅當 provider=ollama)─────
             // qwen3:8b 5.2GB 在 Intel CPU 沒 GPU 加速首次載入可能要分鐘級。
             // 啟動就背景發一個 1-token chat 觸發 model load,使用者第一次按
             // 熱鍵時模型已熱。Groq 路徑直接 no-op。

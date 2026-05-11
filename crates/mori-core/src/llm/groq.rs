@@ -46,7 +46,7 @@ enum RetryDecision {
 pub struct GroqProvider {
     api_key: String,
     model: String,
-    transcribe_model: String,
+    stt_model: String,
     base_url: String,
     client: reqwest::Client,
     retry_callback: Option<RetryCallback>,
@@ -54,14 +54,14 @@ pub struct GroqProvider {
 
 impl GroqProvider {
     pub const DEFAULT_BASE_URL: &'static str = "https://api.groq.com/openai/v1";
-    pub const DEFAULT_CHAT_MODEL: &'static str = "openai/gpt-oss-120b";
-    pub const DEFAULT_TRANSCRIBE_MODEL: &'static str = "whisper-large-v3-turbo";
+    pub const DEFAULT_MODEL: &'static str = "openai/gpt-oss-120b";
+    pub const DEFAULT_STT_MODEL: &'static str = "whisper-large-v3-turbo";
 
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
             model: model.into(),
-            transcribe_model: Self::DEFAULT_TRANSCRIBE_MODEL.to_string(),
+            stt_model: Self::DEFAULT_STT_MODEL.to_string(),
             base_url: Self::DEFAULT_BASE_URL.to_string(),
             client: reqwest::Client::new(),
             retry_callback: None,
@@ -73,8 +73,8 @@ impl GroqProvider {
         self
     }
 
-    pub fn with_transcribe_model(mut self, model: impl Into<String>) -> Self {
-        self.transcribe_model = model.into();
+    pub fn with_stt_model(mut self, model: impl Into<String>) -> Self {
+        self.stt_model = model.into();
         self
     }
 
@@ -266,13 +266,13 @@ impl GroqProvider {
                 //         "ollama"(本機 Ollama,需先 `ollama serve`)
                 //         "claude-cli"(本機 claude CLI subprocess,**chat-only**,
                 //                       不能當主 agent provider — 沒 tool calling)
-                "default_provider": "groq",
+                "provider": "groq",
                 // 5C:STT 跟 chat 解耦。STT provider 獨立配置,可以
                 // 「STT 走 Groq Whisper、chat 走 ollama」或反過來,
                 // 或兩邊都本機(100% Groq-free)。
                 // 接受值:"groq"(預設,Whisper API)
                 //         "whisper-local"(whisper.cpp,需事先下載 ggml model)
-                "default_transcribe_provider": "groq",
+                "stt_provider": "groq",
                 // 5E:語音輸入模式(VoiceInput mode)的清理層級。
                 // - "smart"(預設):LLM 加標點 + 程式 post-process(簡→繁、半→全形)
                 // - "minimal":只跑程式 post-process,不過 LLM(快但無標點)
@@ -281,7 +281,7 @@ impl GroqProvider {
                     "cleanup_level": "smart"
                 },
                 // 5A-3:per-skill provider routing(可選)。沒設這塊就全部
-                // 用 default_provider — 跟 5A-2 之前一樣。
+                // 用 provider — 跟 5A-2 之前一樣。
                 //
                 // 用法:agent 指主 agent loop 走的 provider(必須能 tool calling
                 // — 不要用 claude-cli);skills.<name> 指該 skill 內部 chat
@@ -305,8 +305,8 @@ impl GroqProvider {
                 "providers": {
                     "groq": {
                         "api_key": "REPLACE_ME_WITH_YOUR_GROQ_API_KEY",
-                        "chat_model": super::groq::GroqProvider::DEFAULT_CHAT_MODEL,
-                        "transcribe_model": super::groq::GroqProvider::DEFAULT_TRANSCRIBE_MODEL
+                        "model": super::groq::GroqProvider::DEFAULT_MODEL,
+                        "stt_model": super::groq::GroqProvider::DEFAULT_STT_MODEL
                     },
                     "ollama": {
                         "base_url": super::ollama::OllamaProvider::DEFAULT_BASE_URL,
@@ -542,7 +542,7 @@ impl TranscriptionProvider for GroqProvider {
         let url = format!("{}/audio/transcriptions", self.base_url);
         tracing::debug!(
             bytes = audio.len(),
-            model = %self.transcribe_model,
+            model = %self.stt_model,
             "groq transcribe request"
         );
 
@@ -555,7 +555,7 @@ impl TranscriptionProvider for GroqProvider {
                 .context("groq transcribe: build part")?;
             Ok(multipart::Form::new()
                 .part("file", part)
-                .text("model", self.transcribe_model.clone())
+                .text("model", self.stt_model.clone())
                 .text("response_format", "json")
                 .text("language", "zh")
                 .text(
