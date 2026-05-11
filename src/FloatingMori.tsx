@@ -43,9 +43,13 @@ const PROFILE_LABEL_MS = 1500;
 
 // 麥克風 RMS 值通常在 0.01–0.20，需要 sqrt + 放大讓效果更明顯
 const amplify = (v: number) => Math.sqrt(Math.min(v * 4, 1.0));
-// 音量 → aura 縮放：靜音 0.82，大聲 1.18
-const volumeToScale = (v: number) => 0.82 + 0.36 * amplify(v);
-// 注：ring 設計不再需要 opacity 控制（ring 本身 solid，透明度固定 1.0）
+
+// 波紋觸發門檻 — 低於這個視為靜音不發波
+const RIPPLE_THRESHOLD = 0.04;
+// 波紋發射間隔 — 最快多久一次（防止暴雷洗版）
+const RIPPLE_MIN_INTERVAL_MS = 180;
+// 單個波紋存活時間
+const RIPPLE_LIFETIME_MS = 1200;
 
 function visualFor(
   mode: Mode,
@@ -94,6 +98,11 @@ function FloatingMori() {
   // 5F-3A: 音量驅動的 aura（0.0–1.0，後端 ~30Hz emit）
   const [volume, setVolume] = useState(0);
 
+  // 5F-3A 波紋：音量超過門檻時 spawn 一個 ripple element，CSS animation
+  // 自動 fade out。lastRippleAtRef 限流避免每 33ms 都發一個。
+  const [ripples, setRipples] = useState<Array<{ id: number; intensity: number }>>([]);
+  const lastRippleAtRef = useRef(0);
+
   // 暫時性 info（有 timeout 會消失）
   const [infoLabel, setInfoLabel] = useState<string | null>(null);
   const [infoKey, setInfoKey] = useState(0);
@@ -119,7 +128,21 @@ function FloatingMori() {
 
     // 5F-3A: 音量事件（main.rs 在錄音中每 ~33ms emit 一次）
     const unlistenVolume = listen<number>("audio-level", (e) => {
-      setVolume(e.payload);
+      const v = e.payload;
+      setVolume(v);
+
+      // 音量超過門檻 + 距離上一個波紋 > 限流間隔 → 發新波紋
+      const now = performance.now();
+      if (v >= RIPPLE_THRESHOLD && now - lastRippleAtRef.current >= RIPPLE_MIN_INTERVAL_MS) {
+        lastRippleAtRef.current = now;
+        const id = now;
+        const intensity = amplify(v);
+        setRipples((rs) => [...rs, { id, intensity }]);
+        // 動畫結束後自動移除
+        setTimeout(() => {
+          setRipples((rs) => rs.filter((r) => r.id !== id));
+        }, RIPPLE_LIFETIME_MS);
+      }
     });
 
     // profile 切換："朋友閒聊 · groq" 格式
@@ -238,13 +261,11 @@ function FloatingMori() {
 
   const visual = visualFor(mode, phase, transient);
 
+  // 基底環不再 scale（避免 box-shadow 外溢出視窗被切），只用 --vol 控制
+  // ::before 的發光強度。實際的「音量波動」由獨立的 ripple elements 表現。
   const auraStyle: CSSProperties | undefined =
     visual === "recording"
-      ? ({
-          "--vol": amplify(volume).toFixed(3),
-          transform: `scale(${volumeToScale(volume)})`,
-          animation: "none",
-        } as CSSProperties)
+      ? ({ "--vol": amplify(volume).toFixed(3) } as CSSProperties)
       : undefined;
 
   // 標籤顯示優先序：
@@ -269,6 +290,17 @@ function FloatingMori() {
     >
       {/* 背景光暈：錄音中由音量驅動；其他狀態 CSS animation */}
       <div className="mori-aura" style={auraStyle} />
+
+      {/* 5F-3A: 音量波紋層 — 音量超過門檻時 spawn ripple，向外擴散後 fade。
+          最大擴張到 145px（< 160px 視窗），不會被切。 */}
+      {visual === "recording" &&
+        ripples.map((r) => (
+          <div
+            key={r.id}
+            className="mori-ripple"
+            style={{ "--ripple-intensity": r.intensity.toFixed(3) } as CSSProperties}
+          />
+        ))}
 
       {/* 角色 sprite */}
       <img

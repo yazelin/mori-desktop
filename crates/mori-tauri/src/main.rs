@@ -8,6 +8,8 @@ mod recording;
 #[cfg(target_os = "linux")]
 mod selection;
 mod skill_server;
+#[cfg(target_os = "linux")]
+mod voice_input_tools;
 
 use std::sync::Arc;
 
@@ -805,6 +807,77 @@ async fn run_chat_pipeline(
 /// ```json
 /// "routing": { "skills": { "voice_input_cleanup": "groq" } }
 /// ```
+/// Voice input agent loop（5F-4）— 給 type-B ENABLE flag 開啟時用。
+/// LLM 可呼叫工具（open_url / open_app / send_keys / google_search 等）執行
+/// 動作。多輪迴圈最多 MAX_ROUNDS 次，避免 LLM 卡無限呼叫。最後一輪的 LLM
+/// 文字回應拿來做最終 paste（如果有的話）。
+#[cfg(target_os = "linux")]
+async fn run_voice_input_agent_loop(
+    provider: &std::sync::Arc<dyn mori_core::llm::LlmProvider>,
+    initial_messages: Vec<ChatMessage>,
+    tools: Vec<mori_core::llm::ToolDefinition>,
+) -> anyhow::Result<String> {
+    const MAX_ROUNDS: usize = 5;
+    let mut messages = initial_messages;
+
+    for round in 0..MAX_ROUNDS {
+        let resp = provider
+            .chat(messages.clone(), tools.clone())
+            .await
+            .with_context(|| format!("voice-input agent round {round}"))?;
+
+        tracing::info!(
+            round,
+            content_chars = resp.content.as_deref().map(str::len).unwrap_or(0),
+            tool_calls = resp.tool_calls.len(),
+            "voice-input agent assistant response",
+        );
+
+        // LLM 沒呼叫工具 → 結束，回傳文字（或空字串）
+        if resp.tool_calls.is_empty() {
+            return Ok(resp.content.unwrap_or_default().trim().to_string());
+        }
+
+        // 把 assistant 訊息（含 tool_calls）加進歷史
+        messages.push(ChatMessage::assistant_with_tool_calls(
+            resp.content.clone(),
+            resp.tool_calls.clone(),
+        ));
+
+        // 依序執行每個工具，把結果以 tool role 加回訊息
+        for tc in &resp.tool_calls {
+            let result = match voice_input_tools::execute_tool(&tc.name, tc.arguments.clone())
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => serde_json::json!({ "error": format!("{e:#}") }),
+            };
+            tracing::info!(
+                tool = %tc.name,
+                result = %result,
+                "voice-input agent tool executed",
+            );
+            messages.push(ChatMessage::tool_result(
+                tc.id.clone(),
+                tc.name.clone(),
+                result.to_string(),
+            ));
+        }
+    }
+
+    tracing::warn!(MAX_ROUNDS, "voice-input agent loop hit max rounds");
+    Ok(String::new())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn run_voice_input_agent_loop(
+    _provider: &std::sync::Arc<dyn mori_core::llm::LlmProvider>,
+    _initial_messages: Vec<ChatMessage>,
+    _tools: Vec<mori_core::llm::ToolDefinition>,
+) -> anyhow::Result<String> {
+    anyhow::bail!("voice input agent loop is Linux-only for now")
+}
+
 async fn run_voice_input_pipeline(
     app: AppHandle,
     state: Arc<AppState>,
@@ -889,20 +962,37 @@ async fn run_voice_input_pipeline(
         let _ = app.emit("voice-input-status", format!("⚡ 處理中 · {}", provider_label));
     }
 
-    // Step 1: LLM cleanup（只在 smart 等級才走）
+    // 5F-4: 判斷是否走 agent loop（profile 有任何 type-B ENABLE flag）
+    #[cfg(target_os = "linux")]
+    let tools = voice_input_tools::build_tool_list(&profile.frontmatter);
+    #[cfg(not(target_os = "linux"))]
+    let tools: Vec<mori_core::llm::ToolDefinition> = vec![];
+    let agent_mode = !tools.is_empty();
+
+    // Step 1: LLM cleanup（agent_mode 多輪 / 否則單輪文字轉換；minimal/none 跳 LLM）
     let after_llm: anyhow::Result<String> = match level {
         CleanupLevel::None | CleanupLevel::Minimal => Ok(transcript.clone()),
         CleanupLevel::Smart => {
-            tracing::info!(provider = %llm_provider.name(), model = %llm_provider.model(), "voice-input LLM cleanup");
-            let messages = vec![
+            tracing::info!(
+                provider = %llm_provider.name(),
+                model = %llm_provider.model(),
+                agent_mode,
+                tool_count = tools.len(),
+                "voice-input LLM stage start",
+            );
+            let initial_messages = vec![
                 ChatMessage::system(rendered_system),
                 ChatMessage::user(transcript.clone()),
             ];
-            llm_provider
-                .chat(messages, vec![])
-                .await
-                .context("voice-input LLM cleanup chat")
-                .map(|r| r.content.unwrap_or_default().trim().to_string())
+            if agent_mode {
+                run_voice_input_agent_loop(&llm_provider, initial_messages, tools).await
+            } else {
+                llm_provider
+                    .chat(initial_messages, vec![])
+                    .await
+                    .context("voice-input LLM cleanup chat")
+                    .map(|r| r.content.unwrap_or_default().trim().to_string())
+            }
         }
     };
 
@@ -935,7 +1025,21 @@ async fn run_voice_input_pipeline(
         }
     };
 
+    // 5F-4: agent_mode 下若 LLM 只呼叫工具沒回文字，cleaned_text 會是空。
+    // 不算錯誤 — 工具已執行完了（例如開瀏覽器）。直接結束 pipeline 即可。
     if cleaned_text.is_empty() {
+        if agent_mode {
+            tracing::info!("agent_mode: LLM 只呼叫工具沒回最終文字，跳過 paste");
+            state.set_phase(
+                &app,
+                Phase::Done {
+                    transcript,
+                    response: String::new(),
+                    skill_calls: vec![],
+                },
+            );
+            return;
+        }
         state.set_phase(
             &app,
             Phase::Error {
@@ -945,11 +1049,9 @@ async fn run_voice_input_pipeline(
         return;
     }
 
-    // VoiceInput 模式永遠貼回游標 — 這是核心功能，不受任何 flag 影響。
-    // ZeroType 語意：ENABLE_SMART_PASTE 控制「LLM 能否呼叫 smart_paste 工具」
-    // （PR 4 的 agent tool），不是控制要不要貼回。
-    // 使用熱鍵按下瞬間抓到的 process name 判斷 terminal vs 一般 app，自動
-    // 用 Ctrl+V 或 Ctrl+Shift+V。
+    // VoiceInput 模式：有最終文字就貼回游標（agent mode 也適用——LLM 工具呼叫
+    // 之外還有文字回覆時當作要貼）。使用熱鍵瞬間抓到的 process name 判斷
+    // terminal vs 一般 app，自動用 Ctrl+V 或 Ctrl+Shift+V。
     #[cfg(target_os = "linux")]
     let paste_result = {
         let controller = crate::selection::LinuxPasteController::new(app.clone());
