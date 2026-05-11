@@ -948,10 +948,14 @@ async fn run_voice_input_pipeline(
     // VoiceInput 模式永遠貼回游標 — 這是核心功能，不受任何 flag 影響。
     // ZeroType 語意：ENABLE_SMART_PASTE 控制「LLM 能否呼叫 smart_paste 工具」
     // （PR 4 的 agent tool），不是控制要不要貼回。
+    // 使用熱鍵按下瞬間抓到的 process name 判斷 terminal vs 一般 app，自動
+    // 用 Ctrl+V 或 Ctrl+Shift+V。
     #[cfg(target_os = "linux")]
     let paste_result = {
         let controller = crate::selection::LinuxPasteController::new(app.clone());
-        controller.paste_back(&cleaned_text).await
+        controller
+            .paste_back_for_process(&cleaned_text, &win_ctx.process_name)
+            .await
     };
     #[cfg(not(target_os = "linux"))]
     let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(

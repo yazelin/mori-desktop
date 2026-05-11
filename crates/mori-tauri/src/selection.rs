@@ -97,55 +97,82 @@ impl LinuxPasteController {
     }
 }
 
-#[async_trait]
-impl PasteController for LinuxPasteController {
-    async fn paste_back(&self, text: &str) -> Result<PasteResult> {
-        // ── Step 1:寫入 Wayland 剪貼簿(走 Tauri plugin,不 shell-out)──
-        // 這步如果壞了等於 paste-back 整套沒希望(連 user 手動 Ctrl+V
-        // 都救不了)。Bail out 為 hard error。
+/// Terminal app 用 Ctrl+Shift+V（Ctrl+V 在 terminal 是「送 literal ^V 字元」）。
+/// 其他 app 都用 Ctrl+V。比對 process_name（lowercase）的子字串。
+fn needs_shift_for_paste(process_name: &str) -> bool {
+    let p = process_name.to_lowercase();
+    [
+        "gnome-terminal", "kgx", "ptyxis",     // GNOME 系列
+        "kitty", "alacritty", "wezterm",       // 流行 terminal
+        "foot", "tilix", "terminator", "xterm",
+        "konsole", "urxvt", "rxvt",
+    ]
+    .iter()
+    .any(|t| p.contains(t))
+}
+
+impl LinuxPasteController {
+    /// 主要的 paste-back：根據目標 process 名稱選擇 Ctrl+V 或 Ctrl+Shift+V。
+    /// 在 voice input pipeline 從 HotkeyWindowContext 拿 process name 傳進來。
+    pub async fn paste_back_for_process(
+        &self,
+        text: &str,
+        process_name: &str,
+    ) -> Result<PasteResult> {
         self.app
             .clipboard()
             .write_text(text.to_string())
             .context("Tauri clipboard write_text (capability allow-write-text granted?)")?;
 
-        // ── Step 2:讓合成器消化一下 selection 變更 ───────────────
-        // 太快送 ydotool 偶爾會在 selection 還沒設好之前就觸發 paste,
-        // 目標 app 抓到「上一個」剪貼簿值。80ms 夠。
         tokio::time::sleep(Duration::from_millis(80)).await;
 
-        // ── Step 3:ydotool 模擬 Ctrl+V ────────────────────────────
-        // 這步比較脆弱(ydotoold 沒跑、user 沒進 input group、ydotool
-        // 沒裝)。失敗時**不要 bail** — 文字已經在剪貼簿,user 手動
-        // Ctrl+V 還能補上,所以回 `ClipboardOnly` 讓上層友善降級。
-        let ydotool_outcome = Command::new("ydotool")
-            .args(["key", "29:1", "47:1", "47:0", "29:0"])
-            .status();
+        // Linux keycodes: 29=Ctrl, 42=Shift, 47=V
+        let (keys, label) = if needs_shift_for_paste(process_name) {
+            (
+                vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"],
+                "Ctrl+Shift+V",
+            )
+        } else {
+            (vec!["29:1", "47:1", "47:0", "29:0"], "Ctrl+V")
+        };
+
+        let mut cmd = Command::new("ydotool");
+        cmd.arg("key");
+        for k in &keys {
+            cmd.arg(k);
+        }
+        let ydotool_outcome = cmd.status();
 
         match ydotool_outcome {
             Ok(s) if s.success() => {
                 tracing::info!(
                     chars = text.chars().count(),
-                    "paste-back: wl-copy + ydotool Ctrl+V dispatched",
+                    target_process = %process_name,
+                    paste_keys = label,
+                    "paste-back: ydotool {} dispatched", label,
                 );
                 Ok(PasteResult::Pasted)
             }
             Ok(s) => {
                 tracing::warn!(
                     status = ?s,
-                    "ydotool exited non-zero — text in clipboard but paste-key not sent. \
-                     Check `systemctl --user status ydotool` and that user is in `input` group.",
+                    "ydotool exited non-zero — text in clipboard but paste-key not sent.",
                 );
                 Ok(PasteResult::ClipboardOnly)
             }
             Err(e) => {
-                tracing::warn!(
-                    ?e,
-                    "ydotool failed to spawn — text in clipboard but paste-key not sent. \
-                     Run setup-wayland-input.sh and reboot once for input-group membership.",
-                );
+                tracing::warn!(?e, "ydotool failed to spawn — text in clipboard only.");
                 Ok(PasteResult::ClipboardOnly)
             }
         }
+    }
+}
+
+#[async_trait]
+impl PasteController for LinuxPasteController {
+    /// trait 預設方法：不知道 process 時 fallback 用 Ctrl+V
+    async fn paste_back(&self, text: &str) -> Result<PasteResult> {
+        self.paste_back_for_process(text, "").await
     }
 }
 

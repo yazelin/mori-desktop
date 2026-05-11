@@ -61,9 +61,11 @@ pub async fn run(app: AppHandle) -> Result<()> {
     let app_id: AppID = APP_ID
         .parse()
         .context("APP_ID is not a valid reverse-DNS identifier")?;
+    tracing::info!(app_id = APP_ID, "registering host app with xdg-desktop-portal Registry...");
     register_host_app(app_id)
         .await
         .context("register host app id with xdg-desktop-portal Registry")?;
+    tracing::info!("✓ host app registered — Mori 應被 portal 視為 trusted");
 
     let proxy = GlobalShortcuts::new()
         .await
