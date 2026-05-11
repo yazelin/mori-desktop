@@ -197,6 +197,74 @@ pub fn load_active_agent_profile() -> AgentProfile {
     parse_agent_profile("AGENT", DEFAULT_AGENT_MD)
 }
 
+/// 5K-2: 列出 agent 目錄裡的 profile,給 tray submenu / picker UI 用。
+/// 回傳 `(stem, display_name)`,排序:AGENT.md 第一、AGENT-NN 依數字、其他依字典序。
+/// 預設 AGENT.md 用 stem="AGENT"、display="Mori（自由判斷）"。
+pub fn list_agent_profiles() -> Vec<(String, String)> {
+    let dir = agent_dir();
+    let mut entries: Vec<(String, String)> = std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flat_map(|d| d.filter_map(|e| e.ok()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".md"))
+        .map(|name| {
+            let stem = name.trim_end_matches(".md").to_string();
+            let display = if stem == "AGENT" {
+                "Mori（自由判斷）".to_string()
+            } else {
+                stem.splitn(3, '.').nth(1).unwrap_or(&stem).to_string()
+            };
+            (stem, display)
+        })
+        .collect();
+    entries.sort_by(|(a, _), (b, _)| {
+        // AGENT.md 永遠第一
+        if a == "AGENT" { return std::cmp::Ordering::Less; }
+        if b == "AGENT" { return std::cmp::Ordering::Greater; }
+        let slot_a = a.strip_prefix("AGENT-").and_then(|s| s.split('.').next()).and_then(|s| s.parse::<u32>().ok());
+        let slot_b = b.strip_prefix("AGENT-").and_then(|s| s.split('.').next()).and_then(|s| s.parse::<u32>().ok());
+        match (slot_a, slot_b) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.cmp(b),
+        }
+    });
+    entries
+}
+
+/// 5K-2: 依 stem 切到 agent profile,給 tray / picker UI 用。
+/// stem="AGENT" → AGENT.md 預設(同 switch_agent_slot(0))。
+pub fn switch_to_agent_profile(stem: &str) -> Option<SlotSwitchInfo> {
+    let dir = agent_dir();
+    if stem == "AGENT" {
+        let _ = std::fs::remove_file(dir.join("active"));
+        let profile = load_active_agent_profile();
+        return Some(SlotSwitchInfo {
+            profile_name: "Mori（自由判斷）".to_string(),
+            llm_provider: profile.frontmatter.provider.unwrap_or_else(|| "default".into()),
+        });
+    }
+    let filename = format!("{stem}.md");
+    let path = dir.join(&filename);
+    if !path.exists() {
+        tracing::warn!(stem, "switch_to_agent_profile: file not found");
+        return None;
+    }
+    let _ = std::fs::write(dir.join("active"), stem);
+    let profile_name = stem.splitn(3, '.').nth(1).unwrap_or(stem).to_string();
+    let llm_provider = std::fs::read_to_string(&path)
+        .ok()
+        .map(|content| {
+            let profile = parse_agent_profile(stem, &content);
+            profile.frontmatter.provider.unwrap_or_else(|| "default".into())
+        })
+        .unwrap_or_else(|| "default".to_string());
+    tracing::info!(profile = stem, llm = %llm_provider, "agent profile switched (by name)");
+    Some(SlotSwitchInfo { profile_name, llm_provider })
+}
+
 /// Ctrl+Alt+N 切換時：寫 active 檔 + 回傳顯示資訊。
 /// slot=0 → AGENT.md（default Mori）；slot 1~9 → 掃 AGENT-0N.* 的第一個。
 pub fn switch_agent_slot(n: u8) -> Option<SlotSwitchInfo> {

@@ -403,6 +403,60 @@ impl SlotSwitchInfo {
     }
 }
 
+/// 5K-2: 列出 voice_input 目錄裡所有 USER-*.md profile,給 tray submenu / picker UI 用。
+/// 回傳 `(filename_stem, display_name)`,display_name 取檔名第二段(去 USER-XX. 前綴 + .md 後綴)。
+/// 排序:有 slot prefix(USER-00 ~ USER-99)的依 slot 數字升序,其餘依檔名字典序。
+pub fn list_voice_profiles() -> Vec<(String, String)> {
+    let dir = voice_input_dir();
+    let mut entries: Vec<(String, String)> = std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flat_map(|d| d.filter_map(|e| e.ok()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("USER-") && name.ends_with(".md"))
+        .map(|name| {
+            let stem = name.trim_end_matches(".md").to_string();
+            let display = stem.splitn(3, '.').nth(1).unwrap_or(&stem).to_string();
+            (stem, display)
+        })
+        .collect();
+    entries.sort_by(|(a, _), (b, _)| {
+        // USER-NN.* → slot 數字優先;沒數字的擺後面
+        let slot_a = a.strip_prefix("USER-").and_then(|s| s.split('.').next()).and_then(|s| s.parse::<u32>().ok());
+        let slot_b = b.strip_prefix("USER-").and_then(|s| s.split('.').next()).and_then(|s| s.parse::<u32>().ok());
+        match (slot_a, slot_b) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.cmp(b),
+        }
+    });
+    entries
+}
+
+/// 5K-2: 依檔名 stem(不含 .md)切到特定 profile,給 tray / picker UI 用。
+/// 比 `switch_to_slot` 通用 — slot 編號之外的命名 profile 也能切。
+pub fn switch_to_profile(stem: &str) -> Option<SlotSwitchInfo> {
+    let dir = voice_input_dir();
+    let filename = format!("{stem}.md");
+    let path = dir.join(&filename);
+    if !path.exists() {
+        tracing::warn!(stem, "switch_to_profile: file not found");
+        return None;
+    }
+    let _ = std::fs::write(dir.join("active"), stem);
+    let profile_name = stem.splitn(3, '.').nth(1).unwrap_or(stem).to_string();
+    let llm_provider = std::fs::read_to_string(&path)
+        .ok()
+        .map(|content| {
+            let profile = parse_profile(stem, &content);
+            profile.frontmatter.resolved_provider().display_name()
+        })
+        .unwrap_or_else(|| "default".to_string());
+    tracing::info!(profile = stem, llm = %llm_provider, "voice input profile switched (by name)");
+    Some(SlotSwitchInfo { profile_name, llm_provider })
+}
+
 /// Alt+N 切換時：寫 active 檔案 + 回傳顯示資訊。
 pub fn switch_to_slot(n: u8) -> Option<SlotSwitchInfo> {
     let dir = voice_input_dir();

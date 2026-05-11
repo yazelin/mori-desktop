@@ -34,7 +34,7 @@ use mori_core::skill::{
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Listener, Manager, WindowEvent};
 #[cfg(not(target_os = "linux"))]
@@ -1555,6 +1555,57 @@ fn main() {
                 MenuItem::with_id(app, "mode_voice_input", "語音輸入模式", true, None::<&str>)?;
             let mode_background_item =
                 MenuItem::with_id(app, "mode_background", "休眠(關麥克風)", true, None::<&str>)?;
+
+            // 5K-2: 掃 ~/.mori/voice_input + ~/.mori/agent 目錄,把所有 profile
+            // 列成 tray 子選單(超過 Alt+0~9 / Ctrl+Alt+0~9 的也能點)。
+            // ID 規則:`voice_profile:<stem>` / `agent_profile:<stem>`,on_menu_event 解析。
+            let voice_items: Vec<MenuItem<tauri::Wry>> =
+                mori_core::voice_input_profile::list_voice_profiles()
+                    .into_iter()
+                    .map(|(stem, display)| {
+                        MenuItem::with_id(
+                            app,
+                            format!("voice_profile:{stem}"),
+                            display,
+                            true,
+                            None::<&str>,
+                        )
+                        .expect("build voice profile menu item")
+                    })
+                    .collect();
+            let agent_items: Vec<MenuItem<tauri::Wry>> =
+                mori_core::agent_profile::list_agent_profiles()
+                    .into_iter()
+                    .map(|(stem, display)| {
+                        MenuItem::with_id(
+                            app,
+                            format!("agent_profile:{stem}"),
+                            display,
+                            true,
+                            None::<&str>,
+                        )
+                        .expect("build agent profile menu item")
+                    })
+                    .collect();
+            let voice_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+                voice_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+            let agent_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+                agent_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+            let voice_submenu = Submenu::with_id_and_items(
+                app,
+                "voice_profile_submenu",
+                if voice_items.is_empty() { "Voice Profile（無）" } else { "Voice Profile ▸" },
+                !voice_items.is_empty(),
+                &voice_refs,
+            )?;
+            let agent_submenu = Submenu::with_id_and_items(
+                app,
+                "agent_profile_submenu",
+                if agent_items.is_empty() { "Agent Profile（無）" } else { "Agent Profile ▸" },
+                !agent_items.is_empty(),
+                &agent_refs,
+            )?;
+
             let menu = Menu::with_items(
                 app,
                 &[
@@ -1563,6 +1614,8 @@ fn main() {
                     &mode_active_item,
                     &mode_voice_input_item,
                     &mode_background_item,
+                    &voice_submenu,
+                    &agent_submenu,
                     &MenuItem::with_id(app, "reset", "重新開始對話", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "離開", true, None::<&str>)?,
                 ],
@@ -1618,6 +1671,30 @@ fn main() {
                     "mode_active" => state_for_tray.set_mode(app, Mode::Agent),
                     "mode_voice_input" => state_for_tray.set_mode(app, Mode::VoiceInput),
                     "mode_background" => state_for_tray.set_mode(app, Mode::Background),
+                    id if id.starts_with("voice_profile:") => {
+                        let stem = &id["voice_profile:".len()..];
+                        if !matches!(*state_for_tray.mode.lock(), Mode::VoiceInput) {
+                            state_for_tray.set_mode(app, Mode::VoiceInput);
+                        }
+                        if let Some(info) =
+                            mori_core::voice_input_profile::switch_to_profile(stem)
+                        {
+                            let _ = app.emit("voice-input-profile-switched", info.label());
+                        }
+                    }
+                    id if id.starts_with("agent_profile:") => {
+                        let stem = &id["agent_profile:".len()..];
+                        if !matches!(*state_for_tray.mode.lock(), Mode::Agent) {
+                            state_for_tray.set_mode(app, Mode::Agent);
+                        }
+                        if let Some(info) =
+                            mori_core::agent_profile::switch_to_agent_profile(stem)
+                        {
+                            let label =
+                                format!("Agent · {} · {}", info.profile_name, info.llm_provider);
+                            let _ = app.emit("voice-input-profile-switched", label);
+                        }
+                    }
                     "reset" => {
                         let mut conv = state_for_tray.conversation.lock();
                         let n = conv.len();
