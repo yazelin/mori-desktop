@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -31,13 +31,20 @@ type Visual =
   | "done"
   | "error";
 
-// Done / Error 在 floating widget 上是 transient — 顯示動畫期間後就該回
-// idle,不像主視窗會保留結果卡片。後端的 Phase 不變(主視窗仍顯示
-// 對話結果),只在 floating 端用 transient state 控制視覺生命週期。
 const TRANSIENT_DURATION_MS: Record<"done" | "error", number> = {
-  done: 1500,  // 對齊 mori-done-glow keyframe 的 1.6s
-  error: 2000, // 抖動 0.5s 後再多停一下,讓使用者有意識到
+  done: 1500,
+  error: 2000,
 };
+
+// 轉錄原文泡泡顯示時長
+const TRANSCRIPT_LABEL_MS = 3000;
+// Profile 名稱顯示時長
+const PROFILE_LABEL_MS = 1500;
+
+// 音量 → aura 縮放：0.0 音量 → scale 0.72，1.0 音量 → scale 1.12
+const volumeToScale = (v: number) => 0.72 + 0.40 * Math.min(v, 1.0);
+// 音量 → aura 不透明度：靜音保留最小可見度（不完全消失）
+const volumeToOpacity = (v: number) => 0.30 + 0.70 * Math.min(v * 1.5, 1.0);
 
 function visualFor(
   mode: Mode,
@@ -56,7 +63,6 @@ function visualFor(
       return "thinking";
     case "done":
     case "error":
-      // 過了 transient 時間後 fall-through 回 idle,不卡在 done/error
       return "idle";
   }
 }
@@ -70,9 +76,6 @@ const VISUAL_LABEL: Record<Visual, string> = {
   error: "出錯",
 };
 
-// Path to each sprite under /public/floating/. Vite serves /public at root.
-// Spec for the PNG drop-ins: 512×512, transparent BG, character centred
-// with ~10% padding. Swap any PNG to update Mori's look.
 const SPRITE_SRC: Record<Visual, string> = {
   idle: "/floating/mori-idle.png",
   sleeping: "/floating/mori-sleeping.png",
@@ -85,45 +88,52 @@ const SPRITE_SRC: Record<Visual, string> = {
 function FloatingMori() {
   const [mode, setMode] = useState<Mode>("active");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  // Transient visual override — only for done / error so the celebration
-  // glow / shake plays once and then we fade back to idle. Cleared by a
-  // timer on phase change.
   const [transient, setTransient] = useState<Visual | null>(null);
 
-  // Initial anchor: horizontally centred, ~10% down from the top edge —
-  // matches the AgentPulse capsule placement so Mori reads as a "perched
-  // companion at the top of the workspace" rather than a corner widget.
-  // User can drag elsewhere; we only set this once on mount.
-  //
-  // Also re-asserts always-on-top after positioning; GNOME mutter on
-  // Wayland sometimes drops the flag during the initial geometry dance,
-  // so doing it once from JS after we're settled is more reliable than
-  // trusting the conf.json `alwaysOnTop: true` alone.
-  // No JS positioning / alwaysOnTop manipulation:
-  // GNOME mutter on Wayland honours the conf.json `center: true` and
-  // `alwaysOnTop: true` hints **at window creation**, but treats any
-  // subsequent app-initiated setPosition / setAlwaysOnTop as "client
-  // misbehaving" and silently downgrades the window's z-order. AgentPulse
-  // works because it never touches these post-creation. We follow the
-  // same discipline now. Drag still works via the mousedown handler;
-  // initial placement is screen-centre per `center: true`.
+  // 5F-3A: 音量驅動的 aura（0.0–1.0，後端 ~30Hz emit）
+  const [volume, setVolume] = useState(0);
 
-  // Same events the main window subscribes to — Tauri broadcasts to all
-  // webviews, no extra IPC needed.
+  // 5F-3B: 轉錄原文泡泡 / 5F-3C: profile 名稱泡泡（同一個 slot，後者優先覆蓋）
+  const [infoLabel, setInfoLabel] = useState<string | null>(null);
+  // key 用來讓相同文字再次出現時也能觸發 fade-in 動畫
+  const [infoKey, setInfoKey] = useState(0);
+
+  const showInfo = (text: string) => {
+    setInfoLabel(text);
+    setInfoKey((k) => k + 1);
+  };
+
+  // ── 初始化 & 事件訂閱 ─────────────────────────────────────────────
+
   useEffect(() => {
     invoke<Mode>("current_mode").then(setMode).catch(() => {});
     invoke<Phase>("current_phase").then(setPhase).catch(() => {});
 
     const unlistenMode = listen<Mode>("mode-changed", (e) => setMode(e.payload));
     const unlistenPhase = listen<Phase>("phase-changed", (e) => setPhase(e.payload));
+
+    // 5F-3A: 音量事件（main.rs 在錄音中每 ~33ms emit 一次）
+    const unlistenVolume = listen<number>("audio-level", (e) => {
+      setVolume(e.payload);
+    });
+
+    // 5F-3C: profile 切換事件（PR 3 的 Alt+N 會 emit，現在先接好）
+    const unlistenProfile = listen<string>("voice-input-profile-switched", (e) => {
+      showInfo(e.payload);
+      const t = setTimeout(() => setInfoLabel(null), PROFILE_LABEL_MS);
+      return () => clearTimeout(t);
+    });
+
     return () => {
       unlistenMode.then((f) => f());
       unlistenPhase.then((f) => f());
+      unlistenVolume.then((f) => f());
+      unlistenProfile.then((f) => f());
     };
   }, []);
 
-  // 進 done / error 時:先設 transient(讓 floating 顯示對應 sprite +
-  // glow / shake),動畫結束的時間後 clear → fall-through 回 idle。
+  // ── transient done / error flash ──────────────────────────────────
+
   useEffect(() => {
     if (phase.kind === "done") {
       setTransient("done");
@@ -135,25 +145,38 @@ function FloatingMori() {
       const t = setTimeout(() => setTransient(null), TRANSIENT_DURATION_MS.error);
       return () => clearTimeout(t);
     }
-    // 任何其他 phase 都立刻清掉 transient,避免「上次的 done flash 跑到
-    // 下一輪 recording 中閃一下」這種視覺殘留。
     setTransient(null);
   }, [phase]);
 
-  // Drag vs click disambiguation. Old version called startDragging() on
-  // every mousedown — that swallowed double-click because the second
-  // click landed on a now-moving window. Threshold-based now: only fire
-  // start_dragging once the mouse has moved past 4px from its mousedown
-  // origin. Pure click / double-click never trigger a drag.
-  //
-  // We use the raw `plugin:window|start_dragging` IPC (same as
-  // yazelin/AgentPulse) because the higher-level `startDragging()` JS
-  // wrapper is flaky on GNOME Wayland transparent borderless windows.
+  // ── 5F-3B: 轉錄原文泡泡 ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (phase.kind === "done" && phase.transcript.trim()) {
+      const MAX_CHARS = 40;
+      const text = phase.transcript.trim();
+      const label = text.length > MAX_CHARS
+        ? text.slice(0, MAX_CHARS - 1) + "…"
+        : text;
+      showInfo(label);
+      const t = setTimeout(() => setInfoLabel(null), TRANSCRIPT_LABEL_MS);
+      return () => clearTimeout(t);
+    }
+  }, [phase]);
+
+  // 錄音開始時清掉舊的 info label，避免上輪的轉錄文字殘留
+  useEffect(() => {
+    if (phase.kind === "recording") {
+      setInfoLabel(null);
+    }
+  }, [phase.kind]);
+
+  // ── Drag ──────────────────────────────────────────────────────────
+
   const dragRef = useRef<{ x: number; y: number; armed: boolean } | null>(null);
   const DRAG_THRESHOLD_PX = 4;
 
   const onMouseDown = (e: React.MouseEvent) => {
-    if (e.buttons !== 1) return; // primary button held only
+    if (e.buttons !== 1) return;
     dragRef.current = { x: e.clientX, y: e.clientY, armed: true };
   };
 
@@ -170,30 +193,32 @@ function FloatingMori() {
     }
   };
 
-  const onMouseUp = () => {
-    dragRef.current = null;
-  };
+  const onMouseUp = () => { dragRef.current = null; };
 
-  // Double-click → toggle main window visibility. (Single-click conflicts
-  // with drag-detection on borderless windows; double-click is unambiguous.)
   const onDoubleClick = async () => {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const main = await WebviewWindow.getByLabel("main");
       if (!main) return;
       const visible = await main.isVisible();
-      if (visible) {
-        await main.hide();
-      } else {
-        await main.show();
-        await main.setFocus();
-      }
+      if (visible) { await main.hide(); }
+      else { await main.show(); await main.setFocus(); }
     } catch (e) {
       console.error("toggle main from floating failed", e);
     }
   };
 
   const visual = visualFor(mode, phase, transient);
+
+  // 5F-3A: 錄音中 aura 由 volume 驅動，靜音不完全消失
+  const auraStyle: CSSProperties | undefined =
+    visual === "recording"
+      ? {
+          transform: `scale(${volumeToScale(volume)})`,
+          opacity: volumeToOpacity(volume),
+          animation: "none", // 取消 CSS animation，改由 JS 驅動
+        }
+      : undefined;
 
   return (
     <div
@@ -204,16 +229,23 @@ function FloatingMori() {
       onDoubleClick={onDoubleClick}
       title={`Mori — ${VISUAL_LABEL[visual]}\n拖曳:移動 / 雙擊:切顯示主視窗`}
     >
-      {/* Behind the sprite: a state-coloured aura/halo that pulses or spins. */}
-      <div className="mori-aura" />
-      {/* The sprite itself — swappable PNG, see SPRITE_SRC. The CSS adds
-          per-state breathing / pulse / shake without touching the bitmap. */}
+      {/* 背景光暈：錄音中由音量驅動；其他狀態 CSS animation */}
+      <div className="mori-aura" style={auraStyle} />
+
+      {/* 角色 sprite */}
       <img
         className="mori-sprite"
         src={SPRITE_SRC[visual]}
         alt={VISUAL_LABEL[visual]}
         draggable={false}
       />
+
+      {/* 5F-3B/C: 轉錄原文 / profile 名稱泡泡 */}
+      {infoLabel && (
+        <div key={infoKey} className="mori-info-label">
+          {infoLabel}
+        </div>
+      )}
     </div>
   );
 }

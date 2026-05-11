@@ -101,16 +101,18 @@ body.floating-window #root {
   animation: mori-doze 6s ease-in-out infinite;
 }
 
-/* RECORDING — 暖紅光暈柔脈動,角色微微前傾 */
+/* RECORDING — 暖紅光暈由 JS 音量驅動（scale + opacity via inline style），
+   CSS 只提供背景顏色和 transition 讓變化平滑。animation 由 FloatingMori.tsx
+   設 animation:none 覆蓋，改為 JS 驅動。 */
 .mori-recording .mori-aura {
-  opacity: 1;
+  opacity: 0.30; /* 靜音時的最低可見度；JS inline style 會覆蓋 */
   background: radial-gradient(
     circle,
-    rgba(230, 140, 140, 0.32) 0%,
-    rgba(230, 140, 140, 0.08) 50%,
+    rgba(230, 100, 100, 0.40) 0%,
+    rgba(230, 100, 100, 0.12) 50%,
     transparent 75%
   );
-  animation: mori-listen-pulse 1.4s ease-in-out infinite;
+  transition: transform 80ms linear, opacity 80ms linear;
 }
 .mori-recording .mori-sprite {
   animation: mori-listen-bob 1.4s ease-in-out infinite;
@@ -213,4 +215,34 @@ body.floating-window #root {
   40%      { transform: translateX(2.5px); }
   60%      { transform: translateX(-1.5px); }
   80%      { transform: translateX(1.5px); }
+}
+
+/* ─── 5F-3B/C: 轉錄原文 / profile 名稱泡泡 ──────────────────────── */
+
+.mori-info-label {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  right: 5px;
+  background: rgba(10, 10, 15, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 10px;
+  font-family: system-ui, sans-serif;
+  line-height: 1.35;
+  padding: 3px 7px;
+  text-align: center;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: mori-label-appear 0.18s ease-out;
+}
+
+@keyframes mori-label-appear {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
