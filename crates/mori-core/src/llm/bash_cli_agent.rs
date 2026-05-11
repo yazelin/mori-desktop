@@ -224,7 +224,9 @@ impl LlmProvider for BashCliAgentProvider {
     ) -> Result<ChatResponse> {
         // Tools 列表故意忽略 — 我們把 dispatch 的決策外包給 CLI,Mori 內部
         // 看到的是 single-shot chat。CLI 收 system prompt 知道有 mori CLI 可用。
-        let system_prompt = self.system_prompt();
+        //
+        let cli_instructions = self.system_prompt();
+        let system_prompt = merge_upstream_system(&messages, &cli_instructions);
         let transcript = format_transcript(&messages);
 
         // PATH 注入:讓子程序能找到 mori CLI binary。
@@ -363,6 +365,26 @@ impl LlmProvider for BashCliAgentProvider {
 /// Gemini / Codex 沒有 `--system-prompt` flag，把 system prompt 嵌進 stdin 頂部。
 fn format_stdin_with_system(system: &str, transcript: &str) -> String {
     format!("## Instructions\n{system}\n\n{transcript}")
+}
+
+/// 5J fix: 上游 (`run_agent_pipeline`) 把 profile body + Rust 注入的 context
+/// section（時間 / 視窗 / 剪貼簿 / 反白 / 記憶索引）放在 `messages` 內 role=system
+/// 的訊息。`format_transcript` 會 skip 掉 role=system,如果這裡再用 `self.system_prompt()`
+/// 直接覆寫 → 上游 context 整個丟失,Mori 不知道現在幾點。
+///
+/// 解法：拼上游 system + bash-cli 自己的 CLI 使用說明,用 `---` 分隔。
+fn merge_upstream_system(messages: &[ChatMessage], cli_instructions: &str) -> String {
+    let upstream: String = messages
+        .iter()
+        .filter(|m| m.role == "system")
+        .filter_map(|m| m.content.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if upstream.trim().is_empty() {
+        cli_instructions.to_string()
+    } else {
+        format!("{upstream}\n\n---\n\n{cli_instructions}")
+    }
 }
 
 /// 把 messages 拍平成 user/assistant 對話 transcript。跟 ClaudeCliProvider
@@ -511,6 +533,54 @@ mod tests {
         assert!(sys.contains("mori skill recall-memory"));
         assert!(sys.contains("mori skill call"), "5I: generic dispatch must be mentioned for action_skills / shell_skills");
         assert!(sys.contains("禁止在 CLI 結果後面加任何括號說明"));
+    }
+
+    #[test]
+    fn merge_upstream_system_empty_falls_back_to_cli() {
+        // 沒上游 system → 用原 CLI 指令
+        let msgs = vec![ChatMessage::user("hi")];
+        let merged = merge_upstream_system(&msgs, "CLI_BOILERPLATE");
+        assert_eq!(merged, "CLI_BOILERPLATE");
+    }
+
+    #[test]
+    fn merge_upstream_system_includes_both() {
+        // 5J 關鍵保證:上游 system(時間 / context section / profile body)
+        // 跟 CLI boilerplate 都要進去
+        let msgs = vec![
+            ChatMessage::system("時間: 2026-05-12 03:00\nprofile: 你是 Mori"),
+            ChatMessage::user("現在幾點?"),
+        ];
+        let merged = merge_upstream_system(&msgs, "CLI_BOILERPLATE");
+        assert!(merged.contains("時間: 2026-05-12 03:00"), "missing upstream context: {merged}");
+        assert!(merged.contains("profile: 你是 Mori"), "missing profile body: {merged}");
+        assert!(merged.contains("CLI_BOILERPLATE"), "missing CLI instructions: {merged}");
+        // 用 --- 分隔
+        assert!(merged.contains("\n\n---\n\n"), "missing separator: {merged}");
+    }
+
+    #[test]
+    fn merge_upstream_system_concatenates_multiple_system_messages() {
+        let msgs = vec![
+            ChatMessage::system("first"),
+            ChatMessage::user("hi"),
+            ChatMessage::system("second"),
+        ];
+        let merged = merge_upstream_system(&msgs, "CLI");
+        assert!(merged.contains("first"));
+        assert!(merged.contains("second"));
+        assert!(merged.contains("CLI"));
+    }
+
+    #[test]
+    fn merge_upstream_system_ignores_whitespace_only_system() {
+        // 空白 system 不該觸發 merge,直接用 CLI
+        let msgs = vec![
+            ChatMessage::system("   \n  "),
+            ChatMessage::user("hi"),
+        ];
+        let merged = merge_upstream_system(&msgs, "CLI");
+        assert_eq!(merged, "CLI");
     }
 
     #[test]
