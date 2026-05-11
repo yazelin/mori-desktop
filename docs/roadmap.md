@@ -108,6 +108,32 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
+## Phase 5J — 單層 profile + Rust 統一 context 注入 + gemini provider (2026-05-12,完成)
+
+5G/5H 後遺症收尾。voice_input 還保留 SYSTEM.md（`{{CONTEXT.*}}` 模板）+ USER.md 雙層
+結構，跟 agent profile 不對稱，且 Rust 端兩條 pipeline 各自拼 context、容易漏注入
+（Mori 在 agent mode 不知道時間 / 不看剪貼簿）。5J 把兩條 pipeline 對齊：
+
+- [x] `build_context_section()`：時間 / OS / 視窗 / 剪貼簿 / 反白 / 記憶索引 統一注入
+- [x] `run_voice_input_pipeline` + `run_agent_pipeline` 都走
+      `preprocess_file_includes(body)` + `build_context_section(...)` →
+      `format!("{body}\n\n---\n\n{context}")`
+- [x] `voice_input_profile.rs` 移除 SYSTEM.md 模板路徑（`render_system_prompt` /
+      `load_system_template` / `DEFAULT_SYSTEM_MD` / `DEFAULT_USER_MD` / `write_if_missing`
+      死碼清除）
+- [x] `~/.mori/voice_input/SYSTEM.md` + `USER.md` 移到 `_deprecated_5J/`，
+      fallback 改用內建最小 `FALLBACK_PROFILE_MD` 常數
+- [x] 新增 `gemini` named provider（OpenAI-compat 包裝 generativelanguage.googleapis.com
+      OpenAI 端點，與 `groq` 對齊）。`GenericOpenAiProvider::with_name()` 給 display name
+- [x] `resolve_api_key()` helper：OS env → `~/.mori/config.json` `api_keys.<name>` fallback
+- [x] `build_named_provider` / `build_chat_provider` / `active_chat_provider_snapshot` 加 gemini 分支
+- [x] `~/.mori/config.json` 加 `providers.gemini` 範例（model + 註解）
+- [x] 改寫 voice_input USER-XX 全 11 個 profile：
+      去 `ENABLE_*: false` 預設值雜訊、加 `stt_provider: groq` / `enable_read: true`、
+      body 注入 `#file:~/.mori/corrections.md` 集中 STT 校正
+      （Azure 留 `ZEROTYPE_AIPROMPT_*`，mori 暫無 azure named provider）
+- [x] README + roadmap 更新
+
 ## Phase 5H — 使用者自訂 shell skill (2026-05-12,完成)
 
 「mori 變成 LLM 加持的個人 CLI dispatcher」— profile 裡定義一段 shell_skills，

@@ -20,6 +20,9 @@ pub struct GenericOpenAiProvider {
     api_base: String,
     api_key: String,
     model: String,
+    /// 給 routing / UI 顯示用的 provider 名稱（log、ProviderSnapshot.name）。
+    /// 預設 "openai-compat"，named provider（gemini 等）可用 `with_name` 覆寫。
+    display_name: &'static str,
     client: reqwest::Client,
 }
 
@@ -33,15 +36,22 @@ impl GenericOpenAiProvider {
             api_base: api_base.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
             model: model.into(),
+            display_name: "openai-compat",
             client: reqwest::Client::new(),
         }
+    }
+
+    /// 蓋掉 `name()` 回傳值。`&'static str` 限制下只能傳 string literal。
+    pub fn with_name(mut self, name: &'static str) -> Self {
+        self.display_name = name;
+        self
     }
 }
 
 #[async_trait]
 impl LlmProvider for GenericOpenAiProvider {
     fn name(&self) -> &'static str {
-        "openai-compat"
+        self.display_name
     }
 
     fn model(&self) -> &str {

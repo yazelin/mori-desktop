@@ -167,12 +167,54 @@ pub fn build_named_provider(
             };
             Ok(Arc::new(p))
         }
+        // 5J-1: gemini = OpenAI-compatible 包裝。Google 的 generativelanguage
+        // endpoint 接 OpenAI Chat Completions wire format。key 從 GEMINI_API_KEY
+        // env 或 ~/.mori/config.json api_keys.GEMINI_API_KEY 取。
+        "gemini" => {
+            let api_key = resolve_api_key("GEMINI_API_KEY").ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no GEMINI_API_KEY configured. Edit ~/.mori/config.json \
+                     api_keys.GEMINI_API_KEY or set $GEMINI_API_KEY"
+                )
+            })?;
+            let api_base = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini/api_base"))
+                .unwrap_or_else(|| GEMINI_DEFAULT_API_BASE.to_string());
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini/model"))
+                .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
+            Ok(Arc::new(
+                generic_openai::GenericOpenAiProvider::new(api_base, api_key, model)
+                    .with_name("gemini"),
+            ))
+        }
         other => anyhow::bail!(
-            "unknown provider name '{}' — supported: groq, ollama, claude-cli, \
+            "unknown provider name '{}' — supported: groq, gemini, ollama, claude-cli, \
              claude-bash, gemini-bash, codex-bash, gemini-cli, codex-cli",
             other
         ),
     }
+}
+
+// Gemini defaults — 拉出來給 build_named_provider + active_chat_provider_snapshot 共用。
+pub(crate) const GEMINI_DEFAULT_API_BASE: &str =
+    "https://generativelanguage.googleapis.com/v1beta/openai/";
+pub(crate) const GEMINI_DEFAULT_MODEL: &str = "gemini-3.1-flash-lite-preview";
+
+/// 從 OS env var 或 ~/.mori/config.json `api_keys.<name>` 取 API key。
+/// env var 優先；空字串視為未設。
+pub(crate) fn resolve_api_key(key_env_name: &str) -> Option<String> {
+    if let Ok(v) = std::env::var(key_env_name) {
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    mori_config_path()
+        .as_deref()
+        .and_then(|p| groq::read_json_pointer(p, &format!("/api_keys/{key_env_name}")))
+        .filter(|s| !s.is_empty())
 }
 
 /// ZeroType `ZEROTYPE_AIPROMPT_*` 三個 frontmatter 鍵 → openai-compatible 臨時 provider。
@@ -198,7 +240,7 @@ pub fn build_chat_provider(
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     let default = read_provider_config();
     let resolved = match default.as_str() {
-        "groq" | "ollama" | "claude-cli" | "claude-bash"
+        "groq" | "gemini" | "ollama" | "claude-cli" | "claude-bash"
         | "gemini-bash" | "codex-bash" | "gemini-cli" | "codex-cli" => default.as_str(),
         other => {
             tracing::warn!(
@@ -577,6 +619,13 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 .and_then(|p| groq::read_json_pointer(p, "/providers/codex-cli/model"))
                 .unwrap_or_else(|| "(codex default)".to_string());
             ProviderSnapshot { name: "codex-cli".into(), model, base_url: None }
+        }
+        "gemini" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/gemini/model"))
+                .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
+            ProviderSnapshot { name: "gemini".into(), model, base_url: None }
         }
         _ => {
             let model = mori_config_path()

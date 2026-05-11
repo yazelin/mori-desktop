@@ -742,17 +742,13 @@ async fn run_agent_pipeline(
             &agent_profile.body,
             agent_profile.frontmatter.enable_read,
         );
-        // Agent profile body 取代預設 Mori 人格（若 profile body 非空）
+        // 5J: profile body 為「persona + 行為指示」，Rust 統一注入 context section
+        let win_ctx_snapshot = state.hotkey_window_context.lock().clone();
+        let context_section = build_context_section(&win_ctx_snapshot, &ctx, Some(&memory_index));
         let system_prompt = if body_expanded.trim().is_empty() {
             build_system_prompt(&memory_index, &ctx)
         } else {
-            format!(
-                "{}\n\n[記憶索引]\n{}\n\n[現場 context]\n剪貼簿: {}\n反白文字: {}",
-                body_expanded,
-                memory_index,
-                ctx.clipboard.as_deref().unwrap_or("（無）"),
-                ctx.selected_text.as_deref().unwrap_or("（無）"),
-            )
+            format!("{}\n\n---\n\n{}", body_expanded, context_section)
         };
         tracing::debug!(
             index_chars = memory_index.chars().count(),
@@ -941,8 +937,7 @@ async fn run_voice_input_pipeline(
 
     // 5F-1: 載入 profile 系統
     use mori_core::voice_input_profile::{
-        load_active_profile, load_system_template, render_system_prompt,
-        ResolvedProvider, VoiceInputContext,
+        load_active_profile, ResolvedProvider,
     };
 
     let profile = load_active_profile();
@@ -955,21 +950,18 @@ async fn run_voice_input_pipeline(
         "voice-input pipeline start",
     );
 
-    // 組合 VoiceInputContext（視窗 context 在熱鍵瞬間已抓，此時補上時間和剪貼簿）
+    // 5J: 統一單層 profile body + Rust 注入 context section
     let win_ctx = state.hotkey_window_context.lock().clone();
     let ctx_provider = context_provider::TauriContextProvider::new(app.clone());
     let mori_ctx = ctx_provider.capture().await;
 
-    let mut vi_ctx = VoiceInputContext::new_now();
-    vi_ctx.process_name = win_ctx.process_name.clone();
-    vi_ctx.active_app = win_ctx.process_name.clone();
-    vi_ctx.window_title = win_ctx.window_title.clone();
-    vi_ctx.selected_text = win_ctx.selected_text.clone();
-    vi_ctx.clipboard = mori_ctx.clipboard.clone().unwrap_or_default();
-
-    // 渲染 system prompt
-    let system_template = load_system_template();
-    let rendered_system = render_system_prompt(&system_template, &vi_ctx, &profile.body);
+    let body_expanded = mori_core::agent_profile::preprocess_file_includes(
+        &profile.body,
+        profile.frontmatter.enable_read,
+    );
+    // VoiceInput 不傳 memory_index（單輪 dictation 不需要長期記憶）
+    let context_section = build_context_section(&win_ctx, &mori_ctx, None);
+    let rendered_system = format!("{}\n\n---\n\n{}", body_expanded, context_section);
 
     // 決定 LLM provider
     let llm_provider: Arc<dyn mori_core::llm::LlmProvider> = match profile.frontmatter.resolved_provider() {
@@ -1123,6 +1115,73 @@ async fn run_voice_input_pipeline(
 }
 
 /// 建構 Mori 的 system prompt — 角色 + 時間 + 記憶索引 + 當下 context + tool 規則。
+/// 5J: 統一的 context 注入 — 兩個 mode 共用。
+///
+/// 把使用者的「現場資訊」整理成結構清晰的 markdown 區塊，附加在 profile body
+/// 之後。包含時間 / 視窗 / 剪貼簿 / 反白 / 記憶（agent 才用），所有資訊都在
+/// 一處組裝，profile body 不用再寫這些東西。
+fn build_context_section(
+    win_ctx: &HotkeyWindowContext,
+    mori_ctx: &MoriContext,
+    memory_index: Option<&str>,
+) -> String {
+    let now = chrono::Local::now();
+    let mut out = String::new();
+
+    out.push_str("## 現場 Context（mori 自動注入）\n\n");
+    out.push_str(&format!(
+        "**時間**: {} ({})\n",
+        now.format("%Y-%m-%d %H:%M:%S"),
+        chinese_weekday(now.format("%A").to_string().as_str()),
+    ));
+    out.push_str(&format!("**作業系統**: {}\n\n", std::env::consts::OS));
+
+    out.push_str("**當前焦點視窗**\n");
+    out.push_str(&format!(
+        "- process: {}\n",
+        if win_ctx.process_name.is_empty() { "(未知)" } else { &win_ctx.process_name },
+    ));
+    out.push_str(&format!(
+        "- title: {}\n\n",
+        if win_ctx.window_title.is_empty() { "(未知)" } else { &win_ctx.window_title },
+    ));
+
+    out.push_str("**使用者抓到的內容**\n");
+    out.push_str(&format!(
+        "- 剪貼簿: {}\n",
+        mori_ctx.clipboard.as_deref().unwrap_or("(無)"),
+    ));
+    if !win_ctx.selected_text.is_empty() {
+        out.push_str(&format!("- 反白文字: {}\n", win_ctx.selected_text));
+    } else {
+        out.push_str(&format!(
+            "- 反白文字: {}\n",
+            mori_ctx.selected_text.as_deref().unwrap_or("(無)"),
+        ));
+    }
+
+    if let Some(idx) = memory_index {
+        out.push_str("\n## 你的長期記憶索引\n");
+        out.push_str(if idx.trim().is_empty() { "(目前沒有記憶)" } else { idx });
+        out.push('\n');
+    }
+
+    out
+}
+
+fn chinese_weekday(en: &str) -> &'static str {
+    match en {
+        "Monday" => "星期一",
+        "Tuesday" => "星期二",
+        "Wednesday" => "星期三",
+        "Thursday" => "星期四",
+        "Friday" => "星期五",
+        "Saturday" => "星期六",
+        "Sunday" => "星期日",
+        _ => "?",
+    }
+}
+
 fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%a)").to_string();
     let mut prompt = String::new();
