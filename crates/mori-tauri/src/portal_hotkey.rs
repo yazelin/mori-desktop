@@ -24,18 +24,18 @@ use tauri::{AppHandle, Emitter};
 const APP_ID: &str = "ai.yazelin.mori";
 
 /// Stable id we register with the portal — the `Activated` signal
-/// echoes this back so we can tell which shortcut fired (we'll have
-/// more than one in later phases, e.g. an "ask about selection"
-/// modifier variant).
+/// echoes this back so we can tell which shortcut fired.
 pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
 
-/// Tauri event emitted when the toggle shortcut fires. The main loop
-/// listens for this and runs `handle_hotkey_toggle`.
+/// Tauri event emitted when the toggle shortcut fires.
 pub const PORTAL_HOTKEY_EVENT: &str = "portal-hotkey-fired";
 
-/// Hint to the portal — XDG "shortcuts" spec format. The user can
-/// override via the GNOME settings dialog if they want a different
-/// chord; we just say "this is what we'd prefer".
+/// Prefix for the 9 profile-slot shortcut ids (e.g. "slot-1" … "slot-9").
+const SLOT_ID_PREFIX: &str = "slot-";
+
+/// Tauri event emitted when Alt+N fires. Payload is the slot number as u8 (1–9).
+pub const PROFILE_SLOT_EVENT: &str = "portal-profile-slot";
+
 const PREFERRED_TRIGGER: &str = "CTRL+ALT+space";
 
 /// Run forever, dispatching portal Activated signals into Tauri events.
@@ -74,8 +74,24 @@ pub async fn run(app: AppHandle) -> Result<()> {
         .await
         .context("create GlobalShortcuts session")?;
 
-    let shortcuts = vec![NewShortcut::new(TOGGLE_SHORTCUT_ID, "Mori — 開始 / 停止錄音")
-        .preferred_trigger(Some(PREFERRED_TRIGGER))];
+    // 主錄音熱鍵 + Alt+1~9 profile 切換熱鍵（5F-2）
+    // 先把 String 存好，確保生命週期夠長
+    let slot_ids: Vec<String> = (1u8..=9).map(|n| format!("{SLOT_ID_PREFIX}{n}")).collect();
+    let slot_descriptions: Vec<String> = (1u8..=9)
+        .map(|n| format!("Mori — 切換語音輸入 Profile {n}"))
+        .collect();
+    let slot_triggers: Vec<String> = (1u8..=9).map(|n| format!("ALT+{n}")).collect();
+
+    let mut shortcuts = vec![
+        NewShortcut::new(TOGGLE_SHORTCUT_ID, "Mori — 開始 / 停止錄音")
+            .preferred_trigger(Some(PREFERRED_TRIGGER)),
+    ];
+    for i in 0..9usize {
+        shortcuts.push(
+            NewShortcut::new(&slot_ids[i], &slot_descriptions[i])
+                .preferred_trigger(Some(slot_triggers[i].as_str())),
+        );
+    }
 
     // First-ever call pops the GNOME permission dialog. After grant, the
     // binding persists per-user — subsequent runs are silent.
@@ -105,14 +121,22 @@ pub async fn run(app: AppHandle) -> Result<()> {
         .context("subscribe to Activated signal")?;
 
     while let Some(event) = activated.next().await {
+        let id = event.shortcut_id();
         tracing::debug!(
-            id = event.shortcut_id(),
+            id,
             ts_ms = event.timestamp().as_millis() as u64,
             "portal hotkey activated",
         );
-        if event.shortcut_id() == TOGGLE_SHORTCUT_ID {
+
+        if id == TOGGLE_SHORTCUT_ID {
             if let Err(e) = app.emit(PORTAL_HOTKEY_EVENT, ()) {
                 tracing::warn!(?e, "failed to emit portal-hotkey-fired event");
+            }
+        } else if let Some(slot_str) = id.strip_prefix(SLOT_ID_PREFIX) {
+            if let Ok(n) = slot_str.parse::<u8>() {
+                if let Err(e) = app.emit(PROFILE_SLOT_EVENT, n) {
+                    tracing::warn!(?e, slot = n, "failed to emit profile-slot event");
+                }
             }
         }
     }

@@ -332,6 +332,22 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 
 // ─── 熱鍵 / toggle 處理 ─────────────────────────────────────────────
 
+// ─── 5F-2: Profile slot switching ────────────────────────────────────
+
+/// Alt+N 按下：切換 voice input profile 到對應槽位，並通知 floating widget 顯示名稱。
+fn handle_profile_slot(app: AppHandle, slot: u8) {
+    match mori_core::voice_input_profile::switch_to_slot(slot) {
+        Some(display_name) => {
+            tracing::info!(slot, profile = %display_name, "voice input profile switched");
+            // 通知 floating widget 顯示 profile 名稱（FloatingMori.tsx 已訂閱）
+            let _ = app.emit("voice-input-profile-switched", &display_name);
+        }
+        None => {
+            tracing::debug!(slot, "Alt+{} fired but no profile file found for slot", slot);
+        }
+    }
+}
+
 // ─── 5F-1: Window context capture ────────────────────────────────────
 
 /// 熱鍵按下瞬間抓到的視窗資訊。此時焦點還在使用者的目標視窗，是抓 context 的唯一可靠時機。
@@ -1460,8 +1476,17 @@ fn main() {
                     handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
                 });
 
+                // 5F-2: Alt+1~9 profile 切換
+                let handle_slot = app.handle().clone();
+                app.listen(portal_hotkey::PROFILE_SLOT_EVENT, move |event| {
+                    let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
+                        return;
+                    };
+                    handle_profile_slot(handle_slot.clone(), slot);
+                });
+
                 tracing::info!(
-                    "spawned portal hotkey task (Ctrl+Alt+Space) + tray icon"
+                    "spawned portal hotkey task (Ctrl+Alt+Space + Alt+1~9) + tray icon"
                 );
             }
 
