@@ -1,20 +1,28 @@
-//! Phase 5D — Local HTTP server 暴露 Mori 的 skills 給外部呼叫。
+//! Phase 5D + 5I — Local HTTP server 暴露當前 Agent profile 所有可用 skill。
+//!
+//! ## 5I 動態化（架構升級）
+//!
+//! 原本 skill_server 寫死 8 個 skill（translate / polish / summarize / compose +
+//! 4 個 memory），claude-bash / gemini-bash / codex-bash 透過 mori CLI 看到的
+//! 永遠是這 8 個。5G/5H 新增的 action_skills（open_url / send_keys / 等）和
+//! shell_skills（per-profile CLI 包裝）都看不到。
+//!
+//! 5I 改成「每次 request 即時讀當前 Agent profile，build SkillRegistry」：
+//! - GET /skill/list      → 列出當前 profile 所有 skill（含動態的）+ JSON schema
+//! - POST /skill/<name>   → 即時從 registry dispatch（找不到才 404）
+//!
+//! 對 LLM（claude/gemini/codex）視角，工具集會隨使用者按 Ctrl+Alt+N 切 profile
+//! 改變，但 mori CLI 介面不變。
 //!
 //! ## 流程
 //! 啟動時 bind 127.0.0.1:0 拿空閒 port → 產 32-char auth token →
-//! 寫到 `~/.mori/runtime.json`(原子寫入)→ spawn axum 任務 listen。
+//! 寫到 `~/.mori/runtime.json` → spawn axum 任務 listen。
 //!
 //! 對外暴露:
-//! - `GET  /skill/list`              列出可用 skill name + description
+//! - `GET  /skill/list`              列出當前 profile 的 skill name + description + schema
 //! - `POST /skill/<name>` body=JSON  執行 skill,回傳 user_message 純文字
 //!
 //! 都要帶 `Authorization: Bearer <token>` header(token 從 runtime.json 拿)。
-//!
-//! ## 為什麼不用 MCP
-//! 跟 Mori 在 user prompt 裡解釋過 — Bash CLI proxy(這個 server)token
-//! 成本遠低於 MCP(MCP 把所有 schema 預載到每輪 prompt;Bash 只在用到
-//! 才執行)。Skills 內容 + 參數 schema 走 `mori skill <name> --help` 查
-//! 到後就近執行,LLM 不必背全部。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,7 +39,7 @@ use mori_core::memory::MemoryStore;
 use mori_core::runtime::{generate_auth_token, RuntimeInfo};
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
-    RememberSkill, Skill, SummarizeSkill, TranslateSkill,
+    RememberSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use serde_json::{json, Value};
 
@@ -41,73 +49,112 @@ pub struct SkillServerState {
     pub memory: Arc<dyn MemoryStore>,
 }
 
-/// 啟動 skill HTTP server。
-/// 動作:
-/// 1. bind 127.0.0.1:0
-/// 2. 拿 OS 給的 port
-/// 3. 產 token,寫 runtime.json
-/// 4. spawn server task
-///
-/// 失敗會回 Err 但不該卡 Mori 啟動 — 呼叫端記 log 後繼續就好(只是
-/// 失去 Bash CLI proxy 能力)。
 pub async fn start(memory: Arc<dyn MemoryStore>) -> Result<RuntimeInfo> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
         .await
-        .context("bind skill server to 127.0.0.1:0")?;
-    let addr: SocketAddr = listener.local_addr().context("get bound addr")?;
-
+        .context("bind 127.0.0.1:random")?;
+    let local = listener.local_addr().context("get local addr")?;
+    let port = local.port();
     let token = generate_auth_token();
+    let started_at_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let info = RuntimeInfo {
+        port,
+        auth_token: token.clone(),
+        pid: std::process::id(),
+        started_at_epoch,
+    };
+    info.write_to_default()
+        .context("write ~/.mori/runtime.json")?;
+
     let state = SkillServerState {
-        auth_token: token.clone().into(),
+        auth_token: Arc::from(token.as_str()),
         memory,
     };
-
     let app = Router::new()
         .route("/skill/list", get(list_skills))
         .route("/skill/:name", post(dispatch_skill))
         .with_state(state);
 
-    let info = RuntimeInfo {
-        port: addr.port(),
-        auth_token: token,
-        pid: std::process::id(),
-        started_at_epoch: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-    };
-    let path = info
-        .write_to_default()
-        .context("write runtime.json")?;
-    tracing::info!(
-        path = %path.display(),
-        port = info.port,
-        "skill HTTP server ready"
-    );
-
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!(?e, "skill HTTP server exited");
+            tracing::error!(?e, "skill HTTP server crashed");
         }
     });
 
+    let path_display = mori_core::runtime::RuntimeInfo::default_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(unknown)".to_string());
+    tracing::info!(
+        path = %path_display,
+        port,
+        "skill HTTP server ready"
+    );
     Ok(info)
 }
 
 fn check_auth(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, String)> {
-    let header = headers
+    let got = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let token = header.strip_prefix("Bearer ").unwrap_or("");
-    if token == expected {
-        Ok(())
-    } else {
-        Err((
-            StatusCode::UNAUTHORIZED,
-            "missing or invalid Authorization: Bearer <token>".to_string(),
-        ))
+        .and_then(|s| s.strip_prefix("Bearer "));
+    match got {
+        Some(token) if token == expected => Ok(()),
+        Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token".into())),
+        None => Err((StatusCode::UNAUTHORIZED, "missing Authorization header".into())),
     }
+}
+
+// ─── 5I: 動態 registry builder ──────────────────────────────────────────
+
+/// 依當前 Agent profile build 一個臨時 SkillRegistry：
+/// - Built-in（純 LLM）skill: translate / polish / summarize / compose
+/// - Memory skill: remember / recall_memory / forget_memory / edit_memory
+/// - Action skill (Linux): open_url / open_app / send_keys / google_search /
+///   ask_chatgpt / ask_gemini / find_youtube
+/// - Shell skill: 來自 active agent profile 的 `shell_skills:` 定義
+///
+/// 注意：set_mode / paste_selection_back 等 stateful skill 不註冊到 HTTP 入口，
+/// 它們有 AppHandle / state 依賴，且通常不適合外部觸發。
+fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
+    let routing = mori_core::llm::Routing::build_from_config(None)
+        .context("build routing for skill_server dynamic registry")?;
+    let memory = state.memory.clone();
+    let mut registry = SkillRegistry::new();
+
+    // Built-in 純 LLM skill
+    registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
+    registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
+    registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
+    registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+
+    // Memory skills
+    registry.register(Arc::new(RememberSkill::new(memory.clone())));
+    registry.register(Arc::new(RecallMemorySkill::new(memory.clone())));
+    registry.register(Arc::new(ForgetMemorySkill::new(memory.clone())));
+    registry.register(Arc::new(EditMemorySkill::new(memory.clone())));
+
+    // 5G-6: action skills (Linux only)
+    #[cfg(target_os = "linux")]
+    {
+        registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
+        registry.register(Arc::new(crate::action_skills::OpenAppSkill));
+        registry.register(Arc::new(crate::action_skills::SendKeysSkill));
+        registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
+        registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
+        registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
+        registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
+    }
+
+    // 5H: 當前 agent profile 的 shell skills
+    let profile = mori_core::agent_profile::load_active_agent_profile();
+    for def in &profile.frontmatter.shell_skills {
+        registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
+    }
+
+    Ok(registry)
 }
 
 async fn list_skills(
@@ -115,18 +162,29 @@ async fn list_skills(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     check_auth(&headers, &state.auth_token)?;
-    Ok(Json(json!({
-        "skills": [
-            {"name": "translate",     "description": describe::translate()},
-            {"name": "polish",        "description": describe::polish()},
-            {"name": "summarize",     "description": describe::summarize()},
-            {"name": "compose",       "description": describe::compose()},
-            {"name": "remember",      "description": describe::remember()},
-            {"name": "recall_memory", "description": describe::recall_memory()},
-            {"name": "forget_memory", "description": describe::forget_memory()},
-            {"name": "edit_memory",   "description": describe::edit_memory()},
-        ],
-    })))
+
+    let registry = build_dynamic_registry(&state).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("build registry: {e:#}"),
+        )
+    })?;
+
+    // tool_definitions() 已經是 OpenAI tool 格式：name + description + parameters schema
+    let skills: Vec<Value> = registry
+        .tool_definitions()
+        .into_iter()
+        .map(|td| {
+            json!({
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            })
+        })
+        .collect();
+
+    tracing::debug!(skill_count = skills.len(), "skill_server list_skills (dynamic)");
+    Ok(Json(json!({ "skills": skills })))
 }
 
 async fn dispatch_skill(
@@ -137,39 +195,22 @@ async fn dispatch_skill(
 ) -> Result<String, (StatusCode, String)> {
     check_auth(&headers, &state.auth_token)?;
 
-    // 每次 dispatch 重新讀 routing,讓 user 改 config 後不必重啟 Mori 也生效。
-    let routing = mori_core::llm::Routing::build_from_config(None).map_err(|e| {
+    let registry = build_dynamic_registry(&state).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("build routing: {e:#}"),
+            format!("build registry: {e:#}"),
         )
     })?;
-    let provider = routing.skill_provider(&name);
 
-    // Arc clone 在每個 arm 裡 — 雖然 match 一輪只走一條,borrow checker
-    // 仍要每條獨立持有所有權。Arc clone 只是 refcount++,實際成本可忽略。
-    let skill: Box<dyn Skill> = match name.as_str() {
-        "translate" => Box::new(TranslateSkill::new(provider.clone())),
-        "polish" => Box::new(PolishSkill::new(provider.clone())),
-        "summarize" => Box::new(SummarizeSkill::new(provider.clone())),
-        "compose" => Box::new(ComposeSkill::new(provider.clone())),
-        "remember" => Box::new(RememberSkill::new(state.memory.clone())),
-        "recall_memory" => Box::new(RecallMemorySkill::new(state.memory.clone())),
-        "forget_memory" => Box::new(ForgetMemorySkill::new(state.memory.clone())),
-        "edit_memory" => Box::new(EditMemorySkill::new(state.memory.clone())),
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                format!(
-                    "unknown skill: {name}\n\
-                     available: translate, polish, summarize, compose, \
-                     remember, recall_memory, forget_memory, edit_memory"
-                ),
-            ));
-        }
-    };
+    let skill = registry.get(&name).ok_or_else(|| {
+        let available = registry.names().join(", ");
+        (
+            StatusCode::NOT_FOUND,
+            format!("unknown skill: {name}\navailable: {available}"),
+        )
+    })?;
 
-    tracing::info!(skill = %name, provider = %provider.name(), "skill dispatch via HTTP");
+    tracing::info!(skill = %name, "skill dispatch via HTTP (dynamic registry)");
     let ctx = MoriContext::default();
     match skill.execute(args, &ctx).await {
         Ok(out) => Ok(out.user_message),
@@ -177,62 +218,5 @@ async fn dispatch_skill(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("{}: {e:#}", name),
         )),
-    }
-}
-
-/// `mori skill <name> --help` 顯示用的 skill 描述。直接 inline 在這,
-/// 跟 mori-cli 那邊重複(不耦合到 mori-cli 跑去 query mori-tauri 才能列出
-/// help — CLI 不該依賴 server 才能顯示 help)。
-mod describe {
-    // 注意:這些 description 是 CLI args 視角的(給 LLM 看怎麼用 mori CLI),
-    // 跟 Skill::parameters_schema 內部 LLM-facing JSON schema 是不同層 —
-    // 兩邊參數 key 也故意一致(mori-cli 直接 wrap 成同名 JSON 餵 server)。
-
-    pub fn translate() -> &'static str {
-        "Translate text. CLI:\n\
-         `mori skill translate --text \"...\" --target zh-TW|en|ja|...`\n\
-         target 預設 zh-TW。"
-    }
-
-    pub fn polish() -> &'static str {
-        "Polish / rewrite text. CLI:\n\
-         `mori skill polish --text \"...\" --tone formal|casual|concise|detailed|auto`\n\
-         tone 預設 auto(保留原語氣)。"
-    }
-
-    pub fn summarize() -> &'static str {
-        "Summarize text. CLI:\n\
-         `mori skill summarize --text \"...\" --style bullet_points|one_paragraph|tldr`\n\
-         style 預設 bullet_points。"
-    }
-
-    pub fn compose() -> &'static str {
-        "Draft new text from a topic. CLI:\n\
-         `mori skill compose --kind email|message|essay|social_post|other --topic \"...\" \
-         [--audience \"...\"] [--length-hint short|medium|long]`"
-    }
-
-    pub fn remember() -> &'static str {
-        "Save a fact to Mori's long-term memory. CLI:\n\
-         `mori skill remember --title \"...\" --content \"...\" \
-         --category user_identity|preference|project|reference|other`"
-    }
-
-    pub fn recall_memory() -> &'static str {
-        "Read the full body of a memory by id. CLI:\n\
-         `mori skill recall-memory --id \"<memory-id>\"`\n\
-         id = filename without .md from the memory index."
-    }
-
-    pub fn forget_memory() -> &'static str {
-        "Delete a memory by id (destructive). CLI:\n\
-         `mori skill forget-memory --id \"<memory-id>\"`"
-    }
-
-    pub fn edit_memory() -> &'static str {
-        "Update an existing memory's body. CLI:\n\
-         `mori skill edit-memory --id \"<memory-id>\" --content \"...\" \
-         [--description \"...\"]`\n\
-         Tip: recall first, then edit with the merged content."
     }
 }

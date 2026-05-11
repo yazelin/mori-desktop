@@ -152,26 +152,36 @@ impl BashCliAgentProvider {
              \n\
              ## 你有一個 `{cli}` CLI 可以透過 Bash 工具呼叫\n\
              \n\
-             用它來 dispatch Mori 的內建技能,不要自己做 — 一律走這個 CLI,Mori 的版本會跟使用者偏好對齊。\n\
+             用它來 dispatch Mori 的技能（包含內建 LLM 技能、動作技能、使用者自訂的 shell 技能）。\n\
+             技能會根據使用者當前選的 Agent profile 動態變化,不要假設只有特定幾個。\n\
              \n\
-             查詢可用技能:\n\
+             ## 第一步：先看有哪些技能\n\
              ```\n\
              {cli} skill list\n\
              ```\n\
+             這會回傳 JSON,含每個 skill 的 name / description / parameters schema。\n\
+             根據 parameters 構造正確 JSON args 再呼叫。\n\
              \n\
-             常用呼叫範例:\n\
+             ## 兩種呼叫方式（任選）\n\
+             \n\
+             【A】內建 LLM skill 有 typed args（人類也方便用）:\n\
              ```\n\
              {cli} skill translate   --text \"你好\" --target en\n\
              {cli} skill polish      --text \"...\" --tone formal\n\
              {cli} skill summarize   --text \"...\" --style bullet_points\n\
              {cli} skill compose     --kind email --topic \"...\" --audience \"...\"\n\
              {cli} skill remember    --title \"...\" --content \"...\" --category preference\n\
-             {cli} skill recall-memory  --id \"<memory-id>\"\n\
-             {cli} skill forget-memory  --id \"<memory-id>\"\n\
-             {cli} skill edit-memory    --id \"<memory-id>\" --content \"...\"\n\
+             {cli} skill recall-memory --id \"<memory-id>\"\n\
              ```\n\
              \n\
-             不確定參數時跑 `{cli} skill <name> --help`。\n\
+             【B】通用 dispatch（**動作技能 / shell 技能必須用這個**）:\n\
+             ```\n\
+             {cli} skill call open_url --args '{{\"url\":\"https://example.com\"}}'\n\
+             {cli} skill call open_app --args '{{\"app\":\"Firefox\"}}'\n\
+             {cli} skill call gh_pr_list                              # 沒參數時 --args 可省\n\
+             {cli} skill call ssh_to --args '{{\"host\":\"dev01\"}}'\n\
+             ```\n\
+             不確定 args schema 時先 `{cli} skill list` 看完整定義。\n\
              \n\
              ## 回應規則(嚴格遵守)\n\
              - **CLI 的 stdout 就是你給使用者的完整回應。原樣輸出,一字不改。**\n\
@@ -494,12 +504,12 @@ mod tests {
             None,
         );
         let sys = p.system_prompt();
+        // 5I 起 system_prompt 同時提兩種呼叫方式
         assert!(sys.contains("mori skill list"));
         assert!(sys.contains("mori skill translate"));
         assert!(sys.contains("mori skill remember"));
         assert!(sys.contains("mori skill recall-memory"));
-        assert!(sys.contains("mori skill forget-memory"));
-        assert!(sys.contains("mori skill edit-memory"));
+        assert!(sys.contains("mori skill call"), "5I: generic dispatch must be mentioned for action_skills / shell_skills");
         assert!(sys.contains("禁止在 CLI 結果後面加任何括號說明"));
     }
 

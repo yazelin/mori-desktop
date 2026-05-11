@@ -43,8 +43,24 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SkillCmd {
-    /// 列出可用的 skills(name + 一行描述)。LLM 想知道有什麼 skill 時跑這個。
+    /// 列出可用的 skills(name + 一行描述 + JSON schema)。LLM 想知道有什麼 skill 時跑這個。
+    /// 5I 起會列出當前 Agent profile 的所有 skill（含 action_skill / shell_skill）。
     List,
+
+    /// 5I: 通用 dispatch — 給動態 skill (action_skill / shell_skill) 用。
+    /// LLM 看 `mori skill list` 後直接 `mori skill call <name> --args '{...}'` 即可。
+    ///
+    /// 範例：
+    ///   mori skill call open_url --args '{"url":"https://example.com"}'
+    ///   mori skill call gh_pr_list
+    ///   mori skill call ssh_to --args '{"host":"dev01"}'
+    Call {
+        /// skill 名稱（從 `mori skill list` 得知）
+        name: String,
+        /// JSON 字串，依該 skill 的 parameters schema 帶參數。沒有參數可省略。
+        #[arg(long, default_value = "{}")]
+        args: String,
+    },
 
     /// 翻譯文字。
     Translate {
@@ -146,6 +162,11 @@ fn run() -> Result<()> {
         Command::Status => cmd_status(),
         Command::Skill { sub } => match sub {
             SkillCmd::List => cmd_list(),
+            SkillCmd::Call { name, args } => {
+                let parsed: Value = serde_json::from_str(&args)
+                    .with_context(|| format!("--args 不是合法 JSON: {args}"))?;
+                post_skill(&name, parsed)
+            }
             SkillCmd::Translate { text, target } => post_skill(
                 "translate",
                 json!({ "source_text": text, "target_lang": target }),

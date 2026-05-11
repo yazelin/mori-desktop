@@ -392,10 +392,13 @@ fn read_inline(
 
 pub const DEFAULT_AGENT_MD: &str = r#"---
 # 預設 Mori — Ctrl+Alt+0 啟動
-# provider 留空 = 用 ~/.mori/config.json 的 default_provider
-# enabled_skills 留空 = 全 skill 可用
+# Agent 模式建議用 groq / ollama / claude-cli 等支援標準 OpenAI tool
+# calling 的 provider；claude-bash 走 mori CLI proxy，目前看不到動態註冊
+# 的 action_skill / shell_skill（skill_server 是寫死的 8 個 skill）。
+provider: groq
 
-# provider: claude-bash
+# enabled_skills 留空 = 全 built-in skill 都可用（包含 open_url / open_app
+# / send_keys / google_search / ask_chatgpt / ask_gemini / find_youtube 等）
 # enabled_skills: [translate, polish, summarize, remember, recall_memory, open_url]
 ---
 你是 Mori，森林精靈、桌面 AI 同伴。
