@@ -137,7 +137,7 @@ impl VoiceInputFrontmatter {
         if let (Some(base), Some(key_env)) =
             (&self.zerotype_api_base, &self.zerotype_api_key_env)
         {
-            let api_key = std::env::var(key_env).unwrap_or_default();
+            let api_key = resolve_api_key(key_env);
             return ResolvedProvider::OpenAiCompat {
                 api_base: base.clone(),
                 api_key,
@@ -269,6 +269,45 @@ fn parse_bool(s: &str) -> bool {
 
 fn non_empty(s: &str) -> Option<String> {
     if s.is_empty() { None } else { Some(s.to_string()) }
+}
+
+/// API key 解析順序：
+/// 1. OS 環境變數（`std::env::var(key_env_name)`）
+/// 2. `~/.mori/config.json` 的 `api_keys.<key_env_name>`
+///
+/// 這讓使用者不需要設 Linux GUI 環境變數，直接在 config.json 裡管理 key：
+/// ```json
+/// { "api_keys": { "GEMINI_API_KEY": "AIza..." } }
+/// ```
+fn resolve_api_key(key_env_name: &str) -> String {
+    // 1. 先試 OS env var
+    if let Ok(val) = std::env::var(key_env_name) {
+        if !val.is_empty() {
+            return val;
+        }
+    }
+    // 2. fallback 到 ~/.mori/config.json api_keys.<name>
+    let key = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .and_then(|h| {
+            let path = std::path::PathBuf::from(h).join(".mori").join("config.json");
+            let text = std::fs::read_to_string(path).ok()?;
+            let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+            json.pointer(&format!("/api_keys/{key_env_name}"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+
+    if key.is_empty() {
+        tracing::warn!(
+            key_env = key_env_name,
+            "API key not found in env or config.json api_keys — \
+             add to ~/.mori/config.json: {{\"api_keys\": {{\"{key_env_name}\": \"your_key\"}}}}"
+        );
+    }
+    key
 }
 
 // ─── Template rendering ───────────────────────────────────────────────────
