@@ -736,13 +736,18 @@ async fn run_agent_pipeline(
 
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
         let memory_index = memory.read_index_as_context().unwrap_or_default();
+        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_read=true 才生效）
+        let body_expanded = mori_core::agent_profile::preprocess_file_includes(
+            &agent_profile.body,
+            agent_profile.frontmatter.enable_read,
+        );
         // Agent profile body 取代預設 Mori 人格（若 profile body 非空）
-        let system_prompt = if agent_profile.body.trim().is_empty() {
+        let system_prompt = if body_expanded.trim().is_empty() {
             build_system_prompt(&memory_index, &ctx)
         } else {
             format!(
                 "{}\n\n[記憶索引]\n{}\n\n[現場 context]\n剪貼簿: {}\n反白文字: {}",
-                agent_profile.body,
+                body_expanded,
                 memory_index,
                 ctx.clipboard.as_deref().unwrap_or("（無）"),
                 ctx.selected_text.as_deref().unwrap_or("（無）"),

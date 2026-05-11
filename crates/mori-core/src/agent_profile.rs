@@ -245,6 +245,125 @@ pub fn enabled_skills_set(profile: &AgentProfile) -> Option<HashSet<String>> {
     }
 }
 
+// ─── #file: 預處理（5G-8）─────────────────────────────────────────────────
+
+/// 單檔大小上限（10KB，~3000 中文字 / ~10000 ASCII 字符）
+const FILE_INCLUDE_MAX_BYTES: usize = 10 * 1024;
+/// 整個 profile body 加總引入檔案的上限（50KB）
+const FILE_INCLUDE_TOTAL_MAX_BYTES: usize = 50 * 1024;
+
+/// 處理 profile body 內的 `#file:path` 引用。
+/// 找到 `#file:path/to/file` 字串 → 讀對應檔案 → inline 替換為內容。
+///
+/// 安全：
+/// - 只接受 `$HOME` 子樹下的檔案（path canonicalize 後檢查）
+/// - 單檔超過 [`FILE_INCLUDE_MAX_BYTES`] 截斷
+/// - 全部加總超過 [`FILE_INCLUDE_TOTAL_MAX_BYTES`] 後續忽略
+/// - 失敗替換為 `[#file 讀取失敗: ...]` 標記
+///
+/// 若 `enable` 為 false → 原文不動回傳。
+pub fn preprocess_file_includes(body: &str, enable: bool) -> String {
+    if !enable {
+        return body.to_string();
+    }
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return body.to_string(),
+    };
+    let home_path = std::path::PathBuf::from(&home);
+
+    let mut total_bytes = 0usize;
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '#' && peek_starts_with(&mut chars, "file:") {
+            // consume "file:"
+            for _ in 0..5 {
+                chars.next();
+            }
+            // collect path 直到 whitespace
+            let mut path_str = String::new();
+            while let Some(&pc) = chars.peek() {
+                if pc.is_whitespace() {
+                    break;
+                }
+                path_str.push(pc);
+                chars.next();
+            }
+
+            // 處理 path：~ 展開、相對路徑、canonicalize
+            let resolved = if let Some(stripped) = path_str.strip_prefix("~/") {
+                home_path.join(stripped)
+            } else if path_str.starts_with('/') {
+                std::path::PathBuf::from(&path_str)
+            } else {
+                home_path.join(&path_str)
+            };
+
+            match read_inline(&resolved, &home_path, total_bytes) {
+                Ok((content, bytes)) => {
+                    total_bytes += bytes;
+                    out.push_str(&format!(
+                        "\n[--- 引用檔案 {} ---]\n{content}\n[--- end of {} ---]\n",
+                        path_str, path_str
+                    ));
+                }
+                Err(e) => {
+                    out.push_str(&format!("[#file 讀取失敗: {} — {}]", path_str, e));
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn peek_starts_with(chars: &mut std::iter::Peekable<std::str::Chars>, pat: &str) -> bool {
+    let snapshot: Vec<char> = chars.clone().take(pat.len()).collect();
+    snapshot.iter().collect::<String>() == pat
+}
+
+fn read_inline(
+    path: &std::path::Path,
+    home_root: &std::path::Path,
+    already_read: usize,
+) -> std::result::Result<(String, usize), String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("檔案不存在或無權讀取: {e}"))?;
+    if !canonical.starts_with(home_root) {
+        return Err(format!(
+            "路徑超出 HOME ({}) 子樹，拒絕讀取",
+            home_root.display()
+        ));
+    }
+    if already_read >= FILE_INCLUDE_TOTAL_MAX_BYTES {
+        return Err(format!(
+            "已引入 {} bytes，超過總上限 {} bytes",
+            already_read, FILE_INCLUDE_TOTAL_MAX_BYTES
+        ));
+    }
+    let content = std::fs::read_to_string(&canonical).map_err(|e| format!("讀檔失敗: {e}"))?;
+    let bytes = content.len();
+    let truncated = if bytes > FILE_INCLUDE_MAX_BYTES {
+        let mut s = content
+            .char_indices()
+            .take_while(|(i, _)| *i < FILE_INCLUDE_MAX_BYTES)
+            .map(|(_, c)| c)
+            .collect::<String>();
+        s.push_str(&format!(
+            "\n... [檔案截斷於 {} bytes，原檔 {} bytes]",
+            FILE_INCLUDE_MAX_BYTES, bytes
+        ));
+        s
+    } else {
+        content
+    };
+    Ok((truncated, bytes.min(FILE_INCLUDE_MAX_BYTES)))
+}
+
 // ─── Default file content ────────────────────────────────────────────────
 
 pub const DEFAULT_AGENT_MD: &str = r#"---
@@ -325,5 +444,35 @@ mod tests {
             "---\nenable_read: true\n---\nbody",
         );
         assert!(p.frontmatter.enable_read);
+    }
+
+    #[test]
+    fn preprocess_file_includes_disabled_returns_original() {
+        let body = "hello #file:~/whatever.txt world";
+        assert_eq!(preprocess_file_includes(body, false), body);
+    }
+
+    #[test]
+    fn preprocess_file_includes_handles_missing_file() {
+        let body = "ref: #file:~/this-file-definitely-does-not-exist-12345.txt end";
+        let out = preprocess_file_includes(body, true);
+        assert!(out.contains("[#file 讀取失敗:"));
+        assert!(out.contains("end"));
+    }
+
+    #[test]
+    fn preprocess_file_includes_reads_real_file() {
+        // 用 tempfile 在 HOME 子樹下測試成功讀取
+        let home = std::env::var("HOME").unwrap_or_default();
+        if home.is_empty() {
+            return; // skip 沒 HOME 環境（CI 容器等）
+        }
+        let tmp = std::path::PathBuf::from(&home).join(".mori-test-fileref.txt");
+        std::fs::write(&tmp, "FILE_CONTENT_MARKER\n").unwrap();
+        let body = format!("see: #file:{} end", tmp.display());
+        let out = preprocess_file_includes(&body, true);
+        assert!(out.contains("FILE_CONTENT_MARKER"), "got: {out}");
+        assert!(out.contains("end"));
+        std::fs::remove_file(&tmp).ok();
     }
 }

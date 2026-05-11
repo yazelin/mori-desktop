@@ -41,7 +41,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F 完成 / 5G 進行中(2026-05-12)** — Mori 在 Wayland 上
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G 完成(2026-05-12)** — Mori 在 Wayland 上
 **可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
 
 ### 5G 起的雙模式架構
@@ -99,11 +99,7 @@ Ctrl+Alt + Space → toggle 錄音（兩個模式共用）
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
-| ⏳ **Agent profile 系統 + Ctrl+Alt+N 熱鍵** | `~/.mori/agent/AGENT-XX.md` + 10 個 chat 模式 profile 熱鍵，讓使用者快速切換 Mori 的人格 / 能力組合 | **5G-3~5** |
-| ⏳ **動作工具搬到 chat skill** | OpenUrl / OpenApp / SendKeys / GoogleSearch 等變成 mori-core skill，給 Agent 模式呼叫 | **5G-6** |
-| ⏳ **Profile 動態 SkillRegistry** | Agent profile frontmatter `enabled_skills` 控制每個 profile 暴露哪些 skill | **5G-7** |
-| ⏳ **`#file:` 預處理** | profile body 內 `#file:path/to/x.md` 自動讀檔 inline，引用團隊規範 / 模板 | **5G-8** |
-| ⏳ **Profile 自動遷移** | 既有 voice profile 含 action flag 的自動搬到 `agent/` | **5G-10** |
+| ⏳ Profile 自動遷移 | 既有 voice profile 含 action flag 的自動搬到 `agent/`（手動可做，不擋使用）| 5G-10 |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
 | ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
