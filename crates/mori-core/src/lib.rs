@@ -18,6 +18,7 @@ pub mod paste;
 pub mod runtime;
 pub mod skill;
 pub mod voice_cleanup;
+pub mod voice_input_profile;
 
 /// crate 版本(供 UI 顯示)
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

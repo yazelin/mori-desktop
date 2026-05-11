@@ -108,6 +108,42 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
+## Phase 5F — ZeroType 相容語音輸入 Profile 系統(2026-05,進行中)
+
+### Phase 5F-1 — Profile 系統核心 + Context 注入
+- [ ] `~/.mori/voice_input/` 目錄 + 首次啟動自動生成預設檔案
+- [ ] `SYSTEM.md` 模板引擎：`{{CONTEXT.*}}` 佔位符替換
+- [ ] `USER-*.md` 載入 + YAML frontmatter 解析（`cleanup_level` / `provider` / `ZEROTYPE_AIPROMPT_*` / `ENABLE_*`）
+- [ ] `active` 檔案追蹤當前 profile
+- [ ] 熱鍵按下瞬間抓 context：`PROCESS_NAME` / `WINDOW_TITLE` / `ACTIVE_APP`（xdotool → `/proc/<pid>/comm`）
+- [ ] `SELECTED_TEXT` 注入（`selection.rs` 已有，補接 voice pipeline）
+- [ ] `CLIPBOARD` / `CURRENT_TIME` / `TODAY_DATE` / `OS` 注入
+- [ ] `ZEROTYPE_AIPROMPT_*` frontmatter → openai-compatible 臨時 provider
+- [ ] `provider:` mori 具名 provider 快捷方式
+- [ ] `ENABLE_SMART_PASTE` / `ENABLE_AUTO_ENTER` 類型 A flag 支援
+- [ ] profile 的 `cleanup_level` 覆蓋全域設定
+- [ ] 預設附上課程 prompt 大全（USER-01 ~ USER-06 等）
+- [ ] xdg-portal 的 active window 抓取在 Wayland 上的三層 fallback
+
+### Phase 5F-2 — Alt+1~9 全域切換熱鍵
+- [ ] `portal_hotkey.rs` 擴充支援多個快捷鍵（目前只有 Ctrl+Alt+Space）
+- [ ] 向 xdg-desktop-portal 註冊 `Alt+1` ~ `Alt+9`
+- [ ] 收到 `Alt+N` → 掃描 `USER-0N.*` → 寫 `active` → emit IPC 事件
+
+### Phase 5F-3 — Floating Widget 強化
+- [ ] 錄音中音量紅光：後端每 80ms emit dBFS，aura scale 跟著跳，靜音縮小不消失
+- [ ] STT 完成後原文泡泡：sprite 下方顯示 ~3 秒
+- [ ] Alt+N 切換時顯示 profile 檔名：sprite 下方 1.5 秒
+
+### Phase 5F-4 — ENABLE flags 類型 B（voice input agent loop）
+- [ ] Profile 有 type-B ENABLE flag → voice input 走 agent loop（無則走現有簡單路徑）
+- [ ] `ENABLE_SEND_KEYS` → `ydotool key <keys>` 工具
+- [ ] `ENABLE_OPEN_URL` → `xdg-open <url>` 工具
+- [ ] `ENABLE_GOOGLE_SEARCH` / `ENABLE_ASK_CHATGPT` / `ENABLE_ASK_GEMINI` / `ENABLE_FIND_YOUTUBE` → URL 組合 + xdg-open
+- [ ] `ENABLE_OPEN_APP` → 搜尋 `~/.local/share/applications/*.desktop` + `gtk-launch`
+- [ ] `ENABLE_READ` → 讀本機檔案注入 context（`#file:` 語法）
+- [ ] `ENABLE_RUN_SHELL` → shell 執行，需 `run_shell_whitelist` 白名單
+
 ## Phase 5D-3 — gemini-cli + codex-cli chat-only(2026-05-09,完成)
 
 - [x] `CliProtocol::GeminiChat` / `CodexChat`:省略 agent 旗標,non-TTY 下 tool 執行無法被核准 → chat-only

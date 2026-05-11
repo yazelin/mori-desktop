@@ -18,9 +18,10 @@ use serde_json::Value;
 
 pub mod bash_cli_agent;
 pub mod claude_cli;
+pub mod generic_openai;
 pub mod groq;
 pub mod ollama;
-mod openai_compat;
+pub(crate) mod openai_compat;
 pub mod transcribe;
 pub mod whisper_local;
 
@@ -172,6 +173,15 @@ pub fn build_named_provider(
             other
         ),
     }
+}
+
+/// ZeroType `ZEROTYPE_AIPROMPT_*` 三個 frontmatter 鍵 → openai-compatible 臨時 provider。
+pub fn build_openai_compat_provider(
+    api_base: impl Into<String>,
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+) -> Arc<dyn LlmProvider> {
+    Arc::new(generic_openai::GenericOpenAiProvider::new(api_base, api_key, model))
 }
 
 /// 從 `~/.mori/config.json` 蓋出**主 chat provider**。配置:

@@ -92,6 +92,10 @@ pub struct AppState {
     /// 存在 state 是因為 warm-up 可能在 React 還沒掛上 listener 前就完成,
     /// 用 IPC 把當下狀態回給前端就不會錯過 transition。
     pub ollama_warmup: Mutex<Option<&'static str>>,
+    /// 熱鍵按下瞬間抓到的視窗 context（5F-1）。
+    /// 在 handle_hotkey_toggle 時寫入，run_voice_input_pipeline 時讀取。
+    /// 必須在錄音開始前抓，此時焦點還在使用者的目標視窗上。
+    pub hotkey_window_context: Mutex<HotkeyWindowContext>,
 }
 
 impl AppState {
@@ -328,6 +332,61 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 
 // ─── 熱鍵 / toggle 處理 ─────────────────────────────────────────────
 
+// ─── 5F-1: Window context capture ────────────────────────────────────
+
+/// 熱鍵按下瞬間抓到的視窗資訊。此時焦點還在使用者的目標視窗，是抓 context 的唯一可靠時機。
+#[derive(Debug, Clone, Default)]
+pub struct HotkeyWindowContext {
+    pub process_name: String,
+    pub window_title: String,
+    pub selected_text: String,
+}
+
+/// Linux: 用 xdotool + /proc 抓活躍視窗 context。同步呼叫，耗時 < 100ms。
+/// 失敗時各欄位回空字串，不影響主流程。
+#[cfg(target_os = "linux")]
+fn capture_window_context() -> HotkeyWindowContext {
+    use std::process::Command;
+
+    let pid = Command::new("xdotool")
+        .args(["getactivewindow", "getwindowpid"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let process_name = pid
+        .as_deref()
+        .and_then(|pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    let window_title = Command::new("xdotool")
+        .args(["getactivewindow", "getwindowname"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    let selected_text = crate::selection::read_primary_selection().unwrap_or_default();
+
+    tracing::debug!(
+        process = %process_name,
+        title = %window_title,
+        selected_chars = selected_text.chars().count(),
+        "hotkey window context captured",
+    );
+
+    HotkeyWindowContext { process_name, window_title, selected_text }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn capture_window_context() -> HotkeyWindowContext {
+    HotkeyWindowContext::default()
+}
+
 fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
     // Background 模式下熱鍵語意是「叫醒 + 開錄」一鍵到位,不用先開 tray menu。
     // 切到 Active 後 fall-through 走正常 toggle 邏輯,phase 仍是 Idle 所以
@@ -340,6 +399,8 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
     let current = state.phase.lock().clone();
     match current {
         Phase::Idle | Phase::Done { .. } | Phase::Error { .. } => {
+            // 5F-1: 在錄音開始前抓視窗 context（焦點仍在目標 app）
+            *state.hotkey_window_context.lock() = capture_window_context();
             start_recording(&app, &state);
         }
         Phase::Recording { .. } => {
@@ -685,7 +746,7 @@ async fn run_voice_input_pipeline(
     transcript: String,
     routing: Arc<mori_core::llm::Routing>,
 ) {
-    use mori_core::voice_cleanup::{programmatic_cleanup, read_cleanup_level, CleanupLevel};
+    use mori_core::voice_cleanup::{programmatic_cleanup, CleanupLevel};
 
     state.set_phase(
         &app,
@@ -704,41 +765,69 @@ async fn run_voice_input_pipeline(
         return;
     }
 
-    let level = read_cleanup_level();
+    // 5F-1: 載入 profile 系統
+    use mori_core::voice_input_profile::{
+        load_active_profile, load_system_template, render_system_prompt,
+        ResolvedProvider, VoiceInputContext,
+    };
+
+    let profile = load_active_profile();
+    let level = profile.cleanup_level_effective();
+
     tracing::info!(
         cleanup_level = level.as_str(),
+        profile = %profile.name,
         chars_in = transcript.chars().count(),
         "voice-input pipeline start",
     );
 
-    // Step 1:LLM cleanup(只在 smart 等級才走)
+    // 組合 VoiceInputContext（視窗 context 在熱鍵瞬間已抓，此時補上時間和剪貼簿）
+    let win_ctx = state.hotkey_window_context.lock().clone();
+    let ctx_provider = context_provider::TauriContextProvider::new(app.clone());
+    let mori_ctx = ctx_provider.capture().await;
+
+    let mut vi_ctx = VoiceInputContext::new_now();
+    vi_ctx.process_name = win_ctx.process_name.clone();
+    vi_ctx.active_app = win_ctx.process_name.clone();
+    vi_ctx.window_title = win_ctx.window_title.clone();
+    vi_ctx.selected_text = win_ctx.selected_text.clone();
+    vi_ctx.clipboard = mori_ctx.clipboard.clone().unwrap_or_default();
+
+    // 渲染 system prompt
+    let system_template = load_system_template();
+    let rendered_system = render_system_prompt(&system_template, &vi_ctx, &profile.body);
+
+    // 決定 LLM provider
+    let llm_provider: Arc<dyn mori_core::llm::LlmProvider> = match profile.frontmatter.resolved_provider() {
+        ResolvedProvider::OpenAiCompat { api_base, api_key, model } => {
+            tracing::info!(provider = "openai-compat", model = %model, api_base = %api_base, "voice-input using ZeroType API config");
+            mori_core::llm::build_openai_compat_provider(api_base, api_key, model)
+        }
+        ResolvedProvider::Named(name) => {
+            match mori_core::llm::build_named_provider(&name, None) {
+                Ok(p) => {
+                    tracing::info!(provider = %p.name(), "voice-input using named provider");
+                    p
+                }
+                Err(e) => {
+                    tracing::warn!(?e, "profile provider not found, falling back to routing");
+                    routing.skill_provider("voice_input_cleanup")
+                }
+            }
+        }
+        ResolvedProvider::Default => routing.skill_provider("voice_input_cleanup"),
+    };
+
+    // Step 1: LLM cleanup（只在 smart 等級才走）
     let after_llm: anyhow::Result<String> = match level {
         CleanupLevel::None | CleanupLevel::Minimal => Ok(transcript.clone()),
         CleanupLevel::Smart => {
-            let provider = routing.skill_provider("voice_input_cleanup");
-            tracing::info!(provider = %provider.name(), "voice-input LLM cleanup");
+            tracing::info!(provider = %llm_provider.name(), model = %llm_provider.model(), "voice-input LLM cleanup");
             let messages = vec![
-                ChatMessage::system(
-                    "你是語音輸入清理員。你只做這件事:\n\
-                     - 給 ASR(Whisper)的原始輸出加上**標點 + 段落切分**\n\
-                     - 修正明顯的 Whisper 幻聽(例如 \"thank you for watching\"、\
-                       \"請訂閱\"、\"請按讚\")\n\
-                     - 修正同音字錯字(僅在**極有把握**時,寧可少改不多改)\n\
-                     - 保留使用者原本的**用詞、語氣、口語助詞**(「啊」「呢」「嗯」)\n\
-                     - 中文一律繁體;標點:中文鄰近用全形(,。?!:、),英文用半形\n\
-                     \n\
-                     **絕對禁止**:\n\
-                     - 改寫句子(例:「我覺得這方案 OK」→「我認為此方案可行」← 不可)\n\
-                     - 縮短 / 擴寫\n\
-                     - 加任何解釋、前言、後記\n\
-                     - 用引號包整段\n\
-                     - 翻譯到其他語言\n\
-                     \n\
-                     **只輸出清理後的純文字**。",
-                ),
+                ChatMessage::system(rendered_system),
                 ChatMessage::user(transcript.clone()),
             ];
-            provider
+            llm_provider
                 .chat(messages, vec![])
                 .await
                 .context("voice-input LLM cleanup chat")
@@ -787,25 +876,37 @@ async fn run_voice_input_pipeline(
 
     // 把結果送到游標位置 — Linux 用既有的 LinuxPasteController(arboard 寫
     // primary clipboard + ydotool 模擬 Ctrl+V)。其他平台未來補。
-    #[cfg(target_os = "linux")]
-    let paste_result = {
-        let controller = crate::selection::LinuxPasteController::new(app.clone());
-        controller.paste_back(&cleaned_text).await
-    };
-    #[cfg(not(target_os = "linux"))]
-    let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(
-        "voice-input paste-back not implemented on this platform yet"
-    ));
+    // ENABLE_SMART_PASTE: false → 只顯示結果不貼回
+    if profile.frontmatter.enable_smart_paste {
+        #[cfg(target_os = "linux")]
+        let paste_result = {
+            let controller = crate::selection::LinuxPasteController::new(app.clone());
+            controller.paste_back(&cleaned_text).await
+        };
+        #[cfg(not(target_os = "linux"))]
+        let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(
+            "voice-input paste-back not implemented on this platform yet"
+        ));
 
-    if let Err(e) = paste_result {
-        tracing::error!(?e, "voice-input paste-back failed");
-        state.set_phase(
-            &app,
-            Phase::Error {
-                message: format!("貼到游標位置失敗:{e:#}"),
-            },
-        );
-        return;
+        if let Err(e) = paste_result {
+            tracing::error!(?e, "voice-input paste-back failed");
+            state.set_phase(
+                &app,
+                Phase::Error {
+                    message: format!("貼到游標位置失敗:{e:#}"),
+                },
+            );
+            return;
+        }
+
+        // ENABLE_AUTO_ENTER: true → 貼完後模擬 Enter
+        #[cfg(target_os = "linux")]
+        if profile.frontmatter.enable_auto_enter {
+            let _ = std::process::Command::new("ydotool")
+                .args(["key", "28:1", "28:0"])
+                .status();
+            tracing::debug!("auto-enter sent via ydotool");
+        }
     }
 
     tracing::info!(
@@ -1111,6 +1212,9 @@ fn main() {
     );
     tracing::info!(path = %memory_root.display(), "memory store ready");
 
+    // 5F-1: 確保 ~/.mori/voice_input/ 存在並有預設檔案
+    mori_core::voice_input_profile::ensure_voice_input_dir_initialized();
+
     let state = Arc::new(AppState {
         phase: Mutex::new(Phase::default()),
         recorder: Mutex::new(None),
@@ -1119,6 +1223,7 @@ fn main() {
         conversation: Mutex::new(Vec::new()),
         mode: Mutex::new(Mode::Active),
         ollama_warmup: Mutex::new(None),
+        hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {

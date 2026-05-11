@@ -41,7 +41,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E 完成(2026-05-09，持續更新)** — Mori 在 Wayland 上
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E 完成 / 5F 進行中(2026-05-11)** — Mori 在 Wayland 上
 **可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
 - 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(對話 / 輸入 / 休眠)
 - **反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)
@@ -84,10 +84,13 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 | 缺什麼 | 為什麼重要 | 在哪個 Phase |
 |---|---|---|
+| ⏳ **ZeroType 相容 profile 系統** | SYSTEM.md + USER-*.md + context 注入（PROCESS_NAME / WINDOW_TITLE / SELECTED_TEXT）— 核心架構 | **5F-1** |
+| ⏳ **Alt+1~9 全域切換熱鍵** | 不用滑鼠選選單，直接切 voice input prompt | **5F-2** |
+| ⏳ **Floating widget 強化** | 錄音紅光隨音量跳動 + 轉錄原文泡泡 + prompt 名稱顯示 | **5F-3** |
+| ⏳ **ENABLE flags + voice agent loop** | 讓 voice input profile 能呼叫工具（send_keys / open_url / run_shell 等），對齊 ZeroType 能力 | **5F-4** |
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
 | ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
-| ❌ App-aware tone | Slack 閒聊、Outlook 正式 — 需要活躍視窗偵測 | Phase 4D |
 | ❌ URL routing | YouTube 連結 → 自動摘要 / 文章 → fetch + 摘要 | Phase 3B |
 | ❌ 背景排程 | 「每小時提醒喝水」「每天 9 點晨報」— 真正的常駐 agent | Phase 5 |
 | ❌ 媒體下載 | 「下載這個影片」呼叫 yt-dlp | Phase 6 |
