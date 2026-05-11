@@ -27,8 +27,14 @@ const APP_ID: &str = "ai.yazelin.mori";
 /// echoes this back so we can tell which shortcut fired.
 pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
 
+/// 5J: 錄音中按 Ctrl+Alt+Esc 直接丟掉錄音(不送 STT、不進 chat)。
+pub const CANCEL_SHORTCUT_ID: &str = "cancel";
+
 /// Tauri event emitted when the toggle shortcut fires.
 pub const PORTAL_HOTKEY_EVENT: &str = "portal-hotkey-fired";
+
+/// Tauri event emitted when the cancel shortcut fires(錄音中丟棄)。
+pub const PORTAL_CANCEL_EVENT: &str = "portal-cancel-fired";
 
 /// Prefix for VoiceInput slot shortcuts (Alt+0~9 → slot-0 … slot-9).
 const SLOT_ID_PREFIX: &str = "slot-";
@@ -84,13 +90,15 @@ pub async fn run(app: AppHandle) -> Result<()> {
 
     // 5G: 三組熱鍵 + 一個錄音 toggle，共 21 個全域快捷鍵
     //
-    // Alt+0~9        → VoiceInput profile（slot 0 切回 Agent 模式，1~9 切 voice profile）
+    // Alt+0~9        → VoiceInput profile（slot 0 = USER-00 預設極簡聽寫，1~9 切 voice profile）
     // Ctrl+Alt+0~9   → Agent profile（slot 0 = default Mori，1~9 切 agent profile）
     // Ctrl+Alt+Space → 錄音 toggle（兩個 mode 共用）
     let slot_ids: Vec<String> = (0u8..=9).map(|n| format!("{SLOT_ID_PREFIX}{n}")).collect();
-    let slot_descriptions: Vec<String> = std::iter::once("Mori — 切到 Agent 模式".to_string())
-        .chain((1u8..=9).map(|n| format!("Mori — 切換 VoiceInput Profile {n}")))
-        .collect();
+    let slot_descriptions: Vec<String> = std::iter::once(
+        "Mori — VoiceInput 純語音輸入（USER-00 極簡聽寫）".to_string(),
+    )
+    .chain((1u8..=9).map(|n| format!("Mori — 切換 VoiceInput Profile {n}")))
+    .collect();
     let slot_triggers: Vec<String> = (0u8..=9).map(|n| format!("ALT+{n}")).collect();
 
     let agent_slot_ids: Vec<String> = (0u8..=9)
@@ -106,6 +114,8 @@ pub async fn run(app: AppHandle) -> Result<()> {
     let mut shortcuts = vec![
         NewShortcut::new(TOGGLE_SHORTCUT_ID, "Mori — 開始 / 停止錄音")
             .preferred_trigger(Some(PREFERRED_TRIGGER)),
+        NewShortcut::new(CANCEL_SHORTCUT_ID, "Mori — 錄音中按下取消（丟棄音檔，不送出）")
+            .preferred_trigger(Some("CTRL+ALT+Escape")),
     ];
     for i in 0..=9usize {
         shortcuts.push(
@@ -156,6 +166,10 @@ pub async fn run(app: AppHandle) -> Result<()> {
         if id == TOGGLE_SHORTCUT_ID {
             if let Err(e) = app.emit(PORTAL_HOTKEY_EVENT, ()) {
                 tracing::warn!(?e, "failed to emit portal-hotkey-fired event");
+            }
+        } else if id == CANCEL_SHORTCUT_ID {
+            if let Err(e) = app.emit(PORTAL_CANCEL_EVENT, ()) {
+                tracing::warn!(?e, "failed to emit portal-cancel-fired event");
             }
         } else if let Some(slot_str) = id.strip_prefix(AGENT_SLOT_ID_PREFIX) {
             // 注意：要先 check AGENT_SLOT_ID_PREFIX，因為它以 "slot-" 結尾，

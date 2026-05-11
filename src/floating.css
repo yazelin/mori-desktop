@@ -16,9 +16,10 @@ html.floating-window,
 body.floating-window {
   margin: 0;
   padding: 0;
-  /* width / height 不寫死,讓 floating window 動態 resize:
-     idle = 160×160(只放 sprite),bubble 時拉大到 360×320 顯示完整回應。
-     具體尺寸由 FloatingMori.tsx setSize 控制。 */
+  /* 5J: 跟著 window 的實際大小走(FloatingMori.tsx 會 setSize):
+     idle = 160×160,有 chat bubble 時拉到 360 寬 + 動態高 */
+  width: 100vw;
+  height: 100vh;
   background: transparent !important;
   overflow: hidden;
   user-select: none;
@@ -29,8 +30,8 @@ body.floating-window:active {
   cursor: grabbing;
 }
 body.floating-window #root {
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   margin: 0;
   padding: 0;
   display: block;
@@ -40,18 +41,17 @@ body.floating-window #root {
 /* ─── stage(整個 96×96 容器) ───────────────────────────────────── */
 
 .mori-stage {
+  /* 5J: stage 是整個視窗的 click target;sprite-area 內部固定 160×160,
+     bubble 從 sprite-area 下方延伸出去(window 動態長大時)。 */
   position: absolute;
   inset: 0;
-  /* sprite 固定在頂端中央 160px 區域(留給 bubble 在下方擴張);
-     bubble 不存在時 stage 整個 160×160 看起來跟以前一樣置中。 */
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
 }
-.mori-sprite-anchor {
+.mori-sprite-area {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 160px;
   height: 160px;
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -112,58 +112,97 @@ body.floating-window #root {
   animation: mori-doze 6s ease-in-out infinite;
 }
 
-/* RECORDING — 數位旋轉環（solid ring + 旋轉 + 音量發光）
-   .mori-aura 本體由 JS 驅動 scale；::before 是旋轉環；::after 是內圈。
-   JS 另外透過 CSS 變數 --vol 控制發光強度。 */
+/* RECORDING — 水波紋天空藍(5J 重設計)
+   設計理念:有水樹才會長大。Mori 是森林精靈,錄音時的視覺以水氣泡 /
+   水波紋呈現,跟紅色錄音燈完全不同,讓人感覺「Mori 正在喝水」、
+   「水氣 inhale」,呼應 world-tree 主題。
+   - 主環 (::before):柔慢旋轉的天空藍漸層,音量驅動光暈
+   - 內圈 (::after):水珠般的內裡光暈,呼吸式 pulse
+   - ripple:水波紋(往外擴的同心圓,藍綠色透明) */
 .mori-recording .mori-aura {
   background: transparent;
-  filter: none;          /* 移除 blur，讓環清晰可見 */
+  filter: none;
   opacity: 1;
   transition: transform 80ms linear;
 }
 
-/* 主旋轉環：各段深淺不同，旋轉製造數位感（固定大小不 scale，避免被視窗邊切）*/
 .mori-recording .mori-aura::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: 50%;
   border: 2.5px solid transparent;
-  border-top-color:    rgba(255, 45, 45, 1.00);
-  border-right-color:  rgba(230, 60, 60, 0.75);
-  border-bottom-color: rgba(255, 45, 45, 0.90);
-  border-left-color:   rgba(200, 55, 55, 0.55);
-  animation: mori-ring-spin 1.5s linear infinite;
-  /* 音量驅動 box-shadow 亮度，但 spread 控制在 4-10px 不會外溢視窗 */
+  /* 天空藍 / 水藍漸層 — 柔和、不刺眼 */
+  border-top-color:    rgba(135, 206, 235, 0.95);
+  border-right-color:  rgba(173, 216, 230, 0.65);
+  border-bottom-color: rgba(100, 181, 246, 0.85);
+  border-left-color:   rgba(176, 224, 230, 0.50);
+  animation: mori-ring-spin 2.4s linear infinite;
+  /* 音量驅動水光暈;天空藍 cyan tint */
   box-shadow:
-    0 0 calc(3px + 6px * var(--vol, 0.3)) rgba(255, 40, 40, calc(0.45 + 0.45 * var(--vol, 0.3)));
+    0 0 calc(4px + 8px * var(--vol, 0.3)) rgba(120, 200, 230, calc(0.45 + 0.45 * var(--vol, 0.3)));
 }
 
-/* 內圈：靜態，增加層次感 */
+/* 內圈:像水珠表面 light reflection,呼吸式 pulse */
 .mori-recording .mori-aura::after {
   content: '';
   position: absolute;
   inset: 14px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 80, 80, 0.40);
-  box-shadow: inset 0 0 8px rgba(255, 50, 50, 0.15);
+  border: 1px solid rgba(180, 230, 245, 0.50);
+  box-shadow: inset 0 0 10px rgba(150, 220, 245, 0.20);
+  animation: mori-water-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes mori-water-breathe {
+  0%, 100% { opacity: 0.7; box-shadow: inset 0 0 8px rgba(150, 220, 245, 0.18); }
+  50%      { opacity: 1.0; box-shadow: inset 0 0 14px rgba(150, 220, 245, 0.30); }
 }
 
 .mori-recording .mori-sprite {
   animation: mori-listen-bob 1.4s ease-in-out infinite;
 }
 
-/* THINKING — 旋轉柔光環,角色慢呼吸 */
+/* THINKING — 森林綠雙環 + 呼吸內圈(5J)
+   設計理念:Mori 思考時像森林深處的微光,森林綠色調的旋轉環 + 內圈柔光,
+   呼應「水滋養 → 樹生長 → 葉間光斑」。 */
 .mori-thinking .mori-aura {
-  opacity: 0.7;
-  border: 2px solid transparent;
-  border-top-color: rgba(180, 220, 180, 0.55);
-  border-right-color: rgba(180, 220, 180, 0.25);
-  /* 旋轉時 blur 會跟著旋轉 → 反而看起來不柔。把 thinking 的 aura 拿掉 blur,
-     用 border 自帶的 anti-alias 就好 */
+  background: transparent;
   filter: none;
-  animation: mori-think-spin 1.4s linear infinite;
+  opacity: 1;
 }
+
+/* 外環:森林綠漸層,慢旋(比 recording 慢、更靜謐) */
+.mori-thinking .mori-aura::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2.2px solid transparent;
+  border-top-color:    rgba(155, 215, 165, 0.85);
+  border-right-color:  rgba(180, 230, 190, 0.55);
+  border-bottom-color: rgba(120, 195, 145, 0.75);
+  border-left-color:   rgba(200, 240, 210, 0.40);
+  animation: mori-ring-spin 3.2s linear infinite;
+  box-shadow: 0 0 6px rgba(170, 230, 185, 0.35);
+}
+
+/* 內圈:葉間光斑 — 呼吸式 pulse */
+.mori-thinking .mori-aura::after {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(195, 235, 200, 0.50);
+  box-shadow: inset 0 0 10px rgba(170, 230, 185, 0.20);
+  animation: mori-leaf-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes mori-leaf-breathe {
+  0%, 100% { opacity: 0.7; box-shadow: inset 0 0 8px rgba(170, 230, 185, 0.18); }
+  50%      { opacity: 1.0; box-shadow: inset 0 0 14px rgba(170, 230, 185, 0.32); }
+}
+
 .mori-thinking .mori-sprite {
   animation: mori-breathe 4s ease-in-out infinite;
 }
@@ -250,14 +289,20 @@ body.floating-window #root {
 
 /* ─── 音量波紋（每個 ripple 是一個 div，動畫播完自己消失）─────────── */
 
+/* 5J: 水波紋(原本紅色 → 改成天空藍水藍)。
+   音量大時波紋出來 — 像水面被打中、漣漪向外擴散。 */
 .mori-ripple {
   position: absolute;
   width: 130px;
   height: 130px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 60, 60, calc(0.7 + 0.3 * var(--ripple-intensity, 0.5)));
+  /* 雙層 border 模擬水波紋的折射感 */
+  border: 1.5px solid rgba(130, 200, 235, calc(0.65 + 0.30 * var(--ripple-intensity, 0.5)));
+  box-shadow:
+    0 0 6px rgba(140, 210, 240, calc(0.30 + 0.30 * var(--ripple-intensity, 0.5))),
+    inset 0 0 4px rgba(180, 230, 245, 0.30);
   pointer-events: none;
-  animation: mori-ripple-out 1.2s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  animation: mori-ripple-out 1.4s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
 }
 
 /* 從基底環大小（130px）擴張到 145px，opacity 同時淡出。
@@ -303,35 +348,9 @@ body.floating-window #root {
   animation: mori-label-appear 0.18s ease-out;
 }
 
-/* 5J fix: Mori 完整回應的 chat bubble。
-   - 放在 sprite 下方(stage 下半部),floating window 動態 resize 配合
-   - 多行 wrap、文字靠左、字級拉大讓使用者能讀
-   - 過長時內部 scroll(超過 max-height) */
-.mori-chat-bubble {
-  position: absolute;
-  /* sprite 區是頂端 160px;bubble 放在 sprite 下方 */
-  top: 160px;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
-  z-index: 10;
-  background: rgba(10, 10, 15, 0.86);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 13px;
-  font-family: system-ui, "Noto Sans CJK TC", sans-serif;
-  line-height: 1.55;
-  padding: 10px 12px;
-  text-align: left;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-y: auto;
-  pointer-events: auto; /* 允許滾輪滾動 */
-  animation: mori-label-appear 0.18s ease-out;
-}
+/* 5J: 完整 chat bubble 已搬到獨立 chat_bubble window
+   (Wayland 單窗 setSize + transparent 太不穩);
+   樣式改在 chat-bubble.css。這個檔案保留 sprite + chip 即可。 */
 /* 讓 scrollbar 細一點 */
 .mori-chat-bubble::-webkit-scrollbar { width: 6px; }
 .mori-chat-bubble::-webkit-scrollbar-thumb {

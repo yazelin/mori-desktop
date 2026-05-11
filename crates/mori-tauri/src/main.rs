@@ -99,6 +99,10 @@ pub struct AppState {
     /// 在 handle_hotkey_toggle 時寫入，run_voice_input_pipeline 時讀取。
     /// 必須在錄音開始前抓，此時焦點還在使用者的目標視窗上。
     pub hotkey_window_context: Mutex<HotkeyWindowContext>,
+    /// 5J: 目前跑著的 transcribe + agent pipeline tokio task。
+    /// Ctrl+Alt+Esc 在 Phase::Transcribing / Responding 階段可以 abort 它,
+    /// kill_on_drop 會把 claude / gemini / codex 子程序連帶 SIGKILL。
+    pub pipeline_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl AppState {
@@ -340,18 +344,13 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 /// Alt+N 按下（5G）：
 /// - slot 0  → 切到 Agent 模式（讓 Mori 自己判斷，不選 voice profile）
 /// - slot 1~9 → 切到 VoiceInput mode + 對應 voice profile
+/// Alt+N 按下：永遠進入 VoiceInput 模式 + 載入對應 USER-0N.*.md。
+///
+/// slot 0 = USER-00.*(預設極簡語音輸入,類似 iOS 語音輸入法,不潤稿)。
+/// 切回 Agent 走 Ctrl+Alt+0~9(對應 AGENT-XX),Alt 系列全部 voice_input。
 fn handle_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
-    if slot == 0 {
-        if !matches!(*state.mode.lock(), Mode::Agent) {
-            tracing::info!("Alt+0 — switching to Agent mode");
-            state.set_mode(&app, Mode::Agent);
-        }
-        let _ = app.emit("voice-input-profile-switched", "Agent 模式");
-        return;
-    }
-
     if !matches!(*state.mode.lock(), Mode::VoiceInput) {
-        tracing::info!(slot, "Alt+N — auto-switching to VoiceInput mode");
+        tracing::info!(slot, "Alt+N — switching to VoiceInput mode");
         state.set_mode(&app, Mode::VoiceInput);
     }
 
@@ -558,7 +557,8 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 
     let app_for_provider = app.clone();
 
-    tauri::async_runtime::spawn(async move {
+    let state_for_handle = state.clone();
+    let task = tauri::async_runtime::spawn(async move {
         // Stage 1: Whisper transcribe — 5C 起走 TranscriptionProvider factory,
         // 預設 Groq Whisper API,可在 config 把 stt_provider
         // 改成 "whisper-local" 走 whisper.cpp 離線推理(配上本機 chat
@@ -675,6 +675,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             }
         }
     });
+    *state_for_handle.pipeline_task.lock() = Some(task);
 }
 
 /// 共用的 chat pipeline:給定 transcript + provider,進 Phase::Responding,
@@ -1483,6 +1484,7 @@ fn main() {
         mode: Mutex::new(Mode::Agent),
         ollama_warmup: Mutex::new(None),
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
+        pipeline_task: Mutex::new(None),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -1717,6 +1719,52 @@ fn main() {
                 let state_for_handler = state_for_setup.clone();
                 app.listen(portal_hotkey::PORTAL_HOTKEY_EVENT, move |_event| {
                     handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
+                });
+
+                // 5J: Ctrl+Alt+Esc — 全域中斷
+                // - Phase::Recording → 停錄音 + 丟掉音檔不送 STT
+                // - Phase::Transcribing / Responding → abort pipeline task,
+                //   kill_on_drop 讓 claude / gemini / codex 子程序連帶 SIGKILL
+                // - 其他 phase → 忽略
+                let handle_cancel = app.handle().clone();
+                let state_for_cancel = state_for_setup.clone();
+                app.listen(portal_hotkey::PORTAL_CANCEL_EVENT, move |_event| {
+                    let phase = state_for_cancel.phase.lock().clone();
+                    match phase {
+                        Phase::Recording { .. } => {
+                            tracing::info!("Ctrl+Alt+Esc — cancelling current recording");
+                            if let Some(rec) = state_for_cancel.recorder.lock().take() {
+                                match rec.stop() {
+                                    Ok(audio) => {
+                                        let secs = audio.samples.len() as f32
+                                            / (audio.sample_rate as f32
+                                                * audio.channels as f32);
+                                        tracing::info!(
+                                            duration_secs = secs,
+                                            "recording cancelled via portal hotkey (audio discarded)",
+                                        );
+                                    }
+                                    Err(e) => tracing::warn!(?e, "stop on portal cancel returned err"),
+                                }
+                            }
+                            // abort 後台 pipeline(如果剛好已經 spawn 但還沒進階段)
+                            if let Some(task) = state_for_cancel.pipeline_task.lock().take() {
+                                task.abort();
+                            }
+                            state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
+                        }
+                        Phase::Transcribing | Phase::Responding { .. } => {
+                            tracing::info!(?phase, "Ctrl+Alt+Esc — aborting in-flight pipeline");
+                            if let Some(task) = state_for_cancel.pipeline_task.lock().take() {
+                                task.abort();
+                                tracing::info!("pipeline task aborted (kill_on_drop will SIGKILL child)");
+                            }
+                            state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
+                        }
+                        _ => {
+                            tracing::debug!(?phase, "Ctrl+Alt+Esc fired but no in-flight work — ignored");
+                        }
+                    }
                 });
 
                 // 5F-2: Alt+0~9 VoiceInput profile 切換

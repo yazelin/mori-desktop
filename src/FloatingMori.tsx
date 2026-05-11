@@ -1,7 +1,7 @@
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { listen, emit } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type SkillCallSummary = {
   name: string;
@@ -118,11 +118,10 @@ function FloatingMori() {
   // 當前 profile 常駐標籤（Alt+N 設定後一直記著，錄音中持續顯示）
   const [currentProfileLabel, setCurrentProfileLabel] = useState<string>("");
 
-  // 5J: 完整 chat bubble(Mori 完整回應 / 完整轉錄)。
-  // 跟 infoLabel 不一樣 — infoLabel 是頂端 chip 顯示「切到哪個 profile / 狀態」;
-  // chatBubble 在 sprite 下方,可多行 wrap、容納長回應、會撐大 floating window。
-  const [chatBubble, setChatBubble] = useState<string | null>(null);
-  const chatBubbleRef = useRef<HTMLDivElement | null>(null);
+  // 5J: 完整 chat bubble 改用獨立 chat_bubble window 顯示
+  // (sprite window 永遠 160×160 不動,bubble 走另一個 Tauri window)。
+  // 這裡只保留「目前是否有 bubble」的旗標 + dwell timer 控制。
+  const [hasChatBubble, setHasChatBubble] = useState(false);
 
   // ── 初始化 & 事件訂閱 ─────────────────────────────────────────────
 
@@ -198,78 +197,75 @@ function FloatingMori() {
   }, [phase]);
 
   // ── 5J: 完成後浮動提示 ────────────────────────────────────────
-  // - VoiceInput mode: 短轉錄(≤40 字)→ infoLabel(頂端 chip);長轉錄 → chatBubble(下方多行)
-  // - Agent mode: Mori 完整回應一律進 chatBubble(下方多行,可滾動,不截斷)
+  // - VoiceInput mode: 短轉錄(≤40 字)→ infoLabel(頂端 chip);長轉錄 → chat_bubble window
+  // - Agent mode: Mori 完整回應一律走 chat_bubble window(獨立 window,不受 sprite 限制)
+
+  // sprite 視窗在 tauri.conf.json 寫死 160×160 且 resizable:false。
+  // 不問 outerSize() — GNOME mutter 對 transparent+decorationless 視窗的 outerSize
+  // 在不同時刻可能加上不同 shadow margin,會讓 bubble 每次距離 sprite 越來越遠。
+  const SPRITE_SIZE = 160;
+  const BUBBLE_WIDTH = 360;
+  const BUBBLE_GAP_PX = 8;
+
+  // 顯示 chat bubble:從 sprite 視窗位置算出 bubble 絕對座標,emit 給 chat_bubble window
+  const showChatBubble = async (text: string) => {
+    try {
+      const win = getCurrentWindow();
+      const pos = await win.outerPosition();
+      const scale = await win.scaleFactor();
+      const sprite_x = pos.x / scale;
+      const sprite_y = pos.y / scale;
+      // bubble 中心對齊 sprite 中心
+      const bubble_x = Math.max(0, sprite_x + SPRITE_SIZE / 2 - BUBBLE_WIDTH / 2);
+      const bubble_y = sprite_y + SPRITE_SIZE + BUBBLE_GAP_PX;
+      await emit("chat-bubble-show", { text, x: bubble_x, y: bubble_y });
+      setHasChatBubble(true);
+    } catch (e) {
+      console.error("show chat_bubble failed", e);
+    }
+  };
+
+  const hideChatBubble = async () => {
+    try {
+      await emit("chat-bubble-hide");
+    } catch (e) { console.error("hide chat_bubble failed", e); }
+    setHasChatBubble(false);
+  };
 
   useEffect(() => {
     if (phase.kind !== "done") return;
 
     if (mode === "voice_input" && phase.transcript.trim()) {
       const text = phase.transcript.trim();
-      // 短文字直接 chip 顯示就好,避免動到 window size
+      // 短文字直接 chip 顯示就好,避免開額外視窗
       if (text.length <= 40) {
         showInfo(text);
         const t = setTimeout(() => setInfoLabel(null), TRANSCRIPT_LABEL_MS);
         return () => clearTimeout(t);
       }
-      // 長轉錄走 bubble(完整顯示讓使用者驗證 STT)
-      setChatBubble(text);
-      const t = setTimeout(() => setChatBubble(null), 6000);
+      // 長轉錄走 chat_bubble window(完整顯示讓使用者驗證 STT)
+      showChatBubble(text);
+      const t = setTimeout(hideChatBubble, 6000);
       return () => clearTimeout(t);
     }
 
     if (mode === "agent" && phase.response.trim()) {
-      // 5J 修:不截斷,完整 chat bubble 顯示。Bubble 自動 wrap + 過長 scroll。
-      setChatBubble(phase.response.trim());
+      const text = phase.response.trim();
+      showChatBubble(text);
       // 訊息越長給越久時間讀 — 每 30 字 +1 秒,base 5 秒,最多 15 秒
-      const dwell = Math.min(15000, 5000 + Math.floor(phase.response.length / 30) * 1000);
-      const t = setTimeout(() => setChatBubble(null), dwell);
+      const dwell = Math.min(15000, 5000 + Math.floor(text.length / 30) * 1000);
+      const t = setTimeout(hideChatBubble, dwell);
       return () => clearTimeout(t);
     }
   }, [phase, mode]);
 
-  // 錄音開始時清掉舊的 info label + chat bubble,避免上輪的內容殘留
+  // 錄音開始時清掉舊的 info label + chat bubble window,避免上輪的內容殘留
   useEffect(() => {
     if (phase.kind === "recording") {
       setInfoLabel(null);
-      setChatBubble(null);
+      if (hasChatBubble) hideChatBubble();
     }
   }, [phase.kind]);
-
-  // 5J: 動態 resize floating window
-  // - 沒 chatBubble → 160×160(只露 sprite)
-  // - 有 chatBubble → 360 寬 × 依內容 max 540 高
-  // ResizeObserver 監聽 bubble 實際渲染高度,跟著調 window。
-  useEffect(() => {
-    const win = getCurrentWindow();
-    if (!chatBubble) {
-      // 收回基本尺寸
-      win.setSize(new LogicalSize(160, 160)).catch(() => {});
-      return;
-    }
-    // 預設先給個合理值,ResizeObserver 之後再微調
-    const BASE_WIDTH = 360;
-    const SPRITE_AREA_HEIGHT = 160;
-    const BUBBLE_MAX_HEIGHT = 380;
-    const PADDING_FOR_SHADOW = 8;
-    win.setSize(new LogicalSize(BASE_WIDTH, SPRITE_AREA_HEIGHT + 120)).catch(() => {});
-
-    if (!chatBubbleRef.current) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const bubbleHeight = entry.contentRect.height;
-        const target = Math.min(
-          BUBBLE_MAX_HEIGHT,
-          Math.ceil(bubbleHeight) + 20, // 20px breathing room
-        );
-        win
-          .setSize(new LogicalSize(BASE_WIDTH, SPRITE_AREA_HEIGHT + target + PADDING_FOR_SHADOW))
-          .catch(() => {});
-      }
-    });
-    ro.observe(chatBubbleRef.current);
-    return () => ro.disconnect();
-  }, [chatBubble]);
 
   // ── Drag ──────────────────────────────────────────────────────────
 
@@ -294,7 +290,25 @@ function FloatingMori() {
     }
   };
 
-  const onMouseUp = () => { dragRef.current = null; };
+  const onMouseUp = async () => {
+    dragRef.current = null;
+    // 拖動結束,通知 chat_bubble window 跟著移動到新位置(用 hardcoded sprite 尺寸算)
+    if (hasChatBubble) {
+      try {
+        const win = getCurrentWindow();
+        const pos = await win.outerPosition();
+        const scale = await win.scaleFactor();
+        const sprite_x = pos.x / scale;
+        const sprite_y = pos.y / scale;
+        await emit("sprite-moved", {
+          x: Math.max(0, sprite_x + SPRITE_SIZE / 2 - BUBBLE_WIDTH / 2),
+          y: sprite_y + SPRITE_SIZE + BUBBLE_GAP_PX,
+        });
+      } catch (e) {
+        console.error("sync chat_bubble position after drag failed", e);
+      }
+    }
+  };
 
   const onDoubleClick = async () => {
     try {
@@ -338,42 +352,42 @@ function FloatingMori() {
       onDoubleClick={onDoubleClick}
       title={`Mori — ${VISUAL_LABEL[visual]}\n拖曳:移動 / 雙擊:切顯示主視窗`}
     >
-      {/* 背景光暈：錄音中由音量驅動；其他狀態 CSS animation */}
-      <div className="mori-aura" style={auraStyle} />
+      {/* 5J: sprite-area — 永遠固定在 widget 左上 160×160,讓 sprite 不會
+          因為 window 變寬 / 變高而跑位置。bubble / chip 浮在這之外。 */}
+      <div className="mori-sprite-area">
+        {/* 背景光暈：錄音中由音量驅動；其他狀態 CSS animation */}
+        <div className="mori-aura" style={auraStyle} />
 
-      {/* 5F-3A: 音量波紋層 — 音量超過門檻時 spawn ripple，向外擴散後 fade。
-          最大擴張到 145px（< 160px 視窗），不會被切。 */}
-      {visual === "recording" &&
-        ripples.map((r) => (
-          <div
-            key={r.id}
-            className="mori-ripple"
-            style={{ "--ripple-intensity": r.intensity.toFixed(3) } as CSSProperties}
-          />
-        ))}
+        {/* 5F-3A: 音量波紋層 — 音量超過門檻時 spawn ripple，向外擴散後 fade。
+            最大擴張到 145px（< 160px 視窗），不會被切。 */}
+        {visual === "recording" &&
+          ripples.map((r) => (
+            <div
+              key={r.id}
+              className="mori-ripple"
+              style={{ "--ripple-intensity": r.intensity.toFixed(3) } as CSSProperties}
+            />
+          ))}
 
-      {/* 角色 sprite */}
-      <img
-        className="mori-sprite"
-        src={SPRITE_SRC[visual]}
-        alt={VISUAL_LABEL[visual]}
-        draggable={false}
-      />
+        {/* 角色 sprite */}
+        <img
+          className="mori-sprite"
+          src={SPRITE_SRC[visual]}
+          alt={VISUAL_LABEL[visual]}
+          draggable={false}
+        />
 
-      {/* 5J: 頂端 chip — profile 切換 / 狀態 / 短文字。位置在 sprite 上方。 */}
-      {labelToShow && (
-        <div key={`${labelToShow}-${infoKey}`} className="mori-info-label">
-          {labelToShow}
-        </div>
-      )}
+        {/* 5J: 頂端 chip — profile 切換 / 狀態 / 短文字,在 sprite 上方,
+            chip 隨 sprite-area 移動,window resize 不會跑掉。 */}
+        {labelToShow && (
+          <div key={`${labelToShow}-${infoKey}`} className="mori-info-label">
+            {labelToShow}
+          </div>
+        )}
+      </div>
 
-      {/* 5J: 下方完整 chat bubble — Mori 的完整回應 / 長轉錄。
-          多行 wrap、可滾動,動態 resize floating window。 */}
-      {chatBubble && (
-        <div ref={chatBubbleRef} className="mori-chat-bubble">
-          {chatBubble}
-        </div>
-      )}
+      {/* 5J: Mori 完整回應現在用獨立 chat_bubble window 顯示
+          (Wayland 上單窗 setSize + transparent 太不穩),這裡不再渲染。 */}
     </div>
   );
 }

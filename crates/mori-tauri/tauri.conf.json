@@ -28,10 +28,26 @@
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "resizable": true,
+        "resizable": false,
         "shadow": false,
         "visible": true,
         "center": true
+      },
+      {
+        "label": "chat_bubble",
+        "title": "Mori (chat)",
+        "width": 360,
+        "height": 56,
+        "x": -10000,
+        "y": -10000,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "shadow": false,
+        "visible": true,
+        "focus": false
       }
     ],
     "security": {

@@ -314,7 +314,10 @@ impl LlmProvider for BashCliAgentProvider {
                 std::process::Stdio::null()
             } else {
                 std::process::Stdio::piped()
-            });
+            })
+            // 5J: 上游(mori-tauri pipeline)被 abort 時 future drop → child 也跟著
+            // SIGKILL,避免 claude / gemini / codex subprocess 變 orphan 繼續吃 token。
+            .kill_on_drop(true);
 
         tracing::debug!(
             binary = %self.binary,

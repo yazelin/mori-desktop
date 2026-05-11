@@ -3,8 +3,10 @@ import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import FloatingMori from "./FloatingMori";
+import ChatBubble from "./ChatBubble";
 import "./styles.css";
 import "./floating.css";
+import "./chat-bubble.css";
 
 const label = getCurrentWindow().label;
 const root = document.getElementById("root")!;
@@ -18,6 +20,15 @@ if (label === "floating") {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <FloatingMori />
+    </React.StrictMode>,
+  );
+} else if (label === "chat_bubble") {
+  // 5J: 獨立 chat_bubble window — 跟 sprite 視窗解耦,避免單窗 setSize 在 Wayland 不穩
+  document.documentElement.classList.add("chat-bubble-window");
+  document.body.classList.add("chat-bubble-window");
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <ChatBubble />
     </React.StrictMode>,
   );
 } else {
