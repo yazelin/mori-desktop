@@ -30,11 +30,17 @@ pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
 /// Tauri event emitted when the toggle shortcut fires.
 pub const PORTAL_HOTKEY_EVENT: &str = "portal-hotkey-fired";
 
-/// Prefix for the 9 profile-slot shortcut ids (e.g. "slot-1" … "slot-9").
+/// Prefix for VoiceInput slot shortcuts (Alt+0~9 → slot-0 … slot-9).
 const SLOT_ID_PREFIX: &str = "slot-";
 
-/// Tauri event emitted when Alt+N fires. Payload is the slot number as u8 (1–9).
+/// Prefix for Agent slot shortcuts (5G — Ctrl+Alt+0~9 → agent-slot-0 … agent-slot-9).
+const AGENT_SLOT_ID_PREFIX: &str = "agent-slot-";
+
+/// Tauri event emitted when Alt+N fires. Payload is the slot number as u8 (0–9).
 pub const PROFILE_SLOT_EVENT: &str = "portal-profile-slot";
+
+/// Tauri event emitted when Ctrl+Alt+N fires. Payload is the slot number as u8 (0–9).
+pub const AGENT_SLOT_EVENT: &str = "portal-agent-slot";
 
 const PREFERRED_TRIGGER: &str = "CTRL+ALT+space";
 
@@ -76,15 +82,26 @@ pub async fn run(app: AppHandle) -> Result<()> {
         .await
         .context("create GlobalShortcuts session")?;
 
-    // 主錄音熱鍵 + Alt+0（切回對話模式）+ Alt+1~9（切 VoiceInput profile）
-    // 先把 String 存好，確保生命週期夠長
-    // Alt+0 = slot 0 = 切回 Active（對話）模式
-    // Alt+1~9 = slot 1~9 = 切到 VoiceInput + 對應 profile
+    // 5G: 三組熱鍵 + 一個錄音 toggle，共 21 個全域快捷鍵
+    //
+    // Alt+0~9        → VoiceInput profile（slot 0 切回 Agent 模式，1~9 切 voice profile）
+    // Ctrl+Alt+0~9   → Agent profile（slot 0 = default Mori，1~9 切 agent profile）
+    // Ctrl+Alt+Space → 錄音 toggle（兩個 mode 共用）
     let slot_ids: Vec<String> = (0u8..=9).map(|n| format!("{SLOT_ID_PREFIX}{n}")).collect();
-    let slot_descriptions: Vec<String> = std::iter::once("Mori — 切回對話模式".to_string())
-        .chain((1u8..=9).map(|n| format!("Mori — 切換語音輸入 Profile {n}")))
+    let slot_descriptions: Vec<String> = std::iter::once("Mori — 切到 Agent 模式".to_string())
+        .chain((1u8..=9).map(|n| format!("Mori — 切換 VoiceInput Profile {n}")))
         .collect();
     let slot_triggers: Vec<String> = (0u8..=9).map(|n| format!("ALT+{n}")).collect();
+
+    let agent_slot_ids: Vec<String> = (0u8..=9)
+        .map(|n| format!("{AGENT_SLOT_ID_PREFIX}{n}"))
+        .collect();
+    let agent_slot_descriptions: Vec<String> = std::iter::once(
+        "Mori — Agent 自由判斷模式（default Mori）".to_string(),
+    )
+    .chain((1u8..=9).map(|n| format!("Mori — 切換 Agent Profile {n}")))
+    .collect();
+    let agent_slot_triggers: Vec<String> = (0u8..=9).map(|n| format!("CTRL+ALT+{n}")).collect();
 
     let mut shortcuts = vec![
         NewShortcut::new(TOGGLE_SHORTCUT_ID, "Mori — 開始 / 停止錄音")
@@ -94,6 +111,10 @@ pub async fn run(app: AppHandle) -> Result<()> {
         shortcuts.push(
             NewShortcut::new(&slot_ids[i], &slot_descriptions[i])
                 .preferred_trigger(Some(slot_triggers[i].as_str())),
+        );
+        shortcuts.push(
+            NewShortcut::new(&agent_slot_ids[i], &agent_slot_descriptions[i])
+                .preferred_trigger(Some(agent_slot_triggers[i].as_str())),
         );
     }
 
@@ -135,6 +156,14 @@ pub async fn run(app: AppHandle) -> Result<()> {
         if id == TOGGLE_SHORTCUT_ID {
             if let Err(e) = app.emit(PORTAL_HOTKEY_EVENT, ()) {
                 tracing::warn!(?e, "failed to emit portal-hotkey-fired event");
+            }
+        } else if let Some(slot_str) = id.strip_prefix(AGENT_SLOT_ID_PREFIX) {
+            // 注意：要先 check AGENT_SLOT_ID_PREFIX，因為它以 "slot-" 結尾，
+            // 直接 strip_prefix("slot-") 會誤命中。
+            if let Ok(n) = slot_str.parse::<u8>() {
+                if let Err(e) = app.emit(AGENT_SLOT_EVENT, n) {
+                    tracing::warn!(?e, slot = n, "failed to emit agent-slot event");
+                }
             }
         } else if let Some(slot_str) = id.strip_prefix(SLOT_ID_PREFIX) {
             if let Ok(n) = slot_str.parse::<u8>() {

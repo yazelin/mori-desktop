@@ -310,7 +310,7 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
 
     let state_clone = state.inner().clone();
     tauri::async_runtime::spawn(async move {
-        run_chat_pipeline(app, state_clone, text, routing).await;
+        run_agent_pipeline(app, state_clone, text, routing).await;
     });
 }
 
@@ -336,20 +336,19 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 
 // ─── 5F-2: Profile slot switching ────────────────────────────────────
 
-/// Alt+N 按下：
-/// - slot 0  → 切回 Active（對話）模式，floating 短暫顯示「對話模式」
-/// - slot 1~9 → 切到 VoiceInput mode + 對應 profile，floating 顯示 profile 名稱
+/// Alt+N 按下（5G）：
+/// - slot 0  → 切到 Agent 模式（讓 Mori 自己判斷，不選 voice profile）
+/// - slot 1~9 → 切到 VoiceInput mode + 對應 voice profile
 fn handle_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
     if slot == 0 {
         if !matches!(*state.mode.lock(), Mode::Agent) {
-            tracing::info!("Alt+0 — switching back to Active (chat) mode");
+            tracing::info!("Alt+0 — switching to Agent mode");
             state.set_mode(&app, Mode::Agent);
         }
-        let _ = app.emit("voice-input-profile-switched", "對話模式");
+        let _ = app.emit("voice-input-profile-switched", "Agent 模式");
         return;
     }
 
-    // slot 1~9：自動切到 VoiceInput mode
     if !matches!(*state.mode.lock(), Mode::VoiceInput) {
         tracing::info!(slot, "Alt+N — auto-switching to VoiceInput mode");
         state.set_mode(&app, Mode::VoiceInput);
@@ -357,11 +356,31 @@ fn handle_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
 
     match mori_core::voice_input_profile::switch_to_slot(slot) {
         Some(info) => {
-            // "朋友閒聊 · groq" 格式的 label
             let _ = app.emit("voice-input-profile-switched", info.label());
         }
         None => {
-            tracing::debug!(slot, "no profile file for slot {}", slot);
+            tracing::debug!(slot, "no voice profile file for slot {}", slot);
+        }
+    }
+}
+
+/// Ctrl+Alt+N 按下（5G-5）：
+/// - 永遠切到 Agent mode
+/// - slot 0 → 用內建預設 AGENT.md（Mori 自由判斷）
+/// - slot 1~9 → 載入 AGENT-0N.*.md
+fn handle_agent_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
+    if !matches!(*state.mode.lock(), Mode::Agent) {
+        tracing::info!(slot, "Ctrl+Alt+N — switching to Agent mode");
+        state.set_mode(&app, Mode::Agent);
+    }
+
+    match mori_core::agent_profile::switch_agent_slot(slot) {
+        Some(info) => {
+            let label = format!("Agent · {} · {}", info.profile_name, info.llm_provider);
+            let _ = app.emit("voice-input-profile-switched", label);
+        }
+        None => {
+            tracing::debug!(slot, "no AGENT-{:02}.* file for slot", slot);
         }
     }
 }
@@ -651,7 +670,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                 run_voice_input_pipeline(app, state, transcript, routing).await;
             }
             Mode::Agent | Mode::Background => {
-                run_chat_pipeline(app, state, transcript, routing).await;
+                run_agent_pipeline(app, state, transcript, routing).await;
             }
         }
     });
@@ -663,7 +682,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
 /// 兩個入口會用到:
 /// - `stop_and_transcribe` 從 Whisper 拿到 transcript 後呼叫
 /// - `submit_text` IPC command 直接拿 user 打的 text 呼叫(bypass 麥克風)
-async fn run_chat_pipeline(
+async fn run_agent_pipeline(
     app: AppHandle,
     state: Arc<AppState>,
     transcript: String,
@@ -693,9 +712,42 @@ async fn run_chat_pipeline(
         tracing::warn!(?e, "failed to emit context-captured");
     }
 
+    // 5G: 載入當前 Agent profile（決定 provider override + enabled_skills）
+    let agent_profile = mori_core::agent_profile::load_active_agent_profile();
+    let enabled_set = mori_core::agent_profile::enabled_skills_set(&agent_profile);
+    tracing::info!(
+        profile = %agent_profile.name,
+        provider_override = ?agent_profile.frontmatter.provider,
+        enabled_skills_count = agent_profile.frontmatter.enabled_skills.len(),
+        "agent profile loaded",
+    );
+
+    // 若 profile 指定 provider，覆蓋 routing.agent
+    let agent_provider = match &agent_profile.frontmatter.provider {
+        Some(name) => match mori_core::llm::build_named_provider(name, None) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(?e, name, "agent profile provider not found, falling back to routing.agent");
+                routing.agent.clone()
+            }
+        },
+        None => routing.agent.clone(),
+    };
+
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
         let memory_index = memory.read_index_as_context().unwrap_or_default();
-        let system_prompt = build_system_prompt(&memory_index, &ctx);
+        // Agent profile body 取代預設 Mori 人格（若 profile body 非空）
+        let system_prompt = if agent_profile.body.trim().is_empty() {
+            build_system_prompt(&memory_index, &ctx)
+        } else {
+            format!(
+                "{}\n\n[記憶索引]\n{}\n\n[現場 context]\n剪貼簿: {}\n反白文字: {}",
+                agent_profile.body,
+                memory_index,
+                ctx.clipboard.as_deref().unwrap_or("（無）"),
+                ctx.selected_text.as_deref().unwrap_or("（無）"),
+            )
+        };
         tracing::debug!(
             index_chars = memory_index.chars().count(),
             history_msgs = history_snapshot.len(),
@@ -703,38 +755,57 @@ async fn run_chat_pipeline(
             "calling agent"
         );
 
-        // 註冊 skills
+        // 註冊 skills — 依 agent profile 的 enabled_skills 過濾
         let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
         let mut registry = SkillRegistry::new();
-        // Memory skills(phase 1D-1F)
-        registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
-        registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
-        registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
-        registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
-        // Text skills(phase 2)— 5A-3 起每個 skill 走自己的 routing override,
-        // 沒設 override 就 fallback 到 routing.agent。
-        registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
-        registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
-        registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
-        registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
-        // Mode 控制 skill(phase 4B-2):「晚安」/「醒醒」走這條
+        let allows = |name: &str| -> bool {
+            match &enabled_set {
+                Some(set) => set.contains(name),
+                None => true, // None = 全開
+            }
+        };
+
+        if allows("remember") {
+            registry.register(Arc::new(RememberSkill::new(memory_for_skills.clone())));
+        }
+        if allows("recall_memory") {
+            registry.register(Arc::new(RecallMemorySkill::new(memory_for_skills.clone())));
+        }
+        if allows("forget_memory") {
+            registry.register(Arc::new(ForgetMemorySkill::new(memory_for_skills.clone())));
+        }
+        if allows("edit_memory") {
+            registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
+        }
+        if allows("translate") {
+            registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
+        }
+        if allows("polish") {
+            registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
+        }
+        if allows("summarize") {
+            registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
+        }
+        if allows("compose") {
+            registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+        }
+        // set_mode 永遠註冊（「晚安」「醒醒」是核心功能，無法被 disable）
         let mode_controller: Arc<dyn ModeController> = Arc::new(StateModeController {
             state: state.clone(),
             app: app.clone(),
         });
         registry.register(Arc::new(SetModeSkill::new(mode_controller)));
-        // Paste-back skill(phase 4C):反白 → 講話 → 結果取代反白
-        // Linux only — 其他平台還沒實作 PasteController(macOS / Windows
-        // 各有各的 paste-key 模擬路徑,等之後跨平台 phase 補)。
         #[cfg(target_os = "linux")]
         {
-            let paste_controller: Arc<dyn PasteController> =
-                Arc::new(crate::selection::LinuxPasteController::new(app.clone()));
-            registry.register(Arc::new(PasteSelectionBackSkill::new(paste_controller)));
+            if allows("paste_selection_back") {
+                let paste_controller: Arc<dyn PasteController> =
+                    Arc::new(crate::selection::LinuxPasteController::new(app.clone()));
+                registry.register(Arc::new(PasteSelectionBackSkill::new(paste_controller)));
+            }
         }
         let registry = Arc::new(registry);
 
-        let agent = Agent::new(routing.agent.clone(), registry);
+        let agent = Agent::new(agent_provider.clone(), registry);
         let turn = agent
             .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
             .await?;
@@ -1306,6 +1377,7 @@ fn main() {
 
     // 5F-1: 確保 ~/.mori/voice_input/ 存在並有預設檔案
     mori_core::voice_input_profile::ensure_voice_input_dir_initialized();
+    mori_core::agent_profile::ensure_agent_dir_initialized();
 
     let state = Arc::new(AppState {
         phase: Mutex::new(Phase::default()),
@@ -1552,7 +1624,7 @@ fn main() {
                     handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
                 });
 
-                // 5F-2: Alt+1~9 profile 切換（自動切到 VoiceInput mode）
+                // 5F-2: Alt+0~9 VoiceInput profile 切換
                 let handle_slot = app.handle().clone();
                 let state_for_slot = state_for_setup.clone();
                 app.listen(portal_hotkey::PROFILE_SLOT_EVENT, move |event| {
@@ -1562,8 +1634,22 @@ fn main() {
                     handle_profile_slot(handle_slot.clone(), state_for_slot.clone(), slot);
                 });
 
+                // 5G-5: Ctrl+Alt+0~9 Agent profile 切換
+                let handle_agent_slot = app.handle().clone();
+                let state_for_agent_slot = state_for_setup.clone();
+                app.listen(portal_hotkey::AGENT_SLOT_EVENT, move |event| {
+                    let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
+                        return;
+                    };
+                    handle_agent_profile_slot(
+                        handle_agent_slot.clone(),
+                        state_for_agent_slot.clone(),
+                        slot,
+                    );
+                });
+
                 tracing::info!(
-                    "spawned portal hotkey task (Ctrl+Alt+Space + Alt+1~9) + tray icon"
+                    "spawned portal hotkey task (Ctrl+Alt+Space + Alt+0~9 + Ctrl+Alt+0~9) + tray icon"
                 );
             }
 

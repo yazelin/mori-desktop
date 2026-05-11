@@ -192,7 +192,7 @@ function FloatingMori() {
 
   // ── 5F-3B: 完成後浮動提示 ────────────────────────────────────────
   // - VoiceInput mode: 顯示轉錄原文（確認有沒有聽對）
-  // - Active mode (chat): 顯示 Mori 的回應（讓使用者不用看主視窗也能追蹤對話）
+  // - Agent mode: 顯示 Mori 的回應（讓使用者不用看主視窗也能追蹤對話）
 
   useEffect(() => {
     if (phase.kind !== "done") return;

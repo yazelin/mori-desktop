@@ -10,6 +10,7 @@
 //! 後續 phase 加 module / 加 impl 即可,trait 定義穩定,核心邏輯一行不動。
 
 pub mod agent;
+pub mod agent_profile;
 pub mod context;
 pub mod llm;
 pub mod memory;
