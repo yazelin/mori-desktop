@@ -91,8 +91,22 @@ pub struct VoiceInputFrontmatter {
     pub provider: Option<String>,
     /// 覆蓋此 profile 的 STT provider（groq / whisper-local）
     pub stt_provider: Option<String>,
+    /// 覆蓋此 profile 的 paste 快捷鍵：
+    /// - `ctrl_v`（一般 app：VS Code / 瀏覽器 / 文字編輯器）
+    /// - `ctrl_shift_v`（terminal：gnome-terminal / kitty / Claude Code 等 CLI 工具）
+    /// 沒設時自動偵測 process name；偵測失敗（Wayland 原生視窗）退到 ctrl_v。
+    pub paste_shortcut: Option<PasteShortcut>,
     /// 覆蓋全域 cleanup_level
     pub cleanup_level: Option<CleanupLevel>,
+}
+
+/// 貼回游標時用哪組 ydotool 按鍵。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteShortcut {
+    /// `Ctrl+V` — 大部分 GUI app（VS Code、瀏覽器、文字編輯器、聊天 app）
+    CtrlV,
+    /// `Ctrl+Shift+V` — terminal app（在 terminal 裡 Ctrl+V 是 literal ^V）
+    CtrlShiftV,
 }
 
 impl Default for VoiceInputFrontmatter {
@@ -115,6 +129,7 @@ impl Default for VoiceInputFrontmatter {
             enable_run_shell: false,
             provider: None,
             stt_provider: None,
+            paste_shortcut: None,
             cleanup_level: None,
         }
     }
@@ -277,6 +292,13 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
             "ENABLE_RUN_SHELL" => fm.enable_run_shell = parse_bool(value),
             "provider" => fm.provider = non_empty(value),
             "stt_provider" => fm.stt_provider = non_empty(value),
+            "paste_shortcut" => {
+                fm.paste_shortcut = match value.to_lowercase().replace([' ', '-'], "_").as_str() {
+                    "ctrl_v" | "ctrl+v" => Some(PasteShortcut::CtrlV),
+                    "ctrl_shift_v" | "ctrl+shift+v" => Some(PasteShortcut::CtrlShiftV),
+                    _ => None,
+                };
+            }
             "cleanup_level" => {
                 fm.cleanup_level = match value {
                     "smart" => Some(CleanupLevel::Smart),

@@ -954,7 +954,11 @@ async fn run_voice_input_pipeline(
     let paste_result = {
         let controller = crate::selection::LinuxPasteController::new(app.clone());
         controller
-            .paste_back_for_process(&cleaned_text, &win_ctx.process_name)
+            .paste_back_for_process(
+                &cleaned_text,
+                &win_ctx.process_name,
+                profile.frontmatter.paste_shortcut,
+            )
             .await
     };
     #[cfg(not(target_os = "linux"))]

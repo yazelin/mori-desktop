@@ -1,69 +1,61 @@
-//! Linux primary selection + paste-back via shell-out.
+//! Linux primary selection + paste-back via xclip shell-out.
 //!
-//! Mori reads what the user has highlighted in another app via Wayland's
-//! primary-selection protocol (or X11 PRIMARY under XWayland) using
-//! `wl-paste --primary`. To replace the highlighted range, we write the
-//! result to the clipboard via `wl-copy` and then synthesize a Ctrl+V
-//! keypress with `ydotool` so the focused (still the original) app
-//! receives a paste.
+//! ## 為什麼是 xclip 不是 arboard / wl-clipboard-rs
 //!
-//! Why ydotool, not wtype: GNOME mutter doesn't implement
-//! `zwp_virtual_keyboard_v1`, so wtype silently does nothing. ydotool
-//! works at the kernel uinput layer, compositor-agnostic.
+//! Mori 強制 `GDK_BACKEND=x11`，跑在 XWayland 環境。XWayland 會把
+//! Wayland 剪貼簿透明同步到 X11 selection。
 //!
-//! Setup is one-time: `sudo bash setup-wayland-input.sh` from
-//! yazelin/ubuntu-26.04-setup installs `wl-clipboard` + `ydotool`,
-//! adds the user to the `input` group, enables the ydotoold systemd
-//! user unit. Reboot once for input-group membership to take effect on
-//! the systemd manager.
+//! - `arboard` 3.6+ 透過 `wl-clipboard-rs` 直接打 Wayland zwlr_data_control
+//!   協定 → GNOME portal 看到「不知道是誰在動 clipboard」→ 跳「未知
+//!   wl-clipboard 要求剪貼簿存取」對話框。即使 register_host_app 也救不了
+//!   （portal 無法把 Wayland-protocol-level 的 client 連回 app ID）。
+//! - `xclip` 是純 X11 工具，走 X11 selection API（X server 自己的協定，
+//!   走 XWayland）。portal 完全看不到，不會跳對話框。
+//!
+//! ## 流程
+//!
+//! - 讀反白：`xclip -selection primary -o`
+//! - 寫剪貼簿 + paste：`xclip -selection clipboard -i` → `ydotool key Ctrl+V`
+//!
+//! ## Setup
+//!
+//! `sudo bash setup-wayland-input.sh` from yazelin/ubuntu-26.04-setup
+//! installs `xclip` + `wl-clipboard` + `ydotool`, adds user to `input` group.
 
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
-use arboard::{Clipboard, GetExtLinux, LinuxClipboardKind};
 use async_trait::async_trait;
 use mori_core::paste::{PasteController, PasteResult};
 use tauri::AppHandle;
-use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 最大允許的反白字數 — 太長就視為使用者選了整篇，不適合直接送 Whisper /
 /// LLM tool args。1500 是經驗值(中文 ~2000 token,加上提示 + 結果輸出
 /// 大概 5-6K total,留有餘地給 Groq gpt-oss-120b TPM)。
 const MAX_SELECTION_CHARS: usize = 1500;
 
-/// 讀 X11 PRIMARY selection(滑鼠反白文字)。
+/// 讀 X11 PRIMARY selection（滑鼠反白文字）— shell-out 給 xclip。
 ///
-/// 走 `arboard` 的 X11 backend — 我們強制 `GDK_BACKEND=x11` 讓 Mori 跑
-/// 在 XWayland 相容層,XWayland 自動把 Wayland primary selection 同步到
-/// X11 PRIMARY,所以從 X11 client 視角讀就拿到使用者的反白。**完全不
-/// 走 Wayland portal**,GNOME 不會跳「未知 wl-clipboard 要求剪貼簿存
-/// 取」對話框。
-///
-/// 失敗 / 反白為空 → 回 None。**不**做 fatal。
+/// xclip 是純 X11 工具，透過 XWayland 看到 Wayland 剪貼簿的同步版本，
+/// 不碰 Wayland portal，不會跳對話框。失敗 / 反白為空 → 回 None。
 pub fn read_primary_selection() -> Option<String> {
-    let mut clipboard = match Clipboard::new() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::debug!(?e, "arboard Clipboard::new failed (no display?)");
-            return None;
-        }
-    };
-    let text = match clipboard.get().clipboard(LinuxClipboardKind::Primary).text() {
-        Ok(t) => t,
-        Err(e) => {
-            // 反白為空 / 不是文字(圖片) / 沒 selection owner 都會 Err,
-            // 全部當「沒抓到」即可,不要 warn 洗 log。
-            tracing::trace!(?e, "primary selection unavailable");
-            return None;
-        }
-    };
+    let output = Command::new("xclip")
+        .args(["-selection", "primary", "-o"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        // 反白為空時 xclip 會 exit 1，正常忽略
+        tracing::trace!(status = ?output.status, "xclip primary selection empty / unavailable");
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    // Cap 過長選取(整篇文章不該整個塞 LLM context)。
     let truncated = if trimmed.chars().count() > MAX_SELECTION_CHARS {
         let head: String = trimmed.chars().take(MAX_SELECTION_CHARS).collect();
         tracing::info!(
@@ -88,12 +80,14 @@ pub fn read_primary_selection() -> Option<String> {
 /// 走 Tauri plugin 之後 Mori 是已註冊的 host app(via portal_hotkey
 /// 的 register_host_app),GNOME 就視為 trusted。
 pub struct LinuxPasteController {
-    app: AppHandle,
+    // 5F: 改用 xclip shell-out 後不再需要 AppHandle（不走 Tauri clipboard plugin）。
+    // 保留空 struct 維持 trait object 介面。
+    _private: (),
 }
 
 impl LinuxPasteController {
-    pub fn new(app: AppHandle) -> Self {
-        Self { app }
+    pub fn new(_app: AppHandle) -> Self {
+        Self { _private: () }
     }
 }
 
@@ -112,22 +106,45 @@ fn needs_shift_for_paste(process_name: &str) -> bool {
 }
 
 impl LinuxPasteController {
-    /// 主要的 paste-back：根據目標 process 名稱選擇 Ctrl+V 或 Ctrl+Shift+V。
-    /// 在 voice input pipeline 從 HotkeyWindowContext 拿 process name 傳進來。
+    /// 主要的 paste-back：
+    /// 1. profile 設了 `paste_shortcut` → 完全照辦
+    /// 2. 沒設 → 用 process name 偵測 terminal vs 一般 app
+    /// 3. 偵測失敗（Wayland 原生視窗，xdotool 抓不到）→ fallback Ctrl+V
     pub async fn paste_back_for_process(
         &self,
         text: &str,
         process_name: &str,
+        override_shortcut: Option<mori_core::voice_input_profile::PasteShortcut>,
     ) -> Result<PasteResult> {
-        self.app
-            .clipboard()
-            .write_text(text.to_string())
-            .context("Tauri clipboard write_text (capability allow-write-text granted?)")?;
+        // 用 xclip 寫 X11 CLIPBOARD（純 X11，不碰 Wayland portal，不會跳對話框）。
+        // XWayland 會把 X11 CLIPBOARD 同步到 Wayland clipboard，所有 app 都拿得到。
+        let mut child = Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("spawn xclip — is xclip installed? run setup-wayland-input.sh")?;
+        {
+            let stdin = child.stdin.as_mut().context("get xclip stdin")?;
+            stdin
+                .write_all(text.as_bytes())
+                .context("write text to xclip stdin")?;
+        }
+        // xclip fork 後變成 daemon hold selection，不 wait 它（會卡）。
+        // 直接放任，selection ownership 會在下一次 xclip 寫入時被取代。
+        drop(child);
 
         tokio::time::sleep(Duration::from_millis(80)).await;
 
+        use mori_core::voice_input_profile::PasteShortcut;
         // Linux keycodes: 29=Ctrl, 42=Shift, 47=V
-        let (keys, label) = if needs_shift_for_paste(process_name) {
+        let use_shift_v = match override_shortcut {
+            Some(PasteShortcut::CtrlShiftV) => true,
+            Some(PasteShortcut::CtrlV) => false,
+            None => needs_shift_for_paste(process_name),
+        };
+        let (keys, label) = if use_shift_v {
             (
                 vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"],
                 "Ctrl+Shift+V",
@@ -170,9 +187,9 @@ impl LinuxPasteController {
 
 #[async_trait]
 impl PasteController for LinuxPasteController {
-    /// trait 預設方法：不知道 process 時 fallback 用 Ctrl+V
+    /// trait 預設方法：不知道 process / 沒 profile override 時 fallback 用 Ctrl+V
     async fn paste_back(&self, text: &str) -> Result<PasteResult> {
-        self.paste_back_for_process(text, "").await
+        self.paste_back_for_process(text, "", None).await
     }
 }
 
@@ -181,10 +198,9 @@ impl PasteController for LinuxPasteController {
 /// Mori 還是能跑(語音、剪貼簿、記憶都不受影響)。只是讓 user 早點
 /// 知道為何 paste-back 待會會 fallback 到 ClipboardOnly。
 pub fn warn_if_setup_missing() {
-    // 寫剪貼簿走 Tauri plugin(arboard),讀 primary 也走 arboard,
-    // 兩者都是 in-process X11/XWayland API。剩下的 shell-out 只有 ydotool
-    // (Ctrl+V 模擬,沒有更乾淨的替代)。
-    for tool in ["ydotool"] {
+    // 5F: 改用 xclip 取代 arboard（避免 wl-clipboard portal 對話框）。
+    // 讀反白 + 寫剪貼簿都走 xclip shell-out，paste 鍵盤模擬走 ydotool。
+    for tool in ["xclip", "ydotool"] {
         let ok = Command::new("which")
             .arg(tool)
             .stdout(Stdio::null())
