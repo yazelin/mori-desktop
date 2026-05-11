@@ -962,12 +962,18 @@ async fn run_voice_input_pipeline(
         let _ = app.emit("voice-input-status", format!("⚡ 處理中 · {}", provider_label));
     }
 
-    // 5F-4: 判斷是否走 agent loop（profile 有任何 type-B ENABLE flag）
+    // 5F-4: 判斷是否走 agent loop — 只有 type-B flag 才觸發（open_url / send_keys 等
+    // 真正的「動作」工具）。smart_paste / auto_enter 是 Type A，沒 type-B 時不需要
+    // 工具 calling，pipeline 走簡單路徑就好。
+    let agent_mode = profile.frontmatter.has_type_b_flags();
     #[cfg(target_os = "linux")]
-    let tools = voice_input_tools::build_tool_list(&profile.frontmatter);
+    let tools = if agent_mode {
+        voice_input_tools::build_tool_list(&profile.frontmatter)
+    } else {
+        vec![]
+    };
     #[cfg(not(target_os = "linux"))]
     let tools: Vec<mori_core::llm::ToolDefinition> = vec![];
-    let agent_mode = !tools.is_empty();
 
     // Step 1: LLM cleanup（agent_mode 多輪 / 否則單輪文字轉換；minimal/none 跳 LLM）
     let after_llm: anyhow::Result<String> = match level {

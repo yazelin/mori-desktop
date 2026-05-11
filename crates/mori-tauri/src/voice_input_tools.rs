@@ -119,6 +119,29 @@ pub fn build_tool_list(fm: &VoiceInputFrontmatter) -> Vec<ToolDefinition> {
         });
     }
 
+    if fm.enable_smart_paste {
+        tools.push(ToolDefinition {
+            name: "smart_paste".into(),
+            description:
+                "Insert the given text into the currently focused application by writing to \
+                 the clipboard then synthesizing a paste keystroke. Use this when you want to \
+                 deliver text to the user's cursor (e.g. inserting a generated prompt into a \
+                 chat input, dictating a message). Do NOT use for control shortcuts — use \
+                 send_keys for those."
+                    .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Plain text to insert at the cursor position."
+                    }
+                },
+                "required": ["text"]
+            }),
+        });
+    }
+
     if fm.enable_send_keys {
         tools.push(ToolDefinition {
             name: "send_keys".into(),
@@ -190,6 +213,7 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
             "https://www.youtube.com/results?search_query={}",
         ),
         "send_keys" => execute_send_keys(args),
+        "smart_paste" => execute_smart_paste(args).await,
         "run_shell" => execute_run_shell(args).await,
         other => Ok(json!({ "error": format!("unknown tool '{other}'") })),
     }
@@ -416,7 +440,67 @@ fn key_name_to_code(name: &str) -> Option<u16> {
         "f1" => Some(59),  "f2" => Some(60),  "f3" => Some(61),  "f4" => Some(62),
         "f5" => Some(63),  "f6" => Some(64),  "f7" => Some(65),  "f8" => Some(66),
         "f9" => Some(67),  "f10" => Some(68), "f11" => Some(87), "f12" => Some(88),
+        // 標點符號（Linux input event codes）
+        "period" | "." => Some(52),
+        "comma" | "," => Some(51),
+        "semicolon" | ";" => Some(39),
+        "minus" | "-" => Some(12),
+        "equal" | "=" => Some(13),
+        "slash" | "/" => Some(53),
+        "backslash" | "\\" => Some(43),
+        "leftbracket" | "[" => Some(26),
+        "rightbracket" | "]" => Some(27),
+        "apostrophe" | "'" => Some(40),
+        "grave" | "`" => Some(41),
         _ => None,
+    }
+}
+
+async fn execute_smart_paste(args: Value) -> Result<Value> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let text = args
+        .get("text")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("smart_paste: missing 'text' argument"))?
+        .to_string();
+
+    tracing::info!(chars = text.chars().count(), "voice-input tool: smart_paste");
+
+    // 1. xclip 寫剪貼簿（純 X11，不碰 Wayland portal）
+    let mut child = Command::new("xclip")
+        .args(["-selection", "clipboard"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("spawn xclip")?;
+    child
+        .stdin
+        .as_mut()
+        .context("get xclip stdin")?
+        .write_all(text.as_bytes())
+        .context("write to xclip stdin")?;
+    drop(child);
+
+    // 2. 等合成器消化 selection 變更
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+    // 3. ydotool Ctrl+V（這個 tool 是給 agent 用的，沒法判斷目標 app 是否 terminal，
+    //    預設用 Ctrl+V。要在 terminal 用的 profile 應該另外用 send_keys 送 Ctrl+Shift+V）
+    let status = Command::new("ydotool")
+        .args(["key", "29:1", "47:1", "47:0", "29:0"])
+        .status()
+        .context("spawn ydotool")?;
+
+    if status.success() {
+        Ok(json!({ "ok": true, "pasted_chars": text.chars().count() }))
+    } else {
+        Ok(json!({
+            "error": format!("ydotool exited {status} — text is in clipboard, user can manual paste"),
+            "pasted_chars": text.chars().count(),
+        }))
     }
 }
 
@@ -509,11 +593,13 @@ mod tests {
     }
 
     #[test]
-    fn build_tool_list_empty_when_no_flags() {
+    fn build_tool_list_smart_paste_appears_when_enabled() {
+        // 預設 enable_smart_paste: true，所以 build_tool_list 會回 smart_paste。
+        // 但 main.rs 用 has_type_b_flags() 判斷是否進 agent loop，避免無
+        // type-B 時誤觸發 agent 路徑。這個 test 確認工具列表本身有 smart_paste。
         let fm = VoiceInputFrontmatter::default();
-        // 預設只開 enable_smart_paste，沒 type-B → 空 tool list
         let tools = build_tool_list(&fm);
-        assert!(tools.is_empty(), "got: {:?}", tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+        assert!(tools.iter().any(|t| t.name == "smart_paste"));
     }
 
     #[test]
