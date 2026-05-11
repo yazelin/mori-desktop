@@ -334,16 +334,32 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 
 // ─── 5F-2: Profile slot switching ────────────────────────────────────
 
-/// Alt+N 按下：切換 voice input profile 到對應槽位，並通知 floating widget 顯示名稱。
-fn handle_profile_slot(app: AppHandle, slot: u8) {
+/// Alt+N 按下：
+/// - slot 0  → 切回 Active（對話）模式，floating 短暫顯示「對話模式」
+/// - slot 1~9 → 切到 VoiceInput mode + 對應 profile，floating 顯示 profile 名稱
+fn handle_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
+    if slot == 0 {
+        if !matches!(*state.mode.lock(), Mode::Active) {
+            tracing::info!("Alt+0 — switching back to Active (chat) mode");
+            state.set_mode(&app, Mode::Active);
+        }
+        let _ = app.emit("voice-input-profile-switched", "對話模式");
+        return;
+    }
+
+    // slot 1~9：自動切到 VoiceInput mode
+    if !matches!(*state.mode.lock(), Mode::VoiceInput) {
+        tracing::info!(slot, "Alt+N — auto-switching to VoiceInput mode");
+        state.set_mode(&app, Mode::VoiceInput);
+    }
+
     match mori_core::voice_input_profile::switch_to_slot(slot) {
         Some(display_name) => {
             tracing::info!(slot, profile = %display_name, "voice input profile switched");
-            // 通知 floating widget 顯示 profile 名稱（FloatingMori.tsx 已訂閱）
             let _ = app.emit("voice-input-profile-switched", &display_name);
         }
         None => {
-            tracing::debug!(slot, "Alt+{} fired but no profile file found for slot", slot);
+            tracing::debug!(slot, "no profile file for slot {}", slot);
         }
     }
 }
@@ -890,39 +906,37 @@ async fn run_voice_input_pipeline(
         return;
     }
 
-    // 把結果送到游標位置 — Linux 用既有的 LinuxPasteController(arboard 寫
-    // primary clipboard + ydotool 模擬 Ctrl+V)。其他平台未來補。
-    // ENABLE_SMART_PASTE: false → 只顯示結果不貼回
-    if profile.frontmatter.enable_smart_paste {
-        #[cfg(target_os = "linux")]
-        let paste_result = {
-            let controller = crate::selection::LinuxPasteController::new(app.clone());
-            controller.paste_back(&cleaned_text).await
-        };
-        #[cfg(not(target_os = "linux"))]
-        let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(
-            "voice-input paste-back not implemented on this platform yet"
-        ));
+    // VoiceInput 模式永遠貼回游標 — 這是核心功能，不受任何 flag 影響。
+    // ZeroType 語意：ENABLE_SMART_PASTE 控制「LLM 能否呼叫 smart_paste 工具」
+    // （PR 4 的 agent tool），不是控制要不要貼回。
+    #[cfg(target_os = "linux")]
+    let paste_result = {
+        let controller = crate::selection::LinuxPasteController::new(app.clone());
+        controller.paste_back(&cleaned_text).await
+    };
+    #[cfg(not(target_os = "linux"))]
+    let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(
+        "voice-input paste-back not implemented on this platform yet"
+    ));
 
-        if let Err(e) = paste_result {
-            tracing::error!(?e, "voice-input paste-back failed");
-            state.set_phase(
-                &app,
-                Phase::Error {
-                    message: format!("貼到游標位置失敗:{e:#}"),
-                },
-            );
-            return;
-        }
+    if let Err(e) = paste_result {
+        tracing::error!(?e, "voice-input paste-back failed");
+        state.set_phase(
+            &app,
+            Phase::Error {
+                message: format!("貼到游標位置失敗:{e:#}"),
+            },
+        );
+        return;
+    }
 
-        // ENABLE_AUTO_ENTER: true → 貼完後模擬 Enter
-        #[cfg(target_os = "linux")]
-        if profile.frontmatter.enable_auto_enter {
-            let _ = std::process::Command::new("ydotool")
-                .args(["key", "28:1", "28:0"])
-                .status();
-            tracing::debug!("auto-enter sent via ydotool");
-        }
+    // ENABLE_AUTO_ENTER: true → 貼完後模擬 Enter（ZeroType 語意不變）
+    #[cfg(target_os = "linux")]
+    if profile.frontmatter.enable_auto_enter {
+        let _ = std::process::Command::new("ydotool")
+            .args(["key", "28:1", "28:0"])
+            .status();
+        tracing::debug!("auto-enter sent via ydotool");
     }
 
     tracing::info!(
@@ -1476,13 +1490,14 @@ fn main() {
                     handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
                 });
 
-                // 5F-2: Alt+1~9 profile 切換
+                // 5F-2: Alt+1~9 profile 切換（自動切到 VoiceInput mode）
                 let handle_slot = app.handle().clone();
+                let state_for_slot = state_for_setup.clone();
                 app.listen(portal_hotkey::PROFILE_SLOT_EVENT, move |event| {
                     let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
                         return;
                     };
-                    handle_profile_slot(handle_slot.clone(), slot);
+                    handle_profile_slot(handle_slot.clone(), state_for_slot.clone(), slot);
                 });
 
                 tracing::info!(

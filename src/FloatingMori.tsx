@@ -21,7 +21,7 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
-type Mode = "active" | "background";
+type Mode = "active" | "voice_input" | "background";
 
 type Visual =
   | "sleeping"
@@ -41,10 +41,11 @@ const TRANSCRIPT_LABEL_MS = 3000;
 // Profile 名稱顯示時長
 const PROFILE_LABEL_MS = 1500;
 
-// 音量 → aura 縮放：0.0 音量 → scale 0.72，1.0 音量 → scale 1.12
-const volumeToScale = (v: number) => 0.72 + 0.40 * Math.min(v, 1.0);
-// 音量 → aura 不透明度：靜音保留最小可見度（不完全消失）
-const volumeToOpacity = (v: number) => 0.30 + 0.70 * Math.min(v * 1.5, 1.0);
+// 麥克風 RMS 值通常在 0.01–0.20，需要 sqrt + 放大讓效果更明顯
+const amplify = (v: number) => Math.sqrt(Math.min(v * 4, 1.0));
+// 音量 → aura 縮放：靜音 0.82，大聲 1.18
+const volumeToScale = (v: number) => 0.82 + 0.36 * amplify(v);
+// 注：ring 設計不再需要 opacity 控制（ring 本身 solid，透明度固定 1.0）
 
 function visualFor(
   mode: Mode,
@@ -148,20 +149,29 @@ function FloatingMori() {
     setTransient(null);
   }, [phase]);
 
-  // ── 5F-3B: 轉錄原文泡泡 ───────────────────────────────────────────
+  // ── 5F-3B: 完成後浮動提示 ────────────────────────────────────────
+  // - VoiceInput mode: 顯示轉錄原文（確認有沒有聽對）
+  // - Active mode (chat): 顯示 Mori 的回應（讓使用者不用看主視窗也能追蹤對話）
 
   useEffect(() => {
-    if (phase.kind === "done" && phase.transcript.trim()) {
-      const MAX_CHARS = 40;
+    if (phase.kind !== "done") return;
+
+    if (mode === "voice_input" && phase.transcript.trim()) {
+      const MAX = 40;
       const text = phase.transcript.trim();
-      const label = text.length > MAX_CHARS
-        ? text.slice(0, MAX_CHARS - 1) + "…"
-        : text;
-      showInfo(label);
+      showInfo(text.length > MAX ? text.slice(0, MAX - 1) + "…" : text);
       const t = setTimeout(() => setInfoLabel(null), TRANSCRIPT_LABEL_MS);
       return () => clearTimeout(t);
     }
-  }, [phase]);
+
+    if (mode === "active" && phase.response.trim()) {
+      const MAX = 60;
+      const text = phase.response.trim();
+      showInfo(text.length > MAX ? text.slice(0, MAX - 1) + "…" : text);
+      const t = setTimeout(() => setInfoLabel(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [phase, mode]);
 
   // 錄音開始時清掉舊的 info label，避免上輪的轉錄文字殘留
   useEffect(() => {
@@ -210,14 +220,17 @@ function FloatingMori() {
 
   const visual = visualFor(mode, phase, transient);
 
-  // 5F-3A: 錄音中 aura 由 volume 驅動，靜音不完全消失
+  // 5F-3A: 錄音中 aura 由 volume 驅動
+  // --vol: CSS 變數供 ::before 發光強度使用（0.0~1.0）
+  // transform: scale 控制整體大小（帶動旋轉環一起縮放）
+  // animation: none 取消 .mori-aura 本身的 CSS animation（不影響 ::before 的旋轉）
   const auraStyle: CSSProperties | undefined =
     visual === "recording"
-      ? {
+      ? ({
+          "--vol": amplify(volume).toFixed(3),
           transform: `scale(${volumeToScale(volume)})`,
-          opacity: volumeToOpacity(volume),
-          animation: "none", // 取消 CSS animation，改由 JS 驅動
-        }
+          animation: "none",
+        } as CSSProperties)
       : undefined;
 
   return (

@@ -101,19 +101,44 @@ body.floating-window #root {
   animation: mori-doze 6s ease-in-out infinite;
 }
 
-/* RECORDING — 暖紅光暈由 JS 音量驅動（scale + opacity via inline style），
-   CSS 只提供背景顏色和 transition 讓變化平滑。animation 由 FloatingMori.tsx
-   設 animation:none 覆蓋，改為 JS 驅動。 */
+/* RECORDING — 數位旋轉環（solid ring + 旋轉 + 音量發光）
+   .mori-aura 本體由 JS 驅動 scale；::before 是旋轉環；::after 是內圈。
+   JS 另外透過 CSS 變數 --vol 控制發光強度。 */
 .mori-recording .mori-aura {
-  opacity: 0.30; /* 靜音時的最低可見度；JS inline style 會覆蓋 */
-  background: radial-gradient(
-    circle,
-    rgba(230, 100, 100, 0.40) 0%,
-    rgba(230, 100, 100, 0.12) 50%,
-    transparent 75%
-  );
-  transition: transform 80ms linear, opacity 80ms linear;
+  background: transparent;
+  filter: none;          /* 移除 blur，讓環清晰可見 */
+  opacity: 1;
+  transition: transform 80ms linear;
 }
+
+/* 主旋轉環：各段深淺不同，旋轉製造數位感 */
+.mori-recording .mori-aura::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color:    rgba(255, 45, 45, 1.00);
+  border-right-color:  rgba(230, 60, 60, 0.75);
+  border-bottom-color: rgba(255, 45, 45, 0.90);
+  border-left-color:   rgba(200, 55, 55, 0.55);
+  animation: mori-ring-spin 1.5s linear infinite;
+  /* 音量驅動發光：--vol 由 FloatingMori.tsx 注入 */
+  box-shadow:
+    0 0 calc(4px + 14px * var(--vol, 0.3))  rgba(255, 40, 40, calc(0.55 + 0.40 * var(--vol, 0.3))),
+    0 0 calc(10px + 22px * var(--vol, 0.3)) rgba(255, 40, 40, calc(0.20 + 0.25 * var(--vol, 0.3)));
+}
+
+/* 內圈：靜態，增加層次感 */
+.mori-recording .mori-aura::after {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 80, 80, 0.40);
+  box-shadow: inset 0 0 8px rgba(255, 50, 50, 0.15);
+}
+
 .mori-recording .mori-sprite {
   animation: mori-listen-bob 1.4s ease-in-out infinite;
 }
@@ -209,6 +234,10 @@ body.floating-window #root {
   50%      { transform: scale(1.06); }
 }
 
+@keyframes mori-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes mori-error-shake {
   0%, 100% { transform: translateX(0); }
   20%      { transform: translateX(-2.5px); }
@@ -224,6 +253,7 @@ body.floating-window #root {
   bottom: 5px;
   left: 5px;
   right: 5px;
+  z-index: 10;
   background: rgba(10, 10, 15, 0.72);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);

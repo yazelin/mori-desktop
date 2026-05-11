@@ -74,19 +74,21 @@ pub async fn run(app: AppHandle) -> Result<()> {
         .await
         .context("create GlobalShortcuts session")?;
 
-    // 主錄音熱鍵 + Alt+1~9 profile 切換熱鍵（5F-2）
+    // 主錄音熱鍵 + Alt+0（切回對話模式）+ Alt+1~9（切 VoiceInput profile）
     // 先把 String 存好，確保生命週期夠長
-    let slot_ids: Vec<String> = (1u8..=9).map(|n| format!("{SLOT_ID_PREFIX}{n}")).collect();
-    let slot_descriptions: Vec<String> = (1u8..=9)
-        .map(|n| format!("Mori — 切換語音輸入 Profile {n}"))
+    // Alt+0 = slot 0 = 切回 Active（對話）模式
+    // Alt+1~9 = slot 1~9 = 切到 VoiceInput + 對應 profile
+    let slot_ids: Vec<String> = (0u8..=9).map(|n| format!("{SLOT_ID_PREFIX}{n}")).collect();
+    let slot_descriptions: Vec<String> = std::iter::once("Mori — 切回對話模式".to_string())
+        .chain((1u8..=9).map(|n| format!("Mori — 切換語音輸入 Profile {n}")))
         .collect();
-    let slot_triggers: Vec<String> = (1u8..=9).map(|n| format!("ALT+{n}")).collect();
+    let slot_triggers: Vec<String> = (0u8..=9).map(|n| format!("ALT+{n}")).collect();
 
     let mut shortcuts = vec![
         NewShortcut::new(TOGGLE_SHORTCUT_ID, "Mori — 開始 / 停止錄音")
             .preferred_trigger(Some(PREFERRED_TRIGGER)),
     ];
-    for i in 0..9usize {
+    for i in 0..=9usize {
         shortcuts.push(
             NewShortcut::new(&slot_ids[i], &slot_descriptions[i])
                 .preferred_trigger(Some(slot_triggers[i].as_str())),
