@@ -41,7 +41,7 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H 完成(2026-05-12)** — Mori 在 Wayland 上
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I 完成(2026-05-12)** — Mori 在 Wayland 上
 **可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
 
 ### 5G 起的雙模式架構
@@ -73,6 +73,10 @@ shell_skills:
 ```
 
 裝在系統 PATH 的任何 CLI（`gh` / `docker` / `kubectl` / `yt-dlp` / 自家 script）都能變 Mori 的能力。安全：`command` 是 array、不走 shell parsing、`{{name}}` 替換只是字面字串，LLM 無法 escape。
+
+### 5I：skill_server 動態化
+
+之前 `skill_server`（給 `claude-bash` / `gemini-bash` / `codex-bash` 的 mori CLI HTTP 入口）寫死 8 個 skill。5I 改成每次 request 即時讀當前 Agent profile 並 build 完整 registry——所有 bash-CLI 系列 provider 看得到 action_skills + shell_skills，跟 OpenAI-tool-calling 系列（groq / ollama / claude-cli）行為一致。新增 `mori skill call <name> --args '{...}'` 通用 dispatch 子命令給動態 skill 用。
 
 ### 既有特色（5F 為止）
 
