@@ -94,15 +94,19 @@ function FloatingMori() {
   // 5F-3A: 音量驅動的 aura（0.0–1.0，後端 ~30Hz emit）
   const [volume, setVolume] = useState(0);
 
-  // 5F-3B: 轉錄原文泡泡 / 5F-3C: profile 名稱泡泡（同一個 slot，後者優先覆蓋）
+  // 暫時性 info（有 timeout 會消失）
   const [infoLabel, setInfoLabel] = useState<string | null>(null);
-  // key 用來讓相同文字再次出現時也能觸發 fade-in 動畫
   const [infoKey, setInfoKey] = useState(0);
-
   const showInfo = (text: string) => {
     setInfoLabel(text);
     setInfoKey((k) => k + 1);
   };
+
+  // 持久性狀態 label（錄音中、轉錄中、處理中）
+  const [statusLabel, setStatusLabel] = useState<string | null>(null);
+
+  // 當前 profile 常駐標籤（Alt+N 設定後一直記著，錄音中持續顯示）
+  const [currentProfileLabel, setCurrentProfileLabel] = useState<string>("");
 
   // ── 初始化 & 事件訂閱 ─────────────────────────────────────────────
 
@@ -118,11 +122,17 @@ function FloatingMori() {
       setVolume(e.payload);
     });
 
-    // 5F-3C: profile 切換事件（PR 3 的 Alt+N 會 emit，現在先接好）
+    // profile 切換："朋友閒聊 · groq" 格式
     const unlistenProfile = listen<string>("voice-input-profile-switched", (e) => {
-      showInfo(e.payload);
+      setCurrentProfileLabel(e.payload); // 持久記住
+      showInfo(e.payload);               // 短暫顯示
       const t = setTimeout(() => setInfoLabel(null), PROFILE_LABEL_MS);
       return () => clearTimeout(t);
+    });
+
+    // 轉錄中 / 處理中狀態（後端 emit，有狀態就持續顯示直到下一個狀態）
+    const unlistenStatus = listen<string>("voice-input-status", (e) => {
+      setStatusLabel(e.payload);
     });
 
     return () => {
@@ -130,8 +140,16 @@ function FloatingMori() {
       unlistenPhase.then((f) => f());
       unlistenVolume.then((f) => f());
       unlistenProfile.then((f) => f());
+      unlistenStatus.then((f) => f());
     };
   }, []);
+
+  // 結束狀態時清掉 statusLabel（"轉錄中" / "處理中" 不應該留在 done 之後）
+  useEffect(() => {
+    if (phase.kind === "done" || phase.kind === "error" || phase.kind === "idle") {
+      setStatusLabel(null);
+    }
+  }, [phase.kind]);
 
   // ── transient done / error flash ──────────────────────────────────
 
@@ -220,10 +238,6 @@ function FloatingMori() {
 
   const visual = visualFor(mode, phase, transient);
 
-  // 5F-3A: 錄音中 aura 由 volume 驅動
-  // --vol: CSS 變數供 ::before 發光強度使用（0.0~1.0）
-  // transform: scale 控制整體大小（帶動旋轉環一起縮放）
-  // animation: none 取消 .mori-aura 本身的 CSS animation（不影響 ::before 的旋轉）
   const auraStyle: CSSProperties | undefined =
     visual === "recording"
       ? ({
@@ -232,6 +246,17 @@ function FloatingMori() {
           animation: "none",
         } as CSSProperties)
       : undefined;
+
+  // 標籤顯示優先序：
+  //   infoLabel (時效性訊息：profile 切換 / done 結果) 最優先
+  //   → statusLabel (轉錄中 / 處理中)
+  //   → recording 中常駐顯示 profile 名稱
+  //   → VoiceInput mode idle 時也顯示當前 profile（讓使用者知道現在會用哪個）
+  const labelToShow: string | null =
+    infoLabel
+    ?? statusLabel
+    ?? (visual === "recording" && currentProfileLabel ? `🎙 ${currentProfileLabel}` : null)
+    ?? (visual === "idle" && mode === "voice_input" && currentProfileLabel ? currentProfileLabel : null);
 
   return (
     <div
@@ -253,10 +278,10 @@ function FloatingMori() {
         draggable={false}
       />
 
-      {/* 5F-3B/C: 轉錄原文 / profile 名稱泡泡 */}
-      {infoLabel && (
-        <div key={infoKey} className="mori-info-label">
-          {infoLabel}
+      {/* 5F: 標籤層 — 依優先序顯示 profile / 狀態 / 結果 */}
+      {labelToShow && (
+        <div key={`${labelToShow}-${infoKey}`} className="mori-info-label">
+          {labelToShow}
         </div>
       )}
     </div>

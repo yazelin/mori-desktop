@@ -354,9 +354,9 @@ fn handle_profile_slot(app: AppHandle, state: Arc<AppState>, slot: u8) {
     }
 
     match mori_core::voice_input_profile::switch_to_slot(slot) {
-        Some(display_name) => {
-            tracing::info!(slot, profile = %display_name, "voice input profile switched");
-            let _ = app.emit("voice-input-profile-switched", &display_name);
+        Some(info) => {
+            // "朋友閒聊 · groq" 格式的 label
+            let _ = app.emit("voice-input-profile-switched", info.label());
         }
         None => {
             tracing::debug!(slot, "no profile file for slot {}", slot);
@@ -517,6 +517,12 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     };
 
     state.set_phase(&app, Phase::Transcribing);
+
+    // 5F: 通知 floating widget 顯示轉錄狀態（包含 STT provider 名稱）
+    {
+        let stt = mori_core::llm::transcribe::active_transcribe_snapshot();
+        let _ = app.emit("voice-input-status", format!("📝 轉錄中 · {}", stt.name));
+    }
 
     let app_for_provider = app.clone();
 
@@ -849,6 +855,12 @@ async fn run_voice_input_pipeline(
         }
         ResolvedProvider::Default => routing.skill_provider("voice_input_cleanup"),
     };
+
+    // 5F: 通知 floating widget 顯示處理中狀態
+    {
+        let provider_label = profile.frontmatter.resolved_provider().display_name();
+        let _ = app.emit("voice-input-status", format!("⚡ 處理中 · {}", provider_label));
+    }
 
     // Step 1: LLM cleanup（只在 smart 等級才走）
     let after_llm: anyhow::Result<String> = match level {

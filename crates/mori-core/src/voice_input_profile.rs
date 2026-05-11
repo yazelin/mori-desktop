@@ -166,6 +166,30 @@ pub enum ResolvedProvider {
     Default,
 }
 
+impl ResolvedProvider {
+    /// 給 UI 顯示用的簡短名稱（groq / gemini / ollama / claude-bash / ...）
+    pub fn display_name(&self) -> String {
+        match self {
+            ResolvedProvider::OpenAiCompat { api_base, model, .. } => {
+                if api_base.contains("googleapis") {
+                    // Gemini — 從 model 取最後一段
+                    model.split('-').next().unwrap_or("gemini").to_string()
+                } else if api_base.contains("openai.com") {
+                    "openai".to_string()
+                } else if api_base.contains("azure") {
+                    "azure".to_string()
+                } else if api_base.contains("groq") {
+                    "groq".to_string()
+                } else {
+                    "api".to_string()
+                }
+            }
+            ResolvedProvider::Named(name) => name.clone(),
+            ResolvedProvider::Default => "default".to_string(),
+        }
+    }
+}
+
 // ─── Profile ──────────────────────────────────────────────────────────────
 
 /// 載入完成的 USER-*.md profile。
@@ -375,9 +399,24 @@ pub fn load_active_profile() -> VoiceInputProfile {
     parse_profile("USER", DEFAULT_USER_MD)
 }
 
-/// Alt+N 切換時：寫 active 檔案 + 回傳 profile 顯示名稱。
-/// 掃描 `USER-0{n}.*` glob，取第一個符合的。
-pub fn switch_to_slot(n: u8) -> Option<String> {
+/// Alt+N 切換時回傳的資訊（供 floating widget 顯示）。
+#[derive(Debug, Clone)]
+pub struct SlotSwitchInfo {
+    /// 顯示名稱，例如 "朋友閒聊"
+    pub profile_name: String,
+    /// LLM provider 顯示名稱，例如 "groq" / "gemini"
+    pub llm_provider: String,
+}
+
+impl SlotSwitchInfo {
+    /// 組合成 floating label 文字，例如 "朋友閒聊 · groq"
+    pub fn label(&self) -> String {
+        format!("{} · {}", self.profile_name, self.llm_provider)
+    }
+}
+
+/// Alt+N 切換時：寫 active 檔案 + 回傳顯示資訊。
+pub fn switch_to_slot(n: u8) -> Option<SlotSwitchInfo> {
     let dir = voice_input_dir();
     let prefix = format!("USER-{n:02}");
     let entry = std::fs::read_dir(&dir)
@@ -385,22 +424,26 @@ pub fn switch_to_slot(n: u8) -> Option<String> {
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|name| name.starts_with(&prefix) && name.ends_with(".md"))
-        .min(); // 有多個取字母序最小的
+        .min();
 
     if let Some(filename) = entry {
         let stem = filename.trim_end_matches(".md").to_string();
         let _ = std::fs::write(dir.join("active"), &stem);
-        // 顯示名稱：去掉 "USER-01." 前綴只留描述部分
-        let display = stem
-            .splitn(3, '.')
-            .nth(1)
-            .unwrap_or(&stem)
-            .to_string();
-        tracing::info!(slot = n, profile = %stem, "voice input profile switched");
-        return Some(display);
+        let profile_name = stem.splitn(3, '.').nth(1).unwrap_or(&stem).to_string();
+
+        // 讀取 profile 以取得 LLM provider 顯示名稱
+        let llm_provider = std::fs::read_to_string(dir.join(&filename))
+            .ok()
+            .map(|content| {
+                let profile = parse_profile(&stem, &content);
+                profile.frontmatter.resolved_provider().display_name()
+            })
+            .unwrap_or_else(|| "default".to_string());
+
+        tracing::info!(slot = n, profile = %stem, llm = %llm_provider, "voice input profile switched");
+        return Some(SlotSwitchInfo { profile_name, llm_provider });
     }
 
-    // 找不到該槽位
     tracing::debug!(slot = n, "no profile file found for slot");
     None
 }
