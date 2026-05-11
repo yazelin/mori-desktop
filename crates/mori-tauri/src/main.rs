@@ -1504,6 +1504,15 @@ fn main() {
     let state_for_setup = state.clone();
 
     tauri::Builder::default()
+        // 5J-followup: 防止 mori-tauri orphan + 新實例並存的搶 tray / hotkey 戰。
+        // 第二個 instance 啟動時觸發此 callback:把焦點還給第一個然後自殺。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tracing::warn!("another mori-tauri instance tried to start — focusing existing");
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.show();
+                let _ = main.set_focus();
+            }
+        }))
         .manage(state.clone())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

@@ -15,6 +15,9 @@ mori-core = { workspace = true }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
+# 5J-followup: 防止 tauri dev 中斷後 orphan mori-tauri binary 跟新實例同時跑、
+# 搶 tray icon / portal hotkey / clipboard。第二個實例自殺,焦點還給第一個。
+tauri-plugin-single-instance = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
