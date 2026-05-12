@@ -6,6 +6,24 @@
 
 ---
 
+## docs: roadmap cleanup 對齊實際 code(2026-05-13)
+
+Roadmap audit 抓到三條跟 code 實際狀態不對齊,訂正:
+
+- **5E-2 OpenCC 簡→繁** — 砍掉。`voice_cleanup.rs:25` 內 comment 早就明確
+  說「為什麼**沒**做 OpenCC」(whisper-rs initial_prompt 已 bias 繁體實測
+  夠用),roadmap 卻仍列「未來規劃」自相矛盾
+- **3D active window title** — 已實作但 roadmap 仍列為未來,標 done。
+  `HotkeyWindowContext.process_name + window_title` 透過 xdotool 在熱鍵
+  瞬間捕獲(`main.rs:851`),Mori 看得到當前焦點。3D 條改成「螢幕擷取
+  進 context」單一未完成子項
+- **3C 跨 app 反白** — 描述改清楚:X11 + XWayland 用 xclip + PRIMARY 已
+  cover 90%(5O xclip 主路徑生效),只剩 pure Wayland(原生 GTK4 /
+  Hyprland 等沒 XWayland 的 session)需走 xdg-desktop-portal Selection
+  介面 — 實用 use case 不大,等 Wayland 生態普及再說
+- **3B-2 YouTube transcript** — 描述補充 yt-dlp 已可從 Deps tab 裝(5K-3
+  加進去),差 skill wrapper;路徑改成 examples/agent/ shell_skill 範本
+
 ## 5A-3b — Per-context opt-in LLM fallback chain(2026-05-13)
 
 主 provider 失敗(Groq 429 quota / timeout / network / 5xx)以前只能 Phase::Error
