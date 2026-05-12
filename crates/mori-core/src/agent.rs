@@ -263,3 +263,156 @@ impl Agent {
         )
     }
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::Context;
+    use crate::llm::{ChatResponse, LlmProvider, ToolCall, ToolDefinition};
+    use crate::skill::{Skill, SkillOutput, SkillRegistry};
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    // ─── Mocks ────────────────────────────────────────────────────────
+
+    struct MockProvider {
+        responses: Mutex<VecDeque<ChatResponse>>,
+        chat_calls: AtomicUsize,
+    }
+
+    impl MockProvider {
+        fn new(responses: Vec<ChatResponse>) -> Self {
+            Self {
+                responses: Mutex::new(responses.into_iter().collect()),
+                chat_calls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockProvider {
+        fn name(&self) -> &'static str { "mock" }
+        fn model(&self) -> &str { "mock-model" }
+        async fn chat(
+            &self,
+            _messages: Vec<ChatMessage>,
+            _tools: Vec<ToolDefinition>,
+        ) -> Result<ChatResponse> {
+            self.chat_calls.fetch_add(1, Ordering::SeqCst);
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| anyhow::anyhow!("MockProvider: no more responses queued"))
+        }
+    }
+
+    struct MockSkill;
+
+    #[async_trait]
+    impl Skill for MockSkill {
+        fn name(&self) -> &'static str { "mock_skill" }
+        fn description(&self) -> &'static str { "mock for agent tests" }
+        fn parameters_schema(&self) -> Value { json!({"type": "object"}) }
+        async fn execute(&self, _args: Value, _ctx: &Context) -> Result<SkillOutput> {
+            Ok(SkillOutput {
+                user_message: "mock_skill 已執行".to_string(),
+                data: None,
+            })
+        }
+    }
+
+    fn tc(name: &str) -> ToolCall {
+        ToolCall {
+            id: "tc_1".to_string(),
+            name: name.to_string(),
+            arguments: json!({}),
+        }
+    }
+
+    // ─── Tests ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn dispatch_mode_returns_after_first_tool_call() {
+        // Dispatch 模式只該叫一次 chat(skill execute 後直接 return,不再 round)
+        let provider = Arc::new(MockProvider::new(vec![
+            // round 0:emit tool_call
+            ChatResponse {
+                content: None,
+                tool_calls: vec![tc("mock_skill")],
+            },
+            // round 1:should NEVER be reached(dispatch 模式)
+            ChatResponse {
+                content: Some("這不應該被回到".into()),
+                tool_calls: vec![],
+            },
+        ]));
+        let provider_clone: Arc<MockProvider> = provider.clone();
+        let provider_dyn: Arc<dyn LlmProvider> = provider;
+        let mut reg = SkillRegistry::new();
+        reg.register(Arc::new(MockSkill));
+        let agent = Agent::new(provider_dyn, Arc::new(reg));
+        let ctx = Context::default();
+
+        let turn = agent
+            .respond_with_mode("system", &[], "user-input", &ctx, AgentMode::Dispatch)
+            .await
+            .expect("dispatch mode should succeed");
+
+        assert_eq!(provider_clone.chat_calls.load(Ordering::SeqCst), 1,
+            "dispatch 模式 chat() 應該只被叫 1 次,跑了 {} 次表示二輪有被觸發",
+            provider_clone.chat_calls.load(Ordering::SeqCst));
+        assert_eq!(turn.response, "mock_skill 已執行",
+            "response fallback 用最後一個 skill 的 user_message(chat.content 是 None)");
+        assert_eq!(turn.skill_calls.len(), 1);
+        assert_eq!(turn.skill_calls[0].name, "mock_skill");
+    }
+
+    #[tokio::test]
+    async fn multi_turn_mode_continues_after_tool_call() {
+        // MultiTurn 應該繼續 round,直到 LLM 沒 emit tool_call(final text)
+        let provider = Arc::new(MockProvider::new(vec![
+            ChatResponse {
+                content: None,
+                tool_calls: vec![tc("mock_skill")],
+            },
+            // round 1:final text — 沒 tool_call
+            ChatResponse {
+                content: Some("已完成,做完了".into()),
+                tool_calls: vec![],
+            },
+        ]));
+        let provider_clone: Arc<MockProvider> = provider.clone();
+        let provider_dyn: Arc<dyn LlmProvider> = provider;
+        let mut reg = SkillRegistry::new();
+        reg.register(Arc::new(MockSkill));
+        let agent = Agent::new(provider_dyn, Arc::new(reg));
+        let ctx = Context::default();
+
+        let turn = agent
+            .respond_with_mode("system", &[], "user-input", &ctx, AgentMode::MultiTurn)
+            .await
+            .expect("multi-turn should succeed");
+
+        assert_eq!(provider_clone.chat_calls.load(Ordering::SeqCst), 2,
+            "multi-turn 應該 round 2 次(round 0 emit tool_call,round 1 拿 final)");
+        assert_eq!(turn.response, "已完成,做完了");
+        assert_eq!(turn.skill_calls.len(), 1);
+    }
+
+    #[test]
+    fn agent_mode_from_str_or_default() {
+        assert_eq!(AgentMode::from_str_or_default(None), AgentMode::MultiTurn);
+        assert_eq!(AgentMode::from_str_or_default(Some("")), AgentMode::MultiTurn);
+        assert_eq!(AgentMode::from_str_or_default(Some("multi_turn")), AgentMode::MultiTurn);
+        assert_eq!(AgentMode::from_str_or_default(Some("unknown")), AgentMode::MultiTurn);
+        assert_eq!(AgentMode::from_str_or_default(Some("dispatch")), AgentMode::Dispatch);
+        assert_eq!(AgentMode::from_str_or_default(Some("DISPATCH")), AgentMode::Dispatch);
+        assert_eq!(AgentMode::from_str_or_default(Some("  dispatch  ")), AgentMode::Dispatch);
+    }
+}
