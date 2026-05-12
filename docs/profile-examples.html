@@ -305,7 +305,7 @@ cleanup_level: smart
 provider: groq
 cleanup_level: smart
 paste_shortcut: ctrl_v
-auto_enter: true   # 貼完按 Enter 直接送出(Slack / Discord 等)
+enable_auto_enter: true   # 貼完按 Enter 直接送出(Slack / Discord 等)
 ---
 你是 mori 朋友閒聊輸入助理。
 
@@ -368,7 +368,7 @@ paste_shortcut: ctrl_v
     <tr><td><code>shell_skills</code></td><td>agent</td><td>自訂 CLI 包裝(array of {name, description, parameters, command, timeout_secs})</td></tr>
     <tr><td><code>cleanup_level</code></td><td>voice</td><td><code>smart</code>(LLM)/ <code>minimal</code>(純程式)/ <code>none</code>(raw)</td></tr>
     <tr><td><code>paste_shortcut</code></td><td>voice</td><td><code>ctrl_v</code>(一般 app)/ <code>ctrl_shift_v</code>(terminal)/ 留空(自動)</td></tr>
-    <tr><td><code>auto_enter</code></td><td>voice</td><td>貼完自動按 Enter 送出(Slack / Discord 等聊天 app 用)</td></tr>
+    <tr><td><code>enable_auto_enter</code></td><td>voice</td><td>貼完自動按 Enter 送出(Slack / Discord 等聊天 app 用)</td></tr>
     <tr><td><code>enable_read</code></td><td>both</td><td>啟用 <code>#file:</code> 預處理(讓 body 引用其他 .md)</td></tr>
   </tbody>
 </table>

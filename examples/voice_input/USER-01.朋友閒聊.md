@@ -3,7 +3,7 @@
 provider: groq
 cleanup_level: smart
 paste_shortcut: ctrl_v
-auto_enter: true   # Slack / Discord 等聊天 app:貼完直接送出
+enable_auto_enter: true   # Slack / Discord 等聊天 app:貼完直接送出
 ---
 你是 mori 朋友閒聊輸入助理。
 
