@@ -2602,6 +2602,7 @@ dependencies = [
  "cpal",
  "futures-util",
  "hound",
+ "image",
  "mori-core",
  "parking_lot",
  "serde",

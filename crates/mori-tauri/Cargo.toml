@@ -28,6 +28,9 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 # 5P-1: character_pack 把 sprite PNG 讀進來 base64 encode 給 frontend
 base64 = "0.22"
+# 5P-2: ensure_default 內把 256×256 single-frame PNG tile 成 1024×1024 4×4 placeholder
+# (動畫 ON 看起來不閃,等正式 sprite 上來覆蓋同檔名)。不依賴 ImageMagick。
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Phase 5D — local HTTP skill server for Bash CLI proxy。
 # 啟動時 bind 127.0.0.1:RANDOM,把 port + token 寫到 ~/.mori/runtime.json,

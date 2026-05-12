@@ -28,7 +28,7 @@
 //! 完整給 generator app 開發者 + import 角色 user 的規範在
 //! `docs/character-pack.md`。
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -129,7 +129,12 @@ pub fn sprite_path(stem: &str, state: &str) -> PathBuf {
 }
 
 /// 啟動時:確保 ~/.mori/characters/mori/ 存在 + 寫入 default sprite + manifest。
-/// 已存在的檔不覆蓋 — user 編輯過(或被 placeholder script 升過)保留。
+/// 已存在的檔不覆蓋 — user 編輯過(或自製 sprite 替換過)保留。
+///
+/// 5P-2: 寫入時就把內嵌 256×256 single-frame PNG tile 升 1024×1024 4×4
+/// placeholder(16 格全是同一張 frame 1)— 動畫 ON 看起來不閃(每 frame
+/// 都長一樣),正式 sprite generator app 出來後 user 替換同檔名就會動。
+/// 不依賴 ImageMagick — 用 Rust `image` crate inline 做。
 pub fn ensure_default() -> Result<()> {
     let dir = pack_dir(DEFAULT_PACKAGE_NAME);
     std::fs::create_dir_all(dir.join("sprites"))?;
@@ -152,10 +157,57 @@ pub fn ensure_default() -> Result<()> {
     ] {
         let p = sprite_dir.join(format!("{state}.png"));
         if !p.exists() {
-            std::fs::write(&p, bytes)?;
+            let tiled = tile_4x4_placeholder(bytes)
+                .with_context(|| format!("tile sprite '{state}' to 4x4 placeholder"))?;
+            std::fs::write(&p, tiled)?;
         }
     }
     Ok(())
+}
+
+/// 把 256×256(或任意大小)PNG 拼成 1024×1024 4×4 sheet,16 格全是同一張。
+/// 動畫 ON 看起來不閃,等正式 16-frame loop sheet 上來覆蓋同檔名就會動。
+fn tile_4x4_placeholder(png_bytes: &[u8]) -> Result<Vec<u8>> {
+    use image::{ImageBuffer, ImageEncoder, Rgba};
+
+    let src = image::load_from_memory(png_bytes)
+        .context("decode source PNG")?
+        .to_rgba8();
+    // 強制 normalize 到 256×256(若 source 不是這個尺寸)
+    let cell = image::imageops::resize(
+        &src,
+        256,
+        256,
+        image::imageops::FilterType::Lanczos3,
+    );
+
+    // 1024×1024 RGBA empty canvas
+    let mut sheet: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(1024, 1024);
+    for row in 0..4 {
+        for col in 0..4 {
+            image::imageops::replace(
+                &mut sheet,
+                &cell,
+                (col * 256) as i64,
+                (row * 256) as i64,
+            );
+        }
+    }
+
+    // Encode 回 PNG bytes
+    let mut out = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut out);
+        image::codecs::png::PngEncoder::new(&mut cursor)
+            .write_image(
+                sheet.as_raw(),
+                sheet.width(),
+                sheet.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .context("encode tiled PNG")?;
+    }
+    Ok(out)
 }
 
 fn default_manifest() -> CharacterManifest {
@@ -195,8 +247,8 @@ fn default_manifest() -> CharacterManifest {
         loop_durations_ms,
         sprite_spec: SpriteSpec {
             format: "PNG-32".into(),
-            grid: "1x1".into(),
-            total_size: "256x256".into(),
+            grid: "4x4".into(),
+            total_size: "1024x1024".into(),
             frame_size: "256x256".into(),
             frame_order: "row-major-left-to-right-top-to-bottom".into(),
             background: "transparent".into(),
@@ -277,4 +329,103 @@ pub fn set_active(stem: &str) -> Result<()> {
     std::fs::create_dir_all(characters_dir())?;
     std::fs::write(active_path(), stem)?;
     Ok(())
+}
+
+/// 5P-2:升級任意 character pack 內的 sprite PNG 到 4×4 1024×1024 placeholder。
+/// User 從 generator app import 的 pack 若是 single-frame 256×256,呼叫這個讓
+/// frame 1 duplicate fill 16 格(動畫 ON 不閃)。
+/// - 已是 1024×1024 的檔跳過
+/// - 原檔備份到 sprites/.backup-<timestamp>/
+/// - 完成後寫回 manifest.json 的 sprite_spec(grid="4x4")
+/// 回傳 (upgraded_count, skipped_count)。
+pub fn upgrade_pack_to_4x4(stem: &str) -> Result<(usize, usize)> {
+    use image::GenericImageView;
+
+    let sprites_dir = pack_dir(stem).join("sprites");
+    if !sprites_dir.exists() {
+        anyhow::bail!("character pack '{}' has no sprites/ directory", stem);
+    }
+    let manifest_p = manifest_path(stem);
+    if !manifest_p.exists() {
+        anyhow::bail!("character pack '{}' has no manifest.json", stem);
+    }
+
+    let ts = chrono::Utc::now().timestamp();
+    let backup_dir = sprites_dir.join(format!(".backup-{ts}"));
+    let mut upgraded = 0usize;
+    let mut skipped = 0usize;
+
+    for entry in std::fs::read_dir(&sprites_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("png") {
+            continue;
+        }
+        // 略過 hidden / backup 目錄
+        if path.file_name().and_then(|s| s.to_str()).map(|n| n.starts_with('.')).unwrap_or(false) {
+            continue;
+        }
+        let bytes = std::fs::read(&path)?;
+        let img = match image::load_from_memory(&bytes) {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skip non-decodable PNG");
+                continue;
+            }
+        };
+        let (w, h) = img.dimensions();
+        if w == 1024 && h == 1024 {
+            skipped += 1;
+            continue;
+        }
+        // 備份
+        std::fs::create_dir_all(&backup_dir)?;
+        let fname = path.file_name().unwrap();
+        std::fs::copy(&path, backup_dir.join(fname))?;
+        // 升級
+        let tiled = tile_4x4_placeholder(&bytes)
+            .with_context(|| format!("tile {}", path.display()))?;
+        std::fs::write(&path, tiled)?;
+        upgraded += 1;
+    }
+
+    if upgraded > 0 {
+        let mut manifest = load_manifest(stem)?;
+        manifest.sprite_spec.grid = "4x4".into();
+        manifest.sprite_spec.total_size = "1024x1024".into();
+        manifest.sprite_spec.frame_size = "256x256".into();
+        let json = serde_json::to_string_pretty(&manifest)?;
+        std::fs::write(&manifest_p, json)?;
+    }
+
+    Ok((upgraded, skipped))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::GenericImageView;
+
+    #[test]
+    fn tile_4x4_outputs_1024_square() {
+        // 任 input(用內嵌 idle.png 當 sample)→ 1024×1024 RGBA 16-cell sheet
+        let out = tile_4x4_placeholder(SPRITE_IDLE).expect("tile ok");
+        let img = image::load_from_memory(&out).expect("decode tiled");
+        let (w, h) = img.dimensions();
+        assert_eq!((w, h), (1024, 1024), "tile output must be 1024×1024");
+    }
+
+    #[test]
+    fn tile_4x4_cells_are_identical() {
+        // frame 1 跟 frame 6(任意中間格)pixel 該完全一樣 — placeholder 不閃
+        let out = tile_4x4_placeholder(SPRITE_IDLE).expect("tile ok");
+        let img = image::load_from_memory(&out).expect("decode").to_rgba8();
+        // 比較 (10, 10) vs (10+512, 10)(row 0 cell 0 vs row 0 cell 2)
+        let p0 = img.get_pixel(10, 10);
+        let p2 = img.get_pixel(10 + 512, 10);
+        assert_eq!(p0, p2, "frame 1 跟 frame 3 該 pixel 完全相同");
+        // 跨 row 也檢查
+        let p_row1_col0 = img.get_pixel(10, 10 + 256);
+        assert_eq!(p0, p_row1_col0, "row 0 vs row 1 該 pixel 相同");
+    }
 }

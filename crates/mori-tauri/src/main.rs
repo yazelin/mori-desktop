@@ -708,6 +708,15 @@ fn character_dir() -> String {
     crate::character_pack::characters_dir().display().to_string()
 }
 
+/// 升級任意 character pack 內 single-frame sprite 到 4×4 placeholder。
+/// 主要給 user import 進來的 pack(非 default mori)用 — Config UI 按鈕呼叫。
+/// 回 (upgraded, skipped)。
+#[tauri::command]
+fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String> {
+    crate::character_pack::upgrade_pack_to_4x4(&stem)
+        .map_err(|e| format!("upgrade pack {stem}: {e:#}"))
+}
+
 #[tauri::command]
 async fn memory_search(
     state: tauri::State<'_, Arc<AppState>>,
@@ -2283,6 +2292,7 @@ fn main() {
             character_set_active,
             character_sprite_data_url,
             character_dir,
+            character_upgrade_pack_to_4x4,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
