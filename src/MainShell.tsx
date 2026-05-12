@@ -16,8 +16,9 @@ import ProfilesTab from "./tabs/ProfilesTab";
 import ConfigTab from "./tabs/ConfigTab";
 import MemoryTab from "./tabs/MemoryTab";
 import SkillsTab from "./tabs/SkillsTab";
+import DepsTab from "./tabs/DepsTab";
 
-type TabId = "chat" | "profiles" | "config" | "memory" | "skills";
+type TabId = "chat" | "profiles" | "config" | "memory" | "skills" | "deps";
 
 type TabDef = {
   id: TabId;
@@ -32,6 +33,7 @@ const TABS: TabDef[] = [
   { id: "config",   icon: "⚙️", label: "Config",   sub: "config.json" },
   { id: "memory",   icon: "📓", label: "Memory",   sub: "~/.mori/memory" },
   { id: "skills",   icon: "🛠️", label: "Skills",   sub: "Built-in / Shell" },
+  { id: "deps",     icon: "📦", label: "Deps",     sub: "Optional tools" },
 ];
 
 function MainShell() {
@@ -68,6 +70,7 @@ function MainShell() {
         {tab === "config" && <ConfigTab />}
         {tab === "memory" && <MemoryTab />}
         {tab === "skills" && <SkillsTab />}
+        {tab === "deps" && <DepsTab />}
       </main>
     </div>
   );

@@ -1022,3 +1022,166 @@ select.mori-input option {
 }
 .mori-skill-params .param-required { text-align: center; color: rgba(180, 230, 195, 0.95); }
 .mori-skill-params .param-desc em { color: rgba(255, 255, 255, 0.40); }
+
+/* ─── 5O: Dependencies tab ────────────────────────── */
+
+.mori-deps-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.mori-deps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mori-dep-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.mori-dep-card.installed {
+  background: rgba(180, 230, 195, 0.04);
+  border-color: rgba(180, 230, 195, 0.20);
+}
+.mori-dep-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mori-dep-status {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.mori-dep-status.ok {
+  background: rgba(180, 230, 195, 0.20);
+  color: rgba(190, 240, 200, 0.98);
+  border: 1px solid rgba(180, 230, 195, 0.40);
+}
+.mori-dep-status.missing {
+  background: rgba(255, 200, 100, 0.15);
+  color: rgba(255, 220, 170, 0.98);
+  border: 1px solid rgba(255, 200, 100, 0.35);
+}
+.mori-dep-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mori-dep-name {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+}
+.mori-dep-size {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.mori-dep-sudo {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  background: rgba(255, 200, 100, 0.15);
+  border: 1px solid rgba(255, 200, 100, 0.30);
+  border-radius: 4px;
+  color: rgba(255, 220, 170, 0.95);
+  font-family: ui-monospace, monospace;
+}
+.mori-dep-actions { display: flex; align-items: center; gap: 8px; }
+.mori-dep-status-detail {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.50);
+  font-family: ui-monospace, monospace;
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mori-dep-desc {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.5;
+}
+.mori-dep-unlocks {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.mori-dep-unlocks .label {
+  color: rgba(180, 230, 195, 0.85);
+  margin-right: 4px;
+}
+.mori-dep-cmd {
+  margin-top: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.mori-dep-cmd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.mori-dep-cmd-head .label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.mori-dep-cmd pre {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  color: rgba(190, 240, 200, 0.92);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.mori-dep-result {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+.mori-dep-result.ok {
+  background: rgba(180, 230, 195, 0.08);
+  border: 1px solid rgba(180, 230, 195, 0.25);
+  color: rgba(190, 240, 200, 0.95);
+}
+.mori-dep-result.err {
+  background: rgba(255, 80, 80, 0.10);
+  border: 1px solid rgba(255, 80, 80, 0.30);
+  color: rgba(255, 200, 200, 0.95);
+}
+.mori-dep-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.mori-dep-result-head .exit-code {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.50);
+}
+.mori-dep-result pre {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.80);
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}

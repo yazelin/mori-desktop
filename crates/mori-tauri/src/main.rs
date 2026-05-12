@@ -4,6 +4,7 @@
 #[cfg(target_os = "linux")]
 mod action_skills;
 mod context_provider;
+mod deps;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
@@ -580,6 +581,42 @@ async fn memory_delete(state: tauri::State<'_, Arc<AppState>>, id: String) -> Re
 
 /// 5L-5: 全文搜尋 memory(name / description / body 都搜)。
 /// 回傳跟 memory_list 一樣的 MemoryEntry,加上 hit 程度可後續排序(現在依 store 順序)。
+// ─── 5O: Dependencies IPC ────────────────────────────────────────
+
+#[derive(serde::Serialize, Clone)]
+struct DepInfo {
+    #[serde(flatten)]
+    spec: serde_json::Value,
+    status: crate::deps::DepStatus,
+}
+
+#[tauri::command]
+fn deps_list() -> Vec<DepInfo> {
+    crate::deps::registry()
+        .into_iter()
+        .map(|spec| {
+            let status = crate::deps::check_dep(&spec);
+            DepInfo {
+                spec: serde_json::to_value(&spec).unwrap_or(serde_json::Value::Null),
+                status,
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn deps_install(id: String) -> Result<crate::deps::InstallResult, String> {
+    let spec = crate::deps::registry()
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| format!("unknown dep id: {id}"))?;
+    // Manual install 走不到 run_install — UI 已直接顯示指令給 user
+    tokio::task::spawn_blocking(move || crate::deps::run_install(&spec))
+        .await
+        .map_err(|e| format!("install join: {e}"))?
+        .map_err(|e| format!("install: {e:#}"))
+}
+
 #[tauri::command]
 async fn memory_search(
     state: tauri::State<'_, Arc<AppState>>,
@@ -1982,6 +2019,8 @@ fn main() {
             memory_delete,
             memory_search,
             skills_list,
+            deps_list,
+            deps_install,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
