@@ -11,7 +11,7 @@
 // - 每個 tab 一個 React component;只 mount 當前選中的 tab,避免重複 IPC
 
 import { useState } from "react";
-import App from "./App";
+import ChatPanel from "./ChatPanel";
 import ProfilesTab from "./tabs/ProfilesTab";
 import ConfigTab from "./tabs/ConfigTab";
 import MemoryTab from "./tabs/MemoryTab";
@@ -63,7 +63,7 @@ function MainShell() {
       </aside>
 
       <main className="mori-main">
-        {tab === "chat" && <App />}
+        {tab === "chat" && <ChatPanel />}
         {tab === "profiles" && <ProfilesTab />}
         {tab === "config" && <ConfigTab />}
         {tab === "memory" && <MemoryTab />}

@@ -7,6 +7,7 @@ import ChatBubble from "./ChatBubble";
 import Picker from "./Picker";
 import "./styles.css";
 import "./shell.css";
+import "./chat-panel.css";
 import "./floating.css";
 import "./chat-bubble.css";
 import "./picker.css";

@@ -234,6 +234,37 @@ fn conversation_length(state: tauri::State<Arc<AppState>>) -> usize {
     state.conversation.lock().len()
 }
 
+/// 5N: Chat panel 重設計需要的對話歷史 dump,frontend 渲染 scrollable thread 用。
+/// 只回 user / assistant 訊息(system / tool 過濾掉,使用者不需要看 internal chatter)。
+#[derive(serde::Serialize, Clone)]
+struct ChatTurn {
+    /// "user" | "assistant"
+    role: String,
+    /// 文字內容(空時不應該出現,但 Option 防 corrupt 狀態)
+    content: String,
+    /// 若是 assistant 帶 tool_calls,把 name 列出來給 UI badge 用
+    tools_called: Vec<String>,
+}
+
+#[tauri::command]
+fn get_conversation(state: tauri::State<Arc<AppState>>) -> Vec<ChatTurn> {
+    state
+        .conversation
+        .lock()
+        .iter()
+        .filter(|m| m.role == "user" || m.role == "assistant")
+        .map(|m| ChatTurn {
+            role: m.role.clone(),
+            content: m.content.clone().unwrap_or_default(),
+            tools_called: m
+                .tool_calls
+                .iter()
+                .map(|tc| tc.name.clone())
+                .collect(),
+        })
+        .collect()
+}
+
 /// 取得當前 Mode(active / background)。
 #[tauri::command]
 fn current_mode(state: tauri::State<Arc<AppState>>) -> Mode {
@@ -1669,6 +1700,7 @@ fn main() {
             toggle,
             reset_conversation,
             conversation_length,
+            get_conversation,
             submit_text,
             current_mode,
             set_mode_cmd,
