@@ -599,31 +599,9 @@ function ConfigTab() {
                 ]}
               />
             </FormRow>
-            <FormRow label="paste_shortcut" hint="貼回游標時用的快捷鍵預設">
-              <Select
-                value={cfg.voice_input?.paste_shortcut ?? ""}
-                allowEmpty
-                emptyLabel="(自動偵測)"
-                onChange={(val) =>
-                  applyPatch((c) => {
-                    const v = ensureSubObj(c, "voice_input");
-                    if (val === "") {
-                      delete v.paste_shortcut;
-                      if (Object.keys(v).length === 0) delete c.voice_input;
-                    } else {
-                      v.paste_shortcut = val;
-                    }
-                  })
-                }
-                options={[
-                  { value: "ctrl_v", label: "ctrl_v(一般 app)" },
-                  { value: "ctrl_shift_v", label: "ctrl_shift_v(terminal)" },
-                ]}
-              />
-            </FormRow>
-            {/* 5N: 移除 dead UI — 全域 voice_input.auto_enter 寫進 config.json
-                沒人讀,profile 內 enable_auto_enter 才是真生效的開關。設定請在
-                ProfileEditor 每個 voice profile 自己勾。 */}
+            {/* 5N: 移除 dead UI — 全域 voice_input.auto_enter / .paste_shortcut
+                兩條都不會被 backend 讀(只讀 profile.frontmatter 對應 key)。
+                每個 voice profile 自己在 ProfileEditor 內勾,別在 Config 全域設。 */}
 
             <FormRow
               label="inject_memory_types"

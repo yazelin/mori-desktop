@@ -162,16 +162,8 @@ function FrontmatterForm({
           <FormRow label="enable_auto_enter" hint="貼完後模擬 Enter">
             <input
               type="checkbox"
-              checked={!!fm.enable_auto_enter || !!fm.ENABLE_AUTO_ENTER}
-              onChange={(e) => {
-                // 5N: 改寫 lowercase canonical key。若 file 內還有大寫 alias 一併清掉,
-                // 避免兩份 key 並存時 round-trip 出兩行 YAML(parser case-insensitive 後值會打架)。
-                const next = { ...fm };
-                delete next.ENABLE_AUTO_ENTER;
-                if (e.target.checked) next.enable_auto_enter = true;
-                else delete next.enable_auto_enter;
-                setFm(next);
-              }}
+              checked={!!fm.enable_auto_enter}
+              onChange={(e) => patch("enable_auto_enter", e.target.checked || null)}
             />
           </FormRow>
 
