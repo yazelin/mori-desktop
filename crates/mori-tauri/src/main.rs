@@ -344,6 +344,96 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 /// Alt+N 按下（5G）：
 /// - slot 0  → 切到 Agent 模式（讓 Mori 自己判斷，不選 voice profile）
 /// - slot 1~9 → 切到 VoiceInput mode + 對應 voice profile
+// ─── 5L: Config UI IPC ────────────────────────────────────────────
+//
+// 主視窗 Config tab 編輯 ~/.mori/ 內全部設定檔。設計原則:
+// - 讀:IPC 直接回字串(整個檔案內容),前端 parse / render form
+// - 寫:IPC 收字串,server side validate 後寫檔,失敗回 Result::Err 帶錯誤訊息
+// - 不背 schema(profile frontmatter / config.json 各自的 schema 各自驗)
+//
+// Profile / config 改完即時生效:load_active_profile() / read_provider_config()
+// 都是「呼叫時讀檔」,不會 cache。
+
+fn mori_dir() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(|h| std::path::PathBuf::from(h).join(".mori"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(".mori"))
+}
+
+#[tauri::command]
+fn config_read() -> Result<String, String> {
+    let path = mori_dir().join("config.json");
+    std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
+}
+
+#[tauri::command]
+fn config_write(text: String) -> Result<(), String> {
+    // Validate JSON parses before write,不然容易把 config.json 寫壞
+    serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|e| format!("invalid JSON: {e}"))?;
+    let path = mori_dir().join("config.json");
+    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+#[tauri::command]
+fn corrections_read() -> Result<String, String> {
+    let path = mori_dir().join("corrections.md");
+    std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
+}
+
+#[tauri::command]
+fn corrections_write(text: String) -> Result<(), String> {
+    let path = mori_dir().join("corrections.md");
+    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+#[tauri::command]
+fn profile_read(kind: String, stem: String) -> Result<String, String> {
+    let dir = match kind.as_str() {
+        "voice" => mori_dir().join("voice_input"),
+        "agent" => mori_dir().join("agent"),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    let path = dir.join(format!("{stem}.md"));
+    std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
+}
+
+#[tauri::command]
+fn profile_write(kind: String, stem: String, text: String) -> Result<(), String> {
+    let dir = match kind.as_str() {
+        "voice" => mori_dir().join("voice_input"),
+        "agent" => mori_dir().join("agent"),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    // Validate frontmatter parses(只是 sanity check,不強制 schema)
+    match kind.as_str() {
+        "voice" => {
+            let _ = mori_core::voice_input_profile::parse_profile(&stem, &text);
+        }
+        "agent" => {
+            // parse_agent_profile 會 panic on invalid YAML? 確認一下不會
+            // (它用 serde_yml::from_str 包 Result,frontmatter 錯會回 default + warn)
+            let _ = mori_core::agent_profile::parse_agent_profile(&stem, &text);
+        }
+        _ => {}
+    }
+    let path = dir.join(format!("{stem}.md"));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
+    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+#[tauri::command]
+fn profile_delete(kind: String, stem: String) -> Result<(), String> {
+    let dir = match kind.as_str() {
+        "voice" => mori_dir().join("voice_input"),
+        "agent" => mori_dir().join("agent"),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    let path = dir.join(format!("{stem}.md"));
+    std::fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))
+}
+
 // ─── 5K-1: Picker UI IPC ────────────────────────────────────────────
 
 #[derive(serde::Serialize, Clone)]
@@ -1587,6 +1677,13 @@ fn main() {
             picker_list_agent_profiles,
             picker_switch_voice_profile,
             picker_switch_agent_profile,
+            config_read,
+            config_write,
+            corrections_read,
+            corrections_write,
+            profile_read,
+            profile_write,
+            profile_delete,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)

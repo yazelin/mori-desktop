@@ -183,3 +183,228 @@
   font-size: 12.5px;
   padding: 12px;
 }
+
+/* ─── 5L: list/edit rows + buttons + modal ────────────────── */
+
+.mori-profiles-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.mori-profiles-section-head h3 { margin: 0; }
+
+.mori-profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mori-profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+.mori-profile-row:hover { background: rgba(255, 255, 255, 0.05); }
+.mori-profile-row-info { display: flex; flex-direction: column; gap: 2px; }
+.mori-profile-row-name { font-size: 13px; font-weight: 500; }
+.mori-profile-row-stem {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.42);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.mori-profile-row-actions { display: flex; gap: 6px; }
+
+.mori-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.90);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.mori-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.mori-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.mori-btn.small { padding: 4px 9px; font-size: 11.5px; }
+.mori-btn.primary {
+  background: rgba(135, 206, 235, 0.18);
+  border-color: rgba(135, 206, 235, 0.40);
+  color: rgba(220, 240, 250, 0.98);
+}
+.mori-btn.primary:hover:not(:disabled) {
+  background: rgba(135, 206, 235, 0.28);
+  border-color: rgba(135, 206, 235, 0.55);
+}
+.mori-btn.danger {
+  background: rgba(255, 80, 80, 0.14);
+  border-color: rgba(255, 80, 80, 0.35);
+  color: rgba(255, 200, 200, 0.95);
+}
+.mori-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.22);
+}
+.mori-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: rgba(255, 255, 255, 0.65);
+}
+.mori-btn.ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ─── Config tab sections ──────────────────────────────────── */
+
+.mori-config-section {
+  margin-bottom: 26px;
+}
+.mori-config-section-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 4px;
+  color: rgba(255, 255, 255, 0.88);
+}
+.mori-config-section-hint {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0 0 8px;
+}
+.mori-config-textarea {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.mori-config-textarea:focus {
+  outline: none;
+  border-color: rgba(135, 206, 235, 0.45);
+  background: rgba(0, 0, 0, 0.45);
+}
+.mori-config-textarea.has-error {
+  border-color: rgba(255, 120, 120, 0.50);
+}
+.mori-config-error {
+  color: rgba(255, 160, 160, 0.95);
+  font-size: 11.5px;
+  margin-top: 6px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.mori-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.mori-save-status {
+  font-size: 11.5px;
+  margin-left: 8px;
+}
+.mori-save-status.saving { color: rgba(255, 255, 255, 0.65); }
+.mori-save-status.ok { color: rgba(170, 230, 185, 0.95); }
+.mori-save-status.err { color: rgba(255, 160, 160, 0.95); }
+
+/* ─── Modal ───────────────────────────────────────────────── */
+
+.mori-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: mori-picker-appear 0.14s ease-out;
+}
+.mori-modal {
+  width: min(92%, 720px);
+  max-height: 88%;
+  background: rgba(15, 20, 28, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mori-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.mori-modal-title { display: flex; flex-direction: column; gap: 2px; }
+.mori-modal-kind { font-size: 11.5px; color: rgba(135, 206, 235, 0.85); }
+.mori-modal-stem {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.92);
+}
+.mori-modal-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 18px;
+  min-height: 320px;
+}
+.mori-modal-loading {
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+  padding: 40px;
+}
+.mori-modal-textarea {
+  width: 100%;
+  min-height: 360px;
+  background: rgba(0, 0, 0, 0.40);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.mori-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.20);
+  gap: 8px;
+}
+.mori-modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* code 標籤微調(tab hint 用) */
+.mori-tab-hint code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: rgba(170, 230, 185, 0.9);
+}
