@@ -465,6 +465,187 @@ fn profile_delete(kind: String, stem: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))
 }
 
+// ─── 5L-4: Memory + Skills IPC ────────────────────────────────────
+
+#[derive(serde::Serialize, Clone)]
+struct MemoryEntry {
+    id: String,
+    name: String,
+    description: String,
+    memory_type: String,
+}
+
+fn memory_type_str(t: &mori_core::memory::MemoryType) -> String {
+    match t {
+        mori_core::memory::MemoryType::UserIdentity => "user_identity".into(),
+        mori_core::memory::MemoryType::Preference => "preference".into(),
+        mori_core::memory::MemoryType::SkillOutcome => "skill_outcome".into(),
+        mori_core::memory::MemoryType::Project => "project".into(),
+        mori_core::memory::MemoryType::Reference => "reference".into(),
+        mori_core::memory::MemoryType::Other(s) => s.clone(),
+    }
+}
+
+#[tauri::command]
+async fn memory_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<MemoryEntry>, String> {
+    let memory = state.memory.clone();
+    let entries = memory.read_index().await.map_err(|e| format!("read_index: {e}"))?;
+    Ok(entries
+        .into_iter()
+        .map(|e| MemoryEntry {
+            id: e.id,
+            name: e.name,
+            description: e.description,
+            memory_type: memory_type_str(&e.memory_type),
+        })
+        .collect())
+}
+
+#[derive(serde::Serialize, Clone)]
+struct MemoryDetail {
+    id: String,
+    name: String,
+    description: String,
+    memory_type: String,
+    created: String,
+    last_used: String,
+    body: String,
+}
+
+#[tauri::command]
+async fn memory_read(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Option<MemoryDetail>, String> {
+    let memory = state.memory.clone();
+    let m = memory.read(&id).await.map_err(|e| format!("read: {e}"))?;
+    Ok(m.map(|m| MemoryDetail {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        memory_type: memory_type_str(&m.memory_type),
+        created: m.created.to_rfc3339(),
+        last_used: m.last_used.to_rfc3339(),
+        body: m.body,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct MemoryWriteArgs {
+    id: String,
+    name: String,
+    description: String,
+    /// "user_identity" | "preference" | "skill_outcome" | "project" | "reference" | <其他字串>
+    memory_type: String,
+    body: String,
+}
+
+fn parse_memory_type(s: &str) -> mori_core::memory::MemoryType {
+    use mori_core::memory::MemoryType::*;
+    match s {
+        "user_identity" => UserIdentity,
+        "preference" => Preference,
+        "skill_outcome" => SkillOutcome,
+        "project" => Project,
+        "reference" => Reference,
+        other => Other(other.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn memory_write(
+    state: tauri::State<'_, Arc<AppState>>,
+    args: MemoryWriteArgs,
+) -> Result<(), String> {
+    if args.id.trim().is_empty() {
+        return Err("id 不可空".into());
+    }
+    let now = chrono::Utc::now();
+    let memory_entry = mori_core::memory::Memory {
+        id: args.id,
+        name: args.name,
+        description: args.description,
+        memory_type: parse_memory_type(&args.memory_type),
+        created: now,
+        last_used: now,
+        body: args.body,
+    };
+    state.memory.write(memory_entry).await.map_err(|e| format!("write: {e}"))
+}
+
+#[tauri::command]
+async fn memory_delete(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    state.memory.delete(&id).await.map_err(|e| format!("delete: {e}"))
+}
+
+#[derive(serde::Serialize, Clone)]
+struct SkillInfo {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+    /// "builtin" | "shell"
+    kind: String,
+}
+
+#[tauri::command]
+async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<SkillInfo>, String> {
+    // 內容跟 skill_server::build_dynamic_registry 等價,直接呼叫(在 main 直接拼簡單版)
+    let memory = state.memory.clone();
+    let routing = mori_core::llm::Routing::build_from_config(None)
+        .map_err(|e| format!("build routing: {e}"))?;
+    let mut registry = SkillRegistry::new();
+    let mem_arc: Arc<dyn MemoryStore> = memory;
+    registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
+    registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
+    registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
+    registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+    registry.register(Arc::new(RememberSkill::new(mem_arc.clone())));
+    registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
+    registry.register(Arc::new(ForgetMemorySkill::new(mem_arc.clone())));
+    registry.register(Arc::new(EditMemorySkill::new(mem_arc.clone())));
+    #[cfg(target_os = "linux")]
+    {
+        registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
+        registry.register(Arc::new(crate::action_skills::OpenAppSkill));
+        registry.register(Arc::new(crate::action_skills::SendKeysSkill));
+        registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
+        registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
+        registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
+        registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
+    }
+    // 當前 agent profile 的 shell skills
+    let profile = mori_core::agent_profile::load_active_agent_profile();
+    let shell_skill_names: std::collections::HashSet<String> = profile
+        .frontmatter
+        .shell_skills
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+    for def in &profile.frontmatter.shell_skills {
+        registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
+    }
+    let _ = state; // suppress unused warning (state above is only used through .memory)
+
+    let skills = registry
+        .tool_definitions()
+        .into_iter()
+        .map(|td| {
+            let kind = if shell_skill_names.contains(&td.name) {
+                "shell".to_string()
+            } else {
+                "builtin".to_string()
+            };
+            SkillInfo {
+                name: td.name,
+                description: td.description,
+                parameters: td.parameters,
+                kind,
+            }
+        })
+        .collect();
+    Ok(skills)
+}
+
 // ─── 5K-1: Picker UI IPC ────────────────────────────────────────────
 
 #[derive(serde::Serialize, Clone)]
@@ -1716,6 +1897,11 @@ fn main() {
             profile_read,
             profile_write,
             profile_delete,
+            memory_list,
+            memory_read,
+            memory_write,
+            memory_delete,
+            skills_list,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)

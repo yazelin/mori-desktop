@@ -745,3 +745,201 @@ select.mori-input {
   color: rgba(255, 255, 255, 0.65);
   font-size: 11px;
 }
+
+/* ─── 5L-4: Memory + Skills tabs ────────────────────────── */
+
+.mori-memory-modal { width: min(92%, 720px); }
+.mori-memory-form { display: flex; flex-direction: column; gap: 4px; }
+.mori-memory-timestamps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: ui-monospace, monospace;
+}
+
+.mori-memory-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.mori-memory-toolbar .mori-input { flex: 1; }
+.mori-memory-count {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.50);
+  font-family: ui-monospace, monospace;
+}
+
+.mori-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mori-memory-row {
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.mori-memory-row:hover {
+  background: rgba(135, 206, 235, 0.06);
+  border-color: rgba(135, 206, 235, 0.20);
+}
+.mori-memory-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.mori-memory-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+}
+.mori-memory-type {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.75);
+}
+.mori-memory-type.type-user_identity { background: rgba(180, 230, 195, 0.18); border-color: rgba(180, 230, 195, 0.35); color: rgba(200, 240, 210, 0.95); }
+.mori-memory-type.type-preference     { background: rgba(135, 206, 235, 0.18); border-color: rgba(135, 206, 235, 0.35); color: rgba(220, 240, 250, 0.95); }
+.mori-memory-type.type-project        { background: rgba(255, 200, 100, 0.16); border-color: rgba(255, 200, 100, 0.30); color: rgba(255, 230, 180, 0.95); }
+.mori-memory-type.type-reference      { background: rgba(200, 180, 240, 0.16); border-color: rgba(200, 180, 240, 0.30); color: rgba(220, 200, 250, 0.95); }
+.mori-memory-row-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+}
+.mori-memory-desc {
+  color: rgba(255, 255, 255, 0.65);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mori-memory-desc em {
+  color: rgba(255, 255, 255, 0.35);
+  font-style: italic;
+}
+.mori-memory-id {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.40);
+  font-family: ui-monospace, monospace;
+}
+
+/* Skills tab */
+.mori-skill-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.mori-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mori-skill-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mori-skill-card.expanded {
+  background: rgba(255, 255, 255, 0.05);
+}
+.mori-skill-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease;
+}
+.mori-skill-card-head:hover { background: rgba(255, 255, 255, 0.04); }
+.mori-skill-kind {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.3px;
+}
+.mori-skill-kind.kind-builtin {
+  background: rgba(180, 230, 195, 0.16);
+  border: 1px solid rgba(180, 230, 195, 0.30);
+  color: rgba(200, 240, 210, 0.95);
+}
+.mori-skill-kind.kind-shell {
+  background: rgba(255, 200, 100, 0.16);
+  border: 1px solid rgba(255, 200, 100, 0.30);
+  color: rgba(255, 230, 180, 0.95);
+}
+.mori-skill-name {
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+  flex: 1;
+}
+.mori-skill-param-count {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.mori-skill-toggle {
+  color: rgba(255, 255, 255, 0.50);
+  font-size: 13px;
+}
+.mori-skill-card-desc {
+  padding: 0 12px 10px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+}
+.mori-skill-card-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+.mori-skill-params {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.mori-skill-params th {
+  text-align: left;
+  padding: 4px 8px;
+  color: rgba(255, 255, 255, 0.50);
+  font-weight: 500;
+  font-size: 10.5px;
+  font-family: ui-monospace, monospace;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mori-skill-params td {
+  padding: 6px 8px;
+  color: rgba(255, 255, 255, 0.85);
+  vertical-align: top;
+}
+.mori-skill-params .param-name {
+  font-family: ui-monospace, monospace;
+  font-weight: 500;
+  color: rgba(180, 230, 195, 0.92);
+}
+.mori-skill-params .param-type {
+  font-family: ui-monospace, monospace;
+  color: rgba(135, 206, 235, 0.85);
+}
+.mori-skill-params .param-required { text-align: center; color: rgba(180, 230, 195, 0.95); }
+.mori-skill-params .param-desc em { color: rgba(255, 255, 255, 0.40); }
