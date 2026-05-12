@@ -33,7 +33,7 @@ type TabDef = {
 };
 
 const TABS: TabDef[] = [
-  { id: "chat",     Icon: IconChat,     label: "對話",     sub: "Chat with Mori" },
+  { id: "chat",     Icon: IconChat,     label: "Chat",     sub: "Talk to Mori" },
   { id: "profiles", Icon: IconProfiles, label: "Profiles", sub: "Voice / Agent" },
   { id: "config",   Icon: IconConfig,   label: "Config",   sub: "config.json" },
   { id: "memory",   Icon: IconMemory,   label: "Memory",   sub: "~/.mori/memory" },

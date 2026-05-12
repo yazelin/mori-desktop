@@ -72,10 +72,11 @@ import {
 } from "./icons";
 import type { ComponentType, SVGProps } from "react";
 
+// 跟 Picker / Profiles tab / ProfileEditor modal 對齊用詞:Agent / VoiceInput / Sleep
 const MODE_LABEL: Record<Mode, { Icon: ComponentType<SVGProps<SVGSVGElement>>; label: string }> = {
-  agent: { Icon: IconBubble, label: "對話模式" },
-  voice_input: { Icon: IconKeyboard, label: "語音輸入" },
-  background: { Icon: IconSleep, label: "休眠" },
+  agent: { Icon: IconBubble, label: "Agent" },
+  voice_input: { Icon: IconKeyboard, label: "VoiceInput" },
+  background: { Icon: IconSleep, label: "Sleep" },
 };
 
 function ChatPanel() {
