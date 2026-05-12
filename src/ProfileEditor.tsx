@@ -139,7 +139,7 @@ function FrontmatterForm({
             />
           </FormRow>
 
-          <FormRow label="ENABLE_AUTO_ENTER" hint="貼完後模擬 Enter">
+          <FormRow label="auto_enter" hint="貼完後模擬 Enter(YAML 鍵:ENABLE_AUTO_ENTER)">
             <input
               type="checkbox"
               checked={!!fm.ENABLE_AUTO_ENTER}
@@ -148,29 +148,29 @@ function FrontmatterForm({
           </FormRow>
 
           <details className="mori-form-advanced">
-            <summary>ZEROTYPE_AIPROMPT_* (進階,Azure / 其他 OpenAI-compat 端點用)</summary>
-            <FormRow label="API_BASE">
+            <summary>ZeroType / Azure OpenAI 端點(進階)</summary>
+            <FormRow label="api_base" hint="ZEROTYPE_AIPROMPT_API_BASE">
               <input
                 className="mori-input"
                 value={fm.ZEROTYPE_AIPROMPT_API_BASE ?? ""}
                 onChange={(e) => patch("ZEROTYPE_AIPROMPT_API_BASE", e.target.value)}
               />
             </FormRow>
-            <FormRow label="API_KEY_ENV">
+            <FormRow label="api_key_env" hint="ZEROTYPE_AIPROMPT_API_KEY_ENV">
               <input
                 className="mori-input"
                 value={fm.ZEROTYPE_AIPROMPT_API_KEY_ENV ?? ""}
                 onChange={(e) => patch("ZEROTYPE_AIPROMPT_API_KEY_ENV", e.target.value)}
               />
             </FormRow>
-            <FormRow label="MODEL">
+            <FormRow label="model" hint="ZEROTYPE_AIPROMPT_MODEL">
               <input
                 className="mori-input"
                 value={fm.ZEROTYPE_AIPROMPT_MODEL ?? ""}
                 onChange={(e) => patch("ZEROTYPE_AIPROMPT_MODEL", e.target.value)}
               />
             </FormRow>
-            <FormRow label="MODEL_EFFORT">
+            <FormRow label="model_effort" hint="ZEROTYPE_AIPROMPT_MODEL_EFFORT">
               <input
                 className="mori-input"
                 value={fm.ZEROTYPE_AIPROMPT_MODEL_EFFORT ?? ""}
