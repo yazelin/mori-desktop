@@ -541,6 +541,13 @@
   margin-bottom: 18px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--c-border);
+  /* 5P:Config tab action bar(Form/Raw 切換 + Save 按鈕)sticky 黏在頂端,
+     滾到下面 sections(Floating Mori 等)仍看得到 Save,避免 user 誤點 corrections.md
+     section 內的 Save(那個只存 corrections.md 不存 config.json)。 */
+  position: sticky;
+  top: 0;
+  background: var(--c-page-bg);
+  z-index: 5;
 }
 .mori-view-tab {
   background: transparent;

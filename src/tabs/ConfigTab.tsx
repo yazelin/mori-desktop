@@ -385,15 +385,12 @@ function ConfigTab() {
   }, [raw]);
 
   // 從目前 cfg + patch 序列化回 raw。
-  // 5P debug:用 functional setState 避免 batched state 看到 stale raw closure。
+  // 用 functional setState 避免 batched state 看到 stale raw closure。
   const applyPatch = (patch: (cfg: AnyObj) => void) => {
     setRaw((currentRaw) => {
       const next = JSON.parse(currentRaw || "{}");
       patch(next);
-      const newRaw = JSON.stringify(next, null, 2);
-      console.log("[applyPatch] raw changed?", newRaw !== currentRaw,
-        "rawLen", currentRaw.length, "→", newRaw.length);
-      return newRaw;
+      return JSON.stringify(next, null, 2);
     });
   };
 
@@ -440,14 +437,12 @@ function ConfigTab() {
   };
 
   const saveConfig = async () => {
-    console.log("[saveConfig] clicked, dirty=", dirty, "rawError=", rawError);
     if (rawError) { setStatus({ kind: "err", message: `JSON: ${rawError}` }); return; }
     setStatus({ kind: "saving" });
     try {
       await invoke("config_write", { text: raw });
       setOrig(raw);
       setStatus({ kind: "ok" });
-      console.log("[saveConfig] OK, raw now persisted to ~/.mori/config.json");
       setTimeout(() => setStatus({ kind: "idle" }), 2500);
     } catch (e: any) {
       setStatus({ kind: "err", message: String(e) });
@@ -499,10 +494,6 @@ function ConfigTab() {
         </button>
         <div className="mori-view-toggle-actions">
           <StatusBadge status={status} />
-          {/* 5P debug: 視覺化 dirty + rawError state,排查 Save 不 enable */}
-          <span style={{ fontSize: 11, opacity: 0.7, fontFamily: "ui-monospace, monospace", color: rawError ? "#e74" : "inherit" }}>
-            dirty={dirty ? "Y" : "N"} err={rawError ? "Y" : "N"} disabled={(!dirty || !!rawError) ? "Y" : "N"}
-          </span>
           <button
             className="mori-btn"
             onClick={() => setRaw(orig)}
@@ -512,7 +503,8 @@ function ConfigTab() {
             className="mori-btn primary"
             onClick={saveConfig}
             disabled={!dirty || !!rawError}
-          >儲存</button>
+            title="存 config.json(provider / routing / Floating Mori 等所有上面設定)"
+          >儲存 config.json</button>
         </div>
       </div>
 
@@ -747,14 +739,12 @@ function ConfigTab() {
               <input
                 type="checkbox"
                 checked={cfg.floating?.animated ?? true}
-                onChange={(e) => {
-                  const v = e.target.checked;
-                  console.log("[Floating] animated toggle →", v);
+                onChange={(e) =>
                   applyPatch((c) => {
                     const f = ensureSubObj(c, "floating");
-                    f.animated = v;
-                  });
-                }}
+                    f.animated = e.target.checked;
+                  })
+                }
               />
             </FormRow>
             <FormRow
@@ -764,15 +754,13 @@ function ConfigTab() {
               <input
                 type="checkbox"
                 checked={cfg.floating?.wander ?? false}
-                onChange={(e) => {
-                  const v = e.target.checked;
-                  console.log("[Floating] wander toggle →", v);
+                onChange={(e) =>
                   applyPatch((c) => {
                     const f = ensureSubObj(c, "floating");
-                    if (v) f.wander = true;
+                    if (e.target.checked) f.wander = true;
                     else delete f.wander;
-                  });
-                }}
+                  })
+                }
               />
             </FormRow>
             <CharacterPicker />
@@ -810,7 +798,8 @@ function ConfigTab() {
             className="mori-btn primary"
             onClick={saveCorrections}
             disabled={!corrDirty}
-          >儲存</button>
+            title="只存 corrections.md(STT 同音校正詞表),不存 config.json"
+          >儲存 corrections.md</button>
           <button
             className="mori-btn"
             onClick={() => setCorrText(corrOrig)}
