@@ -40,15 +40,15 @@ function ChatBubble() {
       try {
         await win.setSize(new LogicalSize(WIDTH, MIN_HEIGHT));
         await win.setPosition(new LogicalPosition(x, y));
+        await win.show();
       } catch (err) { console.error("[chat_bubble] show pos/size error", err); }
     });
 
     const unlistenHide = listen("chat-bubble-hide", async () => {
       console.log("[chat_bubble] hide");
       try {
-        // 移到 off-screen 而非 hide():避免 Wayland 重新 show 失敗
-        await win.setPosition(new LogicalPosition(-10000, -10000));
-      } catch (err) { console.error("[chat_bubble] hide pos error", err); }
+        await win.hide();
+      } catch (err) { console.error("[chat_bubble] hide error", err); }
       setText("");
     });
 

@@ -67,8 +67,8 @@ function Picker() {
     setOpen(false);
     const win = getCurrentWindow();
     try {
-      await win.setPosition(new LogicalPosition(-10000, -10000));
-    } catch (e) { console.error("[picker] close move-off failed", e); }
+      await win.hide();
+    } catch (e) { console.error("[picker] hide failed", e); }
   };
 
   const confirm = async () => {
@@ -103,6 +103,7 @@ function Picker() {
       setVoiceIdx(0);
       setAgentIdx(0);
       await centerOnPrimaryMonitor();
+      try { await win.show(); } catch (e) { console.error("[picker] show failed", e); }
       setOpen(true);
       // Wayland 救援:多次 setFocus + focus rootRef(state 還沒 commit 前先 retry)
       const tryFocus = async () => {

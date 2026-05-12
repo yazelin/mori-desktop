@@ -221,13 +221,31 @@ fn ensure_desktop_file() -> Result<()> {
     // 才會把多個視窗(main / floating / chat_bubble / picker)歸到同一個 app
     // entry,不會每次重啟堆一條。Tauri 2 在 GTK/X11 下 WM_CLASS = "mori-tauri" /
     // "Mori-tauri"(Cargo.toml package name)。
+    //
+    // Icon 用絕對路徑指向 binary 旁邊的 256x256 icon — `Icon=mori` 會走 freedesktop
+    // 系統 icon 查找(/usr/share/icons / ~/.local/share/icons),沒裝就空白;
+    // 絕對路徑保證 GNOME shell / dock 一定找得到。
+    let icon_path = exe
+        .parent()
+        .and_then(|p| {
+            // mori-tauri binary 在 target/debug/,icons 在 crates/mori-tauri/icons/
+            // 從 binary 推回 crates/mori-tauri/icons/icon.png
+            let candidates = [
+                p.join("../../crates/mori-tauri/icons/icon.png"),
+                p.join("icons/icon.png"),
+            ];
+            candidates.into_iter().find(|p| p.exists())
+        })
+        .and_then(|p| p.canonicalize().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "mori".to_string());
     let content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Mori\n\
          Comment=森林精靈 Mori 的桌面身體\n\
          Exec={exe_str}\n\
-         Icon=mori\n\
+         Icon={icon_path}\n\
          Categories=Utility;AudioVideo;\n\
          StartupWMClass=Mori-tauri\n\
          X-GNOME-UsesNotifications=true\n\

@@ -40,15 +40,13 @@
         "title": "Mori (chat)",
         "width": 360,
         "height": 56,
-        "x": -10000,
-        "y": -10000,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": true,
         "shadow": false,
-        "visible": true,
+        "visible": false,
         "focus": false
       },
       {
@@ -56,15 +54,13 @@
         "title": "Mori — 切換 Profile",
         "width": 520,
         "height": 280,
-        "x": -10000,
-        "y": -10000,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
         "shadow": false,
-        "visible": true,
+        "visible": false,
         "focus": false
       }
     ],
