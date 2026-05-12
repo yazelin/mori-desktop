@@ -2344,14 +2344,18 @@ fn main() {
                     }
                 });
 
-                // 5K-1: Ctrl+Alt+P 開 picker — 由 picker window 自己負責顯示 + 抓焦點
+                // 5K-1: Ctrl+Alt+P 開 picker
+                //
+                // 流程:Rust 先 show() + set_focus()(確保視窗 visible + Wayland 抓焦點),
+                // 再 emit picker-open 給 React 端 center / 拉 profile 列表。
+                // visible: false 的 window webview 仍會載入,React mount 後 listener 已就位;
+                // 但 emit 前先 show 確保視窗顯示時機跟 focus 都對齊。
                 let handle_picker = app.handle().clone();
                 app.listen(portal_hotkey::PORTAL_PICKER_EVENT, move |_event| {
                     if let Some(w) = handle_picker.get_webview_window("picker") {
-                        // picker window 啟動時被丟到 (-10000, -10000),這裡叫它把自己
-                        // center + focus(picker.tsx 那邊接 picker-open event 處理)
-                        let _ = handle_picker.emit("picker-open", ());
+                        let _ = w.show();
                         let _ = w.set_focus();
+                        let _ = handle_picker.emit("picker-open", ());
                     }
                 });
 
