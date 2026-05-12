@@ -43,7 +43,7 @@ function MainShell() {
     <div className="mori-shell">
       <aside className="mori-sidebar">
         <div className="mori-sidebar-brand">
-          <img className="mori-sidebar-brand-icon" src="/logo-dark.png" alt="Mori" />
+          <img className="mori-sidebar-brand-icon" src="/logo.png" alt="Mori" />
           <span className="mori-sidebar-brand-name">Mori</span>
         </div>
         <nav className="mori-sidebar-nav">

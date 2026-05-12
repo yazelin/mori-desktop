@@ -10,7 +10,7 @@
 <body>
 
 <header class="book-header">
-  <img class="book-logo" src="sprites/logo-light.png" alt="Mori logo">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
   <div>
     <h1>Mori</h1>
     <div class="book-title-sub">DESIGN BOOK · v1.0</div>
@@ -64,63 +64,47 @@
 <h2>Logo</h2>
 <p>
   圓形葉冠 + Mori 側像 + 太極流動曲線。象徵「環繞守護的記憶 + 持續流動的意識」。
-  Monochrome 設計 — interior 透明,可放在任何顏色 UI 上自然融合。
-</p>
-
-<p style="font-size:12.5px;color:var(--c-brown);margin:0 0 16px">
-  兩個版本,依「目標 UI 主題」選 — 命名 = 給哪種主題用,不是 logo 本身什麼色:
+  最終版用 <strong>徽章式設計</strong>:深綠圓盤背景(取自 logo 內部 fill 色 <code>#182622</code>)+
+  米色 stroke 環跟 Mori 剪影疊上 — 兩種 UI 主題看起來一致。
 </p>
 
 <div class="grid grid-2">
   <div class="card" style="background:var(--c-ivory)">
-    <h3 style="color:var(--c-forest-deep)">logo-light(給淺底 UI 用)</h3>
-    <img src="sprites/logo-light.png" alt="logo for light theme" style="width:180px;display:block;margin:10px auto">
+    <h3 style="color:var(--c-forest-deep)">淺底 UI 下</h3>
+    <img src="sprites/logo.png" alt="logo on light bg" style="width:200px;display:block;margin:10px auto">
     <p style="font-size:11.5px;color:var(--c-brown);text-align:center;line-height:1.55">
-      <code>logo-light.png</code><br>
-      深綠 stroke + 米色 interior<br>
-      米色 fill 跟 ivory bg 融合 → 主表現:<strong>森林環</strong><br>
-      e.g. brand book、淺主題視窗
+      深綠 disc 跟淺底成強對比 — 識別度高
     </p>
   </div>
   <div class="card" style="background:rgba(8, 12, 18, 1);color:var(--c-cream)">
-    <h3 style="color:var(--c-cream)">logo-dark(給深底 UI 用)</h3>
-    <img src="sprites/logo-dark.png" alt="logo for dark theme" style="width:180px;display:block;margin:10px auto">
+    <h3 style="color:var(--c-cream)">深底 UI 下</h3>
+    <img src="sprites/logo.png" alt="logo on dark bg" style="width:200px;display:block;margin:10px auto">
     <p style="font-size:11.5px;color:var(--c-sand);text-align:center;line-height:1.55">
-      <code style="background:rgba(255,255,255,0.10);color:var(--c-cream)">logo-dark.png</code><br>
-      米色 stroke + 深綠 interior<br>
-      深綠 fill 跟深底 bg 融合 → 主表現:<strong>米色 silhouette</strong><br>
-      e.g. sidebar、Tauri tray、floating widget
+      深綠 disc 跟深底相似但仍有 outline,米色 stroke 清晰
     </p>
   </div>
 </div>
 
-<p style="font-size:12.5px;color:var(--c-brown);background:var(--c-cream);padding:10px 14px;border-radius:8px;border-left:3px solid var(--c-sand);margin-top:16px">
-  <strong>命名規則(避免混淆)</strong>:
-  <code>logo-&lt;theme&gt;.png</code> 表示「給該 theme 用」,不是「logo 本身是什麼色」。
-  <br>
-  logo-light = light theme 用,logo-dark = dark theme 用 — 跟 CSS
-  <code>color-scheme</code> 語意一致。
-</p>
-
 <h3>使用規則</h3>
 <ul>
-  <li><strong>一張 logo 用到底</strong> — 不分淺底深底,brand 識別優先</li>
-  <li>最小尺寸 16px(tray icon),保持完整圓徽不裁切</li>
-  <li>留白:logo 半徑的 6%(整張 PNG 已含 padding)</li>
-  <li>不要改色 / 不要 recolor — 設計師原作不動</li>
+  <li><strong>單一徽章 logo 用到底</strong> — sidebar / brand book / Tauri tray / dock 都同檔</li>
+  <li>深綠 disc 直徑 = canvas 100%,米色 stroke 縮 83% + 微右移 20px 補同心</li>
+  <li>最小尺寸 16px(tray icon)— disc 確保任何 panel 主題都看得到</li>
+  <li>不要改色:disc 用 <code>#182622</code>(從 logo 內部抽出),strokes 不動</li>
 </ul>
 
 <h3>檔案位置</h3>
 <table class="spec-table">
   <thead><tr><th>檔案</th><th>用途</th></tr></thead>
   <tbody>
-    <tr><td><code>docs/design/Logo.png</code></td><td>原始設計稿(上下分版本,1254×1254)</td></tr>
-    <tr><td><code>docs/design/mori-logo-dark.png</code></td><td>深綠版 monochrome(1024×1024)</td></tr>
-    <tr><td><code>docs/design/mori-logo-light.png</code></td><td>米色版 monochrome(1024×1024)</td></tr>
-    <tr><td><code>docs/design/mori-logo.png</code></td><td>主版本(統一使用 = logo-dark 同檔)</td></tr>
-    <tr><td><code>public/logo.png</code></td><td>frontend 引用版(sidebar / 主視窗 brand 圖示)</td></tr>
-    <tr><td><code>docs/sprites/logo*.png</code></td><td>公式書引用版(同檔)</td></tr>
-    <tr><td><code>crates/mori-tauri/icons/{16,32,64,128,256}.png</code></td><td>Tauri bundle 用,從 mori-logo.png 下採樣</td></tr>
+    <tr><td><code>docs/design/Logo.png</code></td><td>原始高解設計稿(1254×1254 上下兩半)</td></tr>
+    <tr><td><code>docs/design/mori-logo-light.png</code></td><td>原 light(深綠 stroke+米色 fill)— 留檔</td></tr>
+    <tr><td><code>docs/design/mori-logo-dark.png</code></td><td>原 dark(米色 stroke+深綠 fill)— 徽章上層 source</td></tr>
+    <tr><td><code>docs/design/mori-logo-badge.png</code></td><td><strong>主版本</strong>:深綠 disc + 米色 stroke 疊合</td></tr>
+    <tr><td><code>docs/design/mori-logo.png</code></td><td>同 badge(別名)</td></tr>
+    <tr><td><code>docs/sprites/logo.png</code></td><td>公式書引用版(= badge)</td></tr>
+    <tr><td><code>public/logo.png</code></td><td>frontend 引用版(sidebar 用)</td></tr>
+    <tr><td><code>crates/mori-tauri/icons/{16~256}.png</code></td><td>Tauri bundle 從 badge 下採樣</td></tr>
   </tbody>
 </table>
 
