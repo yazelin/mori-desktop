@@ -1,16 +1,13 @@
-// 5K-1: Profile Picker overlay。
+// 5K-1: Profile Picker overlay (refined 5K-1b)
 //
-// 跟 chat_bubble 視窗一樣的「啟動時 off-screen + 收 event 才出來」pattern。
-// 收到 `picker-open` event → 移到螢幕中央 + 抓焦點 + 抓鍵盤(等 Tab / Arrow / Enter / Esc)。
+// 設計:始終顯示 3 個 item(prev / current / next),用「轉輪」概念
+// 上下方向鍵移動 cursor,項目超多也不會超出視窗、不會被切。
 //
-// UX:
-// - Tab 切「VoiceInput」/「Agent」section
-// - ↑↓ 在當前 section 內挑 item
-// - Enter 觸發切換 + 關閉
-// - Esc 關閉(不切換)
-// - 點擊也可選
+// Wayland focus 救援:setFocus() 在 GNOME 下對非 user-activated window 經常被
+// 拒絕。改用 document.addEventListener('keydown') + 多次 retry setFocus +
+// 立即 focus rootRef,把 chance maximize。
 
-import { useEffect, useRef, useState, KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalPosition, currentMonitor } from "@tauri-apps/api/window";
@@ -19,7 +16,7 @@ type ProfileEntry = { stem: string; display: string };
 type Section = "voice" | "agent";
 
 const WIDTH = 520;
-const HEIGHT = 480;
+const HEIGHT = 280; // 縮小:3-item carousel 不需要 480
 
 async function centerOnPrimaryMonitor() {
   const win = getCurrentWindow();
@@ -45,19 +42,55 @@ function Picker() {
   const [agentIdx, setAgentIdx] = useState(0);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // 把 state mirror 到 ref 給 document-level keydown listener 用
+  // (listener 不會跟 state 更新 re-bind)
+  const openRef = useRef(open);
+  const sectionRef = useRef(section);
+  const voiceRef = useRef(voice);
+  const agentRef = useRef(agent);
+  const voiceIdxRef = useRef(voiceIdx);
+  const agentIdxRef = useRef(agentIdx);
+  openRef.current = open;
+  sectionRef.current = section;
+  voiceRef.current = voice;
+  agentRef.current = agent;
+  voiceIdxRef.current = voiceIdx;
+  agentIdxRef.current = agentIdx;
 
-  // 初次 mount:預先抓 profile lists(picker 一打開就有)
+  // 初次 mount:預先抓 profile lists
   useEffect(() => {
     invoke<ProfileEntry[]>("picker_list_voice_profiles").then(setVoice).catch(console.error);
     invoke<ProfileEntry[]>("picker_list_agent_profiles").then(setAgent).catch(console.error);
   }, []);
 
-  // 訊息監聽 — open
+  const close = async () => {
+    setOpen(false);
+    const win = getCurrentWindow();
+    try {
+      await win.setPosition(new LogicalPosition(-10000, -10000));
+    } catch (e) { console.error("[picker] close move-off failed", e); }
+  };
+
+  const confirm = async () => {
+    const list = sectionRef.current === "voice" ? voiceRef.current : agentRef.current;
+    const idx = sectionRef.current === "voice" ? voiceIdxRef.current : agentIdxRef.current;
+    const entry = list[idx];
+    if (!entry) { close(); return; }
+    try {
+      if (sectionRef.current === "voice") {
+        await invoke("picker_switch_voice_profile", { stem: entry.stem });
+      } else {
+        await invoke("picker_switch_agent_profile", { stem: entry.stem });
+      }
+    } catch (e) { console.error("[picker] switch failed", e); }
+    close();
+  };
+
+  // open / hide handlers
   useEffect(() => {
     const win = getCurrentWindow();
     const unlistenOpen = listen("picker-open", async () => {
       console.log("[picker] open");
-      // 重新抓 list(中途使用者新增 profile 也能反映)
       try {
         const [v, a] = await Promise.all([
           invoke<ProfileEntry[]>("picker_list_voice_profiles"),
@@ -70,85 +103,81 @@ function Picker() {
       setVoiceIdx(0);
       setAgentIdx(0);
       await centerOnPrimaryMonitor();
-      await win.setFocus();
       setOpen(true);
-      // focus root div 才能接到 keydown
-      setTimeout(() => rootRef.current?.focus(), 0);
+      // Wayland 救援:多次 setFocus + focus rootRef(state 還沒 commit 前先 retry)
+      const tryFocus = async () => {
+        try {
+          await win.setFocus();
+        } catch {}
+        rootRef.current?.focus();
+      };
+      tryFocus();
+      setTimeout(tryFocus, 30);
+      setTimeout(tryFocus, 120);
     });
     return () => { unlistenOpen.then((f) => f()); };
   }, []);
 
-  const close = async () => {
-    setOpen(false);
-    const win = getCurrentWindow();
-    try {
-      await win.setPosition(new LogicalPosition(-10000, -10000));
-    } catch (e) { console.error("[picker] close move-off failed", e); }
-  };
+  // Global keydown — 同時掛 document 跟 rootRef onKeyDown,二重保險
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!openRef.current) return;
+      const sec = sectionRef.current;
+      const list = sec === "voice" ? voiceRef.current : agentRef.current;
+      const idx = sec === "voice" ? voiceIdxRef.current : agentIdxRef.current;
+      const setIdx = sec === "voice" ? setVoiceIdx : setAgentIdx;
 
-  const confirm = async () => {
-    const list = section === "voice" ? voice : agent;
-    const idx = section === "voice" ? voiceIdx : agentIdx;
-    const entry = list[idx];
-    if (!entry) { close(); return; }
-    try {
-      if (section === "voice") {
-        await invoke("picker_switch_voice_profile", { stem: entry.stem });
-      } else {
-        await invoke("picker_switch_agent_profile", { stem: entry.stem });
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key === "Enter") { e.preventDefault(); confirm(); return; }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        setSection(sec === "voice" ? "agent" : "voice");
+        return;
       }
-    } catch (e) { console.error("[picker] switch failed", e); }
-    close();
-  };
-
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (!open) return;
-    const list = section === "voice" ? voice : agent;
-    const idx = section === "voice" ? voiceIdx : agentIdx;
-    const setIdx = section === "voice" ? setVoiceIdx : setAgentIdx;
-
-    if (e.key === "Escape") { e.preventDefault(); close(); return; }
-    if (e.key === "Enter") { e.preventDefault(); confirm(); return; }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      setSection(section === "voice" ? "agent" : "voice");
-      return;
-    }
-    if (e.key === "ArrowDown" || e.key === "j") {
-      e.preventDefault();
-      if (list.length > 0) setIdx((idx + 1) % list.length);
-      return;
-    }
-    if (e.key === "ArrowUp" || e.key === "k") {
-      e.preventDefault();
-      if (list.length > 0) setIdx((idx - 1 + list.length) % list.length);
-      return;
-    }
-    if (e.key === "ArrowLeft" || e.key === "h") {
-      e.preventDefault();
-      setSection("voice");
-      return;
-    }
-    if (e.key === "ArrowRight" || e.key === "l") {
-      e.preventDefault();
-      setSection("agent");
-      return;
-    }
-  };
+      if (e.key === "ArrowDown" || e.key === "j") {
+        e.preventDefault();
+        if (list.length > 0) setIdx((idx + 1) % list.length);
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "k") {
+        e.preventDefault();
+        if (list.length > 0) setIdx((idx - 1 + list.length) % list.length);
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "h") {
+        e.preventDefault();
+        setSection("voice");
+        return;
+      }
+      if (e.key === "ArrowRight" || e.key === "l") {
+        e.preventDefault();
+        setSection("agent");
+        return;
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
 
   if (!open) return null;
 
   const list = section === "voice" ? voice : agent;
   const idx = section === "voice" ? voiceIdx : agentIdx;
 
+  // 3-item carousel:取 prev / current / next(空時填 null)
+  const at = (i: number): ProfileEntry | null =>
+    list.length === 0 ? null : list[((i % list.length) + list.length) % list.length];
+  const prev = list.length > 1 ? at(idx - 1) : null;
+  const cur = at(idx);
+  const next = list.length > 1 ? at(idx + 1) : null;
+
   return (
     <div
       ref={rootRef}
       tabIndex={0}
       className="mori-picker-root"
-      onKeyDown={onKeyDown}
     >
-      <div className="mori-picker-card">
+      <div className="mori-picker-card mori-picker-carousel">
         <div className="mori-picker-header">
           <div
             className={`mori-picker-tab ${section === "voice" ? "active" : ""}`}
@@ -166,29 +195,50 @@ function Picker() {
           </div>
         </div>
 
-        <ul className="mori-picker-list">
-          {list.length === 0 && (
-            <li className="mori-picker-empty">
-              （這個目錄沒有 profile）
-            </li>
+        <div className="mori-picker-carousel-body">
+          {list.length === 0 ? (
+            <div className="mori-picker-empty">（這個目錄沒有 profile）</div>
+          ) : (
+            <>
+              <div className="mori-picker-row prev" onClick={() => {
+                const setI = section === "voice" ? setVoiceIdx : setAgentIdx;
+                if (list.length > 0) setI((idx - 1 + list.length) % list.length);
+              }}>
+                {prev && <>
+                  <span className="mori-picker-display">{prev.display}</span>
+                  <span className="mori-picker-stem">{prev.stem}</span>
+                </>}
+              </div>
+              <div
+                className="mori-picker-row cur"
+                onClick={confirm}
+                onDoubleClick={confirm}
+                title="Enter / 點擊確認"
+              >
+                {cur && <>
+                  <span className="mori-picker-cursor">▸</span>
+                  <span className="mori-picker-display">{cur.display}</span>
+                  <span className="mori-picker-stem">{cur.stem}</span>
+                </>}
+              </div>
+              <div className="mori-picker-row next" onClick={() => {
+                const setI = section === "voice" ? setVoiceIdx : setAgentIdx;
+                if (list.length > 0) setI((idx + 1) % list.length);
+              }}>
+                {next && <>
+                  <span className="mori-picker-display">{next.display}</span>
+                  <span className="mori-picker-stem">{next.stem}</span>
+                </>}
+              </div>
+              <div className="mori-picker-position">
+                {idx + 1} / {list.length}
+              </div>
+            </>
           )}
-          {list.map((entry, i) => (
-            <li
-              key={entry.stem}
-              className={`mori-picker-item ${i === idx ? "selected" : ""}`}
-              onClick={() => {
-                if (section === "voice") setVoiceIdx(i); else setAgentIdx(i);
-              }}
-              onDoubleClick={confirm}
-            >
-              <span className="mori-picker-display">{entry.display}</span>
-              <span className="mori-picker-stem">{entry.stem}</span>
-            </li>
-          ))}
-        </ul>
+        </div>
 
         <div className="mori-picker-footer">
-          <kbd>↑↓</kbd> 選 &nbsp; <kbd>Tab</kbd> 切換組 &nbsp;
+          <kbd>↑↓</kbd> 選 &nbsp; <kbd>Tab</kbd> 切組 &nbsp;
           <kbd>Enter</kbd> 確認 &nbsp; <kbd>Esc</kbd> 取消
         </div>
       </div>

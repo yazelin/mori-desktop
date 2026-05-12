@@ -332,16 +332,15 @@ function FloatingMori() {
       ? ({ "--vol": amplify(volume).toFixed(3) } as CSSProperties)
       : undefined;
 
-  // 標籤顯示優先序：
-  //   infoLabel (時效性訊息：profile 切換 / done 結果) 最優先
+  // 5K-1b: 標籤顯示優先序(簡化版)
+  //   infoLabel (時效性訊息:profile 切換 1.5s / done 結果) 最優先
   //   → statusLabel (轉錄中 / 處理中)
-  //   → recording 中常駐顯示 profile 名稱
-  //   → VoiceInput mode idle 時也顯示當前 profile（讓使用者知道現在會用哪個）
+  //   → recording 中常駐顯示 profile 名稱(讓使用者知道按下這次會用哪個處理)
+  //   idle 時不再常駐顯示 — 切換時 1.5s 即消失,sprite 保持乾淨
   const labelToShow: string | null =
     infoLabel
     ?? statusLabel
-    ?? (visual === "recording" && currentProfileLabel ? `🎙 ${currentProfileLabel}` : null)
-    ?? (visual === "idle" && mode === "voice_input" && currentProfileLabel ? currentProfileLabel : null);
+    ?? (visual === "recording" && currentProfileLabel ? `🎙 ${currentProfileLabel}` : null);
 
   return (
     <div

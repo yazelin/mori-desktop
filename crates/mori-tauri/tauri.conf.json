@@ -55,7 +55,7 @@
         "label": "picker",
         "title": "Mori — 切換 Profile",
         "width": 520,
-        "height": 480,
+        "height": 280,
         "x": -10000,
         "y": -10000,
         "decorations": false,
