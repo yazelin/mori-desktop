@@ -402,12 +402,16 @@ fn config_read() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn config_write(text: String) -> Result<(), String> {
+fn config_write(app: AppHandle, text: String) -> Result<(), String> {
     // Validate JSON parses before write,不然容易把 config.json 寫壞
     serde_json::from_str::<serde_json::Value>(&text)
         .map_err(|e| format!("invalid JSON: {e}"))?;
     let path = mori_dir().join("config.json");
-    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
+    // 5P-4: 廣播 config 變動,讓 FloatingMori 等 window 重讀(目前主要給 floating
+    // section 的 animated / wander toggle 即時生效用)
+    let _ = app.emit("config-changed", ());
+    Ok(())
 }
 
 #[tauri::command]

@@ -63,18 +63,28 @@ function spriteStyle(
   visual: Visual,
   spriteUrl: string | undefined,
   manifest: CharacterManifest | null,
+  animated: boolean,
 ): CSSProperties {
   // 5P-3 fix: IPC 拉 data URL 是 async(~50ms),啟動瞬間 sprite map empty 會
   // 一閃透明。fallback 到 public/floating/ 既有 PNG path 撐住(Vite 仍 serve),
   // IPC 完成後 sprites[visual] 蓋過來,swap 順順。
   const url = spriteUrl ?? `/floating/mori-${visual}.png`;
   const grid = manifest?.sprite_spec?.grid ?? "1x1";
-  // 未抓到 manifest(啟動瞬間)→ 預設 1x1 不跑 animation,避免 fallback static
-  // 256×256 PNG 套 4×4 CSS 走怪 frame。Manifest 來了之後切到 4×4 才動。
+  // 啟動 fallback / 1×1 grid / config animated=false → 都走 static。
+  // 4×4 但 animated=false 也走 static:顯示 frame 1(左上)取代整 sheet 縮放,
+  // 用 background-size 400% + position 0% 0% 達成「停在 frame 1」。
   if (grid === "1x1" || !spriteUrl) {
     return {
       backgroundImage: `url("${url}")`,
       backgroundSize: "100% 100%",
+      backgroundRepeat: "no-repeat",
+    };
+  }
+  if (!animated) {
+    return {
+      backgroundImage: `url("${url}")`,
+      backgroundSize: "400% 400%",
+      backgroundPosition: "0% 0%",
       backgroundRepeat: "no-repeat",
     };
   }
@@ -177,6 +187,34 @@ function FloatingMori() {
   // 5P-3: Character pack — manifest + 各 state 的 sprite data URL
   const [manifest, setManifest] = useState<CharacterManifest | null>(null);
   const [sprites, setSprites] = useState<Partial<Record<Visual, string>>>({});
+
+  // 5P-4: floating section config(animated / wander)— default animated=true, wander=false。
+  // ConfigTab save 會 emit "config-changed",listen 後 re-read。
+  const [floatingCfg, setFloatingCfg] = useState<{ animated: boolean; wander: boolean }>({
+    animated: true,
+    wander: false,
+  });
+
+  useEffect(() => {
+    const loadFloatingConfig = async () => {
+      try {
+        const raw = await invoke<string>("config_read");
+        const parsed = JSON.parse(raw);
+        setFloatingCfg({
+          animated: parsed?.floating?.animated ?? true,
+          wander: parsed?.floating?.wander ?? false,
+        });
+      } catch (e) {
+        // config.json 不存在 / 壞掉 → 用 default
+        console.warn("[FloatingMori] config_read failed, using defaults", e);
+      }
+    };
+    loadFloatingConfig();
+    const unlistenCfg = listen("config-changed", () => loadFloatingConfig());
+    return () => {
+      unlistenCfg.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     const loadCharacterPack = async () => {
@@ -471,7 +509,7 @@ function FloatingMori() {
         >
           <div
             className="mori-sprite-frame"
-            style={spriteStyle(visual, sprites[visual], manifest)}
+            style={spriteStyle(visual, sprites[visual], manifest, floatingCfg.animated)}
           />
         </div>
 

@@ -625,6 +625,44 @@ function ConfigTab() {
               />
             </FormRow>
           </Section>
+
+          {/* ── Floating Mori ─────────────────────────── */}
+          <Section
+            title="Floating Mori"
+            hint="桌面 floating widget(160×160)的視覺行為。Sprite / 角色資產走 character pack — ~/.mori/characters/<active>/。"
+          >
+            <FormRow
+              label="animated"
+              hint="動態 Mori — sprite 跑 4×4 sheet animation;關掉只顯示 frame 1 靜止"
+            >
+              <input
+                type="checkbox"
+                checked={cfg.floating?.animated ?? true}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const f = ensureSubObj(c, "floating");
+                    f.animated = e.target.checked;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow
+              label="wander"
+              hint="讓 Mori 在桌面隨機走動(實驗性,需 animated ON;走動 sprite 沒上來前先 placeholder)"
+            >
+              <input
+                type="checkbox"
+                checked={cfg.floating?.wander ?? false}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const f = ensureSubObj(c, "floating");
+                    if (e.target.checked) f.wander = true;
+                    else delete f.wander;
+                  })
+                }
+              />
+            </FormRow>
+          </Section>
         </>
       ) : (
         <Section title="" >
