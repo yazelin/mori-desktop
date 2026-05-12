@@ -176,7 +176,7 @@ impl Skill for ShellSkill {
                 .replace("{{stdout}}", &stdout)
                 .replace("{{name}}", &self.def.name)
         } else if status.success() {
-            format!("已執行 {}", self.def.name)
+            build_default_success_message(&self.def.name, &stdout)
         } else {
             format!(
                 "Shell skill '{}' 失敗（exit code {:?}）：{}",
@@ -198,6 +198,20 @@ impl Skill for ShellSkill {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────
+
+/// 預設成功訊息(profile 沒設 `success_message:` template 時用)。
+///
+/// brand-3 follow-up:預設把 stdout 直接給 LLM 看,讓 user 不用每個 shell_skill
+/// 都寫 `success_message: "{{stdout}}"`。沒這個的話 LLM 只看到「已執行 gh_pr_list」
+/// 沒拿到 PR list 內容,只能回應「執行完成」— `gh` / `docker` / `kubectl` / `git`
+/// 等列表型 CLI 的 stdout 才是真正有用的內容,理應 forward 給 LLM 進入下一輪推理。
+fn build_default_success_message(name: &str, stdout: &str) -> String {
+    if stdout.trim().is_empty() {
+        format!("已執行 {}", name)
+    } else {
+        format!("已執行 {} —\n{}", name, stdout)
+    }
+}
 
 /// 從 LLM 給的 `args` JSON object 提出每個 parameter 的字串值。
 /// `required: true` 但沒給 → Err。可選有 default 用 default，沒 default 用空字串。
@@ -280,6 +294,21 @@ mod tests {
         args.insert("host".into(), "dev01".into());
         args.insert("port".into(), "22".into());
         assert_eq!(substitute("ssh {{host}}:{{port}}", &args), "ssh dev01:22");
+    }
+
+    #[test]
+    fn default_success_message_includes_stdout_when_non_empty() {
+        let r = build_default_success_message("gh_pr_list", "#1 First PR\n#2 Second PR");
+        assert!(r.starts_with("已執行 gh_pr_list"),
+            "should start with `已執行 <name>`,got: {r:?}");
+        assert!(r.contains("#1 First PR"));
+        assert!(r.contains("#2 Second PR"));
+    }
+
+    #[test]
+    fn default_success_message_falls_back_when_stdout_empty() {
+        assert_eq!(build_default_success_message("docker_ps", ""), "已執行 docker_ps");
+        assert_eq!(build_default_success_message("docker_ps", "   \n  "), "已執行 docker_ps");
     }
 
     #[test]

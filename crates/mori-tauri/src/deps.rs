@@ -45,6 +45,12 @@ pub enum CheckSpec {
     Which { bin: &'static str },
     /// 檔案存在
     File { path_template: &'static str },
+    /// 跑指令 + 看 stdout 含某字串(例:`ollama list` 看有沒 `qwen3:8b`)
+    CommandStdoutContains {
+        cmd: &'static str,
+        args: &'static [&'static str],
+        needle: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -159,6 +165,23 @@ pub fn registry() -> Vec<DepSpec> {
                 script: "curl -fsSL https://ollama.com/install.sh | sh",
             },
         },
+        DepSpec {
+            id: "ollama-qwen3-8b",
+            name: "qwen3:8b(Ollama 模型本體)",
+            description: "Mori 預設離線 LLM 模型,支援 tool calling(Agent 模式必需)。\
+                          需要 ollama binary 已裝。",
+            unlocks: "ollama 真的能跑 LLM(只裝 ollama binary 沒模型也叫不起來)",
+            size_hint: Some("~5GB"),
+            needs_sudo: false,
+            check: CheckSpec::CommandStdoutContains {
+                cmd: "ollama",
+                args: &["list"],
+                needle: "qwen3:8b",
+            },
+            install: InstallSpec::Shell {
+                script: "ollama pull qwen3:8b",
+            },
+        },
     ]
 }
 
@@ -193,6 +216,41 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
                     id: spec.id,
                     installed: false,
                     detail: Some(format!("not at {path}")),
+                },
+            }
+        }
+        CheckSpec::CommandStdoutContains { cmd, args, needle } => {
+            match Command::new(cmd).args(args.iter()).output() {
+                Ok(out) if out.status.success() => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    if stdout.contains(needle) {
+                        // 取含 needle 的那一行當 detail(像 `ollama list` 顯示 size)
+                        let line = stdout.lines().find(|l| l.contains(needle)).unwrap_or(needle);
+                        DepStatus {
+                            id: spec.id,
+                            installed: true,
+                            detail: Some(line.trim().to_string()),
+                        }
+                    } else {
+                        DepStatus {
+                            id: spec.id,
+                            installed: false,
+                            detail: Some(format!("`{cmd}` 沒列出 `{needle}`")),
+                        }
+                    }
+                }
+                Ok(out) => DepStatus {
+                    id: spec.id,
+                    installed: false,
+                    detail: Some(format!(
+                        "`{cmd}` 失敗:{}",
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    )),
+                },
+                Err(_) => DepStatus {
+                    id: spec.id,
+                    installed: false,
+                    detail: Some(format!("`{cmd}` 不在 PATH")),
                 },
             }
         }
