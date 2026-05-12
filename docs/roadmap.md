@@ -108,39 +108,68 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
+## Phase 5N — Chat panel 重設計(2026-05-12,完成)
+
+5M 拉好 sidebar 後,Chat tab 本身的 UI 還是很雜:沒對話歷史 scroll、status panel 8 行佔下半、mode radio 跟 sidebar 重複。5N 把 Chat tab 重畫:
+
+- [x] **scrollable thread**:從 Rust `get_conversation` IPC 拉 user/assistant 訊息,user 靠右(天空藍泡泡)、Mori 靠左(森林綠泡泡)、🔧 tool chip
+- [x] **bottom input bar**:[🎤 mic] + textarea + [送出],永遠在底部
+- [x] **inline progress chip**:錄音中(秒數 + 音量條)、轉錄中、思考中三種 chip 浮在 input 上方
+- [x] **top bar**:mode chip(provider · model)+ 三個 icon 按鈕(💤休眠 / 🔄 重置 / ⚙️ 開 status modal)
+- [x] **status modal**:原本 status panel 8 行移進 modal(⚙️ 才打開)
+- [x] **get_conversation IPC**:`state.conversation` 暴露給 frontend 用,過濾掉 system/tool internal turn
+- [x] **刪 App.tsx**:整個被 ChatPanel.tsx 取代,沒人引用了
+
 ## Phase 5M — 主視窗 sidebar 架構(2026-05-12,完成)
 
-5L 要加 Config UI、未來 Memory / Skills 分頁也要塞,小聊天框尺寸不夠。
-先做主視窗 layout 重設計。
+5L 要加 Config UI、未來 Memory / Skills 分頁也要塞,小聊天框尺寸不夠。先做主視窗 layout 重設計。
 
 - [x] 視窗預設 880×600 + minWidth/minHeight + resizable
 - [x] 左側 sidebar(196px)分頁:Chat / Profiles / Config / Memory / Skills
-- [x] Chat tab:原 App.tsx 內容完全沿用,只是被 MainShell 包進右側
+- [x] Chat tab:原 App.tsx 內容沿用(5N 後改成 ChatPanel.tsx)
 - [x] Profiles tab:VoiceInput + Agent profile list + 切換 + 編輯入口
-- [x] Config / Memory / Skills tab:5M 是 placeholder,5L 後續填內容
-- [x] shell.css:深底配天空藍(active tab)+ 森林綠(brand)
+- [x] Config / Memory / Skills tab:5M 是 placeholder,5L-1~4 後續填內容
+- [x] shell.css:深底配天空藍(active tab)+ 森林綠(brand)+ `color-scheme: dark` 讓 native widget(select dropdown / scrollbar)也跟著 dark
 
-## Phase 5L — Config / Profile UI(2026-05-12,完成)
+## Phase 5L — Config / Memory / Skills UI(2026-05-12,完成)
 
-之前所有 `~/.mori/` 設定都要手動編 .json / .md;5L 把它們搬進主視窗。
+把 ~/.mori/ 全部設定搬進主視窗,不用手動編 .json / .md。
 
+### 5L-1 第一版(textarea + raw)
 - [x] IPC:config_read / config_write / corrections_read / corrections_write /
       profile_read / profile_write / profile_delete
-- [x] ConfigTab:config.json textarea(即時 JSON parse 驗證,失敗紅框 + 不讓存)+
-      corrections.md textarea
-- [x] ProfilesTab:list voice / agent profile + 切換按鈕 + 編輯 modal,modal 內
-      整個 .md(frontmatter + body)可編、可刪;有「+ 新增」用 prompt 取檔名 +
-      starter template
-- [x] 寫入後即時生效(load_active_profile / read_provider_config 都讀檔即時)
+- [x] ConfigTab:config.json textarea + 即時 JSON parse 驗證
+- [x] ProfilesTab:list + 切換 + 編輯 modal(整個 .md textarea)+ 新增 + 刪除
 
-未做(留給 5L-2 / 5L-3):
-- [ ] config.json 用 typed form 替代 raw JSON(provider / stt_provider 下拉、
-      api_keys 表格、routing.skills 表格)
-- [ ] Profile frontmatter 用 typed form(provider 下拉、enable_read checkbox 等),
-      只 body 留 textarea
-- [ ] shell_skills 用表格編輯器(含 ParamDef)
-- [ ] MemoryTab / SkillsTab 還是 placeholder
-- [ ] Frontmatter parse 錯誤 IPC 回 diff 顯示(現在只回字串)
+### 5L-2 ConfigTab typed form
+- [x] Form / Raw JSON 雙模式切換,共用 JSON source-of-truth
+- [x] 預設區:provider / stt_provider dropdown(全部 named provider 列出)
+- [x] API Keys KV table(value 用 password 欄位)
+- [x] Provider 設定:6 個 provider card(groq / gemini / ollama /
+      claude-bash / claude-cli / whisper-local)可折疊,「已設」chip
+- [x] Routing(進階):agent dropdown + skills KV table
+- [x] voice_input.cleanup_level dropdown
+
+### 5L-3 ProfileEditor typed form + shell_skills
+- [x] js-yaml 加進 deps,frontend YAML round-trip;Rust write 仍 sanity check
+- [x] ProfileEditor 拆出 Form / Shell Skills / Raw 三 view
+- [x] Form 蓋 provider / stt_provider / enable_read / paste_shortcut /
+      cleanup_level / ZEROTYPE_AIPROMPT_* 進階 / enabled_skills chips
+- [x] Shell Skills 表格編輯器:name / description / command(JSON array
+      或 shell-like)/ parameters table / timeout / working_dir / success_message
+- [x] Raw view 整個 .md textarea fallback
+
+### 5L-4 MemoryTab + SkillsTab 真內容
+- [x] IPC:memory_list / memory_read / memory_write / memory_delete / skills_list
+- [x] MemoryTab:list + 顏色 type chip + 搜尋 box + 編輯 modal +
+      「+ 新增記憶」+ 刪除
+- [x] SkillsTab:list 當前 active agent profile 啟用的全部 skills,
+      展開看 parameters table;all / built-in / shell filter tab
+
+未排程(5L-5 後續):
+- [ ] command 中的 `{{param}}` placeholder 跟 parameters 自動同步檢查
+- [ ] memory search 整合 ~/.mori/memory/ 全文搜尋(現在前端 list-only filter)
+- [ ] config form 加 voice_input.paste_shortcut 全域預設 + 其他細項
 
 ## Phase 5K — Profile Picker + Tray submenu(2026-05-12,完成)
 

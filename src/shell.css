@@ -9,6 +9,9 @@
   color: rgba(255, 255, 255, 0.92);
   font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   overflow: hidden;
+  /* 整個 main window 都走 dark color scheme;
+     native widget(select dropdown / scrollbar / prompt 等)跟著用 dark */
+  color-scheme: dark;
 }
 
 /* ─── Sidebar ──────────────────────────────────────────────── */
@@ -487,6 +490,13 @@
 select.mori-input {
   font-family: system-ui, sans-serif;
   cursor: pointer;
+  /* 強制 webkit native dropdown 用 dark 配色,
+     不然在 Linux GTK 主題下會跳出來是亮色 list */
+  color-scheme: dark;
+}
+select.mori-input option {
+  background: rgba(15, 20, 28, 0.98);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 /* ─── KV table ─────────────────────────────────────────────── */

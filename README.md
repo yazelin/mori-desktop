@@ -41,8 +41,8 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J + 5K + 5L + 5M 完成(2026-05-12)** — Mori 在 Wayland 上
-**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法、設定全都從 UI 編**:
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J + 5K + 5L + 5L-2 + 5L-3 + 5L-4 + 5M + 5N 完成(2026-05-12)** — Mori 在 Wayland 上
+**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法、設定/記憶/skills 全都從 UI 編**:
 
 ### 5G 起的雙模式架構
 
@@ -78,15 +78,22 @@ shell_skills:
 
 之前 `skill_server`（給 `claude-bash` / `gemini-bash` / `codex-bash` 的 mori CLI HTTP 入口）寫死 8 個 skill。5I 改成每次 request 即時讀當前 Agent profile 並 build 完整 registry——所有 bash-CLI 系列 provider 看得到 action_skills + shell_skills，跟 OpenAI-tool-calling 系列（groq / ollama / claude-cli）行為一致。新增 `mori skill call <name> --args '{...}'` 通用 dispatch 子命令給動態 skill 用。
 
-### 5K + 5L + 5M：主視窗 sidebar + Picker + Config UI
+### 5K + 5L + 5M + 5N：主視窗大改造
+
+主視窗從小聊天框升級成「Mori 控制台」— sidebar 5 個 tab、scrollable chat、
+從 UI 編 config / profile / memory / skills。
 
 | 改動 | 怎麼用 |
 |---|---|
-| **5K-1 Picker overlay** | `Ctrl+Alt+P` 開獨立 picker 視窗。Tab 切 voice/agent section、↑↓ 選 item、Enter 確認、Esc 取消 |
-| **5K-2 Tray submenu** | 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」，掃 ~/.mori/ 列出全部 .md。滑鼠操作備案 |
-| **5J-followup single-instance** | `tauri-plugin-single-instance`：第二個實例自殺、焦點還給第一個，避免 orphan binary 雙開搶 hotkey |
-| **5M 主視窗 sidebar** | 880×600 + resizable。左側 5 個 tab：Chat / Profiles / Config / Memory / Skills |
-| **5L Config / Profile UI** | ConfigTab 編 config.json + corrections.md(即時 JSON 驗證)；ProfilesTab 列 voice/agent profile + 切換按鈕 + 編輯 modal + 新增/刪除。所有變更不需要重啟 |
+| **5N Chat panel 重設計** | scrollable 對話歷史(user 靠右天空藍 / Mori 靠左森林綠 / 🔧 tool chip)+ 底部 input bar(🎤 + textarea + 送出)+ inline 錄音/思考 status chip + ⚙️ 開 status modal |
+| **5M sidebar 架構** | 主視窗 880×600 resizable。左側 5 個 tab:Chat / Profiles / Config / Memory / Skills |
+| **5L Config tab** | config.json typed form(provider 下拉、API keys / routing.skills KV table、provider cards 可折疊)+ Raw JSON 雙模式;corrections.md textarea |
+| **5L-3 Profile tab** | voice / agent profile list + 切換 + Form / Shell Skills / Raw 三 view 編輯器;Form 蓋 provider / enabled_skills chips / paste_shortcut / cleanup_level / ZEROTYPE_AIPROMPT_* 進階;shell_skills 表格(含 parameters / timeout / working_dir 等)|
+| **5L-4 Memory tab** | ~/.mori/memory/ 全部記憶 list,顏色 type chip,搜尋,點 row 開 modal 編 name / description / type / body |
+| **5L-4 Skills tab** | 列當前 agent profile 啟用的全部 skills(built-in + shell_skill),展開看 parameters table |
+| **5K-1 Picker overlay** | `Ctrl+Alt+P` 開獨立 picker 視窗(3-item carousel),熱鍵之外也能選任意 profile |
+| **5K-2 Tray submenu** | 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」滑鼠選 |
+| **5J-followup single-instance** | `tauri-plugin-single-instance`:第二個實例自殺、焦點還給第一個 |
 
 ### 5J：單層 profile + Rust 統一 context 注入
 
