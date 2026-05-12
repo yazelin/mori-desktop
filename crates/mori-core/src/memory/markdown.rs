@@ -246,7 +246,7 @@ fn parse_memory(id: &str, text: &str) -> Result<Memory> {
                 match key {
                     "name" => name = value.to_string(),
                     "description" => description = value.to_string(),
-                    "type" => memory_type = parse_memory_type(value),
+                    "type" => memory_type = MemoryType::parse(value),
                     "created" => {
                         if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(value) {
                             created = ts.with_timezone(&Utc);
@@ -278,31 +278,12 @@ fn parse_memory(id: &str, text: &str) -> Result<Memory> {
     })
 }
 
-fn parse_memory_type(s: &str) -> MemoryType {
-    match s.to_lowercase().as_str() {
-        "user_identity" | "user-identity" | "useridentity" => MemoryType::UserIdentity,
-        "preference" => MemoryType::Preference,
-        "skill_outcome" | "skill-outcome" | "skilloutcome" => MemoryType::SkillOutcome,
-        "project" => MemoryType::Project,
-        "reference" => MemoryType::Reference,
-        other => MemoryType::Other(other.to_string()),
-    }
-}
-
 fn format_memory(m: &Memory) -> String {
-    let type_str = match &m.memory_type {
-        MemoryType::UserIdentity => "user_identity".to_string(),
-        MemoryType::Preference => "preference".to_string(),
-        MemoryType::SkillOutcome => "skill_outcome".to_string(),
-        MemoryType::Project => "project".to_string(),
-        MemoryType::Reference => "reference".to_string(),
-        MemoryType::Other(s) => s.clone(),
-    };
     format!(
         "---\nname: {}\ndescription: {}\ntype: {}\ncreated: {}\nlast_used: {}\n---\n\n{}\n",
         m.name,
         m.description,
-        type_str,
+        m.memory_type.as_str(),
         m.created.to_rfc3339(),
         m.last_used.to_rfc3339(),
         m.body.trim_end()
@@ -420,5 +401,97 @@ mod tests {
         let hits = store.search("forest", 10).await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, "a");
+    }
+
+    /// 5E-3:`list_by_types` 過濾出指定 type,空 list 直接回空。
+    #[tokio::test]
+    async fn list_by_types_filters_voice_dict() {
+        let dir = tempdir().unwrap();
+        let store = LocalMarkdownMemoryStore::new(dir.path().to_path_buf()).unwrap();
+
+        let now = Utc::now();
+        store
+            .write(Memory {
+                id: "dict_names".into(),
+                name: "STT 校正詞庫".into(),
+                description: "人名 / 公司名 / 專有名詞".into(),
+                memory_type: MemoryType::VoiceDict,
+                created: now,
+                last_used: now,
+                body: "- Annuli 不要寫成「安奴利」".into(),
+            })
+            .await
+            .unwrap();
+        store
+            .write(Memory {
+                id: "user_lang".into(),
+                name: "繁中偏好".into(),
+                description: "always reply 繁體".into(),
+                memory_type: MemoryType::Preference,
+                created: now,
+                last_used: now,
+                body: "Always 繁中.".into(),
+            })
+            .await
+            .unwrap();
+        store
+            .write(Memory {
+                id: "note_a".into(),
+                name: "Note".into(),
+                description: "".into(),
+                memory_type: MemoryType::Other("note".into()),
+                created: now,
+                last_used: now,
+                body: "x".into(),
+            })
+            .await
+            .unwrap();
+
+        // 只要 VoiceDict
+        let hits = store.list_by_types(&[MemoryType::VoiceDict]).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "dict_names");
+
+        // 兩種 type 都要
+        let hits = store
+            .list_by_types(&[MemoryType::VoiceDict, MemoryType::Preference])
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+
+        // 空 list → 空結果(不走 IO short-circuit)
+        let hits = store.list_by_types(&[]).await.unwrap();
+        assert!(hits.is_empty());
+
+        // Other variant(任意字串)能精確匹配
+        let hits = store
+            .list_by_types(&[MemoryType::Other("note".into())])
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "note_a");
+    }
+
+    #[test]
+    fn memory_type_parse_voice_dict() {
+        assert_eq!(MemoryType::parse("voice_dict"), MemoryType::VoiceDict);
+        assert_eq!(MemoryType::parse("voice-dict"), MemoryType::VoiceDict);
+        assert_eq!(MemoryType::parse("VoiceDict"), MemoryType::VoiceDict);
+        assert_eq!(MemoryType::parse("voicedict"), MemoryType::VoiceDict);
+    }
+
+    #[test]
+    fn memory_type_as_str_roundtrips() {
+        for t in [
+            MemoryType::UserIdentity,
+            MemoryType::Preference,
+            MemoryType::SkillOutcome,
+            MemoryType::Project,
+            MemoryType::Reference,
+            MemoryType::VoiceDict,
+            MemoryType::Other("custom".into()),
+        ] {
+            assert_eq!(MemoryType::parse(&t.as_str()), t, "round-trip for {:?}", t);
+        }
     }
 }
