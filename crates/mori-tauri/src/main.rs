@@ -1308,7 +1308,6 @@ async fn run_agent_pipeline(
 
         let registry = Arc::new(registry);
 
-        let agent = Agent::new(agent_provider.clone(), registry);
         // brand-3 follow-up: profile frontmatter `agent_mode: dispatch` 讓 agent loop
         // emit tool_call + execute 後直接結束(不再 round LLM 等 final text),
         // 適合「轉發 / bridge」型 profile(如 ZeroType bridge)避免不必要的二次
@@ -1316,9 +1315,62 @@ async fn run_agent_pipeline(
         let mode = AgentMode::from_str_or_default(
             agent_profile.frontmatter.agent_mode.as_deref(),
         );
-        let turn = agent
-            .respond_with_mode(&system_prompt, &history_snapshot, &transcript, &ctx, mode)
-            .await?;
+
+        // 5A-3b: agent loop fallback chain — 走 option (a):整個 respond_with_mode
+        // 在 fallback provider 上從頭重跑(history + transcript 不變)。
+        // 避免 tool_call_id 跨 provider(groq `call_xxx` / claude / ollama 各家
+        // 格式不同,mid-conversation 換 brain 會炸)。
+        // 沒設 fallback_chain.agent → chain 只有 primary 一個,行為等同單試。
+        let agent_chain: Vec<Arc<dyn mori_core::llm::LlmProvider>> =
+            std::iter::once(agent_provider.clone())
+                .chain(routing.fallback_for("agent").iter().cloned())
+                .collect();
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut maybe_turn: Option<mori_core::agent::AgentTurn> = None;
+        for (idx, p) in agent_chain.iter().enumerate() {
+            let agent = Agent::new(p.clone(), registry.clone());
+            match agent
+                .respond_with_mode(&system_prompt, &history_snapshot, &transcript, &ctx, mode)
+                .await
+            {
+                Ok(t) => {
+                    maybe_turn = Some(t);
+                    break;
+                }
+                Err(e) => {
+                    if let Some(next) = agent_chain.get(idx + 1) {
+                        tracing::warn!(
+                            failed = %p.name(),
+                            next = %next.name(),
+                            ?e,
+                            "agent falling back to next provider",
+                        );
+                        let _ = app.emit(
+                            "chat-system-message",
+                            serde_json::json!({
+                                "kind": "fallback",
+                                "context": "agent",
+                                "failed_provider": p.name(),
+                                "next_provider": next.name(),
+                                "reason": format!("{e:#}"),
+                            }),
+                        );
+                        let _ = app.emit(
+                            "provider-changed",
+                            serde_json::json!({
+                                "context": "agent",
+                                "name": next.name(),
+                            }),
+                        );
+                    }
+                    last_err = Some(e);
+                }
+            }
+        }
+        let turn = maybe_turn.ok_or_else(|| {
+            last_err.unwrap_or_else(|| anyhow::anyhow!("agent chain unexpectedly empty"))
+        })?;
         if !turn.skill_calls.is_empty() {
             tracing::info!(
                 n = turn.skill_calls.len(),
@@ -1512,6 +1564,8 @@ async fn run_voice_input_pipeline(
     }
 
     // Step 1: LLM cleanup（單輪純文字轉換；minimal/none 跳 LLM）
+    // 5A-3b: chat call 走 chat_with_fallback,若 routing.fallback_chain.voice_input_cleanup
+    // 有設,主 provider 失敗會試 fallback。沒設則 chain 只有 primary 一個,行為等同舊版。
     let after_llm: anyhow::Result<String> = match level {
         CleanupLevel::None | CleanupLevel::Minimal => Ok(transcript.clone()),
         CleanupLevel::Smart => {
@@ -1524,11 +1578,49 @@ async fn run_voice_input_pipeline(
                 ChatMessage::system(rendered_system),
                 ChatMessage::user(transcript.clone()),
             ];
-            llm_provider
-                .chat(messages, vec![])
-                .await
-                .context("voice-input LLM cleanup chat")
-                .map(|r| r.content.unwrap_or_default().trim().to_string())
+            let chain: Vec<Arc<dyn mori_core::llm::LlmProvider>> =
+                std::iter::once(llm_provider.clone())
+                    .chain(routing.fallback_for("voice_input_cleanup").iter().cloned())
+                    .collect();
+            let app_cb = app.clone();
+            mori_core::llm::chat_with_fallback(
+                &chain,
+                messages,
+                vec![],
+                move |failed, next, err| {
+                    tracing::warn!(
+                        failed, next, ?err,
+                        "voice-input cleanup falling back to next provider",
+                    );
+                    let _ = app_cb.emit(
+                        "chat-system-message",
+                        serde_json::json!({
+                            "kind": "fallback",
+                            "context": "voice_input_cleanup",
+                            "failed_provider": failed,
+                            "next_provider": next,
+                            "reason": format!("{err:#}"),
+                        }),
+                    );
+                    let _ = app_cb.emit(
+                        "provider-changed",
+                        serde_json::json!({
+                            "context": "voice_input_cleanup",
+                            "name": next,
+                        }),
+                    );
+                    // 5A-3b: voice path 的 floating widget chip 透過 voice-input-status
+                    // 顯示「處理中 · <provider>」— fallback 切到 next 之後重 emit 讓 chip
+                    // 即時改顯示新 provider 名,user 在 floating 上看得到。
+                    let _ = app_cb.emit(
+                        "voice-input-status",
+                        format!("處理中 · {} (fallback)", next),
+                    );
+                },
+            )
+            .await
+            .context("voice-input LLM cleanup chat")
+            .map(|(r, _used)| r.content.unwrap_or_default().trim().to_string())
         }
     };
 

@@ -9,6 +9,15 @@
 //   點 ⚙️ 開 status modal 顯示 build SHA / provider / clipboard 等
 
 import { useEffect, useRef, useState } from "react";
+
+// 5A-3b: ChatPanel 接的 system message payload(fallback chain 觸發時 backend 推)
+type FallbackSystemMessage = {
+  kind: "fallback";
+  context: "agent" | "voice_input_cleanup";
+  failed_provider: string;
+  next_provider: string;
+  reason: string;
+};
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -96,6 +105,9 @@ function ChatPanel() {
     clipboard?: string | null;
     selected_text?: string | null;
   } | null>(null);
+  // 5A-3b: fallback chain 觸發時 backend 推 system message,渲染在 thread 內。
+  // 每次 recording / transcribing 重置(新 pipeline 開始時清舊訊息)。
+  const [systemMessages, setSystemMessages] = useState<FallbackSystemMessage[]>([]);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
 
@@ -121,6 +133,10 @@ function ChatPanel() {
     const unlistenPhase = listen<Phase>("phase-changed", (e) => {
       setPhase(e.payload);
       if (e.payload.kind === "done") refreshConversation();
+      // 5A-3b: 新 pipeline 啟動(recording / transcribing)→ 清掉舊 fallback 訊息
+      if (e.payload.kind === "recording" || e.payload.kind === "transcribing") {
+        setSystemMessages([]);
+      }
     });
     const unlistenMode = listen<Mode>("mode-changed", (e) => setMode(e.payload));
     const unlistenAudio = listen<number>("audio-level", (e) => setAudioLevel(e.payload));
@@ -128,6 +144,10 @@ function ChatPanel() {
     const unlistenCtx = listen<typeof lastContext>("context-captured", (e) =>
       setLastContext(e.payload),
     );
+    // 5A-3b: fallback chain 觸發時 backend emit 一條 system message
+    const unlistenSys = listen<FallbackSystemMessage>("chat-system-message", (e) => {
+      setSystemMessages((prev) => [...prev, e.payload]);
+    });
 
     return () => {
       unlistenPhase.then((f) => f());
@@ -135,6 +155,7 @@ function ChatPanel() {
       unlistenAudio.then((f) => f());
       unlistenWarmup.then((f) => f());
       unlistenCtx.then((f) => f());
+      unlistenSys.then((f) => f());
     };
   }, []);
 
@@ -237,6 +258,17 @@ function ChatPanel() {
           <ChatBubble key={i} turn={turn} />
         ))}
         {inProgress && <ChatBubble turn={inProgress} />}
+        {/* 5A-3b: fallback chain 觸發時的提示行(每次 pipeline 開始清空) */}
+        {systemMessages.map((sm, i) => (
+          <div key={`sys-${i}`} className="mori-chat-system">
+            <span className="label">
+              <IconWarning width={12} height={12} /> {sm.context === "agent" ? "Agent" : "VoiceInput"} fallback
+            </span>
+            <p>
+              <code>{sm.failed_provider}</code> 失敗,自動改用 <code>{sm.next_provider}</code> 重試 — <span className="dim">{sm.reason}</span>
+            </p>
+          </div>
+        ))}
         {phase.kind === "error" && (
           <div className="mori-chat-error">
             <span className="label"><IconWarning width={13} height={13} /> 錯誤</span>
