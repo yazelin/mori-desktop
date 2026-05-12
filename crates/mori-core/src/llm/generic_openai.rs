@@ -54,6 +54,14 @@ impl GenericOpenAiProvider {
         self.display_name = name;
         self
     }
+
+    /// config.json 自訂 provider(provider name 來自 user 輸入,非 string literal)
+    /// 用這個。`Box::leak` 把 String 升級到 'static,custom provider 整個 process
+    /// lifetime 都活著,leak 是可接受的(一次性、量小、不會增長)。
+    pub fn with_name_owned(mut self, name: String) -> Self {
+        self.display_name = Box::leak(name.into_boxed_str());
+        self
+    }
 }
 
 #[async_trait]

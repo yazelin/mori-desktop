@@ -190,11 +190,72 @@ pub fn build_named_provider(
                     .with_name("gemini"),
             ))
         }
-        other => anyhow::bail!(
-            "unknown provider name '{}' — supported: groq, gemini, ollama, claude-cli, \
-             claude-bash, gemini-bash, codex-bash, gemini-cli, codex-cli",
-            other
-        ),
+        other => {
+            // 5N: 自訂 OpenAI-compat 端點 — 在 config.json `providers.<other>` 設:
+            //   {
+            //     "api_base": "https://your.openai.azure.com/openai/v1",
+            //     "api_key_env": "ZEROTYPE_AIPROMPT_API_KEY_AOAI",  // 或 api_key 直接寫(不建議)
+            //     "model": "gpt-4.1"
+            //   }
+            // 有 api_base 就視為 OpenAI-compat,沒 api_base 就 bail unknown。
+            //
+            // 取代過往 ZEROTYPE_AIPROMPT_* frontmatter 鍵的角色 — 端點細節集中在
+            // config.json,profile 只 `provider: <name>`。
+            let cfg_path = mori_config_path();
+            let cfg = cfg_path.as_deref();
+            let api_base = cfg
+                .and_then(|p| groq::read_json_pointer(p, &format!("/providers/{other}/api_base")));
+            if let Some(api_base) = api_base {
+                let key_env = cfg.and_then(|p| {
+                    groq::read_json_pointer(p, &format!("/providers/{other}/api_key_env"))
+                });
+                let inline_key = cfg.and_then(|p| {
+                    groq::read_json_pointer(p, &format!("/providers/{other}/api_key"))
+                });
+                let api_key = match (key_env.as_deref(), inline_key.as_deref()) {
+                    (Some(env_name), _) => resolve_api_key(env_name).unwrap_or_default(),
+                    (None, Some(k)) => k.to_string(),
+                    (None, None) => String::new(),
+                };
+                if api_key.is_empty() {
+                    anyhow::bail!(
+                        "custom provider '{}' has api_base but api_key 解不到。請在 \
+                         ~/.mori/config.json 設 providers.{}.api_key_env(指向 OS env \
+                         或 api_keys.<name>;建議),或 .api_key(直接寫死,不建議)。",
+                        other,
+                        other
+                    );
+                }
+                let model = cfg
+                    .and_then(|p| groq::read_json_pointer(p, &format!("/providers/{other}/model")))
+                    .unwrap_or_default();
+                if model.is_empty() {
+                    tracing::warn!(
+                        provider = other,
+                        "custom provider 沒設 providers.{}.model — 空 model 大概會被 API 拒絕",
+                        other
+                    );
+                }
+                tracing::info!(
+                    provider = other,
+                    api_base = %api_base,
+                    model = %model,
+                    "custom OpenAI-compat provider built from config.json"
+                );
+                return Ok(Arc::new(
+                    generic_openai::GenericOpenAiProvider::new(api_base, api_key, model)
+                        .with_name_owned(other.to_string()),
+                ));
+            }
+            anyhow::bail!(
+                "unknown provider '{}' — built-in: groq, gemini, ollama, claude-cli, \
+                 claude-bash, gemini-bash, codex-bash, gemini-cli, codex-cli。要用自訂 \
+                 OpenAI-compat 端點請在 ~/.mori/config.json 設 providers.{}.api_base + \
+                 .api_key_env + .model。",
+                other,
+                other
+            )
+        }
     }
 }
 
@@ -243,18 +304,20 @@ pub fn build_chat_provider(
     retry_cb: Option<groq::RetryCallback>,
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     let default = read_provider_config();
-    let resolved = match default.as_str() {
-        "groq" | "gemini" | "ollama" | "claude-cli" | "claude-bash"
-        | "gemini-bash" | "codex-bash" | "gemini-cli" | "codex-cli" => default.as_str(),
-        other => {
+    // 5N: 不再 allowlist — 直接交給 build_named_provider 決定;5 個 built-in 之外
+    // 會走 config.json `providers.<name>` lookup(custom OpenAI-compat)。失敗才
+    // fallback 到 groq + warn,讓 user 看到自訂端點哪裡沒填齊。
+    let p = match build_named_provider(&default, retry_cb.clone()) {
+        Ok(p) => p,
+        Err(e) => {
             tracing::warn!(
-                provider = other,
-                "unknown provider — falling back to 'groq'",
+                provider = %default,
+                error = %e,
+                "could not build configured provider — falling back to 'groq'",
             );
-            "groq"
+            build_named_provider("groq", retry_cb)?
         }
     };
-    let p = build_named_provider(resolved, retry_cb)?;
     tracing::info!(provider = %p.name(), model = %p.model(), "chat provider selected");
     Ok(p)
 }
@@ -673,6 +736,100 @@ mod routing_tests {
         assert_eq!(p.name(), "gemini");
         assert!(p.supports_tool_calling());
         assert_eq!(p.model(), GEMINI_DEFAULT_MODEL);
+    }
+
+    // 5N: 自訂 OpenAI-compat 端點 — 把 ZEROTYPE_AIPROMPT_* frontmatter 鍵
+    // 替換成 config.json `providers.<name>` 機制。env / config_path / HOME
+    // 都是 process-global,跟 gemini 系列 test 共用 lock 避免 race。
+    #[test]
+    fn build_named_provider_custom_openai_compat_from_config() {
+        let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home_dir = tempdir().unwrap();
+        std::fs::create_dir_all(home_dir.path().join(".mori")).unwrap();
+        std::fs::write(
+            home_dir.path().join(".mori/config.json"),
+            r#"{
+              "providers": {
+                "azure-gpt41": {
+                  "api_base": "https://example.openai.azure.com/openai/v1",
+                  "api_key_env": "MORI_TEST_AZURE_KEY",
+                  "model": "gpt-4.1"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+        let _g_key = EnvGuard::set("MORI_TEST_AZURE_KEY", "azure-test-key");
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home_dir.path());
+        let result = build_named_provider("azure-gpt41", None);
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let p = result.expect("custom provider should build from config.json");
+        assert_eq!(p.name(), "azure-gpt41", "name = config.json provider key");
+        assert_eq!(p.model(), "gpt-4.1");
+        assert!(p.supports_tool_calling());
+    }
+
+    #[test]
+    fn build_named_provider_unknown_no_api_base_errors() {
+        let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home_dir = tempdir().unwrap();
+        std::fs::create_dir_all(home_dir.path().join(".mori")).unwrap();
+        // 故意沒設 providers.foo.api_base
+        std::fs::write(
+            home_dir.path().join(".mori/config.json"),
+            r#"{"providers": {"foo": {"model": "anything"}}}"#,
+        )
+        .unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home_dir.path());
+        let result = build_named_provider("foo", None);
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let err = match result {
+            Ok(_) => panic!("expected error for unknown provider without api_base"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(err.contains("unknown provider"), "got: {err}");
+        assert!(err.contains("api_base"), "error should hint api_base setup, got: {err}");
+    }
+
+    #[test]
+    fn build_named_provider_custom_missing_key_errors() {
+        let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g_key = EnvGuard::unset("MORI_TEST_NO_KEY_ENV");
+        let home_dir = tempdir().unwrap();
+        std::fs::create_dir_all(home_dir.path().join(".mori")).unwrap();
+        std::fs::write(
+            home_dir.path().join(".mori/config.json"),
+            r#"{
+              "providers": {
+                "azure-x": {
+                  "api_base": "https://example.openai.azure.com/openai/v1",
+                  "api_key_env": "MORI_TEST_NO_KEY_ENV",
+                  "model": "gpt-4.1"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home_dir.path());
+        let result = build_named_provider("azure-x", None);
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let err = match result {
+            Ok(_) => panic!("expected error when api_key cannot be resolved"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(err.contains("api_key"), "error should mention api_key, got: {err}");
     }
 }
 
