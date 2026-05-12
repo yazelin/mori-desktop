@@ -6,6 +6,26 @@
 
 ---
 
+## 3B-2 — YouTube transcript shell_skill 範本(2026-05-13)
+
+Roadmap 上「3B-2 YouTube transcript skill」原本規劃做成 built-in skill,
+這版實際落實為 **shell_skill 範本路徑** — 改邏輯都不用動 Rust,user 自己想
+換語言優先序 / cap size / 字幕清理規則改 sh 就好,跟 mori 主程式解耦。
+
+- `examples/scripts/mori-youtube-transcript.sh` — yt-dlp wrapper:
+  - 抓 auto-subs + manual subs,語言優先 `zh-TW > zh-Hant > zh-Hans > zh > en.* > en`
+  - srt → 純文字(去序號 / 時間軸 / HTML tag / 空行 / 連續重複)
+  - 30KB cap(1 小時影片大約 20-40KB,避免 LLM context 爆)
+  - PATH 自動加 `$HOME/.local/bin`(Deps tab 裝的 yt-dlp 落在那)
+  - 錯誤訊息分類(yt-dlp 沒裝 / 影片無字幕)
+- `examples/agent/AGENT-04.YouTube 摘要.md` — profile + shell_skill 框架:
+  - `provider: claude-bash`(摘要任務 reasoning 重要 + user 自己 quota)
+  - 一條 `youtube_transcript(url)` shell_skill timeout 90s
+  - System prompt 明確要求 hook + 3-5 bullet + 結論的繁中摘要
+  - 截斷時要備註「字幕後半未涵蓋」
+- `docs/profile-examples.html` 加 AGENT-04 card,展示這個 pattern
+- roadmap 3B-2 段砍掉(實作完成)
+
 ## docs: roadmap cleanup 對齊實際 code(2026-05-13)
 
 Roadmap audit 抓到三條跟 code 實際狀態不對齊,訂正:

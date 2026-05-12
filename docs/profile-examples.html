@@ -267,6 +267,50 @@ shell_skills:
   </div>
 </div>
 
+<div class="example">
+  <div class="example-head">
+    <span class="path">agent/AGENT-04.YouTube 摘要.md</span>
+    <span class="hotkey">Ctrl+Alt+4</span>
+  </div>
+  <div class="example-body">
+    <p>
+      <strong>YouTube 摘要 helper</strong>(3B-2)— 給 YouTube URL,Mori 透過
+      <code>yt-dlp</code> 抓字幕 → 轉純文字 → LLM 用繁中產生 hook + 重點 + 結論。
+      原本 roadmap 內的 built-in skill,實際做成 shell_skill 範本後 user 自己
+      改任何邏輯都不用改 Rust。
+    </p>
+    <p>
+      使用前提:Deps tab 裝過 <code>uv</code> + <code>yt-dlp</code>(yt-dlp 透過 uv 管 isolated venv,binary 落在 <code>~/.local/bin/</code>)。
+    </p>
+    <p>
+      實體範本在
+      <a href="https://github.com/yazelin/mori-desktop/tree/main/examples"><code>examples/agent/AGENT-04.YouTube 摘要.md</code></a>
+      +
+      <a href="https://github.com/yazelin/mori-desktop/tree/main/examples/scripts"><code>examples/scripts/mori-youtube-transcript.sh</code></a>:
+    </p>
+<pre>---
+provider: claude-bash
+enable_read: true
+shell_skills:
+  - name: youtube_transcript
+    description: |
+      抓 YouTube 影片字幕(自動 + 手動),輸出純文字 transcript。
+      語言優先序:繁中 > 簡中 > 英文。30KB 上限避免 LLM context 爆。
+    parameters:
+      url: { type: string, required: true }
+    command: ["~/bin/mori-youtube-transcript.sh", "{{url}}"]
+    timeout: 90
+---
+你是 Mori 的 YouTube 影片摘要助手。
+
+流程:
+1. 收到 URL → tool_call youtube_transcript(url: "...")
+2. 拿到 transcript → 產生繁中摘要(hook + 3-5 bullet + 結論)
+3. 若 ERROR → 告知 user 並建議改餵 transcript 文字</pre>
+    <p>script 內部用 <code>yt-dlp --write-auto-subs --sub-langs "zh-TW,zh-Hant,zh-Hans,zh,en.*,en"</code> 抓字幕,srt 轉純文字後 cap 30KB(1 小時影片大約 20-40KB)。改邏輯只改 sh,不動 Rust。</p>
+  </div>
+</div>
+
 <h2 class="group-title">VoiceInput 範本(Alt+N)</h2>
 
 <p>VoiceInput 模式只做「字」,不做「事」:STT → 單輪 LLM cleanup → 貼回游標。

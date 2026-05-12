@@ -22,10 +22,6 @@
 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接。
 等 contributor 補。
 
-### 3B-2 — YouTube transcript skill
-YouTube URL → 抓字幕摘要(yt-dlp 已在 Deps tab 裝得起來,差 skill wrapper)。
-可走 `examples/agent/` shell_skill 範本路徑,user import 即用。
-
 ### 3C — Pure Wayland 跨 app 反白
 **X11 + XWayland 用 xclip + PRIMARY 已 cover 90%**(`selection.rs:39` 的
 `LinuxPasteController`)。Pure Wayland(原生 GTK4 / Hyprland 等沒 XWayland 的
