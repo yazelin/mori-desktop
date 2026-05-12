@@ -5,8 +5,9 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: rgba(12, 16, 22, 1);
-  color: rgba(255, 255, 255, 0.92);
+  /* brand: 深森林夜色,跟 shell main 一致 */
+  background: #1f3329;
+  color: rgba(243, 240, 230, 0.92); /* ivory */
 }
 
 /* ─── Top bar ──────────────────────────────────────── */
@@ -119,13 +120,15 @@
   line-height: 1.55;
 }
 .mori-bubble.user .bubble-body {
-  background: rgba(135, 206, 235, 0.18);
-  border: 1px solid rgba(135, 206, 235, 0.28);
+  /* 暖色 sand 區分 user input vs Mori 回應的森林綠 */
+  background: rgba(214, 191, 161, 0.18);
+  border: 1px solid rgba(214, 191, 161, 0.30);
   border-bottom-right-radius: 4px;
 }
 .mori-bubble.assistant .bubble-body {
-  background: rgba(180, 230, 195, 0.12);
-  border: 1px solid rgba(180, 230, 195, 0.18);
+  /* forest-soft 葉脈淺綠 = Mori 葉子 voice */
+  background: rgba(168, 197, 162, 0.16);
+  border: 1px solid rgba(168, 197, 162, 0.28);
   border-bottom-left-radius: 4px;
 }
 
@@ -191,8 +194,8 @@
   flex-shrink: 0;
 }
 .mori-chat-progress.recording {
-  background: rgba(135, 206, 235, 0.08);
-  border-color: rgba(135, 206, 235, 0.25);
+  background: rgba(106, 143, 114, 0.14);
+  border-color: rgba(168, 197, 162, 0.35);
 }
 .mori-chat-progress .text { font-weight: 500; }
 .mori-chat-progress .hint {
@@ -216,7 +219,7 @@
   flex-shrink: 0;
 }
 .mori-chat-progress .dot.pulse {
-  background: rgba(135, 206, 235, 0.90);
+  background: rgba(168, 197, 162, 0.92);
   animation: mori-chat-pulse 1s ease-in-out infinite;
 }
 .mori-chat-progress .dot.spin {
@@ -245,9 +248,10 @@
 }
 .mori-level-meter .fill {
   height: 100%;
+  /* forest → forest-soft 漸層 (深綠葉根 → 淺綠葉尖) */
   background: linear-gradient(90deg,
-    rgba(135, 206, 235, 0.7) 0%,
-    rgba(170, 230, 185, 0.85) 100%);
+    rgba(106, 143, 114, 0.80) 0%,
+    rgba(168, 197, 162, 0.90) 100%);
   transition: width 50ms linear;
 }
 .mori-level-meter .fill.quiet {
@@ -261,8 +265,8 @@
   align-items: flex-end;
   gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(8, 12, 18, 0.95);
+  border-top: 1px solid rgba(230, 222, 202, 0.08);
+  background: rgba(23, 38, 32, 0.95); /* sidebar 深綠同調 */
   flex-shrink: 0;
 }
 
@@ -284,9 +288,9 @@
 }
 .mori-mic-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .mori-mic-btn.recording {
-  background: rgba(135, 206, 235, 0.22);
-  border-color: rgba(135, 206, 235, 0.55);
-  color: rgba(220, 240, 250, 0.98);
+  background: rgba(106, 143, 114, 0.32);
+  border-color: rgba(168, 197, 162, 0.65);
+  color: rgba(230, 222, 202, 0.98); /* cream-on-forest */
   animation: mori-chat-pulse 1.2s ease-in-out infinite;
 }
 
@@ -307,16 +311,16 @@
 }
 .mori-chat-textarea:focus {
   outline: none;
-  border-color: rgba(135, 206, 235, 0.45);
+  border-color: rgba(168, 197, 162, 0.55);
   background: rgba(0, 0, 0, 0.42);
 }
 .mori-chat-textarea:disabled { opacity: 0.5; }
 
 .mori-send-btn {
   padding: 9px 16px;
-  background: rgba(135, 206, 235, 0.20);
-  border: 1px solid rgba(135, 206, 235, 0.40);
-  color: rgba(220, 240, 250, 0.98);
+  background: rgba(106, 143, 114, 0.30);
+  border: 1px solid rgba(168, 197, 162, 0.55);
+  color: rgba(230, 222, 202, 0.98);
   border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
@@ -326,7 +330,7 @@
   font-family: inherit;
   transition: background 120ms ease;
 }
-.mori-send-btn:hover:not(:disabled) { background: rgba(135, 206, 235, 0.30); }
+.mori-send-btn:hover:not(:disabled) { background: rgba(106, 143, 114, 0.45); }
 .mori-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ─── Status modal ─────────────────────────────────── */

@@ -5,8 +5,9 @@
   display: flex;
   width: 100vw;
   height: 100vh;
-  background: rgba(12, 16, 22, 1);
-  color: rgba(255, 255, 255, 0.92);
+  /* brand: 深森林夜色(forest-deep 暗版),搭配 sidebar 更深一階 */
+  background: #1f3329;
+  color: rgba(243, 240, 230, 0.92); /* ivory tint */
   font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   overflow: hidden;
   /* 整個 main window 都走 dark color scheme;
@@ -19,8 +20,9 @@
 .mori-sidebar {
   width: 196px;
   flex-shrink: 0;
-  background: rgba(8, 12, 18, 1);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  /* 比 main 再深一階,跟 logo badge 的深綠 (#182622) 對齊 */
+  background: #172620;
+  border-right: 1px solid rgba(230, 222, 202, 0.08); /* cream subtle */
   display: flex;
   flex-direction: column;
   padding: 12px 8px;
@@ -32,11 +34,11 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(230, 222, 202, 0.08);
   margin-bottom: 8px;
 }
 .mori-sidebar-brand-icon {
-  /* 5O+ 從 🌳 emoji 換成真 logo (米色 stroke on dark sidebar bg) */
+  /* badge logo: 深綠盤 + cream 描邊,在深 sidebar 上可見度最佳 */
   width: 24px;
   height: 24px;
   display: block;
@@ -46,7 +48,7 @@
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.4px;
-  color: rgba(180, 230, 195, 0.95);
+  color: rgba(230, 222, 202, 0.95); /* cream */
 }
 
 .mori-sidebar-nav {
@@ -71,13 +73,14 @@
   transition: background 120ms ease, color 120ms ease;
 }
 .mori-sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.95);
+  background: rgba(230, 222, 202, 0.05); /* cream tint hover */
+  color: rgba(243, 240, 230, 0.95);
 }
 .mori-sidebar-item.active {
-  background: rgba(135, 206, 235, 0.10);
-  border-color: rgba(135, 206, 235, 0.30);
-  color: rgba(255, 255, 255, 0.98);
+  /* forest active highlight */
+  background: rgba(106, 143, 114, 0.22);
+  border-color: rgba(168, 197, 162, 0.45);
+  color: rgba(243, 240, 230, 0.98);
 }
 
 .mori-sidebar-item-icon {
@@ -120,7 +123,7 @@
   font-size: 18px;
   font-weight: 600;
   margin: 0 0 6px;
-  color: rgba(180, 230, 195, 0.95);
+  color: rgba(230, 222, 202, 0.95); /* cream brand title */
 }
 .mori-tab-hint {
   font-size: 12.5px;
@@ -175,8 +178,8 @@
   transition: background 120ms ease, border-color 120ms ease;
 }
 .mori-profile-card:hover {
-  background: rgba(135, 206, 235, 0.10);
-  border-color: rgba(135, 206, 235, 0.35);
+  background: rgba(106, 143, 114, 0.16);
+  border-color: rgba(168, 197, 162, 0.40);
 }
 .mori-profile-card-name {
   font-size: 13px;
@@ -248,13 +251,13 @@
 }
 .mori-btn.small { padding: 4px 9px; font-size: 11.5px; }
 .mori-btn.primary {
-  background: rgba(135, 206, 235, 0.18);
-  border-color: rgba(135, 206, 235, 0.40);
-  color: rgba(220, 240, 250, 0.98);
+  background: rgba(106, 143, 114, 0.28);
+  border-color: rgba(168, 197, 162, 0.50);
+  color: rgba(230, 222, 202, 0.98); /* cream-on-forest */
 }
 .mori-btn.primary:hover:not(:disabled) {
-  background: rgba(135, 206, 235, 0.28);
-  border-color: rgba(135, 206, 235, 0.55);
+  background: rgba(106, 143, 114, 0.40);
+  border-color: rgba(168, 197, 162, 0.65);
 }
 .mori-btn.danger {
   background: rgba(255, 80, 80, 0.14);
@@ -304,7 +307,7 @@
 }
 .mori-config-textarea:focus {
   outline: none;
-  border-color: rgba(135, 206, 235, 0.45);
+  border-color: rgba(168, 197, 162, 0.55);
   background: rgba(0, 0, 0, 0.45);
 }
 .mori-config-textarea.has-error {
@@ -346,8 +349,9 @@
 .mori-modal {
   width: min(92%, 720px);
   max-height: 88%;
-  background: rgba(15, 20, 28, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* 比 main 再亮一階,modal 浮起來的感覺 */
+  background: #243a31;
+  border: 1px solid rgba(230, 222, 202, 0.14);
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
   display: flex;
@@ -362,7 +366,7 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 .mori-modal-title { display: flex; flex-direction: column; gap: 2px; }
-.mori-modal-kind { font-size: 11.5px; color: rgba(135, 206, 235, 0.85); }
+.mori-modal-kind { font-size: 11.5px; color: rgba(168, 197, 162, 0.85); }
 .mori-modal-stem {
   font-family: ui-monospace, "JetBrains Mono", monospace;
   font-size: 13px;
@@ -444,9 +448,9 @@
   color: rgba(255, 255, 255, 0.95);
 }
 .mori-view-tab.active {
-  background: rgba(135, 206, 235, 0.18);
-  border-color: rgba(135, 206, 235, 0.40);
-  color: rgba(220, 240, 250, 0.98);
+  background: rgba(106, 143, 114, 0.28);
+  border-color: rgba(168, 197, 162, 0.50);
+  color: rgba(230, 222, 202, 0.98);
 }
 .mori-view-toggle-actions {
   margin-left: auto;
@@ -490,7 +494,7 @@
 }
 .mori-input:focus {
   outline: none;
-  border-color: rgba(135, 206, 235, 0.45);
+  border-color: rgba(168, 197, 162, 0.55);
   background: rgba(0, 0, 0, 0.42);
 }
 select.mori-input {
@@ -501,8 +505,8 @@ select.mori-input {
   color-scheme: dark;
 }
 select.mori-input option {
-  background: rgba(15, 20, 28, 0.98);
-  color: rgba(255, 255, 255, 0.92);
+  background: #243a31;
+  color: rgba(243, 240, 230, 0.92);
 }
 
 /* ─── KV table ─────────────────────────────────────────────── */
@@ -529,7 +533,7 @@ select.mori-input option {
 }
 .mori-kv-key:focus, .mori-kv-value:focus {
   outline: none;
-  border-color: rgba(135, 206, 235, 0.45);
+  border-color: rgba(168, 197, 162, 0.55);
 }
 
 /* ─── Provider card (collapsible) ──────────────────────────── */
@@ -670,9 +674,9 @@ select.mori-input option {
   color: rgba(255, 255, 255, 0.95);
 }
 .mori-skill-chip.on {
-  background: rgba(135, 206, 235, 0.20);
-  border-color: rgba(135, 206, 235, 0.45);
-  color: rgba(220, 240, 250, 0.98);
+  background: rgba(106, 143, 114, 0.30);
+  border-color: rgba(168, 197, 162, 0.55);
+  color: rgba(230, 222, 202, 0.98);
 }
 
 /* shell_skills editor */
@@ -871,8 +875,8 @@ select.mori-input option {
   transition: background 120ms ease, border-color 120ms ease;
 }
 .mori-memory-row:hover {
-  background: rgba(135, 206, 235, 0.06);
-  border-color: rgba(135, 206, 235, 0.20);
+  background: rgba(106, 143, 114, 0.12);
+  border-color: rgba(168, 197, 162, 0.30);
 }
 .mori-memory-row-main {
   display: flex;
@@ -895,7 +899,7 @@ select.mori-input option {
   color: rgba(255, 255, 255, 0.75);
 }
 .mori-memory-type.type-user_identity { background: rgba(180, 230, 195, 0.18); border-color: rgba(180, 230, 195, 0.35); color: rgba(200, 240, 210, 0.95); }
-.mori-memory-type.type-preference     { background: rgba(135, 206, 235, 0.18); border-color: rgba(135, 206, 235, 0.35); color: rgba(220, 240, 250, 0.95); }
+.mori-memory-type.type-preference     { background: rgba(214, 191, 161, 0.18); border-color: rgba(214, 191, 161, 0.40); color: rgba(230, 222, 202, 0.95); } /* sand */
 .mori-memory-type.type-project        { background: rgba(255, 200, 100, 0.16); border-color: rgba(255, 200, 100, 0.30); color: rgba(255, 230, 180, 0.95); }
 .mori-memory-type.type-reference      { background: rgba(200, 180, 240, 0.16); border-color: rgba(200, 180, 240, 0.30); color: rgba(220, 200, 250, 0.95); }
 .mori-memory-row-sub {
@@ -1024,7 +1028,7 @@ select.mori-input option {
 }
 .mori-skill-params .param-type {
   font-family: ui-monospace, monospace;
-  color: rgba(135, 206, 235, 0.85);
+  color: rgba(214, 191, 161, 0.90); /* sand for type names */
 }
 .mori-skill-params .param-required { text-align: center; color: rgba(180, 230, 195, 0.95); }
 .mori-skill-params .param-desc em { color: rgba(255, 255, 255, 0.40); }

@@ -32,13 +32,14 @@ body.picker-window #root {
 .mori-picker-card {
   width: 92%;
   max-height: 92%;
-  background: rgba(15, 20, 28, 0.92);
+  /* brand: 深森林背景 + 葉子描邊感 */
+  background: rgba(31, 51, 41, 0.94); /* #1f3329 @ 0.94 */
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(168, 197, 162, 0.20);
   border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  color: rgba(255, 255, 255, 0.95);
+  color: rgba(243, 240, 230, 0.95);
   font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   display: flex;
   flex-direction: column;
@@ -71,9 +72,9 @@ body.picker-window #root {
   color: rgba(255, 255, 255, 0.85);
 }
 .mori-picker-tab.active {
-  color: rgba(255, 255, 255, 0.98);
-  border-bottom: 2px solid rgba(135, 206, 235, 0.85);
-  background: rgba(135, 206, 235, 0.06);
+  color: rgba(243, 240, 230, 0.98);
+  border-bottom: 2px solid rgba(168, 197, 162, 0.90);
+  background: rgba(106, 143, 114, 0.14);
 }
 .mori-picker-tab-count {
   margin-left: 6px;
@@ -115,16 +116,16 @@ body.picker-window #root {
   background: rgba(255, 255, 255, 0.05);
 }
 .mori-picker-row.cur {
-  background: rgba(135, 206, 235, 0.22);
-  outline: 1px solid rgba(135, 206, 235, 0.55);
+  background: rgba(106, 143, 114, 0.32);
+  outline: 1px solid rgba(168, 197, 162, 0.60);
   font-size: 14px;
   font-weight: 500;
 }
 .mori-picker-row.cur:hover {
-  background: rgba(135, 206, 235, 0.30);
+  background: rgba(106, 143, 114, 0.42);
 }
 .mori-picker-cursor {
-  color: rgba(180, 230, 245, 0.95);
+  color: rgba(168, 197, 162, 0.95); /* forest-soft 葉脈 */
   font-size: 14px;
   margin-right: 2px;
 }
