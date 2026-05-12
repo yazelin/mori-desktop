@@ -90,6 +90,21 @@
     color: var(--c-brown);
     font-size: 10.5px;
   }
+  .shot-inline {
+    margin: 12px 0;
+    border: 1px solid var(--c-beige);
+    border-radius: 8px;
+    overflow: hidden;
+    max-width: 480px;
+  }
+  .shot-inline img { display: block; width: 100%; height: auto; }
+  .shot-inline figcaption {
+    padding: 6px 12px;
+    font-size: 11.5px;
+    color: var(--c-brown);
+    background: var(--c-cream);
+    border-top: 1px solid var(--c-beige);
+  }
 </style>
 </head>
 <body>
@@ -159,6 +174,11 @@ npm run tauri dev</code></pre>
   <span style="color: var(--c-brown)"><code>[opt]</code></span> = 選用,user 自己建/裝
 </p>
 
+<figure class="shot-inline">
+  <img src="screenshots/config-light.png" alt="Config tab + Theme picker" loading="lazy">
+  <figcaption>Config tab — theme / provider / api keys / routing 都從這編</figcaption>
+</figure>
+
 <h2 class="group-title">設定檔</h2>
 
 <div class="file-row">
@@ -223,6 +243,11 @@ npm run tauri dev</code></pre>
 
 <h2 class="group-title">Profile</h2>
 
+<figure class="shot-inline">
+  <img src="screenshots/profiles.png" alt="Profiles tab — VoiceInput list" loading="lazy">
+  <figcaption>Profiles tab — 列當前所有 voice / agent profile,切換 + 編輯</figcaption>
+</figure>
+
 <div class="file-row">
   <div class="path">agent/AGENT.md</div>
   <div class="auto yes">auto</div>
@@ -266,6 +291,11 @@ npm run tauri dev</code></pre>
 
 <h2 class="group-title">Memory</h2>
 
+<figure class="shot-inline">
+  <img src="screenshots/memory.png" alt="Memory tab" loading="lazy">
+  <figcaption>Memory tab — Mori 自寫 memory 列表 + 全文搜尋 + 編輯</figcaption>
+</figure>
+
 <div class="file-row">
   <div class="path">memory/</div>
   <div class="auto partial">lazy</div>
@@ -284,7 +314,19 @@ npm run tauri dev</code></pre>
   </div>
 </div>
 
+<h2 class="group-title">Skills(讀取 active profile)</h2>
+
+<figure class="shot-inline">
+  <img src="screenshots/skills.png" alt="Skills tab" loading="lazy">
+  <figcaption>Skills tab — 列當前 profile 啟用的 built-in + shell skill,展開看 schema</figcaption>
+</figure>
+
 <h2 class="group-title">選用</h2>
+
+<figure class="shot-inline">
+  <img src="screenshots/deps.png" alt="Deps tab" loading="lazy">
+  <figcaption>Deps tab — yt-dlp / ydotool / xdotool / whisper-local / ollama 偵測 + 一鍵安裝</figcaption>
+</figure>
 
 <div class="file-row">
   <div class="path">models/ggml-small.bin</div>
