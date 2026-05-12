@@ -25,6 +25,30 @@ Groq TPD 觸頂自動切 ollama / claude(現在要手改 config)。
 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接。
 等 contributor 補。
 
+### 5E-3 — VoiceInput 可選載入相關記憶
+目前 VoiceInput pipeline 是純 LLM cleanup(單輪,沒 tool calling),
+完全不參與 memory(`remember` / `recall_memory` 只在 Agent 模式)。
+未來整合:用**可選開關**讓 user 決定 VoiceInput cleanup 要不要 inject 記憶到
+system prompt。
+
+用途:
+- **專有名詞庫**:Whisper 把「Annuli」一直譯成「安奴利」/「安列利」— 記憶內存「我的專有名詞表」自動 inject,cleanup LLM 看到接近的音優先選清單詞
+- **聯絡人 / 公司名**:「給智凱」「給孟潔」這類 STT 容易錯的人名
+- **個人慣用語**:user 在 Agent 模式用 `remember` 寫下自己的 cleanup 偏好(像「我喜歡用『也就是』不用『就是』」),VoiceInput 之後讀進來
+
+開關設計(暫定):
+```yaml
+# voice profile frontmatter
+inject_memory_types: [voice_dict, glossary]   # 留空 = 不 inject
+```
+或全域 `config.json`:
+```json
+{ "voice_input": { "inject_memory_types": ["voice_dict"] } }
+```
+
+寫入(`remember`)仍只走 Agent;VoiceInput 只 read-only。
+跟既有 `corrections.md`(static / 手動維護)互補:memory 是動態 + tag 分類。
+
 ### 5E-2 — OpenCC 簡→繁保底
 whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加
 `opencc-rust`(系統依賴 `libopencc-dev`)。
