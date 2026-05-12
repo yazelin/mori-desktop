@@ -1,19 +1,36 @@
-// 5L: ~/.mori/config.json + corrections.md 編輯器。
-// 第一版用 textarea + 即時 JSON 驗證,5L-2 再做表單版。
+// 5L-2: ~/.mori/config.json typed form + raw JSON 雙模式編輯器。
 //
-// 設計:三個 sub-section
-// - config.json:JSON textarea,parse 失敗顯示錯誤、不讓存
-// - corrections.md:純文字 textarea
-// - (5L-2)providers / api_keys 表單
+// 設計:
+// - 預設 Form view:常用欄位 typed inputs / dropdowns
+// - Raw JSON view:textarea + 即時 parse 驗證,給 power user 加 routing.skills
+//   等進階欄位
+// - 兩個 view 共用一個 JSON state source-of-truth;切換時自動 sync,
+//   未列在 form 的 key 也會保留(round-trip 不丟資料)
+// - 儲存:寫整個 JSON 物件
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 type SaveStatus =
   | { kind: "idle" }
   | { kind: "saving" }
-  | { kind: "ok"; at: number }
+  | { kind: "ok" }
   | { kind: "err"; message: string };
+
+// 已知的 named providers — 來自 mori-core/src/llm/mod.rs
+const ALL_PROVIDERS = [
+  "groq",
+  "gemini",
+  "ollama",
+  "claude-cli",
+  "claude-bash",
+  "gemini-bash",
+  "codex-bash",
+  "gemini-cli",
+  "codex-cli",
+] as const;
+
+const STT_PROVIDERS = ["groq", "whisper-local"] as const;
 
 function Section({
   title,
@@ -40,114 +57,460 @@ function StatusBadge({ status }: { status: SaveStatus }) {
   return <span className="mori-save-status err">✗ {status.message}</span>;
 }
 
-function ConfigTab() {
-  const [configText, setConfigText] = useState<string>("");
-  const [configOrig, setConfigOrig] = useState<string>("");
-  const [configStatus, setConfigStatus] = useState<SaveStatus>({ kind: "idle" });
-  const [configError, setConfigError] = useState<string | null>(null);
+function FormRow({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mori-form-row">
+      <div className="mori-form-row-label">
+        <span>{label}</span>
+        {hint && <span className="mori-form-row-hint">{hint}</span>}
+      </div>
+      <div className="mori-form-row-input">{children}</div>
+    </div>
+  );
+}
 
-  const [correctionsText, setCorrectionsText] = useState<string>("");
-  const [correctionsOrig, setCorrectionsOrig] = useState<string>("");
-  const [correctionsStatus, setCorrectionsStatus] = useState<SaveStatus>({ kind: "idle" });
+function KvTable({
+  rows,
+  setRows,
+  keyPlaceholder,
+  valuePlaceholder,
+  valueIsSecret = false,
+}: {
+  rows: Array<{ k: string; v: string }>;
+  setRows: (rows: Array<{ k: string; v: string }>) => void;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+  valueIsSecret?: boolean;
+}) {
+  const update = (i: number, field: "k" | "v", value: string) => {
+    const next = [...rows];
+    next[i] = { ...next[i], [field]: value };
+    setRows(next);
+  };
+  const remove = (i: number) => setRows(rows.filter((_, j) => j !== i));
+  const add = () => setRows([...rows, { k: "", v: "" }]);
+  return (
+    <div className="mori-kv-table">
+      {rows.map((r, i) => (
+        <div key={i} className="mori-kv-row">
+          <input
+            className="mori-kv-key"
+            value={r.k}
+            onChange={(e) => update(i, "k", e.target.value)}
+            placeholder={keyPlaceholder}
+          />
+          <input
+            className="mori-kv-value"
+            type={valueIsSecret ? "password" : "text"}
+            value={r.v}
+            onChange={(e) => update(i, "v", e.target.value)}
+            placeholder={valuePlaceholder}
+            autoComplete="off"
+          />
+          <button className="mori-btn small ghost" onClick={() => remove(i)} title="刪除">✕</button>
+        </div>
+      ))}
+      <button className="mori-btn small" onClick={add}>+ 新增</button>
+    </div>
+  );
+}
+
+// ─── helpers:JSON ↔ form state ──────────────────────────────────────
+
+type AnyObj = Record<string, any>;
+
+function getStr(obj: AnyObj | undefined, key: string, fallback = ""): string {
+  const v = obj?.[key];
+  return typeof v === "string" ? v : v == null ? fallback : String(v);
+}
+
+function setStrOrUndef(obj: AnyObj, key: string, value: string) {
+  if (value === "") delete obj[key];
+  else obj[key] = value;
+}
+
+function ensureSubObj(obj: AnyObj, key: string): AnyObj {
+  if (!obj[key] || typeof obj[key] !== "object") obj[key] = {};
+  return obj[key];
+}
+
+function ConfigTab() {
+  const [raw, setRaw] = useState<string>("");
+  const [orig, setOrig] = useState<string>("");
+  const [view, setView] = useState<"form" | "raw">("form");
+  const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
+  const [error, setError] = useState<string | null>(null);
+
+  // corrections.md 同一頁編
+  const [corrText, setCorrText] = useState<string>("");
+  const [corrOrig, setCorrOrig] = useState<string>("");
+  const [corrStatus, setCorrStatus] = useState<SaveStatus>({ kind: "idle" });
 
   useEffect(() => {
     invoke<string>("config_read")
-      .then((t) => {
-        setConfigText(t);
-        setConfigOrig(t);
-      })
-      .catch((e) => setConfigError(`load: ${e}`));
+      .then((t) => { setRaw(t); setOrig(t); })
+      .catch((e) => setError(`load config.json: ${e}`));
     invoke<string>("corrections_read")
-      .then((t) => {
-        setCorrectionsText(t);
-        setCorrectionsOrig(t);
-      })
+      .then((t) => { setCorrText(t); setCorrOrig(t); })
       .catch(() => {
-        // corrections.md 不存在不算錯,提供一個 starter
-        setCorrectionsText("# Mori STT 校正表\n\n# 看到左邊 → 改成右邊\n# 例:modem -> Markdown\n\n");
+        setCorrText("# Mori STT 校正表\n\n# 看到左邊 → 改成右邊\n# 例:modem -> Markdown\n\n");
       });
   }, []);
 
-  // 即時 JSON validate
-  useEffect(() => {
-    if (!configText) { setConfigError(null); return; }
-    try {
-      JSON.parse(configText);
-      setConfigError(null);
-    } catch (e: any) {
-      setConfigError(e.message);
-    }
-  }, [configText]);
+  // Parse raw JSON for form view(失敗則保留 form 為 default,raw view 顯紅框)
+  const cfg: AnyObj = useMemo(() => {
+    try { return JSON.parse(raw || "{}"); } catch { return {}; }
+  }, [raw]);
+
+  // raw view 的 JSON syntax 即時驗證
+  const rawError = useMemo<string | null>(() => {
+    if (!raw.trim()) return null;
+    try { JSON.parse(raw); return null; } catch (e: any) { return e.message; }
+  }, [raw]);
+
+  // 從目前 cfg + patch 序列化回 raw
+  const applyPatch = (patch: (cfg: AnyObj) => void) => {
+    const next = JSON.parse(raw || "{}");
+    patch(next);
+    setRaw(JSON.stringify(next, null, 2));
+  };
+
+  const apiKeysRows: Array<{ k: string; v: string }> = useMemo(() => {
+    const keys = cfg.api_keys;
+    if (!keys || typeof keys !== "object") return [];
+    return Object.entries(keys).map(([k, v]) => ({ k, v: String(v ?? "") }));
+  }, [cfg]);
+
+  const setApiKeys = (rows: Array<{ k: string; v: string }>) => {
+    applyPatch((c) => {
+      const obj: AnyObj = {};
+      rows.forEach((r) => {
+        if (r.k.trim()) obj[r.k.trim()] = r.v;
+      });
+      if (Object.keys(obj).length === 0) {
+        delete c.api_keys;
+      } else {
+        c.api_keys = obj;
+      }
+    });
+  };
+
+  const routingSkillsRows: Array<{ k: string; v: string }> = useMemo(() => {
+    const skills = cfg.routing?.skills;
+    if (!skills || typeof skills !== "object") return [];
+    return Object.entries(skills).map(([k, v]) => ({ k, v: String(v ?? "") }));
+  }, [cfg]);
+
+  const setRoutingSkills = (rows: Array<{ k: string; v: string }>) => {
+    applyPatch((c) => {
+      const r = ensureSubObj(c, "routing");
+      const obj: AnyObj = {};
+      rows.forEach((row) => {
+        if (row.k.trim() && row.v.trim()) obj[row.k.trim()] = row.v.trim();
+      });
+      if (Object.keys(obj).length === 0) {
+        delete r.skills;
+        if (Object.keys(r).length === 0) delete c.routing;
+      } else {
+        r.skills = obj;
+      }
+    });
+  };
 
   const saveConfig = async () => {
-    if (configError) return;
-    setConfigStatus({ kind: "saving" });
+    if (rawError) { setStatus({ kind: "err", message: `JSON: ${rawError}` }); return; }
+    setStatus({ kind: "saving" });
     try {
-      await invoke("config_write", { text: configText });
-      setConfigOrig(configText);
-      setConfigStatus({ kind: "ok", at: Date.now() });
-      setTimeout(() => setConfigStatus({ kind: "idle" }), 2500);
+      await invoke("config_write", { text: raw });
+      setOrig(raw);
+      setStatus({ kind: "ok" });
+      setTimeout(() => setStatus({ kind: "idle" }), 2500);
     } catch (e: any) {
-      setConfigStatus({ kind: "err", message: String(e) });
+      setStatus({ kind: "err", message: String(e) });
     }
   };
 
   const saveCorrections = async () => {
-    setCorrectionsStatus({ kind: "saving" });
+    setCorrStatus({ kind: "saving" });
     try {
-      await invoke("corrections_write", { text: correctionsText });
-      setCorrectionsOrig(correctionsText);
-      setCorrectionsStatus({ kind: "ok", at: Date.now() });
-      setTimeout(() => setCorrectionsStatus({ kind: "idle" }), 2500);
+      await invoke("corrections_write", { text: corrText });
+      setCorrOrig(corrText);
+      setCorrStatus({ kind: "ok" });
+      setTimeout(() => setCorrStatus({ kind: "idle" }), 2500);
     } catch (e: any) {
-      setCorrectionsStatus({ kind: "err", message: String(e) });
+      setCorrStatus({ kind: "err", message: String(e) });
     }
   };
 
-  const configDirty = configText !== configOrig;
-  const correctionsDirty = correctionsText !== correctionsOrig;
+  const dirty = raw !== orig;
+  const corrDirty = corrText !== corrOrig;
 
   return (
     <div className="mori-tab mori-tab-config">
       <h2 className="mori-tab-title">Config</h2>
       <p className="mori-tab-hint">
         編輯 ~/.mori/config.json + corrections.md。改完不需要重啟,下一次熱鍵
-        會即時讀新設定(profile 也是)。
+        會即時讀新設定。Form view 蓋常用欄位,Raw JSON view 給 routing.skills 等進階。
       </p>
 
-      <Section
-        title="config.json"
-        hint="provider / stt_provider / providers.* / api_keys / routing"
-      >
-        <textarea
-          className={`mori-config-textarea ${configError ? "has-error" : ""}`}
-          spellCheck={false}
-          value={configText}
-          onChange={(e) => setConfigText(e.target.value)}
-          rows={20}
-        />
-        {configError && (
-          <div className="mori-config-error">JSON parse error: {configError}</div>
-        )}
-        <div className="mori-config-actions">
+      {error && <div className="mori-config-error">{error}</div>}
+
+      {/* ── View toggle ───────────────────────────────── */}
+      <div className="mori-view-toggle">
+        <button
+          className={`mori-view-tab ${view === "form" ? "active" : ""}`}
+          onClick={() => setView("form")}
+        >
+          Form
+        </button>
+        <button
+          className={`mori-view-tab ${view === "raw" ? "active" : ""}`}
+          onClick={() => setView("raw")}
+        >
+          Raw JSON {rawError ? "⚠" : ""}
+        </button>
+        <div className="mori-view-toggle-actions">
+          <StatusBadge status={status} />
+          <button
+            className="mori-btn"
+            onClick={() => setRaw(orig)}
+            disabled={!dirty}
+          >還原</button>
           <button
             className="mori-btn primary"
             onClick={saveConfig}
-            disabled={!configDirty || !!configError}
-          >
-            儲存
-          </button>
-          <button
-            className="mori-btn"
-            onClick={() => setConfigText(configOrig)}
-            disabled={!configDirty}
-          >
-            還原
-          </button>
-          <StatusBadge status={configStatus} />
+            disabled={!dirty || !!rawError}
+          >儲存</button>
         </div>
-      </Section>
+      </div>
 
+      {view === "form" ? (
+        <>
+          {/* ── Defaults ───────────────────────────────── */}
+          <Section
+            title="預設"
+            hint="所有 profile 沒指定 provider 時用這個。VoiceInput profile 可以再 override 自己的 stt_provider。"
+          >
+            <FormRow label="provider" hint="主對話 / agent LLM">
+              <select
+                className="mori-input"
+                value={getStr(cfg, "provider", "groq")}
+                onChange={(e) =>
+                  applyPatch((c) => setStrOrUndef(c, "provider", e.target.value))
+                }
+              >
+                {ALL_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </FormRow>
+            <FormRow label="stt_provider" hint="Whisper STT">
+              <select
+                className="mori-input"
+                value={getStr(cfg, "stt_provider", "groq")}
+                onChange={(e) =>
+                  applyPatch((c) => setStrOrUndef(c, "stt_provider", e.target.value))
+                }
+              >
+                {STT_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </FormRow>
+          </Section>
+
+          {/* ── API keys ───────────────────────────────── */}
+          <Section
+            title="API Keys"
+            hint="OS env var 找不到時的 fallback。Key 名建議 *_API_KEY,值會以密碼欄位呈現。"
+          >
+            <KvTable
+              rows={apiKeysRows}
+              setRows={setApiKeys}
+              keyPlaceholder="GEMINI_API_KEY"
+              valuePlaceholder="key 值"
+              valueIsSecret
+            />
+          </Section>
+
+          {/* ── Providers ──────────────────────────────── */}
+          <Section
+            title="Provider 設定"
+            hint="只列你會用的就好。空著的 provider 啟動時用內建預設(api_base / model 等)。"
+          >
+            <ProviderCard
+              name="groq"
+              cfg={cfg.providers?.groq}
+              fields={[
+                { key: "api_key", label: "api_key", secret: true, hint: "gsk_..." },
+                { key: "model", label: "model", hint: "openai/gpt-oss-120b" },
+                { key: "stt_model", label: "stt_model", hint: "whisper-large-v3-turbo" },
+              ]}
+              onPatch={(patch) =>
+                applyPatch((c) => {
+                  const p = ensureSubObj(c, "providers");
+                  const g = ensureSubObj(p, "groq");
+                  patch(g);
+                })
+              }
+            />
+            <ProviderCard
+              name="gemini"
+              cfg={cfg.providers?.gemini}
+              fields={[
+                { key: "model", label: "model", hint: "gemini-3.1-flash-lite-preview" },
+                { key: "api_base", label: "api_base", hint: "(留空用預設 google 端點)" },
+              ]}
+              hint="key 從 api_keys.GEMINI_API_KEY 或 OS env 取"
+              onPatch={(patch) =>
+                applyPatch((c) => {
+                  const p = ensureSubObj(c, "providers");
+                  const g = ensureSubObj(p, "gemini");
+                  patch(g);
+                })
+              }
+            />
+            <ProviderCard
+              name="ollama"
+              cfg={cfg.providers?.ollama}
+              fields={[
+                { key: "base_url", label: "base_url", hint: "http://localhost:11434" },
+                { key: "model", label: "model", hint: "qwen3:8b" },
+              ]}
+              onPatch={(patch) =>
+                applyPatch((c) => {
+                  const p = ensureSubObj(c, "providers");
+                  const o = ensureSubObj(p, "ollama");
+                  patch(o);
+                })
+              }
+            />
+            <ProviderCard
+              name="claude-bash"
+              cfg={cfg.providers?.["claude-bash"]}
+              fields={[
+                { key: "binary", label: "binary", hint: "PATH 上的 claude binary 名稱" },
+                { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
+                { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+              ]}
+              onPatch={(patch) =>
+                applyPatch((c) => {
+                  const p = ensureSubObj(c, "providers");
+                  const b = ensureSubObj(p, "claude-bash");
+                  patch(b);
+                })
+              }
+            />
+            <ProviderCard
+              name="claude-cli"
+              cfg={cfg.providers?.["claude-cli"]}
+              fields={[
+                { key: "binary", label: "binary", hint: "claude" },
+                { key: "model", label: "model" },
+              ]}
+              onPatch={(patch) =>
+                applyPatch((c) => {
+                  const p = ensureSubObj(c, "providers");
+                  const cc = ensureSubObj(p, "claude-cli");
+                  patch(cc);
+                })
+              }
+            />
+            <ProviderCard
+              name="whisper-local"
+              cfg={cfg.providers?.["whisper-local"]}
+              fields={[
+                { key: "model_path", label: "model_path", hint: "/home/.../ggml-small.bin" },
+                { key: "language", label: "language", hint: "zh / en / ..." },
+              ]}
+              onPatch={(patch) =>
+                applyPatch((c) => {
+                  const p = ensureSubObj(c, "providers");
+                  const w = ensureSubObj(p, "whisper-local");
+                  patch(w);
+                })
+              }
+            />
+          </Section>
+
+          {/* ── Routing(進階)───────────────────────────── */}
+          <Section
+            title="Routing(進階)"
+            hint="個別 skill 走不同 provider。沒設 = 全部用上面 provider。"
+          >
+            <FormRow label="agent" hint="agent loop 用哪個 provider(預設 = provider)">
+              <select
+                className="mori-input"
+                value={cfg.routing?.agent ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const r = ensureSubObj(c, "routing");
+                    if (e.target.value === "") {
+                      delete r.agent;
+                      if (Object.keys(r).length === 0) delete c.routing;
+                    } else {
+                      r.agent = e.target.value;
+                    }
+                  })
+                }
+              >
+                <option value="">(同 provider)</option>
+                {ALL_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </FormRow>
+            <FormRow label="skills" hint="skill_name → provider(空 = 用 agent / provider)">
+              <KvTable
+                rows={routingSkillsRows}
+                setRows={setRoutingSkills}
+                keyPlaceholder="translate / polish / summarize ..."
+                valuePlaceholder="groq / claude-cli ..."
+              />
+            </FormRow>
+          </Section>
+
+          {/* ── Voice input ────────────────────────────── */}
+          <Section
+            title="VoiceInput"
+            hint="VoiceInput 模式的 cleanup 等級(每個 voice profile 也可以 override)"
+          >
+            <FormRow label="cleanup_level" hint="smart=LLM+程式 / minimal=只程式 / none=raw 直貼">
+              <select
+                className="mori-input"
+                value={cfg.voice_input?.cleanup_level ?? "smart"}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const v = ensureSubObj(c, "voice_input");
+                    v.cleanup_level = e.target.value;
+                  })
+                }
+              >
+                <option value="smart">smart</option>
+                <option value="minimal">minimal</option>
+                <option value="none">none</option>
+              </select>
+            </FormRow>
+          </Section>
+        </>
+      ) : (
+        <Section title="" >
+          <textarea
+            className={`mori-config-textarea ${rawError ? "has-error" : ""}`}
+            spellCheck={false}
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            rows={28}
+          />
+          {rawError && (
+            <div className="mori-config-error">JSON parse error: {rawError}</div>
+          )}
+        </Section>
+      )}
+
+      {/* ── Corrections.md ────────────────────────────── */}
       <Section
         title="corrections.md"
         hint="共用 STT 校正表(voice / agent profile 用 #file: 引用)"
@@ -155,28 +518,83 @@ function ConfigTab() {
         <textarea
           className="mori-config-textarea"
           spellCheck={false}
-          value={correctionsText}
-          onChange={(e) => setCorrectionsText(e.target.value)}
+          value={corrText}
+          onChange={(e) => setCorrText(e.target.value)}
           rows={14}
         />
         <div className="mori-config-actions">
           <button
             className="mori-btn primary"
             onClick={saveCorrections}
-            disabled={!correctionsDirty}
-          >
-            儲存
-          </button>
+            disabled={!corrDirty}
+          >儲存</button>
           <button
             className="mori-btn"
-            onClick={() => setCorrectionsText(correctionsOrig)}
-            disabled={!correctionsDirty}
-          >
-            還原
-          </button>
-          <StatusBadge status={correctionsStatus} />
+            onClick={() => setCorrText(corrOrig)}
+            disabled={!corrDirty}
+          >還原</button>
+          <StatusBadge status={corrStatus} />
         </div>
       </Section>
+    </div>
+  );
+}
+
+// ─── Provider card ──────────────────────────────────────────────────
+
+type ProviderField = {
+  key: string;
+  label: string;
+  hint?: string;
+  secret?: boolean;
+};
+
+function ProviderCard({
+  name,
+  cfg,
+  fields,
+  hint,
+  onPatch,
+}: {
+  name: string;
+  cfg: AnyObj | undefined;
+  fields: ProviderField[];
+  hint?: string;
+  onPatch: (patch: (provider: AnyObj) => void) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(true);
+  const present = !!cfg && Object.keys(cfg).length > 0;
+  return (
+    <div className={`mori-provider-card ${collapsed ? "collapsed" : ""}`}>
+      <div
+        className="mori-provider-card-head"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <span className="mori-provider-name">{name}</span>
+        {present && <span className="mori-provider-set">已設</span>}
+        {hint && <span className="mori-provider-hint">{hint}</span>}
+        <span className="mori-provider-toggle">{collapsed ? "▸" : "▾"}</span>
+      </div>
+      {!collapsed && (
+        <div className="mori-provider-card-body">
+          {fields.map((f) => (
+            <FormRow key={f.key} label={f.label} hint={f.hint}>
+              <input
+                className="mori-input"
+                type={f.secret ? "password" : "text"}
+                autoComplete="off"
+                value={cfg?.[f.key] == null ? "" : String(cfg[f.key])}
+                onChange={(e) =>
+                  onPatch((p) => {
+                    if (e.target.value === "") delete p[f.key];
+                    else p[f.key] = e.target.value;
+                  })
+                }
+              />
+            </FormRow>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -408,3 +408,164 @@
   font-size: 11px;
   color: rgba(170, 230, 185, 0.9);
 }
+
+/* ─── 5L-2: Typed form widgets ─────────────────────────────── */
+
+.mori-view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mori-view-tab {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.65);
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.mori-view-tab:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.95);
+}
+.mori-view-tab.active {
+  background: rgba(135, 206, 235, 0.18);
+  border-color: rgba(135, 206, 235, 0.40);
+  color: rgba(220, 240, 250, 0.98);
+}
+.mori-view-toggle-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mori-form-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.mori-form-row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.80);
+  font-family: ui-monospace, monospace;
+}
+.mori-form-row-hint {
+  font-family: system-ui, sans-serif;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.mori-form-row-input { min-width: 0; }
+
+.mori-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.30);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 6px 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.mori-input:focus {
+  outline: none;
+  border-color: rgba(135, 206, 235, 0.45);
+  background: rgba(0, 0, 0, 0.42);
+}
+select.mori-input {
+  font-family: system-ui, sans-serif;
+  cursor: pointer;
+}
+
+/* ─── KV table ─────────────────────────────────────────────── */
+
+.mori-kv-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mori-kv-row {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr auto;
+  gap: 6px;
+  align-items: center;
+}
+.mori-kv-key, .mori-kv-value {
+  background: rgba(0, 0, 0, 0.30);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 6px 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+}
+.mori-kv-key:focus, .mori-kv-value:focus {
+  outline: none;
+  border-color: rgba(135, 206, 235, 0.45);
+}
+
+/* ─── Provider card (collapsible) ──────────────────────────── */
+
+.mori-provider-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.mori-provider-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease;
+}
+.mori-provider-card-head:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.mori-provider-name {
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+}
+.mori-provider-set {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  background: rgba(170, 230, 185, 0.20);
+  border: 1px solid rgba(170, 230, 185, 0.30);
+  border-radius: 4px;
+  color: rgba(200, 240, 210, 0.95);
+}
+.mori-provider-hint {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.40);
+  margin-left: 4px;
+}
+.mori-provider-toggle {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.50);
+  font-size: 13px;
+}
+.mori-provider-card-body {
+  padding: 8px 12px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.mori-provider-card-body .mori-form-row {
+  grid-template-columns: 140px 1fr;
+  margin-bottom: 6px;
+}
