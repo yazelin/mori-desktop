@@ -38,7 +38,9 @@ body.picker-window #root {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--c-border-strong);
   border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  /* picker window 520×280,card 邊距只 ~20/11px;原 box-shadow 0 12px 40px
+     blur 過大會被 window 裁切,縮到留在 card 周圍即可 */
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.30);
   color: var(--c-text-strong);
   font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   display: flex;
@@ -143,7 +145,9 @@ body.picker-window #root {
 .mori-picker-stem {
   flex: 1;
   font-size: 10.5px;
-  color: var(--c-text-soft);
+  /* light theme 下 stem 用 text-muted(brown 100%)而非 text-soft(brown alpha 65%)
+     — 後者在 cream hover bg 上對比不夠 */
+  color: var(--c-text-muted);
   font-family: ui-monospace, "JetBrains Mono", monospace;
   white-space: nowrap;
   overflow: hidden;
