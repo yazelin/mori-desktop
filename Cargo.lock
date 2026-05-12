@@ -2597,6 +2597,7 @@ dependencies = [
  "ashpd",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "cpal",
  "futures-util",

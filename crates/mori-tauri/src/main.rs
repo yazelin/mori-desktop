@@ -9,6 +9,7 @@ mod deps;
 mod portal_hotkey;
 mod recording;
 #[cfg(target_os = "linux")]
+mod character_pack;
 mod selection;
 mod shell_skill;
 mod skill_server;
@@ -655,6 +656,56 @@ fn theme_toggle() -> Result<(String, crate::theme::Theme), String> {
 #[tauri::command]
 fn theme_dir() -> String {
     crate::theme::themes_dir().display().to_string()
+}
+
+// ─── 5P-1: Character pack IPC ─────────────────────────────────────
+
+#[tauri::command]
+fn character_list() -> Result<Vec<crate::character_pack::CharacterEntry>, String> {
+    crate::character_pack::list().map_err(|e| format!("list characters: {e:#}"))
+}
+
+#[tauri::command]
+fn character_get_active() -> Result<(String, crate::character_pack::CharacterManifest), String> {
+    let stem = crate::character_pack::get_active();
+    let m = crate::character_pack::load_manifest(&stem)
+        .map_err(|e| format!("load manifest {stem}: {e:#}"))?;
+    Ok((stem, m))
+}
+
+#[tauri::command]
+fn character_set_active(
+    stem: String,
+) -> Result<crate::character_pack::CharacterManifest, String> {
+    crate::character_pack::set_active(&stem).map_err(|e| format!("set active: {e:#}"))?;
+    let m = crate::character_pack::load_manifest(&stem)
+        .map_err(|e| format!("load manifest {stem}: {e:#}"))?;
+    Ok(m)
+}
+
+/// 讀 sprite 檔成 data URL(`data:image/png;base64,...`)讓 frontend `<img>` /
+/// CSS `background-image` 直接套。每張 sprite 對話只取一次,frontend 該 memoize。
+#[tauri::command]
+fn character_sprite_data_url(stem: String, state: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let p = crate::character_pack::sprite_path(&stem, &state);
+    if !p.exists() {
+        // Fallback 到 default mori 對應 state
+        let fallback = crate::character_pack::sprite_path("mori", &state);
+        if !fallback.exists() {
+            return Err(format!("sprite not found: {} (no fallback)", state));
+        }
+        tracing::warn!(stem = %stem, state = %state, "sprite missing, falling back to mori");
+        let bytes = std::fs::read(&fallback).map_err(|e| format!("read fallback: {e:#}"))?;
+        return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)));
+    }
+    let bytes = std::fs::read(&p).map_err(|e| format!("read sprite {state}: {e:#}"))?;
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)))
+}
+
+#[tauri::command]
+fn character_dir() -> String {
+    crate::character_pack::characters_dir().display().to_string()
 }
 
 #[tauri::command]
@@ -2227,6 +2278,11 @@ fn main() {
             theme_set_active,
             theme_toggle,
             theme_dir,
+            character_list,
+            character_get_active,
+            character_set_active,
+            character_sprite_data_url,
+            character_dir,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -2241,6 +2297,12 @@ fn main() {
             // 啟動時寫入(已存在則保留 user 編輯)
             if let Err(e) = crate::theme::ensure_builtin() {
                 tracing::warn!(error = %e, "theme::ensure_builtin failed");
+            }
+
+            // 5P-1: ensure ~/.mori/characters/mori/(default character pack)。
+            // manifest.json + 6 張 sprite PNG 從 binary 內嵌寫入,已存在不覆蓋。
+            if let Err(e) = crate::character_pack::ensure_default() {
+                tracing::warn!(error = %e, "character_pack::ensure_default failed");
             }
 
             // 注意:**不要**在這裡 setup() 直接 call set_always_on_top —

@@ -26,6 +26,8 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
+# 5P-1: character_pack 把 sprite PNG 讀進來 base64 encode 給 frontend
+base64 = "0.22"
 
 # Phase 5D — local HTTP skill server for Bash CLI proxy。
 # 啟動時 bind 127.0.0.1:RANDOM,把 port + token 寫到 ~/.mori/runtime.json,
