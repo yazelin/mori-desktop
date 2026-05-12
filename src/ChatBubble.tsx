@@ -51,6 +51,13 @@ function ChatBubble() {
         // visible 保留,WMClass group 已建立,後續 show 不會再造成 dock 堆疊
         await win.setPosition(new LogicalPosition(-10000, -10000));
       } catch (err) { console.error("[chat_bubble] move off-screen error", err); }
+      // brand-3 follow-up: 雙保險縮成 1×1。Wayland 偶爾 setPosition 沒成功
+      // (mutter 對 transparent + decorationless window 不穩),視窗停在
+      // user 上次顯示位置(常在 navbar / 左上角),仍 alwaysOnTop 吃 click。
+      // 即使 setPosition fail,1×1 透明窗擋不住任何 click。
+      try {
+        await win.setSize(new LogicalSize(1, 1));
+      } catch (err) { console.error("[chat_bubble] shrink error", err); }
       setText("");
     });
 

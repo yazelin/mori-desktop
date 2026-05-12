@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalPosition, currentMonitor } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, LogicalSize, currentMonitor } from "@tauri-apps/api/window";
 import { IconVoiceMic, IconTree } from "./icons";
 
 type ProfileEntry = { stem: string; display: string };
@@ -73,6 +73,13 @@ function Picker() {
     try {
       await win.setPosition(new LogicalPosition(-10000, -10000));
     } catch (e) { console.error("[picker] move off-screen failed", e); }
+    // brand-3 follow-up: 雙保險縮成 1×1。Wayland 偶爾 setPosition 沒成功
+    // (mutter 對 transparent decorationless 視窗不穩),520×280 alwaysOnTop
+    // 透明窗停在原位會擋下面 app(navbar / explorer 區 click hit-test)。
+    // 即使 setPosition fail,1×1 窗擋不住。下次 picker-open 會再 setSize 回 520×280。
+    try {
+      await win.setSize(new LogicalSize(1, 1));
+    } catch (e) { console.error("[picker] shrink failed", e); }
   };
 
   const confirm = async () => {
@@ -106,6 +113,9 @@ function Picker() {
       setSection("voice");
       setVoiceIdx(0);
       setAgentIdx(0);
+      // close 時縮成 1×1,重開時要 setSize 回正常尺寸再 center
+      try { await win.setSize(new LogicalSize(WIDTH, HEIGHT)); }
+      catch (e) { console.error("[picker] resize failed", e); }
       await centerOnPrimaryMonitor();
       // 第一次 show()(visible:false → true);之後 close 不 hide 只移 off-screen,
       // 所以這裡 show() 第二次以後是 no-op 但安全。
