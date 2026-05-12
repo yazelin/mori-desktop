@@ -1,0 +1,261 @@
+/* docs/ 設計公式書共用樣式 — 所有 .html 都 link 這個。
+   改 brand palette 只動這一個 :root,所有頁面跟著變。 */
+
+:root {
+  /* === Mori brand palette(從 docs/design/mori-brand.png COLOR PALETTE 抽出)=== */
+  --c-forest-deep:  #2C4A3D;
+  --c-forest:       #6A8F72;
+  --c-forest-soft:  #A8C5A2;
+  --c-cream:        #E6DECA;
+  --c-sand:         #D6BFA1;
+  --c-charcoal:     #3B2F2F;
+  --c-brown:        #7D6B5A;
+  --c-beige:        #B8A98E;
+  --c-ivory:        #F3F0E6;
+  --c-white:        #FFFFFF;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--c-ivory);
+  color: var(--c-charcoal);
+  font-family: "Noto Serif TC", "Source Han Serif TC", "Songti TC", serif;
+  line-height: 1.7;
+}
+body {
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+/* ── 公式書 header ── */
+.book-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--c-beige);
+  margin-bottom: 32px;
+}
+.book-header img.book-logo {
+  width: 52px; height: 52px;
+}
+.book-header h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--c-forest-deep);
+  letter-spacing: 1px;
+}
+.book-header .book-title-sub {
+  font-size: 12px;
+  letter-spacing: 4px;
+  color: var(--c-brown);
+  margin-top: 4px;
+}
+.book-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.book-nav a {
+  color: var(--c-forest);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+.book-nav a:hover { background: var(--c-cream); }
+.book-nav a.current {
+  background: var(--c-forest-deep);
+  color: var(--c-cream);
+}
+
+/* ── headings ── */
+h1.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--c-forest-deep);
+  margin: 0 0 4px;
+  letter-spacing: 1px;
+}
+.page-subtitle {
+  color: var(--c-brown);
+  font-size: 13px;
+  letter-spacing: 3px;
+  margin: 0 0 32px;
+}
+h2 {
+  font-size: 17px;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--c-forest-deep);
+  border-bottom: 1px solid var(--c-beige);
+  padding-bottom: 8px;
+  margin: 48px 0 18px;
+  font-weight: 600;
+}
+h3 {
+  font-size: 13.5px;
+  color: var(--c-brown);
+  margin: 16px 0 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+p { margin: 8px 0 12px; }
+
+/* ── code / pre ── */
+code, pre {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: var(--c-forest-deep);
+}
+code {
+  background: var(--c-cream);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12.5px;
+}
+pre {
+  background: var(--c-cream);
+  padding: 12px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  border: 1px solid var(--c-beige);
+}
+
+/* ── lead quote ── */
+.lead {
+  font-size: 17px;
+  color: var(--c-forest-deep);
+  line-height: 1.85;
+  border-left: 3px solid var(--c-sand);
+  padding: 4px 0 4px 18px;
+  margin: 24px 0;
+  font-style: italic;
+}
+
+/* ── grids ── */
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
+.grid-6 { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+
+/* ── color swatches ── */
+.swatch {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--c-beige);
+  background: var(--c-white);
+}
+.swatch-color { height: 90px; }
+.swatch-meta {
+  padding: 10px 14px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+}
+.swatch-hex { font-weight: 700; color: var(--c-charcoal); }
+.swatch-name {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-brown);
+  font-size: 10.5px;
+}
+.swatch-usage {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--c-brown);
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* ── chips ── */
+.chip-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.chip {
+  background: var(--c-sand);
+  color: var(--c-charcoal);
+  padding: 6px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.chip.outline {
+  background: transparent;
+  border: 1px solid var(--c-forest);
+  color: var(--c-forest-deep);
+}
+
+/* ── design img embed ── */
+.design-img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--c-beige);
+  margin: 8px 0;
+  background: var(--c-white);
+  display: block;
+}
+.design-img.thumb { max-width: 280px; }
+.design-img.contain {
+  object-fit: contain;
+  max-height: 800px;
+  background: var(--c-ivory);
+}
+
+/* ── two col ── */
+.two-col {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+/* ── card / surface ── */
+.card {
+  background: var(--c-white);
+  border: 1px solid var(--c-beige);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.card.tinted {
+  background: var(--c-cream);
+}
+
+/* ── footer ── */
+.book-footer {
+  margin-top: 64px;
+  padding-top: 24px;
+  border-top: 1px solid var(--c-beige);
+  font-size: 12px;
+  color: var(--c-brown);
+  text-align: center;
+}
+
+/* ── table ── */
+.spec-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.spec-table th, .spec-table td {
+  padding: 8px 12px;
+  border: 1px solid var(--c-beige);
+  text-align: left;
+}
+.spec-table thead {
+  background: var(--c-cream);
+}
+.spec-table tbody tr:nth-child(even) {
+  background: rgba(230, 222, 202, 0.40);
+}
+
+@media (max-width: 720px) {
+  .grid-3, .grid-5 { grid-template-columns: repeat(2, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
+}

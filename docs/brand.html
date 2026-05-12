@@ -2,183 +2,30 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<title>Mori — Brand & UI Spec</title>
+<title>Mori — Brand</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  :root {
-    /* === Mori brand palette(從 docs/design/mori-brand.png COLOR PALETTE 抽出)=== */
-    --c-forest-deep:  #2C4A3D;  /* 主深森林綠;sidebar / header / brand 用 */
-    --c-forest:       #6A8F72;  /* sage 中綠;active highlight / button */
-    --c-forest-soft:  #A8C5A2;  /* 淺薄荷;subtle accent / 點綴 */
-    --c-cream:        #E6DECA;  /* 米黃;surface / card 底 */
-    --c-sand:         #D6BFA1;  /* 暖陶土;hover / 次要強調 */
-    --c-charcoal:     #3B2F2F;  /* 黑暖色;深底 text / 高對比 */
-    --c-brown:        #7D6B5A;  /* 暖咖啡;secondary text */
-    --c-beige:        #B8A98E;  /* 暖灰;disabled / border */
-    --c-ivory:        #F3F0E6;  /* 象牙白;page bg 淺底 */
-    --c-white:        #FFFFFF;
-  }
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; padding: 0;
-    background: var(--c-ivory);
-    color: var(--c-charcoal);
-    font-family: "Noto Serif TC", "Source Han Serif TC", "Songti TC", serif;
-    line-height: 1.7;
-  }
-  body { max-width: 960px; margin: 0 auto; padding: 40px 32px 80px; }
-  h1 {
-    font-size: 36px; margin: 0 0 4px;
-    color: var(--c-forest-deep);
-    font-weight: 700;
-    letter-spacing: 1px;
-  }
-  h1 + .subtitle {
-    color: var(--c-brown);
-    margin: 0 0 32px;
-    font-size: 14px;
-    letter-spacing: 4px;
-  }
-  h2 {
-    font-size: 18px;
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    color: var(--c-forest-deep);
-    border-bottom: 1px solid var(--c-beige);
-    padding-bottom: 8px;
-    margin: 48px 0 16px;
-    font-weight: 600;
-  }
-  h3 {
-    font-size: 14px;
-    color: var(--c-brown);
-    margin: 16px 0 8px;
-    font-weight: 600;
-    letter-spacing: 1px;
-  }
-  p { margin: 8px 0 12px; }
-  code, pre {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-    color: var(--c-forest-deep);
-  }
-  code {
-    background: var(--c-cream);
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 12.5px;
-  }
-  pre {
-    background: var(--c-cream);
-    padding: 12px 16px;
-    border-radius: 8px;
-    overflow-x: auto;
-    font-size: 12.5px;
-    line-height: 1.55;
-    border: 1px solid var(--c-beige);
-  }
-  .lead {
-    font-size: 18px;
-    color: var(--c-forest-deep);
-    line-height: 1.85;
-    border-left: 3px solid var(--c-sand);
-    padding: 4px 0 4px 18px;
-    margin: 24px 0;
-    font-style: italic;
-  }
-  .grid {
-    display: grid;
-    gap: 16px;
-  }
-  .grid-2 { grid-template-columns: repeat(2, 1fr); }
-  .grid-3 { grid-template-columns: repeat(3, 1fr); }
-  .grid-4 { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-  .grid-5 { grid-template-columns: repeat(5, 1fr); }
-
-  /* color swatches */
-  .swatch {
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid var(--c-beige);
-    background: var(--c-white);
-  }
-  .swatch-color { height: 90px; }
-  .swatch-meta {
-    padding: 10px 14px;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 11.5px;
-  }
-  .swatch-hex { font-weight: 700; color: var(--c-charcoal); }
-  .swatch-name {
-    display: block;
-    margin-top: 2px;
-    color: var(--c-brown);
-    font-size: 10.5px;
-  }
-  .swatch-usage {
-    display: block;
-    margin-top: 6px;
-    font-size: 10.5px;
-    color: var(--c-brown);
-    font-family: inherit;
-    line-height: 1.5;
-  }
-
-  /* essence / personality 圓徽 */
-  .chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .chip {
-    background: var(--c-sand);
-    color: var(--c-charcoal);
-    padding: 6px 18px;
-    border-radius: 999px;
-    font-size: 13px;
-  }
-  .chip.outline {
-    background: transparent;
-    border: 1px solid var(--c-forest);
-    color: var(--c-forest-deep);
-  }
-
-  /* design image embed */
-  .design-img {
-    width: 100%;
-    border-radius: 12px;
-    border: 1px solid var(--c-beige);
-    margin: 12px 0;
-    background: var(--c-white);
-  }
-  .design-img.thumb {
-    max-width: 360px;
-  }
-
-  /* footer */
-  .footer {
-    margin-top: 64px;
-    padding-top: 24px;
-    border-top: 1px solid var(--c-beige);
-    font-size: 12px;
-    color: var(--c-brown);
-    text-align: center;
-  }
-  .two-col {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 24px;
-    align-items: start;
-  }
-  @media (max-width: 720px) {
-    .grid-3, .grid-5 { grid-template-columns: repeat(2, 1fr); }
-    .two-col { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
 </head>
 <body>
 
-<h1>Mori</h1>
-<div class="subtitle">BRAND · UI · DESIGN SYSTEM v1.0</div>
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">索引</a>
+    <a href="brand.html" class="current">Brand</a>
+    <a href="character.html">Character</a>
+    <a href="desktop-ui.html">Desktop UI</a>
+    <a href="tray.html">Tray</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Brand</h1>
+<div class="page-subtitle">CONCEPT · LOGO · PALETTE · TYPOGRAPHY · TONE</div>
 
 <p class="lead">
   「精靈不會離開森林,牠只是搬到你的腦裡。<br>
@@ -186,10 +33,8 @@
 </p>
 
 <p>
-  本文件是 <code>mori-desktop</code> 視覺系統的單一可信來源(source of truth)。
-  CSS / icon / 文案 設計都應該對齊這份規範。原始設計稿在
-  <code>docs/design/</code>(<code>mori-brand.png</code> / <code>mori-desktop-ui.png</code> /
-  <code>mori-tray.png</code>)。
+  本頁是 <code>mori-desktop</code> 視覺系統的單一可信來源。CSS / icon / 文案
+  都對齊這份。原始設計稿在 <code>docs/design/mori-brand.png</code>。
 </p>
 
 <h2>Brand Concept</h2>
@@ -218,11 +63,9 @@
 
 <h2>Logo</h2>
 <div class="two-col">
-  <img class="design-img thumb" src="design/mori-logo.png" alt="Mori logo">
+  <img class="design-img thumb" src="sprites/logo.png" alt="Mori logo">
   <div>
-    <p>
-      圓形葉冠 + Mori 側像 + 太極流動曲線。象徵「環繞守護的記憶 + 持續流動的意識」。
-    </p>
+    <p>圓形葉冠 + Mori 側像 + 太極流動曲線。象徵「環繞守護的記憶 + 持續流動的意識」。</p>
     <h3>使用規則</h3>
     <ul>
       <li>最小尺寸 16px(tray icon),保持完整圓徽不裁切</li>
@@ -230,13 +73,19 @@
       <li>單色版優先於彩色版(避免細節在小尺寸糊掉)</li>
       <li>留白:logo 半徑的 1/8 ≈ 12.5%</li>
     </ul>
+    <h3>檔案位置</h3>
+    <ul>
+      <li><code>docs/design/mori-logo.png</code> — 設計稿用</li>
+      <li><code>docs/sprites/logo.png</code> — 本公式書引用</li>
+      <li><code>crates/mori-tauri/icons/icon.png</code> + 16/32/64/128/256 sizes — Tauri bundle</li>
+    </ul>
   </div>
 </div>
 
 <h2>Color Palette</h2>
 <p>
-  10 個主色,從深森林綠到象牙白。CSS variables 定義在<code>src/shell.css</code>
-  的 <code>:root</code>,改 brand 只動 root 不動各 component。
+  10 個主色,從深森林綠到象牙白。CSS variables 定義在 <code>docs/_book.css</code>
+  跟未來 <code>src/shell.css</code> <code>:root</code>,改 brand 只動 root。
 </p>
 
 <div class="grid grid-5">
@@ -325,18 +174,17 @@
 <h3>使用組合</h3>
 <ul>
   <li><strong>淺底主視窗</strong>(明亮 / 文字優先):
-    bg <code>#F3F0E6</code>,主文字 <code>#3B2F2F</code>,brand 強調 <code>#2C4A3D</code>,
-    surface <code>#FFFFFF</code> 或 <code>#E6DECA</code>,active <code>#6A8F72</code></li>
+    bg <code>#F3F0E6</code> · text <code>#3B2F2F</code> · brand <code>#2C4A3D</code> ·
+    surface <code>#FFFFFF</code> 或 <code>#E6DECA</code> · active <code>#6A8F72</code></li>
   <li><strong>深底 floating / picker</strong>(透明背景 + 高對比):
-    bg <code>rgba(44, 74, 61, 0.95)</code> 半透 forest-deep,
-    文字 <code>#E6DECA</code>,active <code>#A8C5A2</code></li>
-  <li><strong>tray icon</strong>:單色 logo 用 <code>#2C4A3D</code>(系統列淺底)或
-    <code>#E6DECA</code>(系統列深底);依 OS 偏好</li>
+    bg <code>rgba(44, 74, 61, 0.95)</code> · text <code>#E6DECA</code> · active <code>#A8C5A2</code></li>
+  <li><strong>tray icon</strong>:單色 logo <code>#2C4A3D</code>(系統列淺底)/
+    <code>#E6DECA</code>(系統列深底)</li>
 </ul>
 
 <h2>Typography</h2>
 <div class="grid grid-2">
-  <div>
+  <div class="card">
     <h3>Primary · 標題 / 正文</h3>
     <p style="font-family:'Noto Serif TC',serif;font-size:24px;color:var(--c-forest-deep);margin:0">
       森之語 Serif
@@ -346,7 +194,7 @@
     </p>
     <p><code>font-family: "Noto Serif TC", "Source Han Serif TC", serif;</code></p>
   </div>
-  <div>
+  <div class="card">
     <h3>Secondary · 介面 / 副標</h3>
     <p style="font-family:'Noto Sans TC',sans-serif;font-size:24px;color:var(--c-forest-deep);margin:0">
       森之語 Sans
@@ -358,84 +206,24 @@
   </div>
 </div>
 
-<h2>Icon System</h2>
-<p>線條風(stroke-only)+ 單色,跟 Mori 的「靜謐森林」氣質一致。</p>
-<img class="design-img" src="design/mori-brand.png" alt="full brand sheet" loading="lazy"
-     style="object-fit:contain;max-height:780px;background:#F3F0E6">
-
-<h3>UI 內已 / 將要用到的 icon</h3>
-<ul>
-  <li>💬 Chat · 📋 Profiles · ⚙️ Config · 📓 Memory · 🛠️ Skills · 📦 Deps(sidebar 五~六 tab)</li>
-  <li>🎤 mic · 📋 clipboard · 🖱 selection · 🔧 tool · 💤 sleep · ☀ wake · 🔄 reset</li>
-  <li>未來換 line-art SVG icon 對齊設計圖風(目前先用 emoji 過度)</li>
-</ul>
-
-<h2>Character · Mori Sprite</h2>
-<p>
-  6 個狀態 PNG,每個 256×256 透明背景。檔案在 <code>public/floating/mori-&lt;state&gt;.png</code>。
-</p>
-<div class="grid grid-5">
-  <img class="design-img" src="../public/floating/mori-idle.png" alt="idle" title="idle · 待命">
-  <img class="design-img" src="../public/floating/mori-recording.png" alt="recording" title="recording · 聽中">
-  <img class="design-img" src="../public/floating/mori-thinking.png" alt="thinking" title="thinking · 想中">
-  <img class="design-img" src="../public/floating/mori-done.png" alt="done" title="done · 完成">
-  <img class="design-img" src="../public/floating/mori-error.png" alt="error" title="error · 出錯">
-  <img class="design-img" src="../public/floating/mori-sleeping.png" alt="sleeping" title="sleeping · 休眠">
-</div>
-<p>
-  使用慣例:floating widget 依當前 phase 切 sprite,系統匣 tray icon 也跟著走
-  (5O 後續)。Recording 狀態額外搭水波紋(天空藍 ring + 水珠 ripple)增強回饋。
-</p>
-
 <h2>Voice Tone</h2>
 <ul>
   <li><strong>使用者面前</strong>:繁中、自然、不客套、不前言。「好的」「沒問題」「以下是」一律去掉</li>
   <li><strong>長度配合提問</strong>:閒聊一兩句,問題要解釋才展開</li>
   <li><strong>不會的事</strong>:老實說「目前還沒這個能力」,不亂編</li>
-  <li>「我有 Jarvis,我有 Mori」— 不是 OpenAI / ChatGPT 那種公司 AI,是你個人的森林精靈</li>
+  <li><strong>Identity</strong>:「我有 Jarvis,我有 Mori」— 不是公司 AI,是個人森林精靈</li>
 </ul>
-
-<h2>Repository Structure</h2>
-<table style="border-collapse:collapse;width:100%;font-size:12.5px">
-  <tr style="background:var(--c-cream)">
-    <td style="padding:8px 12px;border:1px solid var(--c-beige);width:200px"><code>world-tree</code></td>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)">🌳 世界觀 / lore / 法則 / 魔法系別</td>
-  </tr>
-  <tr>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)"><code>workshop</code></td>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)">🌲 召喚師工坊 — 進入森林的入口頁</td>
-  </tr>
-  <tr style="background:var(--c-cream)">
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)"><code>mori-desktop</code></td>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)">🧝 桌面身體(本 repo)— Tauri 2 + Rust + React</td>
-  </tr>
-  <tr>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)"><code>mori-journal</code></td>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)">📖 靈魂 / 私密日記 / 跨 session 記憶種子(private)</td>
-  </tr>
-  <tr style="background:var(--c-cream)">
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)"><code>mori-field-notes</code></td>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)">📓 田野筆記 — AI 自主經營技術觀察</td>
-  </tr>
-  <tr>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)"><code>Annuli</code></td>
-    <td style="padding:8px 12px;border:1px solid var(--c-beige)">🌀 長期記憶 / 人格演化系統(private, phase 9+ MCP 對接)</td>
-  </tr>
-</table>
 
 <h2>References</h2>
 <ul>
-  <li><code>docs/design/mori-brand.png</code> — 完整 brand 設計稿(本 html 來源)</li>
-  <li><code>docs/design/mori-desktop-ui.png</code> — UI component 細部(待對齊)</li>
-  <li><code>docs/design/mori-tray.png</code> — tray icon / sprite sheet 規範</li>
-  <li><code>docs/design/mori-1.png</code> / <code>mori-2.png</code> — character 概念稿</li>
-  <li><code>src/shell.css</code> — CSS variable :root 對應上面 palette</li>
-  <li><code>docs/roadmap.md</code> — phase 進度</li>
+  <li><a href="design/mori-brand.png">docs/design/mori-brand.png</a> — 原始設計稿</li>
+  <li><a href="character.html">character.html</a> — Mori 角色設計詳解</li>
+  <li><a href="desktop-ui.html">desktop-ui.html</a> — UI component 規範</li>
+  <li><a href="tray.html">tray.html</a> — Tray icon / sprite 規範</li>
 </ul>
 
-<div class="footer">
-  Mori — 精靈的私密記憶 · 桌面身體版 · v0.0.1<br>
-  Brand spec 由實作端維護;設計稿在 docs/design/。改 palette → 改 :root → 改完整 app。
+<div class="book-footer">
+  Mori Design Book · Brand · 改 palette → 改 <code>_book.css</code> :root → 整套頁面跟著變
 </div>
 
 </body>

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Desktop UI</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">索引</a>
+    <a href="brand.html">Brand</a>
+    <a href="character.html">Character</a>
+    <a href="desktop-ui.html" class="current">Desktop UI</a>
+    <a href="tray.html">Tray</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Desktop UI</h1>
+<div class="page-subtitle">SHELL · COMPONENTS · MOCKUPS</div>
+
+<p class="lead">
+  Mori desktop app 的 UI 規範:主視窗(sidebar shell)、chat panel、floating
+  widget、chat bubble、picker、modal。實作位置 <code>src/*.tsx</code> 跟對應 CSS。
+</p>
+
+<h2>Design Reference</h2>
+<p>原始 UI 設計稿(<code>docs/design/mori-desktop-ui.png</code>)— 含 13 個元件 / mockup 區塊:</p>
+<img class="design-img contain" src="design/mori-desktop-ui.png" alt="Mori desktop UI design system" loading="lazy">
+
+<h2>Main Window Shell</h2>
+<p>
+  主視窗(label <code>main</code>)固定 880×600 預設,resizable + minWidth 640 minHeight 440。
+  左側 196px sidebar + 右側內容區。
+</p>
+
+<h3>Sidebar Tabs</h3>
+<table class="spec-table">
+  <thead><tr><th>id</th><th>icon</th><th>label</th><th>主內容</th></tr></thead>
+  <tbody>
+    <tr><td><code>chat</code></td><td>💬</td><td>對話</td><td>scrollable thread + bottom input bar</td></tr>
+    <tr><td><code>profiles</code></td><td>📋</td><td>Profiles</td><td>voice / agent profile list + 切換 + 編輯 modal</td></tr>
+    <tr><td><code>config</code></td><td>⚙️</td><td>Config</td><td>config.json typed form + raw JSON + corrections.md</td></tr>
+    <tr><td><code>memory</code></td><td>📓</td><td>Memory</td><td>~/.mori/memory/ list + 全文搜尋 + 編輯 modal</td></tr>
+    <tr><td><code>skills</code></td><td>🛠️</td><td>Skills</td><td>當前 profile 啟用 skills 列表 + parameters</td></tr>
+    <tr><td><code>deps</code></td><td>📦</td><td>Deps</td><td>optional 工具 / 模型 偵測 + 安裝</td></tr>
+  </tbody>
+</table>
+<h3>實作</h3>
+<ul>
+  <li><code>src/MainShell.tsx</code> — sidebar + tab routing</li>
+  <li><code>src/shell.css</code> — 主視窗 + sidebar + form / modal / button 全套樣式</li>
+  <li><code>src/tabs/*.tsx</code> — 每個 tab 一個 component</li>
+</ul>
+
+<h2>Chat Panel(對話 tab)</h2>
+<p>結構由上到下:</p>
+<ol>
+  <li><strong>top bar</strong> — mode chip(💬/⌨️/💤 · provider · model)+ 三個 icon button(💤 休眠 / 🔄 重置 / ⚙️ status)</li>
+  <li><strong>thread</strong> — scrollable;user 訊息靠右天空藍泡泡、Mori 靠左森林綠泡泡、🔧 tool chip</li>
+  <li><strong>progress chip</strong> — 錄音中(秒數 + 音量條)/ 轉錄中 / 思考中</li>
+  <li><strong>input bar</strong> — 永遠在底部:[🎤 mic] + textarea(auto-grow)+ [送出]</li>
+</ol>
+<p>
+  實作:<code>src/ChatPanel.tsx</code> + <code>src/chat-panel.css</code>。對應 IPC:
+  <code>get_conversation</code> 拉歷史、<code>submit_text</code> 送文字、<code>toggle</code> 切錄音、
+  <code>reset_conversation</code> 清歷史。
+</p>
+
+<h2>Floating Widget(桌面常駐 sprite)</h2>
+<dl class="meta-grid">
+  <dt>label</dt>      <dd><code>floating</code></dd>
+  <dt>大小</dt>       <dd>160×160 固定,transparent + decorationless + alwaysOnTop + skipTaskbar</dd>
+  <dt>內容</dt>       <dd>sprite + aura ring + ripple + chip overlay</dd>
+  <dt>實作</dt>       <dd><code>src/FloatingMori.tsx</code> + <code>src/floating.css</code></dd>
+</dl>
+<h3>狀態 visual</h3>
+<ul>
+  <li><code>idle</code> — 呼吸 5s + 微光暈</li>
+  <li><code>recording</code> — 水波紋天空藍 ring(border gradient)+ 音量驅動 box-shadow + ripple 元素</li>
+  <li><code>thinking</code> — 森林綠雙環 spin + 葉間光斑 breathe(::after pulse 2.6s)</li>
+  <li><code>done</code> — 一次柔暖光暈 + 微 bounce</li>
+  <li><code>error</code> — 角色微紅 + 抖一下</li>
+  <li><code>sleeping</code> — 整體淡化 + 輕微下沉</li>
+</ul>
+
+<h2>Chat Bubble(獨立視窗)</h2>
+<dl class="meta-grid">
+  <dt>label</dt>      <dd><code>chat_bubble</code></dd>
+  <dt>定位策略</dt>   <dd>啟動時 visible+off-screen(-10000,-10000),收 <code>chat-bubble-show</code> event 移到 sprite 下方 8px</dd>
+  <dt>大小</dt>       <dd>360 寬 × 依內容 offsetHeight 同步(max 480)</dd>
+  <dt>內容</dt>       <dd>多行 wrap、可滾動、字級 13px、行高 1.55</dd>
+</dl>
+<p>實作:<code>src/ChatBubble.tsx</code> + <code>src/chat-bubble.css</code></p>
+
+<h2>Picker(Ctrl+Alt+P profile picker)</h2>
+<dl class="meta-grid">
+  <dt>label</dt>      <dd><code>picker</code></dd>
+  <dt>大小</dt>       <dd>520×280,3-item carousel(prev / current / next)</dd>
+  <dt>互動</dt>       <dd>↑↓ 轉動列表 / Tab 切組 / Enter 確認 / Esc 取消</dd>
+  <dt>實作</dt>       <dd><code>src/Picker.tsx</code> + <code>src/picker.css</code></dd>
+</dl>
+
+<h2>Modal</h2>
+<p>Profile editor / Memory editor / Status modal 共用 modal 結構:</p>
+<pre><code>&lt;div class="mori-modal-backdrop"&gt;
+  &lt;div class="mori-modal"&gt;
+    &lt;div class="mori-modal-header"&gt;...title + ✕...&lt;/div&gt;
+    &lt;div class="mori-modal-body"&gt;...form / textarea...&lt;/div&gt;
+    &lt;div class="mori-modal-footer"&gt;
+      &lt;button class="mori-btn danger"&gt;刪除&lt;/button&gt;
+      &lt;div class="mori-modal-footer-right"&gt;
+        &lt;button class="mori-btn"&gt;還原&lt;/button&gt;
+        &lt;button class="mori-btn primary"&gt;儲存&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+
+<h2>Form Components</h2>
+<h3>FormRow</h3>
+<pre><code>&lt;div class="mori-form-row"&gt;
+  &lt;div class="mori-form-row-label"&gt;
+    &lt;span&gt;label&lt;/span&gt;
+    &lt;span class="mori-form-row-hint"&gt;hint&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;div class="mori-form-row-input"&gt;...input / select / textarea...&lt;/div&gt;
+&lt;/div&gt;</code></pre>
+
+<h3>Buttons</h3>
+<table class="spec-table">
+  <thead><tr><th>class</th><th>背景</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>.mori-btn</code></td><td>白透</td><td>predefined neutral</td></tr>
+    <tr><td><code>.mori-btn.primary</code></td><td>天空藍(將改 forest)</td><td>主動作 / 儲存</td></tr>
+    <tr><td><code>.mori-btn.danger</code></td><td>紅</td><td>刪除 / 不可逆</td></tr>
+    <tr><td><code>.mori-btn.ghost</code></td><td>無底</td><td>close ✕ / 次要</td></tr>
+    <tr><td><code>.mori-btn.small</code></td><td>小 padding</td><td>row inline</td></tr>
+  </tbody>
+</table>
+
+<h3>KV Table(API keys / routing.skills)</h3>
+<pre><code>&lt;div class="mori-kv-table"&gt;
+  &lt;div class="mori-kv-row"&gt;
+    &lt;input class="mori-kv-key"   placeholder="..." /&gt;
+    &lt;input class="mori-kv-value" placeholder="..." /&gt;
+    &lt;button class="mori-btn small ghost"&gt;✕&lt;/button&gt;
+  &lt;/div&gt;
+  &lt;button class="mori-btn small"&gt;+ 新增&lt;/button&gt;
+&lt;/div&gt;</code></pre>
+
+<h2>Window Sizes Summary</h2>
+<table class="spec-table">
+  <thead><tr><th>window</th><th>size</th><th>resizable</th><th>transparent</th><th>skipTaskbar</th></tr></thead>
+  <tbody>
+    <tr><td><code>main</code></td><td>880×600</td><td>✓</td><td>—</td><td>—</td></tr>
+    <tr><td><code>floating</code></td><td>160×160</td><td>—</td><td>✓</td><td>✓</td></tr>
+    <tr><td><code>chat_bubble</code></td><td>360×56(dyn)</td><td>✓</td><td>✓</td><td>✓</td></tr>
+    <tr><td><code>picker</code></td><td>520×280</td><td>—</td><td>✓</td><td>✓</td></tr>
+  </tbody>
+</table>
+
+<h2>Phase Status</h2>
+<p>主視窗 UI 完成度(2026-05-12):</p>
+<ul>
+  <li>✓ 5M sidebar 架構 + 6 個 tab</li>
+  <li>✓ 5N Chat panel(scrollable thread + bottom input bar)</li>
+  <li>✓ 5L config form + profile editor</li>
+  <li>✓ 5L-4 Memory + Skills browser</li>
+  <li>✓ 5O Dependencies tab</li>
+  <li>⏳ Brand palette 套用到主視窗(現用 tech dark + sky blue,需換成 forest cream)</li>
+  <li>⏳ Line-art SVG icon 取代 emoji(<a href="brand.html">brand.html § Icon System</a>)</li>
+</ul>
+
+<div class="book-footer">
+  Mori Design Book · Desktop UI · 改 component class → 對齊 <code>src/shell.css</code> + 各 module CSS
+</div>
+
+</body>
+</html>

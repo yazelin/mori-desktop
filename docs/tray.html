@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Tray</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">索引</a>
+    <a href="brand.html">Brand</a>
+    <a href="character.html">Character</a>
+    <a href="desktop-ui.html">Desktop UI</a>
+    <a href="tray.html" class="current">Tray</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Tray</h1>
+<div class="page-subtitle">SYSTEM TRAY · ICONS · SPRITES · MENU</div>
+
+<p class="lead">
+  系統匣 icon 規範 + 7 個 sprite 表情 + menu icon 庫 + interaction states。<br>
+  讓 Mori 在 panel 上是「會呼吸的森林精靈」,不是死木頭按鈕。
+</p>
+
+<h2>Design Reference</h2>
+<img class="design-img contain" src="design/mori-tray.png" alt="Mori tray design system" loading="lazy">
+
+<h2>Tray Icon (App Identity)</h2>
+<div class="two-col">
+  <img class="design-img thumb" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <p>系統匣的「app icon」永遠是 logo 圓徽,不是 sprite 表情。原因:</p>
+    <ul>
+      <li>小尺寸(16/22px)sprite 細節糊掉</li>
+      <li>logo 在所有狀態都不變 — 使用者「點 Mori」找它要穩定</li>
+    </ul>
+    <h3>檔案來源</h3>
+    <ul>
+      <li><code>docs/design/mori-logo.png</code> — 從 brand sheet logo 區自動 crop + 去米色背景</li>
+      <li><code>crates/mori-tauri/icons/icon.png</code> + 16/32/64/128/256 — Tauri bundle 輸出</li>
+    </ul>
+  </div>
+</div>
+
+<h3>單色版規則</h3>
+<p>系統匣有些桌面環境(GNOME / macOS dark panel)會自動把 icon 染成 monochrome。
+要對應:</p>
+<ul>
+  <li>主版用墨綠 <code>#2C4A3D</code>(淺底 panel)</li>
+  <li>反白版用米色 <code>#E6DECA</code>(深底 panel)</li>
+  <li>純黑 silhouette 也行 — GNOME-Shell 系統匣會自己處理 invert</li>
+</ul>
+
+<h2>Sprite Sheet(動態狀態)</h2>
+<p>
+  Floating widget 用 6 個 sprite 表情,tray dynamic 也用同一套(未來 5O-2 啟用)。
+  Sprite 在<code>public/floating/</code>跟<code>docs/sprites/</code>都有一份。
+</p>
+
+<div class="grid grid-6">
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-idle.png" alt="idle" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">idle · 待命</div>
+    <code style="font-size:10px">mori-idle</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-recording.png" alt="recording" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">recording · 聽中</div>
+    <code style="font-size:10px">mori-recording</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-thinking.png" alt="thinking" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">thinking · 想中</div>
+    <code style="font-size:10px">mori-thinking</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-done.png" alt="done" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">done · 完成</div>
+    <code style="font-size:10px">mori-done</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-error.png" alt="error" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">error · 出錯</div>
+    <code style="font-size:10px">mori-error</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-sleeping.png" alt="sleeping" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">sleeping · 休眠</div>
+    <code style="font-size:10px">mori-sleeping</code>
+  </div>
+</div>
+
+<h2>Tray Menu(系統匣選單)</h2>
+<p>Right-click / left-click tray icon 出現的選單,目前實作在 <code>main.rs</code>:</p>
+<table class="spec-table">
+  <thead><tr><th>項目</th><th>動作</th></tr></thead>
+  <tbody>
+    <tr><td>顯示 Mori</td><td>show main window + 把 floating set_always_on_top</td></tr>
+    <tr><td>隱藏</td><td>hide main window</td></tr>
+    <tr><td>對話模式</td><td>Mode::Agent</td></tr>
+    <tr><td>語音輸入模式</td><td>Mode::VoiceInput</td></tr>
+    <tr><td>休眠(關麥克風)</td><td>Mode::Background</td></tr>
+    <tr><td>Voice Profile ▸</td><td>掃 <code>~/.mori/voice_input/</code> 列出全部 .md(5K-2)</td></tr>
+    <tr><td>Agent Profile ▸</td><td>掃 <code>~/.mori/agent/</code> 列出全部 .md</td></tr>
+    <tr><td>重新開始對話</td><td>清空 conversation history</td></tr>
+    <tr><td>離開</td><td><code>app.exit(0)</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Interaction States</h2>
+<table class="spec-table">
+  <thead><tr><th>狀態</th><th>tray icon</th><th>floating sprite</th><th>aura / 效果</th></tr></thead>
+  <tbody>
+    <tr><td>idle</td><td>logo(靜態)</td><td>mori-idle</td><td>呼吸 5s + 微光暈</td></tr>
+    <tr><td>recording</td><td>logo + 紅點(planned)</td><td>mori-recording</td><td>水波紋天空藍 ring + 音量光暈 + ripple</td></tr>
+    <tr><td>thinking</td><td>logo + 旋轉點(planned)</td><td>mori-thinking</td><td>森林綠雙環 spin + 葉間光斑 breathe</td></tr>
+    <tr><td>done</td><td>logo(短暫綠光)</td><td>mori-done</td><td>柔暖光暈 + 微 bounce</td></tr>
+    <tr><td>error</td><td>logo + 黃 badge(planned)</td><td>mori-error</td><td>微紅 + 抖一下</td></tr>
+    <tr><td>sleeping</td><td>logo(灰)</td><td>mori-sleeping</td><td>淡化 + 下沉</td></tr>
+  </tbody>
+</table>
+
+<h2>Notifications</h2>
+<p>Mori 主動通知時(背景排程提醒 / 失敗 / etc.):</p>
+<ul>
+  <li>tray icon 短暫變 <code>notice</code> 表情 0.6s 後恢復(planned, 5O-2)</li>
+  <li>用桌面通知系統(<code>tauri-plugin-notification</code>)送原生 notif</li>
+  <li>Mori sprite 在 floating 同時呈現 attention pose(eyes wide / 望向 cursor)</li>
+</ul>
+
+<h2>實作位置</h2>
+<ul>
+  <li><code>crates/mori-tauri/src/main.rs</code> setup 區:<code>TrayIconBuilder</code> 建 tray、menu、event handler</li>
+  <li><code>crates/mori-tauri/icons/</code> — 6 size icon + tray/ dir 含 sprite 32/64</li>
+  <li><code>crates/mori-tauri/src/portal_hotkey.rs</code> ensure_desktop_file — 寫 .desktop entry,<code>StartupWMClass=Mori-tauri</code> 對齊實際 WM_CLASS</li>
+</ul>
+
+<div class="book-footer">
+  Mori Design Book · Tray · sprite 改 → 同步 <code>public/floating/</code> + <code>docs/sprites/</code> + <code>icons/tray/</code>
+</div>
+
+</body>
+</html>

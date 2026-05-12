@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Character</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">索引</a>
+    <a href="brand.html">Brand</a>
+    <a href="character.html" class="current">Character</a>
+    <a href="desktop-ui.html">Desktop UI</a>
+    <a href="tray.html">Tray</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Character</h1>
+<div class="page-subtitle">PROFILE · TURNAROUND · EXPRESSIONS · POSES · SPRITE</div>
+
+<p class="lead">
+  Mori 是「住在腦裡的森林精靈」— 安靜、好奇、共生型陪伴角色。<br>
+  視覺核心:綠色長髮配葉冠 + 米色洋裝 + 持燈或書本意象。
+</p>
+
+<h2>Character Profile</h2>
+<dl class="meta-grid">
+  <dt>name</dt>       <dd>Mori(森)</dd>
+  <dt>身分</dt>       <dd>精靈 · 守記憶者</dd>
+  <dt>個性</dt>       <dd>溫柔、堅定、好奇而深思、獨立而溫暖</dd>
+  <dt>視覺</dt>       <dd>森林綠長髮 + 葉冠 + 米色 / 苔綠洋裝 + 提燈 / 書 / 蕨葉</dd>
+  <dt>體型</dt>       <dd>少女形象,身高約 150 cm,呈現知性與童趣兼具</dd>
+  <dt>原型參考</dt>   <dd>森林精靈 · 圖書館員 · 守燈人</dd>
+</dl>
+
+<h2>Full Illustration</h2>
+<img class="design-img contain" src="design/mori-2.png" alt="Full character design sheet" loading="lazy">
+<p style="font-size:11.5px;color:var(--c-brown)">
+  原始角色設計總覽(<code>docs/design/mori-2.png</code>)— 含 turnaround、表情、姿勢、
+  sprite sheet、道具、icon avatar。下方是各區塊抽出。
+</p>
+
+<h2>Turnaround</h2>
+<p>三視圖(FRONT / SIDE / BACK)用於 3D 建模 / 不同角度繪製參考。</p>
+<img class="design-img contain" src="design/mori-1.png" alt="Mori turnaround + chibi" loading="lazy">
+<p style="font-size:11.5px;color:var(--c-brown)">
+  另一份 character design sheet(<code>docs/design/mori-1.png</code>)— 同樣含
+  turnaround / 表情 / chibi / 道具,風格更接近最終 app sprite 採用版。
+</p>
+
+<h2>Expressions</h2>
+<p>共 8 種表情 — UI sprite(<code>public/floating/mori-*.png</code>)目前用 6 個:</p>
+<div class="grid grid-6">
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-idle.png" alt="idle" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">idle · 待命</div>
+    <code style="font-size:10px">mori-idle.png</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-recording.png" alt="recording" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">recording · 聽中</div>
+    <code style="font-size:10px">mori-recording.png</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-thinking.png" alt="thinking" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">thinking · 想中</div>
+    <code style="font-size:10px">mori-thinking.png</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-done.png" alt="done" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">done · 完成</div>
+    <code style="font-size:10px">mori-done.png</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-error.png" alt="error" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">error · 出錯</div>
+    <code style="font-size:10px">mori-error.png</code>
+  </div>
+  <div class="card" style="text-align:center">
+    <img src="sprites/mori-sleeping.png" alt="sleeping" style="width:100%">
+    <div style="margin-top:6px;font-size:11px;color:var(--c-forest-deep)">sleeping · 休眠</div>
+    <code style="font-size:10px">mori-sleeping.png</code>
+  </div>
+</div>
+
+<h3>對應到 Phase</h3>
+<table class="spec-table">
+  <thead><tr><th>Phase</th><th>sprite</th><th>視覺特徵</th></tr></thead>
+  <tbody>
+    <tr><td><code>Idle</code></td><td>idle</td><td>呼吸 5s 緩動 + 淡光暈</td></tr>
+    <tr><td><code>Recording</code></td><td>recording</td><td>水波紋天空藍 ring + 音量驅動光暈 + ripple</td></tr>
+    <tr><td><code>Transcribing / Responding</code></td><td>thinking</td><td>森林綠雙環 spin + 葉間光斑呼吸</td></tr>
+    <tr><td><code>Done</code></td><td>done</td><td>柔暖光暈 + 微 bounce 1.6s 一次</td></tr>
+    <tr><td><code>Error</code></td><td>error</td><td>角色微紅色調 + 抖一下</td></tr>
+    <tr><td><code>Background</code></td><td>sleeping</td><td>整體淡化 + 輕微下沉(像睡著)</td></tr>
+  </tbody>
+</table>
+
+<h2>Sprite Sheet (For Animations)</h2>
+<p>
+  動畫用 sprite 規格:每個 state 8 frames @ 12 fps,256×256 透明 PNG,
+  循序排成水平 sprite sheet(總寬度 = 2048px、高度 = 256px)。
+</p>
+<p>
+  目前實作:單 PNG / state(static pose)+ CSS keyframes 做呼吸 / 旋轉 / bounce
+  動畫。未來換成 sprite-sheet animation(`background-position` step animation)
+  時,把單張 256×256 換成 2048×256 sheet 即可,React 端 CSS class 不用大改。
+</p>
+
+<dl class="meta-grid">
+  <dt>frame size</dt>  <dd>256 × 256 px</dd>
+  <dt>frame count</dt> <dd>8 per state</dd>
+  <dt>fps</dt>         <dd>12</dd>
+  <dt>loop type</dt>   <dd>idle / recording / thinking → ping-pong;done / error → 1 次;sleeping → 慢循環</dd>
+  <dt>實作位置</dt>    <dd><code>src/floating.css</code> @keyframes mori-* + <code>FloatingMori.tsx</code></dd>
+</dl>
+
+<h2>Poses & Actions</h2>
+<p>
+  設計稿中有 8 種額外動作(讀書、提燈、撫貓、揮手、走路、思考等),目前 desktop 版
+  只用 idle / recording / thinking / done / error / sleeping 6 種。未來擴充:
+</p>
+<ul>
+  <li>📚 reading — 使用者打開「閱讀模式」(planned)</li>
+  <li>✏️ writing — Mori 在用 RememberSkill / EditMemorySkill 時短暫切到此 pose</li>
+  <li>🍵 chill — 長時間 idle 隨機切到此 pose 增加生氣(防呆板)</li>
+</ul>
+
+<h2>Items & Props</h2>
+<p>Mori 隨身道具,從設計稿提取:</p>
+<div class="grid grid-4">
+  <div class="card">
+    <h3>提燈(lantern)</h3>
+    <p style="font-size:12px;color:var(--c-brown)">守護光 / 記憶之光。dock 主視窗開啟動畫可用作 motif。</p>
+  </div>
+  <div class="card">
+    <h3>書(book)</h3>
+    <p style="font-size:12px;color:var(--c-brown)">知識 / 記憶。Memory tab 的 icon 可往這方向走。</p>
+  </div>
+  <div class="card">
+    <h3>蕨葉(fern)</h3>
+    <p style="font-size:12px;color:var(--c-brown)">成長 / 共生。Mori sprite 髮飾 / 葉冠主要元素。</p>
+  </div>
+  <div class="card">
+    <h3>燈籠花(bell)</h3>
+    <p style="font-size:12px;color:var(--c-brown)">通知 / 喚醒。tray icon notification 狀態可用此意象。</p>
+  </div>
+</div>
+
+<h2>Color Variations</h2>
+<p>
+  設計稿底部有 Mori 的色彩變化版(夏 / 秋 / 冬 / 夜)— 給未來「節日 sprite」用。
+  目前 desktop 只發行森林綠主版,變化版 phase 6+ 才開放挑。
+</p>
+
+<h2>Voice Tone(角色說話風格)</h2>
+<p>跟 Brand 共用 — 詳見 <a href="brand.html#h-voice-tone">brand.html § Voice Tone</a>。重點:</p>
+<ul>
+  <li>繁中、自然、不客套</li>
+  <li>「我有 Jarvis,我有 Mori」— 個人森林精靈,不是公司 AI</li>
+  <li>不會的事老實說「目前還沒這個能力」</li>
+</ul>
+
+<div class="book-footer">
+  Mori Design Book · Character · 改 sprite → 更新 <code>public/floating/</code> + <code>docs/sprites/</code> 同步
+</div>
+
+</body>
+</html>

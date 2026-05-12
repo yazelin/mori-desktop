@@ -173,6 +173,7 @@ Mori 在 agent mode 不知道現在幾點、看不到剪貼簿、不知道在哪
 | ❌ Wake word | 不用按熱鍵,叫名字喚醒 | Phase 6+ |
 
 完整路線圖見 [`docs/roadmap.md`](docs/roadmap.md)。
+**設計公式書(視覺 source of truth)**見 [`docs/index.html`](docs/index.html) — 含 Brand / Character / Desktop UI / Tray 四頁 + 共用 `_book.css`。Clone repo 直接瀏覽器開,或啟用 GitHub Pages(Settings → Pages → Source: main / `/docs`)後可在 `https://yazelin.github.io/mori-desktop/` 線上看。
 
 ## 架構速覽
 
