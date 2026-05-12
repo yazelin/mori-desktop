@@ -108,49 +108,58 @@
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
 
-## Phase 5M — 主視窗 UI 重設計(規劃中)
+## Phase 5M — 主視窗 sidebar 架構(2026-05-12,完成)
 
-5L 要加 Config UI、未來 Memory / Skills 分頁也要塞,目前小聊天框尺寸不夠。
-先做主視窗 layout 重設計,再蓋功能。
+5L 要加 Config UI、未來 Memory / Skills 分頁也要塞,小聊天框尺寸不夠。
+先做主視窗 layout 重設計。
 
-- [ ] 視窗預設拉大(~800×600),resizable
-- [ ] 左側 sidebar 分頁:Chat / Profiles / Config / Memory / Skills
-- [ ] Chat tab:保留現有對話 panel + 麥克風 + 文字輸入
-- [ ] Profiles tab:VoiceInput + Agent profile list + 切換 + 編輯入口
-- [ ] Config tab(銜接 5L):config.json 表單編輯
-- [ ] Memory tab:browse / search / edit ~/.mori/memory/
-- [ ] Skills tab:當前 profile 啟用的 built-in skill + shell_skill 列表
-- [ ] 動工前先做 mockup 跟 user 確認風格
+- [x] 視窗預設 880×600 + minWidth/minHeight + resizable
+- [x] 左側 sidebar(196px)分頁:Chat / Profiles / Config / Memory / Skills
+- [x] Chat tab:原 App.tsx 內容完全沿用,只是被 MainShell 包進右側
+- [x] Profiles tab:VoiceInput + Agent profile list + 切換 + 編輯入口
+- [x] Config / Memory / Skills tab:5M 是 placeholder,5L 後續填內容
+- [x] shell.css:深底配天空藍(active tab)+ 森林綠(brand)
 
-順序：5K(picker)→ 5M(主視窗重設計)→ 5L(config UI 真正塞進去)。
+## Phase 5L — Config / Profile UI(2026-05-12,完成)
 
-## Phase 5L — 主視窗 Config UI(規劃中,依賴 5M)
+之前所有 `~/.mori/` 設定都要手動編 .json / .md;5L 把它們搬進主視窗。
 
-目前 `~/.mori/` 內所有設定(config.json / voice_input/USER-XX.md / agent/AGENT-XX.md /
-corrections.md)都要手動改檔,使用者門檻高。5L 在主視窗加 Config 分頁(或 modal)
-讓所有設定可從 UI 編輯。
+- [x] IPC:config_read / config_write / corrections_read / corrections_write /
+      profile_read / profile_write / profile_delete
+- [x] ConfigTab:config.json textarea(即時 JSON parse 驗證,失敗紅框 + 不讓存)+
+      corrections.md textarea
+- [x] ProfilesTab:list voice / agent profile + 切換按鈕 + 編輯 modal,modal 內
+      整個 .md(frontmatter + body)可編、可刪;有「+ 新增」用 prompt 取檔名 +
+      starter template
+- [x] 寫入後即時生效(load_active_profile / read_provider_config 都讀檔即時)
 
-- [ ] Tauri IPC:`read_config` / `write_config` / `list_profiles` / `read_profile` /
-      `write_profile` / `read_corrections` / `write_corrections`
-- [ ] 前端 Config 分頁,子分頁:Global / VoiceInput Profiles / Agent Profiles / Corrections
-- [ ] config.json 表單 — provider / stt_provider / providers.* / api_keys / routing
-- [ ] Profile 編輯器 — frontmatter 表單 + body 編輯器(monaco 或簡易 textarea)
-- [ ] shell_skills 表格編輯器(含 ParamDef)
-- [ ] corrections.md 編輯器 — `舊 -> 新` 表格 / raw markdown 兩種模式
-- [ ] 寫入後 hot reload(`load_active_profile()` 已是讀檔即時,無需重啟)
-- [ ] 安全:寫入前 validate frontmatter parse;失敗回 diff 顯示
+未做(留給 5L-2 / 5L-3):
+- [ ] config.json 用 typed form 替代 raw JSON(provider / stt_provider 下拉、
+      api_keys 表格、routing.skills 表格)
+- [ ] Profile frontmatter 用 typed form(provider 下拉、enable_read checkbox 等),
+      只 body 留 textarea
+- [ ] shell_skills 用表格編輯器(含 ParamDef)
+- [ ] MemoryTab / SkillsTab 還是 placeholder
+- [ ] Frontmatter parse 錯誤 IPC 回 diff 顯示(現在只回字串)
 
-優先序:5K(picker)→ 5L(config UI)→ 後續 features。
+## Phase 5K — Profile Picker + Tray submenu(2026-05-12,完成)
 
-## Phase 5K — Profile Picker UI + Tray submenu(規劃中)
+20 個熱鍵 slot 不夠用,11+ profile 無法選。
 
-10 個 slot 不夠用,11+ profile 無法以熱鍵選擇。
+- [x] **5K-1 Picker UI overlay** — 新熱鍵 Ctrl+Alt+P 開獨立 picker 視窗
+      (520×480 transparent + decorationless),方向鍵選 / Tab 切組(voice/agent)
+      / Enter 確認 / Esc 取消 / 點擊雙擊也可。pattern 同 chat_bubble:
+      啟動時 off-screen + visible → 收 event 移到中心 + setFocus。
+- [x] **5K-2 Tray submenu** — 系統匣加「Voice Profile ▸」「Agent Profile ▸」
+      子選單,掃 ~/.mori/ 列出全部 .md。mori-core 加 `list_voice_profiles` /
+      `list_agent_profiles` / `switch_to_profile` / `switch_to_agent_profile`
+      helper。
 
-- [ ] **5K-1 Picker UI overlay** — 新熱鍵(例 Ctrl+Alt+P)開 list overlay,
-      方向鍵選 / Enter 確認 / Esc 取消。新 Tauri window + portal hotkey +
-      鍵盤事件路由
-- [ ] **5K-2 Tray submenu** — 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」
-      子選單,掃 ~/.mori/voice_input/ + ~/.mori/agent/ 列出全部 .md
+## Phase 5J-followup — single-instance lock(2026-05-12,完成)
+
+`tauri-plugin-single-instance`:tauri dev 包裝層被 kill 時,mori-tauri binary
+會 reparent 變 orphan,下次起新實例就兩個搶 tray / portal hotkey / clipboard。
+裝完之後第二個實例自殺,焦點還給第一個。
 
 ## Phase 5J — 單層 profile + Rust 統一 context 注入 + gemini provider (2026-05-12,完成)
 

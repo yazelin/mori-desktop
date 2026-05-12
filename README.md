@@ -41,8 +41,8 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J 完成(2026-05-12)** — Mori 在 Wayland 上
-**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法**:
+**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J + 5K + 5L + 5M 完成(2026-05-12)** — Mori 在 Wayland 上
+**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法、設定全都從 UI 編**:
 
 ### 5G 起的雙模式架構
 
@@ -77,6 +77,16 @@ shell_skills:
 ### 5I：skill_server 動態化
 
 之前 `skill_server`（給 `claude-bash` / `gemini-bash` / `codex-bash` 的 mori CLI HTTP 入口）寫死 8 個 skill。5I 改成每次 request 即時讀當前 Agent profile 並 build 完整 registry——所有 bash-CLI 系列 provider 看得到 action_skills + shell_skills，跟 OpenAI-tool-calling 系列（groq / ollama / claude-cli）行為一致。新增 `mori skill call <name> --args '{...}'` 通用 dispatch 子命令給動態 skill 用。
+
+### 5K + 5L + 5M：主視窗 sidebar + Picker + Config UI
+
+| 改動 | 怎麼用 |
+|---|---|
+| **5K-1 Picker overlay** | `Ctrl+Alt+P` 開獨立 picker 視窗。Tab 切 voice/agent section、↑↓ 選 item、Enter 確認、Esc 取消 |
+| **5K-2 Tray submenu** | 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」，掃 ~/.mori/ 列出全部 .md。滑鼠操作備案 |
+| **5J-followup single-instance** | `tauri-plugin-single-instance`：第二個實例自殺、焦點還給第一個，避免 orphan binary 雙開搶 hotkey |
+| **5M 主視窗 sidebar** | 880×600 + resizable。左側 5 個 tab：Chat / Profiles / Config / Memory / Skills |
+| **5L Config / Profile UI** | ConfigTab 編 config.json + corrections.md(即時 JSON 驗證)；ProfilesTab 列 voice/agent profile + 切換按鈕 + 編輯 modal + 新增/刪除。所有變更不需要重啟 |
 
 ### 5J：單層 profile + Rust 統一 context 注入
 
