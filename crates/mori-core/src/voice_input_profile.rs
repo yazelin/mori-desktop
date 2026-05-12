@@ -102,6 +102,15 @@ pub struct VoiceInputFrontmatter {
     pub paste_shortcut: Option<PasteShortcut>,
     /// 覆蓋全域 cleanup_level
     pub cleanup_level: Option<CleanupLevel>,
+    /// 5E-3:cleanup LLM call 之前注入哪些 memory type 進 system prompt(read-only)。
+    /// 用來給 VoiceInput 提供「校正詞庫 / 專有名詞 / 個人慣用語」之類 context,
+    /// 例 `[voice_dict]`。Memory 寫入仍只走 Agent 模式。
+    ///
+    /// 語意:
+    /// - `None` → fallback 到 config.json `voice_input.inject_memory_types`
+    /// - `Some(vec![])` → 強制不 inject(即使 config 全域有設)
+    /// - `Some([...])` → 用 profile 自己的清單
+    pub inject_memory_types: Option<Vec<String>>,
 }
 
 /// 貼回游標時用哪組 ydotool 按鍵。
@@ -135,6 +144,7 @@ impl Default for VoiceInputFrontmatter {
             stt_provider: None,
             paste_shortcut: None,
             cleanup_level: None,
+            inject_memory_types: None,
         }
     }
 }
@@ -322,6 +332,12 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
                     _ => None,
                 }
             }
+            // 5E-3: inline array 寫法 `[voice_dict, glossary]`(hand-rolled
+            // parser 不支援 YAML block list,只接 inline)。空 `[]` 表「強制不
+            // inject」,跟「沒寫這行」(走 config fallback)語意不同。
+            "inject_memory_types" => {
+                fm.inject_memory_types = Some(parse_inline_string_array(value));
+            }
             _ => {} // 未知鍵靜默忽略
         }
     }
@@ -343,6 +359,23 @@ fn parse_bool(s: &str) -> bool {
 
 fn non_empty(s: &str) -> Option<String> {
     if s.is_empty() { None } else { Some(s.to_string()) }
+}
+
+/// 5E-3:解析 inline YAML array 字串 `[a, b, "c"]` → `Vec<String>`。
+/// 支援 quote(`"x"` / `'x'`)+ 空白容忍。不支援 block list(`- a` 多行)— 5N
+/// hand-rolled line-parser 跨多行成本太高,沒這需求。
+fn parse_inline_string_array(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    inner
+        .split(',')
+        .map(|tok| tok.trim().trim_matches(|c| c == '"' || c == '\''))
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// API key 解析順序：
@@ -382,6 +415,47 @@ fn resolve_api_key(key_env_name: &str) -> String {
         );
     }
     key
+}
+
+// ─── 5E-3: VoiceInput memory inject 設定 ─────────────────────────────────
+
+/// 從 `~/.mori/config.json` 讀 `voice_input.inject_memory_types`。沒設或失敗 → 空 vec。
+/// 預期 JSON array of string,例 `["voice_dict"]`。
+pub fn read_config_inject_memory_types() -> Vec<String> {
+    let path = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(|h| std::path::PathBuf::from(h).join(".mori").join("config.json"));
+    let Some(path) = path else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new() };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    json.pointer("/voice_input/inject_memory_types")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 5E-3:解析 profile → 一個 `Vec<MemoryType>`(經過 fallback chain)。
+/// - profile.frontmatter.inject_memory_types = `Some(v)` → 用 v(空 = 強制不 inject)
+/// - profile = `None` → 讀 config.json `voice_input.inject_memory_types`
+/// - 都沒 → 空 vec
+pub fn resolve_inject_memory_types(profile: &VoiceInputProfile) -> Vec<crate::memory::MemoryType> {
+    let names = match &profile.frontmatter.inject_memory_types {
+        Some(v) => v.clone(),
+        None => read_config_inject_memory_types(),
+    };
+    names
+        .iter()
+        .map(|s| crate::memory::MemoryType::parse(s))
+        .collect()
 }
 
 // ─── File I/O ─────────────────────────────────────────────────────────────
@@ -632,6 +706,65 @@ mod tests {
         let content = "---\nENABLE_SEND_KEYS: true\n---\nbody";
         let p = parse_profile("test", content);
         assert!(p.frontmatter.has_type_b_flags());
+    }
+
+    #[test]
+    fn parse_inline_string_array_basics() {
+        assert_eq!(parse_inline_string_array("[a, b, c]"), vec!["a", "b", "c"]);
+        assert_eq!(
+            parse_inline_string_array(r#"["voice_dict", "glossary"]"#),
+            vec!["voice_dict", "glossary"]
+        );
+        assert_eq!(parse_inline_string_array("[]"), Vec::<String>::new());
+        assert_eq!(parse_inline_string_array("[ a ]"), vec!["a"]);
+        // 沒 bracket 包裝也容忍(寬鬆 parse)
+        assert_eq!(parse_inline_string_array("a, b"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parse_profile_inject_memory_types_inline() {
+        let content =
+            "---\ninject_memory_types: [voice_dict, glossary]\n---\nbody";
+        let p = parse_profile("test", content);
+        assert_eq!(
+            p.frontmatter.inject_memory_types.as_deref(),
+            Some(["voice_dict".to_string(), "glossary".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn parse_profile_inject_memory_types_empty_means_force_off() {
+        let content = "---\ninject_memory_types: []\n---\nbody";
+        let p = parse_profile("test", content);
+        // 「明確空 list」跟「沒寫」語意不同 — Some(empty) 表示 user 想強制關掉
+        assert_eq!(p.frontmatter.inject_memory_types, Some(vec![]));
+    }
+
+    #[test]
+    fn parse_profile_inject_memory_types_missing_means_fallback() {
+        let content = "---\nprovider: groq\n---\nbody";
+        let p = parse_profile("test", content);
+        // 沒這行 → None → resolve 時走 config fallback
+        assert!(p.frontmatter.inject_memory_types.is_none());
+    }
+
+    #[test]
+    fn resolve_inject_types_profile_some_takes_precedence() {
+        // profile Some(["voice_dict"]) → 即使 config 有東西也用 profile
+        let content = "---\ninject_memory_types: [voice_dict]\n---\nbody";
+        let p = parse_profile("test", content);
+        let resolved = resolve_inject_memory_types(&p);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0], crate::memory::MemoryType::VoiceDict);
+    }
+
+    #[test]
+    fn resolve_inject_types_profile_empty_forces_off() {
+        let content = "---\ninject_memory_types: []\n---\nbody";
+        let p = parse_profile("test", content);
+        // 即使 config.json 有設,profile Some(empty) 強制空 — 不走 fallback
+        let resolved = resolve_inject_memory_types(&p);
+        assert!(resolved.is_empty());
     }
 
     #[test]
