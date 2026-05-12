@@ -610,9 +610,9 @@
 select.mori-input {
   font-family: system-ui, sans-serif;
   cursor: pointer;
-  /* 強制 webkit native dropdown 用 dark 配色,
-     不然在 Linux GTK 主題下會跳出來是亮色 list */
-  color-scheme: dark;
+  /* brand-3: 讓 webkit native dropdown 跟著 :root color-scheme(theme.ts 套上)
+     走 — 切 light theme 時 dropdown 也是 light、dark 時 dark */
+  color-scheme: light dark;
 }
 select.mori-input option {
   background: var(--c-surface-bg);
