@@ -477,15 +477,9 @@ struct MemoryEntry {
     memory_type: String,
 }
 
+// 5E-3: 改走 MemoryType::as_str() 集中。VoiceDict 也自動 cover。
 fn memory_type_str(t: &mori_core::memory::MemoryType) -> String {
-    match t {
-        mori_core::memory::MemoryType::UserIdentity => "user_identity".into(),
-        mori_core::memory::MemoryType::Preference => "preference".into(),
-        mori_core::memory::MemoryType::SkillOutcome => "skill_outcome".into(),
-        mori_core::memory::MemoryType::Project => "project".into(),
-        mori_core::memory::MemoryType::Reference => "reference".into(),
-        mori_core::memory::MemoryType::Other(s) => s.clone(),
-    }
+    t.as_str()
 }
 
 #[tauri::command]
@@ -1445,9 +1439,41 @@ async fn run_voice_input_pipeline(
         &profile.body,
         profile.frontmatter.enable_read,
     );
-    // VoiceInput 不傳 memory_index（單輪 dictation 不需要長期記憶）
+    // VoiceInput 不傳 memory_index（單輪 dictation 不需要長期記憶索引）
     let context_section = build_context_section(&win_ctx, &mori_ctx, None);
-    let rendered_system = format!("{}\n\n---\n\n{}", body_expanded, context_section);
+
+    // 5E-3: VoiceInput 可選注入 voice_dict / 其他 memory type 進 cleanup prompt。
+    // 只在 smart level 跑(minimal/none 跳 LLM 不需要 memory)。Profile Some
+    // takes precedence over config.json voice_input.inject_memory_types(空 vec
+    // = 強制不 inject)。失敗 fallback 空字串繼續 — 不擋 cleanup pipeline。
+    let voice_dict_section = if matches!(level, CleanupLevel::Smart) {
+        let types = mori_core::voice_input_profile::resolve_inject_memory_types(&profile);
+        if types.is_empty() {
+            String::new()
+        } else {
+            match state.memory.list_by_types(&types).await {
+                Ok(mems) => {
+                    tracing::info!(
+                        types = ?types,
+                        count = mems.len(),
+                        "voice-input injecting memory entries into cleanup prompt",
+                    );
+                    build_voice_dict_section(&mems)
+                }
+                Err(e) => {
+                    tracing::warn!(?e, "voice-input memory list_by_types failed, continuing without inject");
+                    String::new()
+                }
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    let rendered_system = format!(
+        "{}\n\n---\n\n{}{}",
+        body_expanded, context_section, voice_dict_section
+    );
 
     // 決定 LLM provider
     let llm_provider: Arc<dyn mori_core::llm::LlmProvider> = match profile.frontmatter.resolved_provider() {
@@ -1627,6 +1653,37 @@ fn populate_urls_detected(ctx: &mut MoriContext, transcript: &str) {
         push(&mut all, &mut seen, extract_urls(s));
     }
     ctx.urls_detected = all;
+}
+
+/// 5E-3: 把選定 memory(通常 voice_dict)拼成 cleanup prompt 用的「校正詞庫」段落。
+/// 給 LLM 提示「這是參考詞表,不是 user 想說的話」,避免 LLM 把詞庫內容當輸入吐回去。
+/// 每筆 memory body 取前 800 字當摘要 — voice_dict 通常很短,800 足夠。
+fn build_voice_dict_section(mems: &[mori_core::memory::Memory]) -> String {
+    if mems.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("\n\n---\n\n## 校正參考(user 的詞庫 / 偏好)\n\n");
+    s.push_str(
+        "以下是 user 維護的專有名詞 / 偏好詞表。STT 校正時,\
+         遇到讀音接近的詞優先選清單詞;這是參考,**不是** user 想說的話,不要照搬輸出。\n\n",
+    );
+    for m in mems {
+        s.push_str(&format!("### {}\n", m.name));
+        if !m.description.is_empty() {
+            s.push_str(&format!("> {}\n\n", m.description));
+        } else {
+            s.push('\n');
+        }
+        let body = m.body.trim();
+        let preview: String = if body.chars().count() > 800 {
+            body.chars().take(800).collect::<String>() + "…"
+        } else {
+            body.to_string()
+        };
+        s.push_str(&preview);
+        s.push_str("\n\n");
+    }
+    s
 }
 
 fn build_context_section(
