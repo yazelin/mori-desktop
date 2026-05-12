@@ -1,11 +1,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import App from "./App";
+import MainShell from "./MainShell";
 import FloatingMori from "./FloatingMori";
 import ChatBubble from "./ChatBubble";
 import Picker from "./Picker";
 import "./styles.css";
+import "./shell.css";
 import "./floating.css";
 import "./chat-bubble.css";
 import "./picker.css";
@@ -43,9 +44,10 @@ if (label === "floating") {
     </React.StrictMode>,
   );
 } else {
+  // 5M: main window 換成 sidebar shell,App(chat)變成 sidebar 的一個 tab。
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
-      <App />
+      <MainShell />
     </React.StrictMode>,
   );
 }
