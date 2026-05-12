@@ -402,6 +402,10 @@ function FloatingMori() {
 
   const dragRef = useRef<{ x: number; y: number; armed: boolean } | null>(null);
   const DRAG_THRESHOLD_PX = 4;
+  // 5P-5: 拖曳中 — 套 .is-dragging class 讓 CSS 做「被拎起來懸空」視覺
+  // (sprite scale up + shadow 變大 + 微 tilt)。正式 dragging sprite 上來
+  // 後可在 character pack manifest 加 dragging state,這裡再切 visual。
+  const [isDragging, setIsDragging] = useState(false);
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.buttons !== 1) return;
@@ -415,6 +419,7 @@ function FloatingMori() {
     const dy = Math.abs(e.clientY - d.y);
     if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
       d.armed = false;
+      setIsDragging(true);
       invoke("plugin:window|start_dragging", { label: "floating" }).catch(
         (err) => console.error("start_dragging failed", err),
       );
@@ -423,6 +428,7 @@ function FloatingMori() {
 
   const onMouseUp = async () => {
     dragRef.current = null;
+    setIsDragging(false);
     // 拖動結束,通知 chat_bubble window 跟著移動到新位置(用 hardcoded sprite 尺寸算)
     if (hasChatBubble) {
       try {
@@ -475,7 +481,7 @@ function FloatingMori() {
 
   return (
     <div
-      className={`mori-stage mori-${visual}`}
+      className={`mori-stage mori-${visual}${isDragging ? " is-dragging" : ""}`}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}

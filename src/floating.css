@@ -108,6 +108,23 @@ body.floating-window #root {
   background-repeat: no-repeat;
 }
 
+/* 5P-5: 拖曳互動 — 被滑鼠拎起來「懸空」感:整 sprite scale up + drop-shadow
+   變大變遠 + 微 tilt(像被拎起來搖晃)。pause sprite frame animation 讓
+   user 聚焦在被抓住的狀態(等 dragging.png 正式上來再切 visual)。 */
+.mori-stage.is-dragging .mori-sprite {
+  transform: scale(1.08) rotate(-3deg);
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.45));
+  transition: transform 120ms ease-out, filter 120ms ease-out;
+  animation-play-state: paused;
+}
+.mori-stage.is-dragging .mori-sprite-frame {
+  animation-play-state: paused;
+}
+.mori-stage.is-dragging .mori-aura {
+  opacity: 0.4;
+  transition: opacity 120ms ease;
+}
+
 @keyframes mori-sprite-x {
   to { background-position-x: -400%; }
 }
