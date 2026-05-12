@@ -110,7 +110,7 @@ pub fn registry() -> Vec<DepSpec> {
         DepSpec {
             id: "xdotool",
             name: "xdotool",
-            description: "抓活躍視窗 / process name(XWayland 也吃)",
+            description: "抓活躍視窗 / process name。GNOME Wayland 下對 XWayland app(Chrome / VSCode / Electron 多數)能讀;純 Wayland-only app(部分 GTK4)拿不到。",
             unlocks: "Mori 知道你當下在哪個 app(寫 prompt context 用)",
             size_hint: None,
             needs_sudo: true,
@@ -122,8 +122,8 @@ pub fn registry() -> Vec<DepSpec> {
         DepSpec {
             id: "xclip",
             name: "xclip",
-            description: "X11 PRIMARY selection / clipboard 讀取",
-            unlocks: "反白文字直接被 Mori 看到(不用 Ctrl+C)",
+            description: "X11 PRIMARY selection / clipboard 讀寫。GNOME Wayland 下 Mutter 會把 PRIMARY 同步到 XWayland,xclip 透過 X server 仍能讀到反白 — mori 5F 之後 selection / clipboard 的 production path 就走它(避開 wl-paste 觸發的 portal 對話框)。",
+            unlocks: "反白文字直接被 Mori 看到(不用 Ctrl+C);Wayland 下等同必裝",
             size_hint: None,
             needs_sudo: true,
             check: CheckSpec::Which { bin: "xclip" },
