@@ -1,7 +1,7 @@
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, primaryMonitor } from "@tauri-apps/api/window";
 
 type SkillCallSummary = {
   name: string;
@@ -30,7 +30,8 @@ type Visual =
   | "recording"
   | "thinking"
   | "done"
-  | "error";
+  | "error"
+  | "walking";   // 5P-7: wander toggle ON + idle 時走來走去
 
 const TRANSIENT_DURATION_MS: Record<"done" | "error", number> = {
   done: 1500,
@@ -104,9 +105,13 @@ function visualFor(
   mode: Mode,
   phase: Phase,
   transient: Visual | null,
+  isWandering: boolean,
 ): Visual {
   if (mode === "background") return "sleeping";
   if (transient) return transient;
+  // 5P-7: 散步中 — 只在 idle phase + wander 開啟時走,其他 phase(錄音 / 思考
+  // / 完成 / 錯誤)優先,避免 user 講話時 Mori 跑掉
+  if (isWandering && phase.kind === "idle") return "walking";
   switch (phase.kind) {
     case "idle":
       return "idle";
@@ -122,6 +127,7 @@ function visualFor(
 }
 
 const VISUAL_LABEL: Record<Visual, string> = {
+  walking: "散步中",
   sleeping: "休眠中",
   idle: "在這",
   recording: "聽中",
@@ -198,6 +204,11 @@ function FloatingMori() {
     animated: true,
     wander: false,
   });
+  // 5P-7: Mori 是否現在正在「散步」(走動中)— 走的時候 visualFor 切到 walking,
+  // 走動完成後切回 idle。獨立 state 避免影響 phase-driven visual。
+  const [isWandering, setIsWandering] = useState(false);
+  // walking 方向(true = 向左,套 CSS scaleX(-1) 鏡像 idle sprite)
+  const [walkFacingLeft, setWalkFacingLeft] = useState(false);
 
   useEffect(() => {
     const loadFloatingConfig = async () => {
@@ -226,7 +237,7 @@ function FloatingMori() {
         const [stem, m] = await invoke<[string, CharacterManifest]>("character_get_active");
         setManifest(m);
         // foreach state 抓 data URL
-        const allStates: Visual[] = ["idle", "sleeping", "recording", "thinking", "done", "error"];
+        const allStates: Visual[] = ["idle", "sleeping", "recording", "thinking", "done", "error", "walking"];
         const entries = await Promise.all(
           allStates.map(async (state) => {
             try {
@@ -411,7 +422,118 @@ function FloatingMori() {
   // 5P-5: 拖曳中 — 套 .is-dragging class 讓 CSS 做「被拎起來懸空」視覺
   // (sprite scale up + shadow 變大 + 微 tilt)。正式 dragging sprite 上來
   // 後可在 character pack manifest 加 dragging state,這裡再切 visual。
+  // 5P-7 fix: Tauri start_dragging 接管 mouse 後,React onMouseUp 不一定 fire。
+  // 加 window-level mouseup / blur listener 確保 isDragging 一定 reset。
   const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    const reset = () => setIsDragging(false);
+    window.addEventListener("mouseup", reset);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("mouseup", reset);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+
+  // 5P-7: Wander logic — wander toggle ON + animated ON + phase=idle + 不在拖曳時,
+  // 定時隨機走動。實作:每 4-9 秒選一個新目標,setPosition 用 requestAnimationFrame
+  // 插值移動 1.5 秒。Wayland 下 client-side setPosition 對 floating widget 是允許的
+  // (5J 已驗證過用 setPosition off-screen 來 hide/show)。
+  useEffect(() => {
+    if (!floatingCfg.wander) return;
+    if (!floatingCfg.animated) return;
+    if (mode !== "agent" && mode !== "voice_input") return;
+    if (isDragging) return;
+    if (phase.kind !== "idle") return;
+
+    let cancelled = false;
+    const win = getCurrentWindow();
+
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    const walkOnce = async (): Promise<void> => {
+      try {
+        const pos = await win.outerPosition();
+        const factor = await win.scaleFactor();
+        const sx = pos.x / factor;
+        const sy = pos.y / factor;
+
+        // 螢幕邊界 — primaryMonitor 拿 size,floating widget 160×160
+        const monitor = await primaryMonitor();
+        const W = monitor ? monitor.size.width / factor : 1920;
+        const H = monitor ? monitor.size.height / factor : 1080;
+        const PAD = 40;
+        const WIN_W = 160;
+        const WIN_H = 160;
+
+        // 隨機目標(不要離當前太遠也不要太近 — 100~400px 距離)
+        let attempts = 0;
+        let tx = sx;
+        let ty = sy;
+        while (attempts < 10) {
+          tx = PAD + Math.random() * (W - WIN_W - PAD * 2);
+          ty = PAD + Math.random() * (H - WIN_H - PAD * 2);
+          const dx = tx - sx;
+          const dy = ty - sy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 100 && dist < 400) break;
+          attempts++;
+        }
+
+        // 設方向(目標在當前左還是右)
+        setWalkFacingLeft(tx < sx);
+        setIsWandering(true);
+
+        // requestAnimationFrame 插值 1.5 秒
+        const duration = 1500;
+        const t0 = performance.now();
+        await new Promise<void>((resolve) => {
+          const step = async () => {
+            if (cancelled) {
+              resolve();
+              return;
+            }
+            const elapsed = performance.now() - t0;
+            const t = Math.min(1, elapsed / duration);
+            // ease-in-out
+            const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            const x = sx + (tx - sx) * e;
+            const y = sy + (ty - sy) * e;
+            try {
+              await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+            } catch (e) {
+              console.warn("[wander] setPosition failed", e);
+            }
+            if (t < 1) requestAnimationFrame(step);
+            else resolve();
+          };
+          requestAnimationFrame(step);
+        });
+      } catch (e) {
+        console.warn("[wander] walk failed", e);
+      } finally {
+        setIsWandering(false);
+      }
+    };
+
+    let loopActive = true;
+    const loop = async () => {
+      while (loopActive && !cancelled) {
+        // 隨機 idle 等待 4-9 秒
+        await sleep(4000 + Math.random() * 5000);
+        if (!loopActive || cancelled) break;
+        await walkOnce();
+      }
+    };
+    loop();
+
+    return () => {
+      cancelled = true;
+      loopActive = false;
+      setIsWandering(false);
+    };
+  }, [floatingCfg.wander, floatingCfg.animated, mode, phase.kind, isDragging]);
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.buttons !== 1) return;
@@ -466,7 +588,7 @@ function FloatingMori() {
     }
   };
 
-  const visual = visualFor(mode, phase, transient);
+  const visual = visualFor(mode, phase, transient, isWandering);
 
   // 基底環不再 scale（避免 box-shadow 外溢出視窗被切），只用 --vol 控制
   // ::before 的發光強度。實際的「音量波動」由獨立的 ripple elements 表現。
@@ -516,7 +638,7 @@ function FloatingMori() {
             兩層分開避免 animation property 互相覆蓋。動畫 ON 預設(commit 4 接 toggle)。
             loop_durations_ms 從 manifest 拿,placeholder 階段 16 格全是同一張看似不閃。 */}
         <div
-          className={`mori-sprite mori-sprite-${visual}`}
+          className={`mori-sprite mori-sprite-${visual}${visual === "walking" && walkFacingLeft ? " walk-left" : ""}`}
           title={VISUAL_LABEL[visual]}
         >
           <div

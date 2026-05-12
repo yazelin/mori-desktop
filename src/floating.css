@@ -125,6 +125,26 @@ body.floating-window #root {
   transition: opacity 120ms ease;
 }
 
+/* 5P-7: walking — 沒專屬 walking sprite 時 fallback idle 看起來會像走路
+   配 wander 邏輯(setPosition window 真的移動)。walk-left class 由 JS
+   根據目標方向加,scaleX(-1) 鏡像讓 idle sprite 面向左。 */
+.mori-stage.mori-walking .mori-sprite {
+  transform: translateY(-2px);
+  animation: mori-walk-bob 0.5s ease-in-out infinite;
+}
+.mori-stage.mori-walking.walk-left .mori-sprite {
+  transform: scaleX(-1) translateY(-2px);
+  animation: mori-walk-bob-left 0.5s ease-in-out infinite;
+}
+@keyframes mori-walk-bob {
+  0%, 100% { transform: translateY(-2px) rotate(-1deg); }
+  50%      { transform: translateY(-6px) rotate(1deg); }
+}
+@keyframes mori-walk-bob-left {
+  0%, 100% { transform: scaleX(-1) translateY(-2px) rotate(1deg); }
+  50%      { transform: scaleX(-1) translateY(-6px) rotate(-1deg); }
+}
+
 @keyframes mori-sprite-x {
   to { background-position-x: -400%; }
 }

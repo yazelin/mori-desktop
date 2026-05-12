@@ -689,22 +689,38 @@ fn character_set_active(
 
 /// 讀 sprite 檔成 data URL(`data:image/png;base64,...`)讓 frontend `<img>` /
 /// CSS `background-image` 直接套。每張 sprite 對話只取一次,frontend 該 memoize。
+///
+/// Fallback chain(找第一個存在的 PNG):
+///   1. <stem>/sprites/<state>.png         ← 角色自己這 state 的 sprite
+///   2. mori/sprites/<state>.png           ← default mori 同 state
+///   3. <stem>/sprites/idle.png            ← 角色自己 idle 充當(例 walking / dragging)
+///   4. mori/sprites/idle.png              ← 最後保底
 #[tauri::command]
 fn character_sprite_data_url(stem: String, state: String) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    let p = crate::character_pack::sprite_path(&stem, &state);
-    if !p.exists() {
-        // Fallback 到 default mori 對應 state
-        let fallback = crate::character_pack::sprite_path("mori", &state);
-        if !fallback.exists() {
-            return Err(format!("sprite not found: {} (no fallback)", state));
+    let candidates = [
+        crate::character_pack::sprite_path(&stem, &state),
+        crate::character_pack::sprite_path("mori", &state),
+        crate::character_pack::sprite_path(&stem, "idle"),
+        crate::character_pack::sprite_path("mori", "idle"),
+    ];
+    for (idx, p) in candidates.iter().enumerate() {
+        if !p.exists() {
+            continue;
         }
-        tracing::warn!(stem = %stem, state = %state, "sprite missing, falling back to mori");
-        let bytes = std::fs::read(&fallback).map_err(|e| format!("read fallback: {e:#}"))?;
+        if idx > 0 {
+            tracing::debug!(
+                stem = %stem,
+                state = %state,
+                fell_back = idx,
+                using = %p.display(),
+                "sprite missing in primary, using fallback",
+            );
+        }
+        let bytes = std::fs::read(p).map_err(|e| format!("read sprite {state}: {e:#}"))?;
         return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)));
     }
-    let bytes = std::fs::read(&p).map_err(|e| format!("read sprite {state}: {e:#}"))?;
-    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)))
+    Err(format!("sprite not found: {} (no fallback available)", state))
 }
 
 #[tauri::command]
