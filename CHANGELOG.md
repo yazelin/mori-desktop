@@ -6,6 +6,47 @@
 
 ---
 
+## agent reliability / ZeroType bridge(2026-05-12)
+
+ZeroType Agent profile 卡 `Phase::Responding` 永遠不退的 bug,沿線挖出多個
+agent loop / shell_skill / LLM provider 的 reliability 問題,一併補:
+
+- `shell_skill` 加 `kill_on_drop(true)` — Ctrl+Alt+Esc 中斷後子程序(xclip /
+  ydotool)連帶 SIGKILL,避免殘留 process 影響後續 trigger(`5e8af7d`)
+- `groq.rs` reqwest client 加 90s timeout — LLM call hang(stream 不結束 /
+  API glitch)不再讓 agent loop 永遠卡(`68c381e`)
+- 新 `AgentMode::Dispatch` profile flag — bridge profile 第一個 tool_call
+  execute 後直接 Done,不再 round 第二輪 LLM(`bb831ca`)
+- `generic_openai`(gemini)+ `claude_cli` + `bash_cli_agent` 同樣補 timeout
+  (90s / 120s / 180s)(`17f6933`)
+- 新 unit test:Dispatch / MultiTurn 路徑分別驗證,加 `AgentMode::from_str_or_default`
+  parse cases(`71d3ac2`)
+- `examples/agent/AGENT-03.ZeroType Agent.md` + `examples/scripts/mori-trigger-zerotype.sh`
+  bridge pattern 範本入 repo;docs/profile-examples.html 加進這個 pattern 給其他
+  ZeroType 學員 reference(`6f4703f`)
+
+## brand-3 follow-ups(2026-05-12)
+
+brand-3 後續的瑣碎收尾跟 fix:
+
+- Custom Select 取代 native `<select>`(Linux webkit2gtk 的 GTK dropdown 配色
+  被 system GTK theme 鎖死;自繪 dropdown 跨 theme 同步)(`84fad44`)
+- 公式書 tagline 改「**靜靜記得 · 你經過的痕跡**」(從 SOUL.md 引言截取);
+  OG image 重 render(`3dd0999`)
+- Nav 統一兩套各自規範:docs nav 7 link(含 ~/.mori/ + Troubleshooting),
+  design book nav 6 link(`dd18add`)
+- `docs/profile-examples.html` Profile 範本頁 + `examples/agent/` + `examples/voice_input/`
+  starter pack(`fb7a79b`)
+- `docs/roadmap.md` 5E-3 VoiceInput 可選載入相關記憶(roadmap-only)(`667242c`)
+- `docs/desktop-ui.html` Phase Status 對齊 brand-2 / brand-3 完成項;拿掉舊
+  emoji 描述改 SVG `IconXxx` 名稱(`dd70dd4`, `21f703d`)
+- Picker / chat_bubble hide 時加 `setSize(1, 1)` — 雙保險避免 transparent
+  alwaysOnTop 視窗擋下面 app click hit-test(`81846d4`)
+- `scripts/restart-dev.sh` + `npm run dev:restart` 一鍵 kill + 重啟 dev(`5498abe`)
+- 12 張主畫面截圖 + main-dark.png caption 精準化(STT 收音不佳時 Mori 自我察覺,
+  不是 perfect 對話)(`b37504f`, `0482cbc`)
+- `docs/mori-home.html` ~/.mori/ 結構說明頁 + nav link
+
 ## brand-3 — 雙 theme + VSCode-like 自訂 theme(2026-05-12)
 
 - CSS variables 重構:`shell.css` / `chat-panel.css` / `picker.css` / `chat-bubble.css` / `floating.css` 全部色值改用 `var(--c-*)`,`:root` 內置 Mori Dark fallback
