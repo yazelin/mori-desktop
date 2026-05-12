@@ -274,6 +274,16 @@ function ShellSkillsEditor({
   );
 }
 
+// 5L-5: 從 command 抽 {{name}} placeholder,跟 parameters 字典 cross-check
+function extractPlaceholders(command: string[] | string): string[] {
+  const text = Array.isArray(command) ? command.join(" ") : command;
+  const re = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+  const found = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) found.add(m[1]);
+  return Array.from(found);
+}
+
 function ShellSkillCard({
   skill,
   onPatch,
@@ -287,6 +297,12 @@ function ShellSkillCard({
   const commandStr = Array.isArray(skill.command)
     ? skill.command.map((c) => JSON.stringify(c)).join(" ")
     : skill.command;
+
+  // 5L-5: placeholders vs parameters cross-check
+  const usedPlaceholders = extractPlaceholders(skill.command);
+  const declaredParams = Object.keys(skill.parameters ?? {});
+  const usedNotDeclared = usedPlaceholders.filter((p) => !declaredParams.includes(p));
+  const declaredNotUsed = declaredParams.filter((p) => !usedPlaceholders.includes(p));
   const setCommand = (text: string) => {
     // 嘗試 JSON-array 解析(["foo","bar baz"]),失敗就 split by space(僅最簡 case)
     let parsed: string[] | string | null = null;
@@ -354,13 +370,54 @@ function ShellSkillCard({
             />
           </FormRow>
           <FormRow label="command" hint='JSON array["bin","arg",...] 或 shell-like 字串'>
-            <textarea
-              className="mori-input mono"
-              rows={2}
-              value={commandStr}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder='["gh", "pr", "list", "--repo", "{{repo}}"]'
-            />
+            <div>
+              <textarea
+                className="mori-input mono"
+                rows={2}
+                value={commandStr}
+                onChange={(e) => setCommand(e.target.value)}
+                placeholder='["gh", "pr", "list", "--repo", "{{repo}}"]'
+              />
+              {/* 5L-5: placeholder ↔ parameters 一致性檢查 */}
+              {(usedNotDeclared.length > 0 || declaredNotUsed.length > 0) && (
+                <div className="mori-placeholder-check">
+                  {usedNotDeclared.length > 0 && (
+                    <div className="warn">
+                      ⚠️ command 用到但 parameters 沒宣告:
+                      {usedNotDeclared.map((p) => (
+                        <button
+                          key={p}
+                          className="mori-placeholder-chip add"
+                          onClick={() => {
+                            const next = { ...(skill.parameters ?? {}) };
+                            next[p] = { type: "string", required: true };
+                            onPatch({ parameters: next });
+                          }}
+                          title={`加為 string required 參數`}
+                        >
+                          {`{{${p}}}`} <span className="action">+ 加</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {declaredNotUsed.length > 0 && (
+                    <div className="hint">
+                      ℹ️ parameters 宣告了但 command 沒用:
+                      {declaredNotUsed.map((p) => (
+                        <span key={p} className="mori-placeholder-chip dim">{p}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {usedPlaceholders.length > 0
+                && usedNotDeclared.length === 0
+                && declaredNotUsed.length === 0 && (
+                <div className="mori-placeholder-check ok">
+                  ✓ {usedPlaceholders.length} 個 placeholder 都對應到 parameters
+                </div>
+              )}
+            </div>
           </FormRow>
           <FormRow label="timeout" hint="秒,空 = 30">
             <input

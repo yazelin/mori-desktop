@@ -756,6 +756,75 @@ select.mori-input option {
   font-size: 11px;
 }
 
+/* 5L-5: command ↔ parameters 同步檢查 */
+.mori-placeholder-check {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.mori-placeholder-check .warn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 9px;
+  background: rgba(255, 200, 100, 0.10);
+  border: 1px solid rgba(255, 200, 100, 0.25);
+  border-radius: 6px;
+  color: rgba(255, 220, 170, 0.95);
+}
+.mori-placeholder-check .hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.mori-placeholder-check.ok {
+  padding: 4px 9px;
+  background: rgba(170, 230, 185, 0.10);
+  border: 1px solid rgba(170, 230, 185, 0.22);
+  border-radius: 6px;
+  color: rgba(190, 240, 200, 0.95);
+}
+.mori-placeholder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: ui-monospace, monospace;
+}
+.mori-placeholder-chip.add {
+  cursor: pointer;
+  border-color: rgba(255, 200, 100, 0.40);
+  background: rgba(255, 200, 100, 0.10);
+  transition: background 120ms ease;
+  font-family: inherit;
+}
+.mori-placeholder-chip.add:hover {
+  background: rgba(255, 200, 100, 0.22);
+}
+.mori-placeholder-chip.add .action {
+  font-size: 9.5px;
+  opacity: 0.75;
+}
+.mori-placeholder-chip.dim {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.55);
+}
+
 /* ─── 5L-4: Memory + Skills tabs ────────────────────────── */
 
 .mori-memory-modal { width: min(92%, 720px); }

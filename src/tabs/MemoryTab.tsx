@@ -201,6 +201,8 @@ function MemoryEditor({
 
 function MemoryTab() {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
+  const [hits, setHits] = useState<MemoryEntry[] | null>(null); // null = 沒在搜尋
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; isNew: boolean } | null>(null);
@@ -220,6 +222,29 @@ function MemoryTab() {
 
   useEffect(() => { reload(); }, []);
 
+  // 5L-5: 搜尋 debounce 300ms,空 query 回 list-only。
+  // 非空走 memory_search(會掃 body),空就清空 hits。
+  useEffect(() => {
+    const q = filter.trim();
+    if (!q) {
+      setHits(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await invoke<MemoryEntry[]>("memory_search", { query: q, limit: 100 });
+        setHits(res);
+      } catch (e: any) {
+        setError(String(e));
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [filter]);
+
   const createNew = () => {
     const id = prompt("新 memory id(英數 / _ / -,例 user_lang_preference):");
     if (!id) return;
@@ -232,16 +257,8 @@ function MemoryTab() {
     setEditing({ id: trimmed, isNew: true });
   };
 
-  const filtered = entries.filter((e) => {
-    if (!filter.trim()) return true;
-    const q = filter.toLowerCase();
-    return (
-      e.id.toLowerCase().includes(q) ||
-      e.name.toLowerCase().includes(q) ||
-      e.description.toLowerCase().includes(q) ||
-      e.memory_type.toLowerCase().includes(q)
-    );
-  });
+  // 有 query → 用後端 hits(含 body 搜尋);無 query → 用 list
+  const filtered = hits ?? entries;
 
   return (
     <div className="mori-tab mori-tab-memory">
@@ -257,13 +274,15 @@ function MemoryTab() {
       <div className="mori-memory-toolbar">
         <input
           className="mori-input"
-          placeholder="搜尋 id / name / description..."
+          placeholder="搜尋 name / description / body (全文,300ms debounce)"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
         <button className="mori-btn primary" onClick={createNew}>+ 新增記憶</button>
         <button className="mori-btn" onClick={reload}>🔄</button>
-        <span className="mori-memory-count">{filtered.length} / {entries.length}</span>
+        <span className="mori-memory-count">
+          {searching ? "搜尋中…" : `${filtered.length} / ${entries.length}`}
+        </span>
       </div>
 
       {loading ? (

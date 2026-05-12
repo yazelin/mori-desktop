@@ -578,6 +578,31 @@ async fn memory_delete(state: tauri::State<'_, Arc<AppState>>, id: String) -> Re
     state.memory.delete(&id).await.map_err(|e| format!("delete: {e}"))
 }
 
+/// 5L-5: 全文搜尋 memory(name / description / body 都搜)。
+/// 回傳跟 memory_list 一樣的 MemoryEntry,加上 hit 程度可後續排序(現在依 store 順序)。
+#[tauri::command]
+async fn memory_search(
+    state: tauri::State<'_, Arc<AppState>>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<MemoryEntry>, String> {
+    let limit = limit.unwrap_or(50);
+    let hits = state
+        .memory
+        .search(&query, limit)
+        .await
+        .map_err(|e| format!("search: {e}"))?;
+    Ok(hits
+        .into_iter()
+        .map(|m| MemoryEntry {
+            id: m.id,
+            name: m.name,
+            description: m.description,
+            memory_type: memory_type_str(&m.memory_type),
+        })
+        .collect())
+}
+
 #[derive(serde::Serialize, Clone)]
 struct SkillInfo {
     name: String,
@@ -1901,6 +1926,7 @@ fn main() {
             memory_read,
             memory_write,
             memory_delete,
+            memory_search,
             skills_list,
         ])
         .on_window_event(|window, event| {

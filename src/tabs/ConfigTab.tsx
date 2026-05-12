@@ -475,7 +475,7 @@ function ConfigTab() {
           {/* ── Voice input ────────────────────────────── */}
           <Section
             title="VoiceInput"
-            hint="VoiceInput 模式的 cleanup 等級(每個 voice profile 也可以 override)"
+            hint="VoiceInput 模式的全域預設;每個 voice profile 都可以 override 自己這幾項。"
           >
             <FormRow label="cleanup_level" hint="smart=LLM+程式 / minimal=只程式 / none=raw 直貼">
               <select
@@ -492,6 +492,44 @@ function ConfigTab() {
                 <option value="minimal">minimal</option>
                 <option value="none">none</option>
               </select>
+            </FormRow>
+            <FormRow label="paste_shortcut" hint="貼回游標時用的快捷鍵預設">
+              <select
+                className="mori-input"
+                value={cfg.voice_input?.paste_shortcut ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const v = ensureSubObj(c, "voice_input");
+                    if (e.target.value === "") {
+                      delete v.paste_shortcut;
+                      if (Object.keys(v).length === 0) delete c.voice_input;
+                    } else {
+                      v.paste_shortcut = e.target.value;
+                    }
+                  })
+                }
+              >
+                <option value="">(自動偵測 — process name → terminal 用 ctrl_shift_v、其他用 ctrl_v)</option>
+                <option value="ctrl_v">ctrl_v(一般 app)</option>
+                <option value="ctrl_shift_v">ctrl_shift_v(terminal)</option>
+              </select>
+            </FormRow>
+            <FormRow label="auto_enter" hint="貼完後自動按 Enter 送出(每個 profile 也可 ENABLE_AUTO_ENTER override)">
+              <input
+                type="checkbox"
+                checked={!!cfg.voice_input?.auto_enter}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const v = ensureSubObj(c, "voice_input");
+                    if (e.target.checked) {
+                      v.auto_enter = true;
+                    } else {
+                      delete v.auto_enter;
+                      if (Object.keys(v).length === 0) delete c.voice_input;
+                    }
+                  })
+                }
+              />
             </FormRow>
           </Section>
         </>
