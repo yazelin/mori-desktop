@@ -65,6 +65,7 @@ phase 演進見 [**CHANGELOG**](CHANGELOG.md)。
 - 長期記憶(`~/.mori/memory/*.md`,user 可編)
 - 剪貼簿 / 反白 / URL 自動進 context
 - 雙 theme(dark / light)+ VSCode-like 自訂 theme(`~/.mori/themes/*.json`)
+- 替換 floating Mori 角色 — sprite 4×4 sheet animation + character pack 系統(`~/.mori/characters/<name>/`,manifest.json schema + 預期由獨立 generator app 出 `.moripack.zip` 給 user import,規範見 [docs/character-pack](https://yazelin.github.io/mori-desktop/character-pack))
 - 完整視覺品牌系統(公式書 = 單一可信來源)
 - 所有 LLM provider 都有 timeout 兜底 + agent loop 殘留 child 不會卡死 — 不再
   「Mori 卡住要 Ctrl+Alt+Esc」

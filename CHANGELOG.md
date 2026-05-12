@@ -22,7 +22,7 @@ yazelin 另開的 sprite generator app 能輸出**完全符合規格**的 `.mori
   crate inline 做,user 不用 sudo apt install ImageMagick
 - **動 / 拖曳分層 toggle**;走動 toggle persist 但 logic 下版接
 
-### 6 個子 commit
+### 子 commit(時序)
 
 - **5P-1 `39d1056`**:character_pack 規範 + default mori ensure + Tauri IPC
 - **5P-2 `1446321`**:ensure_default 升 4×4 placeholder(Rust image crate)+
@@ -34,8 +34,24 @@ yazelin 另開的 sprite generator app 能輸出**完全符合規格**的 `.mori
   + config-changed event 即時生效
 - **5P-5 `a6d81d3`**:拖曳偵測 + .is-dragging CSS「被拎起懸空」視覺(scale +
   rotate + drop-shadow + animation paused)
-- **5P-6**(本 commit):ConfigTab character picker + 升級 button + docs/character-pack.md
-  完整規範 + floating-sprite-spec.md 修 buggy keyframes
+- **5P-6 `d260400`**:ConfigTab character picker + 升級 button + docs/character-pack.md
+  完整規範
+- **5P-7 `3980a60`**:walking 邏輯實作(setPosition 隨機 + 1.5s 平滑插值移動 +
+  邊界檢測)+ 拖曳 mouseup window-level listener 保險(Tauri start_dragging 接管
+  後 React onMouseUp 不一定 fire 的 bug)+ IPC sprite fallback chain 升級 4 階
+  (自己 pack 同 state → mori 同 state → 自己 idle → mori idle)
+- **5P-8 `2d5d137`**:首輪 flicker fix attempt — 把 keyframes `to: -400%` 改
+  `-300%` 想避開 wrap blank。**方向錯**(下個 commit 修)
+- **5P-9 `d6ca1ee`** 真 flicker fix:CSS `background-position` 百分比公式是
+  `pixel_shift = percent × (container - image)`,負值會把 image 推 off-screen
+  完全 blank。改用**正百分比** `to: 100%` map 到 cell 0..3,配 `steps(4, jump-none)`
+  整 cycle 都在 image 範圍內。User 看到的「持續 cycle 出現消失」徹底修
+- **5P-ux `8c76eb6`**:Config tab UX 修 — 兩顆 Save 按鈕標籤區分
+  (「儲存 config.json」vs「儲存 corrections.md」)、頂端 action bar 改 sticky
+  (滾到下面 Floating Mori section 仍看得到主 Save,避免誤點 corrections.md
+  那顆 Save)
+- 中間還有 `3b53a6d` / `3294dcd` / `2e83350` 三個 debug commit(console.log +
+  視覺 dirty indicator)定位 root cause 後在 5P-ux 撤掉,留作 git history 紀錄
 
 ### Sprite generator workflow 預備
 - `docs/character-pack.md` 完整 schema + frame order + design tips
@@ -43,10 +59,14 @@ yazelin 另開的 sprite generator app 能輸出**完全符合規格**的 `.mori
 - ConfigTab Floating section 提供 active 切換 + 升級 button
 
 ### 已知限制(交給 future commit)
-- One-shot 模式(done / error)engine 簡化都當 infinite loop,正式 sprite 來
-  再接 fill-forwards
-- Wander logic(setPosition 隨機走動)— toggle persist 但 logic 未實作
-- 個人化光效顏色 picker / chat bubble / profile chip 顯示 toggle — 拆下版
+- **One-shot 模式**(done / error)engine 簡化都當 infinite loop,正式 sprite
+  上來再接 `animation-iteration-count: 1` + `fill-mode: forwards` 停 frame 16
+- **正式 sprite 美術資產**:目前 placeholder 是 16 cell 全填 frame 1,動畫 ON
+  看起來不動;等 yazelin 另開的 generator app 出真 16-frame walking / dragging /
+  其他動作 sheet,直接覆蓋同檔名就會動
+- **個人化光效顏色 picker** / **chat bubble 顯示 toggle** / **profile chip
+  顯示 toggle** — 拆下版「Floating settings page」做
+- **Import / Export `.moripack.zip` UI** — 等 generator app 有 ZIP 輸出再接
 
 ## docs(roadmap): 5E-2 scope 精準化 — 不只是 paste-back(2026-05-13)
 
