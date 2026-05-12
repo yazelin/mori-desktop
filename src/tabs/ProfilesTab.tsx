@@ -1,104 +1,12 @@
-// 5L: profile list + edit modal。
-// 點 profile 按鈕「切換」直接切並 emit slot event(同 picker);
-// 點「編輯」打開 modal 顯示 .md 內容,可改 frontmatter / body 後存。
+// 5L-3: profile list + edit modal(ProfileEditor 拆到 ProfileEditor.tsx,
+// 內含 frontmatter typed form + shell_skills 表格 + raw 切換)。
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { ProfileEditor } from "../ProfileEditor";
 
 type ProfileEntry = { stem: string; display: string };
 type Kind = "voice" | "agent";
-
-type SaveStatus =
-  | { kind: "idle" }
-  | { kind: "saving" }
-  | { kind: "ok" }
-  | { kind: "err"; message: string };
-
-function ProfileEditor({
-  kind,
-  stem,
-  onClose,
-  onSaved,
-}: {
-  kind: Kind;
-  stem: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [text, setText] = useState<string>("");
-  const [orig, setOrig] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
-
-  useEffect(() => {
-    invoke<string>("profile_read", { kind, stem })
-      .then((t) => { setText(t); setOrig(t); })
-      .catch((e) => setStatus({ kind: "err", message: `load: ${e}` }))
-      .finally(() => setLoading(false));
-  }, [kind, stem]);
-
-  const save = async () => {
-    setStatus({ kind: "saving" });
-    try {
-      await invoke("profile_write", { kind, stem, text });
-      setOrig(text);
-      setStatus({ kind: "ok" });
-      onSaved();
-      setTimeout(() => setStatus({ kind: "idle" }), 2000);
-    } catch (e: any) {
-      setStatus({ kind: "err", message: String(e) });
-    }
-  };
-
-  const remove = async () => {
-    if (!confirm(`刪除 ${kind}/${stem}.md? 不可復原。`)) return;
-    try {
-      await invoke("profile_delete", { kind, stem });
-      onSaved();
-      onClose();
-    } catch (e: any) {
-      setStatus({ kind: "err", message: String(e) });
-    }
-  };
-
-  const dirty = text !== orig;
-
-  return (
-    <div className="mori-modal-backdrop" onClick={onClose}>
-      <div className="mori-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="mori-modal-header">
-          <div className="mori-modal-title">
-            <span className="mori-modal-kind">{kind === "voice" ? "🎙 VoiceInput" : "🌳 Agent"}</span>
-            <span className="mori-modal-stem">{stem}.md</span>
-          </div>
-          <button className="mori-btn ghost" onClick={onClose}>✕</button>
-        </div>
-        <div className="mori-modal-body">
-          {loading ? (
-            <div className="mori-modal-loading">讀取中…</div>
-          ) : (
-            <textarea
-              className="mori-modal-textarea"
-              spellCheck={false}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-            />
-          )}
-        </div>
-        <div className="mori-modal-footer">
-          <button className="mori-btn danger" onClick={remove}>刪除</button>
-          <div className="mori-modal-footer-right">
-            {status.kind === "saving" && <span className="mori-save-status saving">儲存中…</span>}
-            {status.kind === "ok" && <span className="mori-save-status ok">✓ 已儲存</span>}
-            {status.kind === "err" && <span className="mori-save-status err">✗ {status.message}</span>}
-            <button className="mori-btn" onClick={() => setText(orig)} disabled={!dirty}>還原</button>
-            <button className="mori-btn primary" onClick={save} disabled={!dirty}>儲存</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function NewProfileButton({
   kind,
