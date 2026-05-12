@@ -13,8 +13,16 @@
 //! - profile body = 純人格 / cleanup 指示（使用者寫的）
 //! - 時間 / 視窗 / 剪貼簿 / OS 等動態 context 由 mori-tauri 的 `build_context_section()`
 //!   在 LLM call 之前拼到 system prompt 後面
-//! - ZeroType 相容鍵（ZEROTYPE_AIPROMPT_* / ENABLE_*）仍可解析，但建議改用 mori-native
-//!   的 `provider:` / `stt_provider:` 寫法
+//!
+//! ## 5N 之後（key 大小寫整合）
+//! - Frontmatter key 全部 case-insensitive：`enable_read` 跟 `ENABLE_READ` 視為等價，
+//!   `provider` 跟 `Provider` 也行。canonical 寫法是 lowercase snake_case（跟
+//!   Rust field 名一致）。
+//! - 過去 voice profile 內 `enable_read: true` 因 parser 只認 SCREAMING_SNAKE 被
+//!   silently 忽略 — 5N 修好了，會真的觸發 `#file:` 預處理。
+//! - **ZEROTYPE_AIPROMPT_\* deprecated**：自訂 OpenAI-compat 端點請改用
+//!   `provider: <custom-name>` + `~/.mori/config.json` `providers.<custom-name>`
+//!   (`api_base` + `api_key_env` + `model`)。舊鍵仍可解析作為過渡。
 
 use std::path::PathBuf;
 
@@ -261,31 +269,42 @@ pub fn parse_profile(name: &str, content: &str) -> VoiceInputProfile {
 
 fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
     let mut fm = VoiceInputFrontmatter::default();
+    // 5N: 偵測 SCREAMING_SNAKE 舊寫法用，end-of-loop 統一 warn 一次。
+    let mut deprecated_uppercase: Vec<String> = Vec::new();
     for line in s.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let Some(colon) = line.find(':') else { continue };
-        let key = line[..colon].trim();
+        let raw_key = line[..colon].trim();
         let value = line[colon + 1..].trim();
+        // 5N: key 全 case-insensitive — `enable_read` / `ENABLE_READ` 視為等價。
+        // canonical 是 lowercase snake_case;SCREAMING_SNAKE 為過渡期 deprecated alias。
+        let key = raw_key.to_ascii_lowercase();
+        if raw_key.chars().any(|c| c.is_ascii_uppercase()) {
+            deprecated_uppercase.push(raw_key.to_string());
+        }
 
-        match key {
-            "ZEROTYPE_AIPROMPT_API_BASE" => fm.zerotype_api_base = non_empty(value),
-            "ZEROTYPE_AIPROMPT_API_KEY_ENV" => fm.zerotype_api_key_env = non_empty(value),
-            "ZEROTYPE_AIPROMPT_MODEL" => fm.zerotype_model = non_empty(value),
-            "ZEROTYPE_AIPROMPT_MODEL_EFFORT" => fm.zerotype_model_effort = non_empty(value),
-            "ENABLE_SMART_PASTE" => fm.enable_smart_paste = parse_bool(value),
-            "ENABLE_AUTO_ENTER" => fm.enable_auto_enter = parse_bool(value),
-            "ENABLE_SEND_KEYS" => fm.enable_send_keys = parse_bool(value),
-            "ENABLE_OPEN_URL" => fm.enable_open_url = parse_bool(value),
-            "ENABLE_OPEN_APP" => fm.enable_open_app = parse_bool(value),
-            "ENABLE_GOOGLE_SEARCH" => fm.enable_google_search = parse_bool(value),
-            "ENABLE_ASK_CHATGPT" => fm.enable_ask_chatgpt = parse_bool(value),
-            "ENABLE_ASK_GEMINI" => fm.enable_ask_gemini = parse_bool(value),
-            "ENABLE_FIND_YOUTUBE" => fm.enable_find_youtube = parse_bool(value),
-            "ENABLE_READ" => fm.enable_read = parse_bool(value),
-            "ENABLE_RUN_SHELL" => fm.enable_run_shell = parse_bool(value),
+        match key.as_str() {
+            // ── ZeroType 自訂端點(deprecated,改用 provider: <name> + config.json) ──
+            "zerotype_aiprompt_api_base" => fm.zerotype_api_base = non_empty(value),
+            "zerotype_aiprompt_api_key_env" => fm.zerotype_api_key_env = non_empty(value),
+            "zerotype_aiprompt_model" => fm.zerotype_model = non_empty(value),
+            "zerotype_aiprompt_model_effort" => fm.zerotype_model_effort = non_empty(value),
+            // ── enable flags(canonical: lowercase enable_X)─────────────────
+            "enable_smart_paste" => fm.enable_smart_paste = parse_bool(value),
+            "enable_auto_enter" => fm.enable_auto_enter = parse_bool(value),
+            "enable_send_keys" => fm.enable_send_keys = parse_bool(value),
+            "enable_open_url" => fm.enable_open_url = parse_bool(value),
+            "enable_open_app" => fm.enable_open_app = parse_bool(value),
+            "enable_google_search" => fm.enable_google_search = parse_bool(value),
+            "enable_ask_chatgpt" => fm.enable_ask_chatgpt = parse_bool(value),
+            "enable_ask_gemini" => fm.enable_ask_gemini = parse_bool(value),
+            "enable_find_youtube" => fm.enable_find_youtube = parse_bool(value),
+            "enable_read" => fm.enable_read = parse_bool(value),
+            "enable_run_shell" => fm.enable_run_shell = parse_bool(value),
+            // ── mori 原生鍵 ────────────────────────────────────────────
             "provider" => fm.provider = non_empty(value),
             "stt_provider" => fm.stt_provider = non_empty(value),
             "paste_shortcut" => {
@@ -303,8 +322,17 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
                     _ => None,
                 }
             }
-            _ => {} // 未知鍵靜默忽略，ZeroType profile 相容
+            _ => {} // 未知鍵靜默忽略
         }
+    }
+    if !deprecated_uppercase.is_empty() {
+        tracing::warn!(
+            keys = ?deprecated_uppercase,
+            "voice profile frontmatter 用了 SCREAMING_SNAKE 寫法(過渡期 deprecated alias) — \
+             建議改成 lowercase snake_case(canonical),例 ENABLE_READ → enable_read。\
+             ZEROTYPE_AIPROMPT_* 整組會在下個版本移除,改用 provider: <name> + \
+             ~/.mori/config.json providers.<name>(api_base + api_key_env + model)。",
+        );
     }
     fm
 }
@@ -528,6 +556,36 @@ mod tests {
         assert!(p.frontmatter.enable_auto_enter);
         assert!(!p.frontmatter.enable_smart_paste);
         assert_eq!(p.body, "Hello");
+    }
+
+    #[test]
+    fn parse_profile_lowercase_enable_keys() {
+        // 5N: lowercase canonical 寫法應該正常被認識(過去因 parser 只認 SCREAMING
+        // 被默默忽略,所有 USER-XX profile 的 `enable_read: true` 都沒效)。
+        let content = "---\nenable_read: true\nenable_auto_enter: true\nenable_smart_paste: false\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(p.frontmatter.enable_read);
+        assert!(p.frontmatter.enable_auto_enter);
+        assert!(!p.frontmatter.enable_smart_paste);
+    }
+
+    #[test]
+    fn parse_profile_mixed_case_keys_treated_equal() {
+        // 5N: case-insensitive — Enable_Read / ENABLE_read 等 weird 寫法也吃
+        let content = "---\nEnable_Read: true\nENABLE_run_shell: yes\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(p.frontmatter.enable_read);
+        assert!(p.frontmatter.enable_run_shell);
+    }
+
+    #[test]
+    fn parse_profile_lowercase_zerotype_keys() {
+        // 5N: ZeroType 鍵也接受 lowercase(雖然 canonical 應該用 provider: + config.json)
+        let content = "---\nzerotype_aiprompt_api_base: https://x.example.com/v1\nzerotype_aiprompt_api_key_env: MY_KEY\nzerotype_aiprompt_model: gpt-4\n---\nbody";
+        let p = parse_profile("test", content);
+        assert_eq!(p.frontmatter.zerotype_api_base.as_deref(), Some("https://x.example.com/v1"));
+        assert_eq!(p.frontmatter.zerotype_api_key_env.as_deref(), Some("MY_KEY"));
+        assert_eq!(p.frontmatter.zerotype_model.as_deref(), Some("gpt-4"));
     }
 
     #[test]

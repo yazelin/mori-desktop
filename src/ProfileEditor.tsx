@@ -82,13 +82,22 @@ function FrontmatterForm({
 
   return (
     <div className="mori-frontmatter-form">
-      <FormRow label="provider" hint="LLM provider">
+      <FormRow label="provider" hint="LLM provider(自訂 OpenAI-compat 端點請於 Config tab 加 providers.<name> 區塊)">
         <Select
           value={fm.provider ?? ""}
           allowEmpty
           emptyLabel="(同 ~/.mori/config.json)"
           onChange={(v) => patch("provider", v)}
-          options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
+          options={(() => {
+            // 5N: 若 profile 寫了不在 ALL_PROVIDERS 內的 provider 名(例自訂
+            // azure-gpt41),補一條 option 進去讓 Select 顯示得出來,別 fallback 到 placeholder。
+            const base = ALL_PROVIDERS.map((p) => ({ value: p, label: p }));
+            const cur = fm.provider;
+            if (typeof cur === "string" && cur && !ALL_PROVIDERS.includes(cur)) {
+              base.push({ value: cur, label: `${cur}(自訂)` });
+            }
+            return base;
+          })()}
         />
       </FormRow>
 
@@ -139,45 +148,21 @@ function FrontmatterForm({
             />
           </FormRow>
 
-          <FormRow label="auto_enter" hint="貼完後模擬 Enter(YAML 鍵:ENABLE_AUTO_ENTER)">
+          <FormRow label="enable_auto_enter" hint="貼完後模擬 Enter">
             <input
               type="checkbox"
-              checked={!!fm.ENABLE_AUTO_ENTER}
-              onChange={(e) => patch("ENABLE_AUTO_ENTER", e.target.checked || null)}
+              checked={!!fm.enable_auto_enter || !!fm.ENABLE_AUTO_ENTER}
+              onChange={(e) => {
+                // 5N: 改寫 lowercase canonical key。若 file 內還有大寫 alias 一併清掉,
+                // 避免兩份 key 並存時 round-trip 出兩行 YAML(parser case-insensitive 後值會打架)。
+                const next = { ...fm };
+                delete next.ENABLE_AUTO_ENTER;
+                if (e.target.checked) next.enable_auto_enter = true;
+                else delete next.enable_auto_enter;
+                setFm(next);
+              }}
             />
           </FormRow>
-
-          <details className="mori-form-advanced">
-            <summary>ZeroType / Azure OpenAI 端點(進階)</summary>
-            <FormRow label="api_base" hint="ZEROTYPE_AIPROMPT_API_BASE">
-              <input
-                className="mori-input"
-                value={fm.ZEROTYPE_AIPROMPT_API_BASE ?? ""}
-                onChange={(e) => patch("ZEROTYPE_AIPROMPT_API_BASE", e.target.value)}
-              />
-            </FormRow>
-            <FormRow label="api_key_env" hint="ZEROTYPE_AIPROMPT_API_KEY_ENV">
-              <input
-                className="mori-input"
-                value={fm.ZEROTYPE_AIPROMPT_API_KEY_ENV ?? ""}
-                onChange={(e) => patch("ZEROTYPE_AIPROMPT_API_KEY_ENV", e.target.value)}
-              />
-            </FormRow>
-            <FormRow label="model" hint="ZEROTYPE_AIPROMPT_MODEL">
-              <input
-                className="mori-input"
-                value={fm.ZEROTYPE_AIPROMPT_MODEL ?? ""}
-                onChange={(e) => patch("ZEROTYPE_AIPROMPT_MODEL", e.target.value)}
-              />
-            </FormRow>
-            <FormRow label="model_effort" hint="ZEROTYPE_AIPROMPT_MODEL_EFFORT">
-              <input
-                className="mori-input"
-                value={fm.ZEROTYPE_AIPROMPT_MODEL_EFFORT ?? ""}
-                onChange={(e) => patch("ZEROTYPE_AIPROMPT_MODEL_EFFORT", e.target.value)}
-              />
-            </FormRow>
-          </details>
         </>
       )}
 
