@@ -116,6 +116,11 @@ impl Skill for ShellSkill {
             cmd.current_dir(expand_tilde(wd));
         }
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // brand-3 follow-up: 跟 bash_cli_agent 一致設 kill_on_drop,讓 Ctrl+Alt+Esc
+        // abort pipeline task 後,子程序(以及它 spawn 的 xclip / ydotool 等)連帶
+        // SIGKILL — 避免殘留 process 卡 X11 clipboard ownership / ydotool 半發 key
+        // sequence,造成下次 shell_skill 異常(如 ZeroType agent 永久叫不動)。
+        cmd.kill_on_drop(true);
 
         let mut child = cmd
             .spawn()
