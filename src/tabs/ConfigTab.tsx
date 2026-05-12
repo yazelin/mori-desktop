@@ -440,12 +440,14 @@ function ConfigTab() {
   };
 
   const saveConfig = async () => {
+    console.log("[saveConfig] clicked, dirty=", dirty, "rawError=", rawError);
     if (rawError) { setStatus({ kind: "err", message: `JSON: ${rawError}` }); return; }
     setStatus({ kind: "saving" });
     try {
       await invoke("config_write", { text: raw });
       setOrig(raw);
       setStatus({ kind: "ok" });
+      console.log("[saveConfig] OK, raw now persisted to ~/.mori/config.json");
       setTimeout(() => setStatus({ kind: "idle" }), 2500);
     } catch (e: any) {
       setStatus({ kind: "err", message: String(e) });
@@ -497,9 +499,9 @@ function ConfigTab() {
         </button>
         <div className="mori-view-toggle-actions">
           <StatusBadge status={status} />
-          {/* 5P debug: 視覺化 dirty state,排查 Save 不 enable */}
-          <span style={{ fontSize: 11, opacity: 0.6, fontFamily: "ui-monospace, monospace" }}>
-            dirty={dirty ? "Y" : "N"} rawLen={raw.length} origLen={orig.length}
+          {/* 5P debug: 視覺化 dirty + rawError state,排查 Save 不 enable */}
+          <span style={{ fontSize: 11, opacity: 0.7, fontFamily: "ui-monospace, monospace", color: rawError ? "#e74" : "inherit" }}>
+            dirty={dirty ? "Y" : "N"} err={rawError ? "Y" : "N"} disabled={(!dirty || !!rawError) ? "Y" : "N"}
           </span>
           <button
             className="mori-btn"
