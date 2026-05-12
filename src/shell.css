@@ -35,7 +35,13 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   margin-bottom: 8px;
 }
-.mori-sidebar-brand-icon { font-size: 18px; }
+.mori-sidebar-brand-icon {
+  /* 5O+ 從 🌳 emoji 換成真 logo (米色 stroke on dark sidebar bg) */
+  width: 24px;
+  height: 24px;
+  display: block;
+  object-fit: contain;
+}
 .mori-sidebar-brand-name {
   font-size: 14px;
   font-weight: 600;
