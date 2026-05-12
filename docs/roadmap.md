@@ -15,9 +15,24 @@
 
 ## 近期(Phase 5 後續)
 
-### 5E-2 — macOS / Windows voice-input paste-back
-目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接。
-等 contributor 補。
+### 5E-2 — Win / Mac voice pipeline 完整支援(等 contributor)
+
+主視窗 UI / config / profile 編輯 / 主視窗內打字對話 — Win/Mac **已可用**
+(Tauri + cpal + STT + LLM 都跨平台)。**缺的是 voice input 熱鍵 pipeline 內
+三塊 platform-specific 程式**,只有 Linux 有實作:
+
+| 子項 | Linux 現況 | Win/Mac 要寫的 |
+|---|---|---|
+| **selection capture**(滑鼠反白 → context) | `xclip -selection primary` | Win `GetClipboardData` / Mac `NSPasteboard`(+ 反白偵測機制) |
+| **window context**(focus app / title 進 LLM context) | `xdotool getactivewindow` | Win `GetForegroundWindow` / Mac `NSWorkspace` + accessibility |
+| **paste-back**(模擬 Ctrl+V 貼回游標) | `arboard` + `ydotool` 在 `LinuxPasteController` | Win `SendInput` / Mac `NSEvent` + accessibility permission UX |
+
+不是「做完 paste-back 就支援」— 三塊都得寫。
+
+**為什麼是 contributor 路徑**:yazelin 主力 Ubuntu,沒有 Mac/Win 日常驗證環境。
+寫了測不到 = 不知對錯。架構面 `mori-core` 純邏輯已完全跨平台,平台殼分離設計
+讓「寫一個 `selection_macos.rs` / `selection_windows.rs` mod」就能接。歡迎 fork
++ PR,主流程 reviewer 在(`crates/mori-tauri/src/selection.rs` 是良好參考)。
 
 ---
 

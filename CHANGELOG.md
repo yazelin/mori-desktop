@@ -6,6 +6,27 @@
 
 ---
 
+## docs(roadmap): 5E-2 scope 精準化 — 不只是 paste-back(2026-05-13)
+
+第二輪 audit 之後 user 問:「5E-2 是不是寫了 paste-back 就直接支援 Win/Mac
+voice input?」答案是**不**。
+
+原本 roadmap 描述只提 paste-back,讓人以為單塊 work 就行。實際上 Win/Mac
+要支援完整 voice pipeline 需要**三塊** platform-specific code:
+
+| 子項 | Linux 現況 | Win/Mac 缺 |
+|---|---|---|
+| selection capture(反白文字) | xclip -selection primary | Win GetClipboardData / Mac NSPasteboard |
+| window context(焦點 app/title) | xdotool getactivewindow | Win GetForegroundWindow / Mac NSWorkspace |
+| paste-back(模擬 Ctrl+V) | arboard + ydotool | Win SendInput / Mac NSEvent + accessibility permission |
+
+Roadmap entry 改名為「Win/Mac voice pipeline 完整支援」+ 表格列三子項,
+讓未來 contributor 看到完整 scope 不會誤判工作量。
+
+也強調為何走 contributor pathway 而非 yazelin 自寫:沒 Mac/Win 主力環境,
+寫了測不到 = 不知對錯。架構面 mori-core 純邏輯已跨平台 + 平台殼分離,新增
+selection_macos.rs / selection_windows.rs mod 就能接,已備好基礎。
+
 ## docs(roadmap): prune 5G-10 / 3C / 3D 三條(2026-05-13)
 
 Roadmap audit 第二輪 — 把「真的要做」跟「可能不做」混在一起會誤導讀者
