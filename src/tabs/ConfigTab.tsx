@@ -384,11 +384,17 @@ function ConfigTab() {
     try { JSON.parse(raw); return null; } catch (e: any) { return e.message; }
   }, [raw]);
 
-  // 從目前 cfg + patch 序列化回 raw
+  // 從目前 cfg + patch 序列化回 raw。
+  // 5P debug:用 functional setState 避免 batched state 看到 stale raw closure。
   const applyPatch = (patch: (cfg: AnyObj) => void) => {
-    const next = JSON.parse(raw || "{}");
-    patch(next);
-    setRaw(JSON.stringify(next, null, 2));
+    setRaw((currentRaw) => {
+      const next = JSON.parse(currentRaw || "{}");
+      patch(next);
+      const newRaw = JSON.stringify(next, null, 2);
+      console.log("[applyPatch] raw changed?", newRaw !== currentRaw,
+        "rawLen", currentRaw.length, "→", newRaw.length);
+      return newRaw;
+    });
   };
 
   const apiKeysRows: Array<{ k: string; v: string }> = useMemo(() => {
@@ -491,6 +497,10 @@ function ConfigTab() {
         </button>
         <div className="mori-view-toggle-actions">
           <StatusBadge status={status} />
+          {/* 5P debug: 視覺化 dirty state,排查 Save 不 enable */}
+          <span style={{ fontSize: 11, opacity: 0.6, fontFamily: "ui-monospace, monospace" }}>
+            dirty={dirty ? "Y" : "N"} rawLen={raw.length} origLen={orig.length}
+          </span>
           <button
             className="mori-btn"
             onClick={() => setRaw(orig)}
