@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — ~/.mori/ 結構</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<style>
+  .file-row {
+    display: grid;
+    grid-template-columns: 280px 90px 1fr;
+    gap: 12px 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--c-beige);
+    font-size: 13px;
+  }
+  .file-row:last-child { border-bottom: none; }
+  .file-row .path {
+    font-family: ui-monospace, monospace;
+    font-size: 12.5px;
+    color: var(--c-forest-deep);
+    font-weight: 500;
+  }
+  .file-row .auto {
+    font-size: 10.5px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-align: center;
+    align-self: start;
+    font-family: ui-monospace, monospace;
+  }
+  .file-row .auto.yes {
+    background: rgba(106, 143, 114, 0.18);
+    border: 1px solid rgba(106, 143, 114, 0.45);
+    color: var(--c-forest-deep);
+  }
+  .file-row .auto.partial {
+    background: rgba(245, 158, 11, 0.16);
+    border: 1px solid rgba(245, 158, 11, 0.40);
+    color: #945A0A;
+  }
+  .file-row .auto.user {
+    background: var(--c-cream);
+    border: 1px solid var(--c-beige);
+    color: var(--c-brown);
+  }
+  .file-row .desc {
+    color: var(--c-charcoal);
+    line-height: 1.6;
+  }
+  .file-row .desc code {
+    background: var(--c-cream);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11.5px;
+  }
+  .group-title {
+    color: var(--c-forest-deep);
+    font-size: 17px;
+    margin: 32px 0 6px;
+    font-weight: 600;
+  }
+  .tree {
+    background: var(--c-cream);
+    border: 1px solid var(--c-beige);
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--c-forest-deep);
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .tree .auto-tag {
+    color: var(--c-forest);
+    font-size: 10.5px;
+  }
+  .tree .user-tag {
+    color: var(--c-brown);
+    font-size: 10.5px;
+  }
+</style>
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html" class="current">~/.mori/</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">~/.mori/ 結構</h1>
+<div class="page-subtitle">FILES · AUTO-CREATED · USER-EDITABLE</div>
+
+<p class="lead">
+  Mori 把所有 user-state(config / profile / memory / theme)都存在
+  <code>~/.mori/</code> plain text 檔。第一次啟動會自動建必要骨架,user 可隨時手改,
+  改完不需要重啟 — 下一次熱鍵會即時讀新內容。
+</p>
+
+<h2>安裝(目前只 dev mode)</h2>
+<p>
+  尚未發布 release binary / package。安裝就是 clone + build:
+</p>
+
+<pre><code>git clone https://github.com/yazelin/mori-desktop.git
+cd mori-desktop
+cargo build --workspace
+npm install
+npm run tauri dev</code></pre>
+
+<p>
+  詳細步驟見 <a href="getting-started.html">Getting Started</a>。
+  Release binary(.deb / AppImage / .dmg)在
+  <a href="roadmap.md">roadmap</a>。
+</p>
+
+<h2>第一次啟動會建什麼</h2>
+
+<div class="tree">~/.mori/
+├── config.json              <span class="auto-tag">[auto] stub 自動寫入</span>
+├── active_theme             <span class="auto-tag">[auto] active theme stem(切 theme 時寫)</span>
+├── themes/
+│   ├── dark.json            <span class="auto-tag">[auto] Mori Dark 內建 theme</span>
+│   └── light.json           <span class="auto-tag">[auto] Mori Light 內建 theme</span>
+├── agent/
+│   └── AGENT.md             <span class="auto-tag">[auto] 預設 agent profile</span>
+├── voice_input/             <span class="auto-tag">[auto] 空目錄,USER-*.md 由你建</span>
+├── memory/                  <span class="user-tag">[lazy] 第一次 RememberSkill 寫入時建</span>
+├── corrections.md           <span class="user-tag">[opt] 共用糾錯規則(profile #file: 引用)</span>
+└── models/                  <span class="user-tag">[opt] whisper-local 模型放這(Deps tab 一鍵下載)</span></div>
+
+<p>
+  <strong>說明</strong>:
+  <span style="color: var(--c-forest)"><code>[auto]</code></span> = 啟動時自動建立 ·
+  <span style="color: #945A0A"><code>[lazy]</code></span> = 用到才建 ·
+  <span style="color: var(--c-brown)"><code>[opt]</code></span> = 選用,user 自己建/裝
+</p>
+
+<h2 class="group-title">設定檔</h2>
+
+<div class="file-row">
+  <div class="path">config.json</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    全域設定:<code>provider</code> / <code>stt_provider</code> / <code>api_keys</code> /
+    <code>routing</code> / <code>voice_input</code>。第一次跑 bootstrap stub(<code>main.rs::ensure_config</code>),
+    從 <strong>Config tab</strong> 編或直接改 JSON。完整欄位見
+    <a href="providers.html">Providers</a>。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">active_theme</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    一行 plain text,內容是當前 theme 的 stem(<code>dark</code> / <code>light</code> /
+    自訂)。Sidebar 左下角 toggle 或 Config tab 切 theme 時更新。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">corrections.md</div>
+  <div class="auto user">user</div>
+  <div class="desc">
+    共用糾錯規則(專有名詞拼字 / 慣用語 normalize 等)。任何 profile body 用
+    <code>#file: ../corrections.md</code> 引用,LLM 看 system prompt 時讀進去。
+    user 自己建,不存在不影響運作。
+  </div>
+</div>
+
+<h2 class="group-title">Theme</h2>
+
+<div class="file-row">
+  <div class="path">themes/dark.json</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    Mori Dark 內建 theme(<code>theme.rs::ensure_builtin</code>)。
+    啟動時若不存在從 bundle 寫入,**存在就不覆蓋**(user 編輯保留)。
+    color key 對應 CSS variable(<code>page-bg</code> → <code>--c-page-bg</code> 等)。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">themes/light.json</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    Mori Light 內建 theme。同上,可改可覆寫。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">themes/&lt;name&gt;.json</div>
+  <div class="auto user">user</div>
+  <div class="desc">
+    自訂 theme(VSCode-like)。複製 <code>dark.json</code> 改名 + 改色即可,
+    Config tab → Theme 自動列出。完整 key 對照見
+    <a href="brand.html">Brand Design Book → Dual Theme System</a>。
+  </div>
+</div>
+
+<h2 class="group-title">Profile</h2>
+
+<div class="file-row">
+  <div class="path">agent/AGENT.md</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    預設 agent profile(<code>agent_profile.rs::ensure_agent_dir_initialized</code>)。
+    啟動時若 <code>agent/</code> 空就寫一份 DEFAULT_AGENT_MD。
+    user 沒指定 profile(沒按 <code>Ctrl+Alt+N</code>)時 fallback 到這個。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">agent/AGENT-NN.&lt;display&gt;.md</div>
+  <div class="auto user">user</div>
+  <div class="desc">
+    自訂 agent profile,frontmatter + body。<code>Ctrl+Alt+N</code>(N=0~9)切換,或
+    <code>Ctrl+Alt+P</code> picker / Profiles tab / tray menu。
+    Frontmatter 包含 <code>provider</code> / <code>enabled_skills</code> /
+    <code>shell_skills</code> 等,body 是人格 / 行為 prompt(可用 <code>#file:</code> 引用其他檔)。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">voice_input/</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    空目錄(<code>voice_input_profile.rs::ensure_voice_input_dir_initialized</code>)。
+    沒任何 <code>USER-*.md</code> 時 fallback 到 code 內常數
+    <code>FALLBACK_PROFILE_MD</code>(基本繁中校正),不寫 disk。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">voice_input/USER-NN.&lt;display&gt;.md</div>
+  <div class="auto user">user</div>
+  <div class="desc">
+    自訂 voice input profile(ZeroType 相容格式)。<code>Alt+N</code>(N=0~9)切換,
+    STT → 單輪 LLM cleanup → 貼游標。Frontmatter 可 override
+    <code>stt_provider</code> / <code>cleanup_level</code> / <code>paste_shortcut</code>。
+  </div>
+</div>
+
+<h2 class="group-title">Memory</h2>
+
+<div class="file-row">
+  <div class="path">memory/</div>
+  <div class="auto partial">lazy</div>
+  <div class="desc">
+    Mori 自己決定該記什麼,透過 <code>RememberSkill</code> 寫入 <code>&lt;name&gt;.md</code>。
+    跟 Claude Code auto-memory 同款結構(每筆獨立 .md + frontmatter type / description)。
+    Memory tab 可瀏覽 / 編輯 / 全文搜尋。第一次 remember 時 <code>create_dir_all</code>。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">memory/MEMORY.md</div>
+  <div class="auto partial">lazy</div>
+  <div class="desc">
+    記憶索引(Mori 自己維護的 entry list),Recall 時優先讀這份。第一次寫入時建立。
+  </div>
+</div>
+
+<h2 class="group-title">選用</h2>
+
+<div class="file-row">
+  <div class="path">models/ggml-small.bin</div>
+  <div class="auto user">user</div>
+  <div class="desc">
+    <code>whisper-local</code> STT 用的 GGML 模型(466MB 中文小模型)。
+    Deps tab 一鍵下載,或 <code>wget</code> 從
+    <a href="https://huggingface.co/ggerganov/whisper.cpp">HuggingFace</a>
+    抓。<code>stt_provider: whisper-local</code> 才需要。
+  </div>
+</div>
+
+<div class="file-row">
+  <div class="path">runtime.json</div>
+  <div class="auto yes">auto</div>
+  <div class="desc">
+    Mori CLI(<code>mori-cli</code>)跟主程式溝通用的本機 HTTP port + auth token。
+    啟動時自動寫,每次 dev restart 換新 port / token。
+    給 Bash CLI proxy(<code>claude-bash</code> / <code>gemini-bash</code> /
+    <code>codex-bash</code>)的 <code>mori</code> CLI 用。
+  </div>
+</div>
+
+<h2 class="group-title">改檔 vs UI</h2>
+
+<p>所有 <code>~/.mori/</code> 內檔案都是 plain text user 可手改,但**主視窗 UI 多數情境更方便**:</p>
+
+<ul>
+  <li><code>config.json</code> → <strong>Config tab</strong>(form + raw JSON view)</li>
+  <li><code>agent/*.md</code> / <code>voice_input/*.md</code> → <strong>Profiles tab</strong>
+    (typed form + shell_skills 表格 + raw)</li>
+  <li><code>memory/*.md</code> → <strong>Memory tab</strong>(列表 + 全文搜尋 + 編輯 modal)</li>
+  <li><code>themes/*.json</code> → <strong>Config tab → Theme</strong>(下拉 + reload)<br>
+    自訂 theme 還是手寫 json 比較快</li>
+</ul>
+
+<p>
+  改檔即時生效 — 下一次熱鍵 / Mori 回應會讀新內容,不需要重啟。Theme 切換用 emit
+  廣播,所有視窗即時跟著切。
+</p>
+
+<div class="book-footer">
+  Mori Docs · ~/.mori/ 結構
+</div>
+
+</body>
+</html>

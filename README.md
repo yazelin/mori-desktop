@@ -91,6 +91,7 @@ Phase 1 → brand-3(雙 theme + VSCode-like 自訂 theme)已完成。完整 phas
 | [Getting Started](https://yazelin.github.io/mori-desktop/getting-started.html) | install / dev / 第一次跑 |
 | [Hotkeys](https://yazelin.github.io/mori-desktop/hotkeys.html) | 完整熱鍵清單 |
 | [Providers](https://yazelin.github.io/mori-desktop/providers.html) | Groq / Gemini / Ollama / Claude-CLI 設定 |
+| [~/.mori/](https://yazelin.github.io/mori-desktop/mori-home.html) | config / profile / memory / theme 全套結構 |
 | [Troubleshooting](https://yazelin.github.io/mori-desktop/troubleshooting.html) | Whisper / 全域熱鍵 / cargo deps |
 | [Design Book](https://yazelin.github.io/mori-desktop/design-book.html) | Brand / Character / Desktop UI / Tray 公式書 |
 | [Architecture](docs/architecture.md) | `mori-core` / `mori-tauri` / `mori-cli` 跨 module 關係 |
