@@ -213,6 +213,60 @@ shell_skills:
   </div>
 </div>
 
+<div class="example">
+  <div class="example-head">
+    <span class="path">agent/AGENT-03.ZeroType Agent.md</span>
+    <span class="hotkey">Ctrl+Alt+3</span>
+  </div>
+  <div class="example-body">
+    <p>
+      <strong>外部工具 bridge pattern</strong> — Mori 把語音優化過的指令 forward 給
+      Chrome 的 <strong>ZeroType Agent</strong> extension 在當前網頁執行。
+      適合「ZeroType 沒 Linux 版,但想用」的場景,user 主力 Linux 把 Mac/Windows
+      工具能力借到 Mori 來。
+    </p>
+    <p>
+      此範本展示三個重要設計點:
+    </p>
+    <ul>
+      <li><strong><code>agent_mode: dispatch</code></strong> — Mori 第一個 tool_call execute 後直接 Done,不再 round LLM(避免「forward 完還要等二輪 final text」卡死)</li>
+      <li><strong><code>enabled_skills: []</code></strong> — 關掉所有 built-in skill,LLM 只看 trigger_zerotype_agent 一個 shell_skill,強制走「優化 prompt + forward」單一流程</li>
+      <li><strong><code>provider: groq</code></strong> — 走原生 OpenAI tool calling,比 bash CLI proxy 對「固定流程」型 profile 穩定(不會自己加「我無法執行 JS」disclaimer)</li>
+    </ul>
+    <p>
+      實體範本(含 helper script)在
+      <a href="https://github.com/yazelin/mori-desktop/tree/main/examples"><code>examples/agent/AGENT-03.ZeroType Agent.md</code></a>
+      +
+      <a href="https://github.com/yazelin/mori-desktop/tree/main/examples/scripts"><code>examples/scripts/mori-trigger-zerotype.sh</code></a>。
+    </p>
+<pre>---
+provider: groq
+enable_read: true
+enabled_skills: []
+agent_mode: dispatch
+
+shell_skills:
+  - name: trigger_zerotype_agent
+    description: 把優化後指令交給 Chrome 的 ZeroType Agent extension 執行
+    parameters:
+      prompt:
+        type: string
+        required: true
+    command: ["~/bin/mori-trigger-zerotype.sh", "{{prompt}}"]
+---
+你是 ZeroType Agent 的指令**轉發員**。**不執行任何網頁動作,只 forward**。
+
+## 固定流程
+1. 收到 user 講話
+2. 優化成完整可執行 prompt
+3. emit tool_call trigger_zerotype_agent(prompt: "...")
+4. 結束 — 不寫任何 text response
+
+#file:~/.mori/corrections.md</pre>
+    <p><strong>同款 bridge pattern</strong> 可套到任何「Chrome / Firefox 內 extension」/「其他 desktop app 有 hotkey 觸發」/「網頁 SaaS 有 keyboard shortcut 開 dialog」— 寫個 helper script 走「寫 clipboard + ydotool 送熱鍵」流程,Mori 端 profile 用 dispatch mode + 單一 shell_skill 框死流程即可。</p>
+  </div>
+</div>
+
 <h2 class="group-title">VoiceInput 範本(Alt+N)</h2>
 
 <p>VoiceInput 模式只做「字」,不做「事」:STT → 單輪 LLM cleanup → 貼回游標。
