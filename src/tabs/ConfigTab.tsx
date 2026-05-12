@@ -10,8 +10,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
+
+// 5P-6: character pack picker
+type CharacterEntry = {
+  stem: string;
+  display_name: string;
+  author: string;
+  version: string;
+};
 
 type SaveStatus =
   | { kind: "idle" }
@@ -250,6 +259,94 @@ function ConfigMemoryTypeChips({
         </button>
       ))}
     </div>
+  );
+}
+
+// 5P-6: Character pack picker — Floating section 內,讓 user 切換 / 列出 / 升級
+// 4×4 placeholder。換 active 後 emit "character-changed" 讓 FloatingMori 即時 re-fetch。
+function CharacterPicker() {
+  const [chars, setChars] = useState<CharacterEntry[]>([]);
+  const [active, setActive] = useState<string>("mori");
+  const [characterDir, setCharacterDir] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      const list = await invoke<CharacterEntry[]>("character_list");
+      setChars(list);
+      const [stem] = await invoke<[string, unknown]>("character_get_active");
+      setActive(stem);
+      setCharacterDir(await invoke<string>("character_dir"));
+    } catch (e) {
+      console.error("CharacterPicker refresh", e);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const onSelect = async (stem: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await invoke("character_set_active", { stem });
+      setActive(stem);
+      await emit("character-changed");
+      setMsg(`已切換到 ${stem}`);
+      setTimeout(() => setMsg(null), 2000);
+    } catch (e: any) {
+      setMsg(`切換失敗:${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onUpgrade = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const [up, sk] = await invoke<[number, number]>("character_upgrade_pack_to_4x4", {
+        stem: active,
+      });
+      await emit("character-changed");
+      setMsg(`升級完成:${up} 張升 4×4,${sk} 已是 1024×1024 略過`);
+      setTimeout(() => setMsg(null), 4000);
+    } catch (e: any) {
+      setMsg(`升級失敗:${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <FormRow
+        label="character"
+        hint={`Active character pack — 切到要用的角色。資料夾: ${characterDir}`}
+      >
+        <Select
+          value={active}
+          onChange={onSelect}
+          options={chars.map((c) => ({
+            value: c.stem,
+            label: `${c.display_name}${c.author ? ` · ${c.author}` : ""}`,
+          }))}
+        />
+      </FormRow>
+      <FormRow
+        label=""
+        hint="把 active pack 內 single-frame sprite 升 4×4 placeholder(原檔備份到 sprites/.backup-<ts>/)"
+      >
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="mori-btn" onClick={onUpgrade} disabled={busy}>
+            升級此 pack 為 4×4 placeholder
+          </button>
+          {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
+        </div>
+      </FormRow>
+    </>
   );
 }
 
@@ -662,6 +759,7 @@ function ConfigTab() {
                 }
               />
             </FormRow>
+            <CharacterPicker />
           </Section>
         </>
       ) : (

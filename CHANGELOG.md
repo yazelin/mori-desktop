@@ -6,6 +6,48 @@
 
 ---
 
+## 5P — Sprite 4×4 engine + Character pack 系統(2026-05-13)
+
+Floating Mori 從 single-frame static PNG 升級成 **4×4 sprite sheet animation**,
+且整套 sprite + 設定包成「character pack」讓 user 可替換角色。設計目標:讓
+yazelin 另開的 sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,
+其他 user import 即可。
+
+### 設計重點
+- **同一份 sprite 兩種模式**:`floating.animated: bool` 純 CSS 切換動 / 不動,
+  不用兩份檔
+- **Schema versioning + portable metadata**:`manifest.schema_version` 讓未來
+  schema 改不破壞舊 pack
+- **不依賴外部工具**:ensure_default + upgrade_pack_to_4x4 都用 Rust `image`
+  crate inline 做,user 不用 sudo apt install ImageMagick
+- **動 / 拖曳分層 toggle**;走動 toggle persist 但 logic 下版接
+
+### 6 個子 commit
+
+- **5P-1 `39d1056`**:character_pack 規範 + default mori ensure + Tauri IPC
+- **5P-2 `1446321`**:ensure_default 升 4×4 placeholder(Rust image crate)+
+  upgrade_pack_to_4x4 IPC + 2 unit tests
+- **5P-3 `2e417fd`**:FloatingMori 改讀 character pack + CSS 4×4 雙軸 step
+  engine(取代原 spec 的 buggy 斜對角 keyframes)
+- **5P-3 fix `a0fe0cf`**:啟動 fallback 到 public/floating/ 避免一閃
+- **5P-4 `0db2e65`**:Config Floating section animated / wander toggle + persist
+  + config-changed event 即時生效
+- **5P-5 `a6d81d3`**:拖曳偵測 + .is-dragging CSS「被拎起懸空」視覺(scale +
+  rotate + drop-shadow + animation paused)
+- **5P-6**(本 commit):ConfigTab character picker + 升級 button + docs/character-pack.md
+  完整規範 + floating-sprite-spec.md 修 buggy keyframes
+
+### Sprite generator workflow 預備
+- `docs/character-pack.md` 完整 schema + frame order + design tips
+- `docs/floating-sprite-spec.md` 修正 keyframes 為正確 row-major 雙軸寫法
+- ConfigTab Floating section 提供 active 切換 + 升級 button
+
+### 已知限制(交給 future commit)
+- One-shot 模式(done / error)engine 簡化都當 infinite loop,正式 sprite 來
+  再接 fill-forwards
+- Wander logic(setPosition 隨機走動)— toggle persist 但 logic 未實作
+- 個人化光效顏色 picker / chat bubble / profile chip 顯示 toggle — 拆下版
+
 ## docs(roadmap): 5E-2 scope 精準化 — 不只是 paste-back(2026-05-13)
 
 第二輪 audit 之後 user 問:「5E-2 是不是寫了 paste-back 就直接支援 Win/Mac

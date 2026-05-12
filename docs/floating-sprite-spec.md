@@ -57,28 +57,38 @@ Phase` 切換顯示。
 - 16 frame 比 3×3 (9 frame) 動畫更流暢,適合 idle 呼吸 / talk
   口型 / walk 步伐這類需要中間 frame 銜接的動作
 
-引擎側只要把 `src/FloatingMori.tsx` 裡那行 `<img src=...>` 換成:
+## 引擎實作(5P 已落實)
+
+`src/FloatingMori.tsx` 結構:
 ```tsx
-<div
-  className="mori-sprite"
-  style={{ backgroundImage: `url(${SPRITE_SRC[visual]})` }}
-/>
+<div className={`mori-sprite mori-sprite-${visual}`}>     {/* 容器套既有 state animation */}
+  <div className="mori-sprite-frame" style={spriteStyle(...)} />  {/* 子層跑 sheet loop */}
+</div>
 ```
-然後 CSS 改成:
+
+CSS:
 ```css
-.mori-sprite {
-  width: 124px;
-  height: 124px;
-  background-size: 400% 400%;
-  /* 1.6s 跑完 16 格,steps(16) 讓畫面跳格不淡入 */
-  animation: mori-cycle 1.6s steps(16) infinite;
+.mori-sprite-frame {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  /* background-image / -size / animation 由 React inline style 套(從 manifest 拿 duration) */
 }
-@keyframes mori-cycle {
-  /* (4-1)*size 各軸 = -3*124 = -372px */
-  to { background-position: -372px -372px; }
-}
+@keyframes mori-sprite-x { to { background-position-x: -400%; } }
+@keyframes mori-sprite-y { to { background-position-y: -400%; } }
 ```
-就完成。其他 transform / aura / opacity 的 state-specific 動效不動。
+
+**為什麼兩軸獨立**:原 spec 寫單一 `steps(16)` to `(-372, -372)` 是 buggy 的 —
+那是「斜對角線」播放(frame 5 應在 row 1 col 0 但 steps(16) at 5/16 給斜線
+中點)。**正解**:x 軸 steps(4) duration/4 跑一 row,y 軸 steps(4) duration
+跑 4 row,兩軸組合自然 row-major 16 frame loop。
+
+引擎讀 `loop_durations_ms[state]` 決定每 state duration。詳細 spec 見
+[`character-pack.md`](character-pack.md)。
+
+**character pack 系統**(5P)讓 sprite 跟 character 設定可替換,不再 hardcode
+public/floating/。每個角色一個資料夾在 ~/.mori/characters/,manifest 規範哪些
+state / loop mode / duration。詳見 `character-pack.md`。
 
 ## 預設範例(目前的 placeholder)
 

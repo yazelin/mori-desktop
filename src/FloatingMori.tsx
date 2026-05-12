@@ -187,6 +187,10 @@ function FloatingMori() {
   // 5P-3: Character pack — manifest + 各 state 的 sprite data URL
   const [manifest, setManifest] = useState<CharacterManifest | null>(null);
   const [sprites, setSprites] = useState<Partial<Record<Visual, string>>>({});
+  // 5P-6 fix: sprite 載完後 delay 300ms 才啟動 CSS animation,讓 backgroundImage
+  // swap(fallback → data URL)跟 backgroundSize 變化(100% → 400%)先穩定,
+  // 之後 animation 才 kick in,避免 swap + animation start 同 frame 造成閃爍。
+  const [animationReady, setAnimationReady] = useState(false);
 
   // 5P-4: floating section config(animated / wander)— default animated=true, wander=false。
   // ConfigTab save 會 emit "config-changed",listen 後 re-read。
@@ -242,6 +246,8 @@ function FloatingMori() {
           if (u) map[s] = u;
         }
         setSprites(map);
+        // 5P-6 fix: sprite 設好之後 delay 一陣才放行 animation
+        setTimeout(() => setAnimationReady(true), 300);
       } catch (e) {
         console.error("[FloatingMori] character_get_active failed", e);
       }
@@ -515,7 +521,7 @@ function FloatingMori() {
         >
           <div
             className="mori-sprite-frame"
-            style={spriteStyle(visual, sprites[visual], manifest, floatingCfg.animated)}
+            style={spriteStyle(visual, sprites[visual], manifest, floatingCfg.animated && animationReady)}
           />
         </div>
 
