@@ -84,10 +84,16 @@
 - [x] UI 狀態列「📋 N 字 / —」+ tooltip 顯示完整內容
 - [x] `context-captured` event emit 給前端
 
-### Phase 3B — URL routing(下個 PR)
-- [ ] 剪貼簿 / 輸入裡偵測 URL,填 `ctx.urls_detected`
-- [ ] LLM 看到 YouTube URL → 自動建議 / 觸發 summarize
-- [ ] LLM 看到一般文章 URL → fetch 內容後 summarize / extract
+### Phase 3B — URL routing(2026-05-12,完成)
+- [x] 剪貼簿 / 反白文字 / transcript 內偵測 URL,填 `ctx.urls_detected`
+- [x] system prompt 加「偵測到的網址」區塊 + 觸發規則:使用者用「這個 / 這篇 / 這頁」等指示詞 → 強制 fetch_url 不憑記憶猜
+- [x] mori-core/src/url_detect.rs:pure Rust URL scanner(12 unit tests)
+- [x] mori-core/src/skill/fetch_url.rs:FetchUrlSkill (reqwest GET、HTML 抽 title + strip script/style、8KB cap、7 unit tests)
+- [x] 註冊到 agent pipeline + skill_server + skills_list
+
+未做(3B-2 後續):
+- [ ] YouTube transcript skill(yt-dlp wrapper,user 用 Deps tab 裝 yt-dlp 後啟用)
+- [ ] readability 強化(現在 strip-all-tags 會包含 sidebar/nav 雜訊)
 
 ### Phase 3C — 跨 app 反白文字
 - [ ] macOS / Windows / X11:模擬 Ctrl+C 抓 selection
@@ -107,6 +113,50 @@
 - [ ] Destructive 操作二次確認 UI
 - [ ] Audit log 寫入 `~/.mori/audit.log`
 - [ ] `DownloadMediaSkill`(yt-dlp wrapper)
+
+## Brand 設計系統 + 公式書(2026-05-12,完成)
+
+把分散的設計資產整合成統一 brand,所有 logo / palette / typography / character / UI / tray 規範文件化。
+
+- [x] 從原 Logo.png 切出米色 / 深綠兩版本 → 最終整合成「徽章式」單一 logo:
+      深綠 disc 背景(取 logo 內部 fill 色 #182622)+ 米色 stroke 環疊上(縮 83% + 微右移 20px 補同心)— 深淺 UI 都看得到
+- [x] Tauri icon set 16/32/64/128/256 全部從新徽章 logo 下採樣
+- [x] sidebar 🌳 emoji 換成 /logo.png(`MainShell.tsx`)
+- [x] `.desktop` 檔 StartupWMClass=Mori-tauri(對齊 Tauri 實際 WM_CLASS,GNOME taskbar 不堆)
+- [x] `.desktop` Icon 改絕對路徑(原 `Icon=mori` GNOME 找不到 → dock 空白)
+- [x] **設計公式書 docs/*.html**:
+      - index.html — 封面 + TOC + repo map
+      - brand.html — concept / 10 色 palette / typography / logo 規範 / voice tone
+      - character.html — Mori 角色設定:turnaround / 8 表情 / sprite sheet / poses / items
+      - desktop-ui.html — sidebar / chat panel / floating / picker / modal / form 規範
+      - tray.html — tray icon / 系統匣 menu / interaction states / notifications
+- [x] _book.css:共用 brand 樣式(改 :root 變數 5 頁同步變)
+- [x] docs/sprites/ 給 GH Pages 用的靜態路徑;.nojekyll 防 Jekyll 忽略 _book.css
+- [x] README 加指向 docs/index.html + GH Pages 啟用說明
+
+未做(brand-2 後續):
+- [ ] **套 brand palette 進 src/shell.css**(主視窗目前還是 tech dark + 天空藍,跟公式書 forest/cream/sand 不一致)
+- [ ] line-art SVG icon 取代 sidebar tab 的 emoji(💬 📋 ⚙️ 等)
+- [ ] character.html 中提到的 reading / writing / chill 額外 pose sprite
+
+## Phase 5O — Dependencies tab(2026-05-12,完成)
+
+把所有 optional 工具偵測 + 安裝 UI 化,使用者不用看 README 一條一條跑 shell。
+
+- [x] mori-tauri/src/deps.rs:DepSpec / CheckSpec(Which/File)/ InstallSpec(Run/Shell/Manual)
+- [x] check_dep / run_install — Manual install 給指令使用者複製,其他直接代執行
+- [x] 6 個 dep entries:yt-dlp / ydotool / xdotool / xclip / whisper-local model / ollama
+- [x] IPC:deps_list / deps_install
+- [x] tabs/DepsTab.tsx:狀態 chip + 描述 + 解鎖什麼 + 安裝按鈕 + output modal
+- [x] dock / tray 修順手:.desktop Icon 絕對路徑 + chat_bubble / picker 改 visible:false 避免啟動堆疊
+
+## Phase 5L-5 — placeholder sync + memory 全文搜尋 + config form 細項(2026-05-12,完成)
+
+三個 5L 後續 TODO 一次補完。
+
+- [x] ShellSkillCard:command 內 {{var}} 跟 parameters 字典 cross-check,警告 + 一鍵「加為 string required」
+- [x] memory_search IPC(後端 MemoryStore::search,body 也搜)+ MemoryTab 300ms debounce 走後端
+- [x] ConfigTab voice_input 加 paste_shortcut 全域預設 + auto_enter checkbox
 
 ## Phase 5N — Chat panel 重設計(2026-05-12,完成)
 

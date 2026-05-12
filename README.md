@@ -41,8 +41,8 @@ Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
 
 ## 目前狀態
 
-**Phase 1 + 2 + 3A + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J + 5K + 5L + 5L-2 + 5L-3 + 5L-4 + 5M + 5N 完成(2026-05-12)** — Mori 在 Wayland 上
-**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法、設定/記憶/skills 全都從 UI 編**:
+**Phase 1 + 2 + 3A + 3B + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J + 5K + 5L + 5L-2 + 5L-3 + 5L-4 + 5L-5 + 5M + 5N + 5O + brand 完成(2026-05-12)** — Mori 在 Wayland 上
+**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法、設定/記憶/skills 全都從 UI 編、有完整視覺品牌規範**:
 
 ### 5G 起的雙模式架構
 
@@ -86,14 +86,18 @@ shell_skills:
 | 改動 | 怎麼用 |
 |---|---|
 | **5N Chat panel 重設計** | scrollable 對話歷史(user 靠右天空藍 / Mori 靠左森林綠 / 🔧 tool chip)+ 底部 input bar(🎤 + textarea + 送出)+ inline 錄音/思考 status chip + ⚙️ 開 status modal |
-| **5M sidebar 架構** | 主視窗 880×600 resizable。左側 5 個 tab:Chat / Profiles / Config / Memory / Skills |
+| **5M sidebar 架構** | 主視窗 880×600 resizable。左側 6 個 tab:Chat / Profiles / Config / Memory / Skills / Deps |
 | **5L Config tab** | config.json typed form(provider 下拉、API keys / routing.skills KV table、provider cards 可折疊)+ Raw JSON 雙模式;corrections.md textarea |
 | **5L-3 Profile tab** | voice / agent profile list + 切換 + Form / Shell Skills / Raw 三 view 編輯器;Form 蓋 provider / enabled_skills chips / paste_shortcut / cleanup_level / ZEROTYPE_AIPROMPT_* 進階;shell_skills 表格(含 parameters / timeout / working_dir 等)|
-| **5L-4 Memory tab** | ~/.mori/memory/ 全部記憶 list,顏色 type chip,搜尋,點 row 開 modal 編 name / description / type / body |
+| **5L-4 Memory tab** | ~/.mori/memory/ 全部記憶 list,顏色 type chip,搜尋(後端全文 + body),點 row 開 modal 編 name / description / type / body |
 | **5L-4 Skills tab** | 列當前 agent profile 啟用的全部 skills(built-in + shell_skill),展開看 parameters table |
-| **5K-1 Picker overlay** | `Ctrl+Alt+P` 開獨立 picker 視窗(3-item carousel),熱鍵之外也能選任意 profile |
+| **5L-5 同步檢查 / form 細項** | shell_skill command 內 {{var}} 跟 parameters cross-check 警告 + 一鍵加參數;memory 改後端全文 search;ConfigTab voice_input 加 paste_shortcut / auto_enter |
+| **5O Deps tab** | 📦 偵測 + 安裝 6 個 optional 依賴(yt-dlp / ydotool / xdotool / xclip / whisper-local model / ollama),sudo 的給指令給使用者跑、其他可代執行 |
+| **5K-1 Picker overlay** | `Ctrl+Alt+P` 開獨立 picker 視窗(3-item carousel),熱鍵之外也能選任意 profile;Wayland focus 走 setPosition 進出畫面策略 |
 | **5K-2 Tray submenu** | 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」滑鼠選 |
 | **5J-followup single-instance** | `tauri-plugin-single-instance`:第二個實例自殺、焦點還給第一個 |
+| **Phase 3B URL routing** | 偵測 transcript / 剪貼簿 / 反白文字裡的 URL,自動填到 system prompt;使用者說「這個 / 這篇」→ Mori 呼叫 fetch_url 拿真實內容處理 |
+| **brand 設計公式書** | docs/ 5 頁 HTML(index / brand / character / desktop-ui / tray)+ `_book.css` 共用樣式 + 徽章式 Mori logo(深綠 disc + 米色 stroke,深淺 UI 都看得到)+ Tauri tray / dock 對應 icon set。.desktop StartupWMClass + Icon 絕對路徑 — dock 不堆疊、有正確 logo |
 
 ### 5J：單層 profile + Rust 統一 context 注入
 
@@ -164,7 +168,7 @@ Mori 在 agent mode 不知道現在幾點、看不到剪貼簿、不知道在哪
 | ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
 | ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
 | ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
-| ❌ URL routing | YouTube 連結 → 自動摘要 / 文章 → fetch + 摘要 | Phase 3B |
+| ⏳ YouTube transcript | YouTube URL → 抓字幕摘要(需 yt-dlp 在 Deps tab 裝) | 3B-2 |
 | ❌ 背景排程 | 「每小時提醒喝水」「每天 9 點晨報」— 真正的常駐 agent | Phase 5 |
 | ❌ 媒體下載 | 「下載這個影片」呼叫 yt-dlp | Phase 6 |
 | ❌ ExecCommand 白名單 | 「跑那個指令」要先有白名單 + 二次確認機制 | Phase 6 |
