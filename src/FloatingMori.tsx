@@ -52,6 +52,39 @@ const RIPPLE_MIN_INTERVAL_MS = 180;
 // 單個波紋存活時間
 const RIPPLE_LIFETIME_MS = 1200;
 
+// 5P-3: sprite-frame inline style — 走 4×4 row-major 兩軸動畫。
+// 設計重點:
+// - x 軸 (mori-sprite-x) 跑 4 frame in one row,duration = 整 sheet / 4
+// - y 軸 (mori-sprite-y) 跑 4 row,duration = 整 sheet 時長
+// - 兩軸都 steps(4) jump-end,以 (0, 0) → (-400%, -400%) wrap 回 (0, 0) 完成 loop
+// - 這版簡化 不分 loop / one-shot,全 infinite(commit 4 toggle 時可改)
+// - grid "1x1" → 不跑 animation,純 static
+function spriteStyle(
+  visual: Visual,
+  spriteUrl: string | undefined,
+  manifest: CharacterManifest | null,
+): CSSProperties {
+  if (!spriteUrl) return {};
+  const grid = manifest?.sprite_spec?.grid ?? "4x4";
+  if (grid === "1x1") {
+    return {
+      backgroundImage: `url("${spriteUrl}")`,
+      backgroundSize: "100% 100%",
+      backgroundRepeat: "no-repeat",
+    };
+  }
+  const duration = manifest?.loop_durations_ms?.[visual] ?? 1600;
+  return {
+    backgroundImage: `url("${spriteUrl}")`,
+    backgroundSize: "400% 400%",
+    backgroundRepeat: "no-repeat",
+    animationName: "mori-sprite-x, mori-sprite-y",
+    animationDuration: `${duration / 4}ms, ${duration}ms`,
+    animationTimingFunction: "steps(4), steps(4)",
+    animationIterationCount: "infinite, infinite",
+  };
+}
+
 function visualFor(
   mode: Mode,
   phase: Phase,
@@ -82,13 +115,26 @@ const VISUAL_LABEL: Record<Visual, string> = {
   error: "出錯",
 };
 
-const SPRITE_SRC: Record<Visual, string> = {
-  idle: "/floating/mori-idle.png",
-  sleeping: "/floating/mori-sleeping.png",
-  recording: "/floating/mori-recording.png",
-  thinking: "/floating/mori-thinking.png",
-  done: "/floating/mori-done.png",
-  error: "/floating/mori-error.png",
+// 5P-3: Sprite 從 character pack 來,manifest + 各 state PNG data URL 從 IPC 拉。
+// 不再 hardcode public/floating/ path,讓 user 能換角色 pack。
+
+type CharacterManifest = {
+  schema_version: string;
+  package_name: string;
+  display_name: string;
+  version?: string;
+  states: string[];
+  optional_states?: string[];
+  loop_modes?: Record<string, string>;       // "loop" | "one-shot"
+  loop_durations_ms?: Record<string, number>;
+  sprite_spec: {
+    format: string;
+    grid: string;                             // "4x4" / "1x1"
+    total_size: string;
+    frame_size: string;
+    frame_order: string;
+    background: string;
+  };
 };
 
 function FloatingMori() {
@@ -122,6 +168,48 @@ function FloatingMori() {
   // (sprite window 永遠 160×160 不動,bubble 走另一個 Tauri window)。
   // 這裡只保留「目前是否有 bubble」的旗標 + dwell timer 控制。
   const [hasChatBubble, setHasChatBubble] = useState(false);
+
+  // 5P-3: Character pack — manifest + 各 state 的 sprite data URL
+  const [manifest, setManifest] = useState<CharacterManifest | null>(null);
+  const [sprites, setSprites] = useState<Partial<Record<Visual, string>>>({});
+
+  useEffect(() => {
+    const loadCharacterPack = async () => {
+      try {
+        const [stem, m] = await invoke<[string, CharacterManifest]>("character_get_active");
+        setManifest(m);
+        // foreach state 抓 data URL
+        const allStates: Visual[] = ["idle", "sleeping", "recording", "thinking", "done", "error"];
+        const entries = await Promise.all(
+          allStates.map(async (state) => {
+            try {
+              const url = await invoke<string>("character_sprite_data_url", {
+                stem,
+                state,
+              });
+              return [state, url] as const;
+            } catch (e) {
+              console.warn("[FloatingMori] failed to load sprite", state, e);
+              return [state, ""] as const;
+            }
+          }),
+        );
+        const map: Partial<Record<Visual, string>> = {};
+        for (const [s, u] of entries) {
+          if (u) map[s] = u;
+        }
+        setSprites(map);
+      } catch (e) {
+        console.error("[FloatingMori] character_get_active failed", e);
+      }
+    };
+    loadCharacterPack();
+    // 5P-6: ConfigTab character picker 切換 active 後 emit 這個
+    const unlistenChar = listen("character-changed", () => loadCharacterPack());
+    return () => {
+      unlistenChar.then((f) => f());
+    };
+  }, []);
 
   // ── 初始化 & 事件訂閱 ─────────────────────────────────────────────
 
@@ -368,13 +456,19 @@ function FloatingMori() {
             />
           ))}
 
-        {/* 角色 sprite */}
-        <img
-          className="mori-sprite"
-          src={SPRITE_SRC[visual]}
-          alt={VISUAL_LABEL[visual]}
-          draggable={false}
-        />
+        {/* 5P-3: 角色 sprite container 套既有 state-specific transform animation
+            (mori-breathe / mori-doze / mori-listen-bob 等),子層 frame 跑 sheet loop。
+            兩層分開避免 animation property 互相覆蓋。動畫 ON 預設(commit 4 接 toggle)。
+            loop_durations_ms 從 manifest 拿,placeholder 階段 16 格全是同一張看似不閃。 */}
+        <div
+          className={`mori-sprite mori-sprite-${visual}`}
+          title={VISUAL_LABEL[visual]}
+        >
+          <div
+            className="mori-sprite-frame"
+            style={spriteStyle(visual, sprites[visual], manifest)}
+          />
+        </div>
 
         {/* 5J: 頂端 chip — profile 切換 / 狀態 / 短文字,在 sprite 上方,
             chip 隨 sprite-area 移動,window resize 不會跑掉。 */}

@@ -98,6 +98,23 @@ body.floating-window #root {
   -webkit-image-rendering: auto;
 }
 
+/* 5P-3: sprite-frame 子層跑 4×4 sheet 動畫,不干擾 .mori-sprite container
+   既有 state-specific transform / opacity animation。background-image 從 inline
+   style 套(來自 character pack data URL),animation duration 也從 manifest 拿。
+   兩軸獨立 steps(4) 配合 background-size 400% 400% 走 row-major 16 frame loop。 */
+.mori-sprite-frame {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+}
+
+@keyframes mori-sprite-x {
+  to { background-position-x: -400%; }
+}
+@keyframes mori-sprite-y {
+  to { background-position-y: -400%; }
+}
+
 /* ─── 狀態變化 — 角色本身用 transform / filter,aura 處理光環 ──── */
 
 /* IDLE — 平靜呼吸 */
