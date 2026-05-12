@@ -1,0 +1,161 @@
+# Changelog
+
+依 phase 逆序(最新在上)。完整 commit log 用 `git log`。
+
+未來規劃見 [`docs/roadmap.md`](docs/roadmap.md)。
+
+---
+
+## brand-3 — 雙 theme + VSCode-like 自訂 theme(2026-05-12)
+
+- CSS variables 重構:`shell.css` / `chat-panel.css` / `picker.css` / `chat-bubble.css` / `floating.css` 全部色值改用 `var(--c-*)`,`:root` 內置 Mori Dark fallback
+- Theme 檔在 `~/.mori/themes/*.json` — 啟動時內建 `dark.json` / `light.json` 自動寫入,user 可複製改名做自訂
+- 跨視窗同步:任一 window 切 theme 後 `emit("theme-changed")`,picker / chat_bubble / floating 全部跟著切
+- UI:左下角 sun/moon quick toggle + Config tab Theme picker(列所有 themes + Reload + 顯示資料夾 path)
+- Light theme 對比 override:skill kind badge / memory type chip / dep ok status / 解鎖 label / kbd 等 light 下 forest-deep 暗字
+- 公式書 `brand.html` 增 forest-night `#1f3329` / forest-shadow `#172620` 兩階深綠 + Dual Theme System 整段
+
+## brand-2 — line-art SVG icon + 全套 brand palette(2026-05-12)
+
+- Sidebar 6 個 tab 從 emoji(💬📋⚙️📓🛠️📦)→ inline line-art SVG icon(stroke=currentColor)
+- 整個專案 emoji 大掃除:ChatPanel / Picker / Profiles / Memory / Deps / Skills tab 的 emoji button / chip / section header 全換 SVG
+- 主視窗從「tech dark + 天空藍」改成 forest palette:main #1f3329 / sidebar #172620 / modal #243a31 + forest active / cream text
+- Chat bubble:user → sand 暖色 / assistant → forest-soft 葉脈綠
+- `mori-sleeping` / `mori-error` / `mori-recording` PNG 上緣 ~y20 的橫線 artifact 抹掉(原稿 frame 殘留,sleeping 無 aura ring 蓋住才裸露)
+- commits: `0b51788`, `3516131`
+
+## brand-1 — 徽章 logo + 公式書(2026-05-12)
+
+- Logo 徽章式設計:深綠 disc(#182622,從 logo 內部 wreath 採樣)+ 米色 stroke 縮 83% + 右移 20px 補同心
+- 同一張 PNG 用到底:`public/logo.png` / `crates/mori-tauri/icons/{16~256}.png` / `docs/sprites/logo.png`
+- 公式書 `docs/index.html` + brand / character / desktop-ui / tray 四頁 + `_book.css` 共用 CSS variables
+- `.desktop` Icon 用 absolute path + StartupWMClass=Mori-tauri 修 dock 4 icon 堆疊
+- commits: `4910510`, `afefbc0`, `033ee09`, `1369cd6`, `15d99e2`
+
+## Phase 5O — Dependencies tab(2026-05-12)
+
+- `~/.mori` 第 6 個 tab,偵測 + 安裝 optional 工具(yt-dlp / ydotool / xdotool / xclip / whisper-local / ollama)
+- 區分 needs-sudo(顯示指令給 user 自己跑)vs 無 sudo(代執行 + 顯示 stdout/stderr)
+- `crates/mori-tauri/src/deps.rs` registry,UI 可一鍵 install + reload check
+- commit: `8ff7142`
+
+## Phase 5N — Chat panel 重設計(2026-05-12)
+
+- top bar(mode chip + provider · model + status 按鈕)/ scrollable thread / progress chip / bottom input bar 四層 vertical flex
+- user 訊息靠右 / Mori 靠左,bubble + tool chip
+- 從 fixed-position 改 inline thread,符合常見 chat app 操作習慣
+- commit: `842ba80`
+
+## Phase 5M — 主視窗 sidebar 架構(2026-05-12)
+
+- App 從單一 chat 視窗變 6 個 tab(Chat / Profiles / Config / Memory / Skills / Deps)
+- 左 196px sidebar + 右 main area,每個 tab 一個 React component(只 mount 當前 tab,省 IPC)
+- commit: `f5be5a5`
+
+## Phase 5L — Config / Memory / Skills UI(2026-05-12)
+
+- **5L-1**:textarea raw editor(快速版)
+- **5L-2**:`ConfigTab` typed form — 常用欄位 dropdown / input,Raw JSON 模式給 routing.skills 進階(`415617e`)
+- **5L-3**:`ProfileEditor` typed form + `shell_skills` 表格 + frontmatter ↔ raw 雙向 sync(`a328213`)
+- **5L-4**:`MemoryTab` browser/editor + `SkillsTab` skills inspector(列當前 profile 啟用的 builtin + shell skills)(`178b935`)
+- **5L-5**:command ↔ parameters placeholder 一致性檢查 + memory 全文搜尋(rust backend) + config form 細項(`7eb4e94`)
+
+## Phase 5K — Profile Picker + Tray submenu(2026-05-12)
+
+- **5K-1**:Ctrl+Alt+P 開 picker overlay,3-item carousel(prev / current / next),↑↓ 切 + Tab 換組 + Enter 確認(`5edb3d7`, `40b51fc`)
+- **5K-2**:tray menu 列出全部 voice / agent profile(超過 Alt+0~9 / Ctrl+Alt+0~9 上限的也能點)(`718dcc4`)
+- Wayland focus quirk fix:picker / chat_bubble 第二次 hide/show 拿不到 focus → 改 setPosition 進出畫面(`527faeb`, `13f943f`)
+
+## Phase 5J — 單層 profile + 統一 context + Gemini(2026-05-12)
+
+- Profile 結構從「voice / agent 兩種 schema」統一為單層 frontmatter:`provider` / `stt_provider` / `enabled_skills` / `shell_skills` / `cleanup_level` 一套吃
+- `build_context_section()` 在 Rust 端統一注入:timestamp / clipboard / selection / `urls_detected`,所有 provider 看到相同 context
+- 新 named provider `gemini`(走 OpenAI-compat 端點)
+- `chat_bubble` 獨立視窗(Wayland 單窗 setSize + transparent 不穩)
+- `tauri-plugin-single-instance` 防 dev 重啟 orphan 並存
+- commits: `42b41c3`, `927bb65`, `ed5a74a`, `2b2f52f`
+
+## Phase 5I — skill_server 動態 registry(2026-05-12)
+
+- `skill_server`(claude-bash / gemini-bash / codex-bash 共用 HTTP 入口)從 hardcoded 8 skill 改成每次 request 即時讀 active agent profile build 完整 registry
+- `mori skill call <name> --args '{...}'` 通用 dispatch 子命令
+- bash-CLI 系列現在跟 OpenAI tool-calling 系列(groq / ollama / claude-cli)看到一致的 action_skills + shell_skills
+- commit: `efc4b99`
+
+## Phase 5H — 使用者自訂 shell skill(2026-05-12)
+
+- Agent profile frontmatter `shell_skills: [...]` 直接定義 CLI 包裝,不用改 Rust
+- `command: ["gh", "pr", "list", ...]` 是 array(不走 shell parsing),`{{name}}` 替換是字面字串 — LLM 無法 escape
+- `gh` / `docker` / `kubectl` / `yt-dlp` / 自家 script 任何 PATH 內 CLI 都能變 Mori 能力
+- commit: `0149f67`
+
+## Phase 5G — 雙模式架構(VoiceInput + Agent)(2026-05-12)
+
+- 熱鍵 + profile 二維:`Alt+0~9` = VoiceInput / `Ctrl+Alt+0~9` = Agent
+- VoiceInput:STT → 單輪 LLM cleanup → 貼游標(只做「字」)
+- Agent:STT → multi-turn agent loop → chat 回應 / 動作執行(`open_url` / `send_keys` / 查資料)
+- Action skills 搬到 mori-core Skill trait(原 `voice_input_tools` 刪除)
+- 動態 `SkillRegistry`,profile 決定該載哪些 skill
+- `#file:` 前置處理,profile body 可內嵌參考檔
+- 共用 `corrections.md`,新增 default `AGENT.md`
+- commits: `4aecf2a`, `a7552f5`, `939f9f5`, `546fc61`, `4bd01ed`, `6299e5f`
+
+## Phase 5F — Voice input profile(2026-05-11)
+
+- `Alt+1~9` 切 voice input profile(ZeroType 相容格式)
+- Floating widget 重設計:音量光環 / ripple / 詳細狀態 chip(轉錄中 / 處理中 / profile 名稱)
+- Voice input agent loop:9 個工具(translate / polish / 標點 / etc.)+ smart_paste
+- `profile.stt_provider` 可覆蓋全域 STT 設定
+- `xclip` 取代 `arboard` 消除 wl-clipboard portal 對話框
+- Terminal paste-back 用 `Ctrl+Shift+V`
+- `config.api_keys` 支援 `ZEROTYPE_AIPROMPT_API_KEY_ENV` fallback
+- commits: `da61073`, `7632c81`, `3735c7f`, `3a43621`, `67d6b86`, `c94519c`, `dee74c9`, `92c2396`, `a6c0998`, `5570745`, `95005e6`
+
+## Phase 5E — Voice-input mode(2026-05-08)
+
+- Mori 變 LLM-powered dictation:STT → LLM cleanup(加標點 / 修幻聽 / 切段,prompt 鎖死不准改詞)→ 貼回游標
+- 三級 cleanup:`smart`(LLM)/ `minimal`(純程式 post-process)/ `none`(raw whisper)
+- commit: `117221a`
+
+## Phase 5D — Bash CLI proxy + chat-only variants(2026-05-08~09)
+
+- **5D-1**:`claude-bash` provider — claude CLI 當 agent,透過 Bash tool 呼叫本機 `mori` CLI dispatch skill(walk Pro/Max quota)(`f06ca0f`)
+- **5D-2**:`gemini-bash` / `codex-bash` agent providers + memory skills 接上 Bash CLI proxy + tighten system prompt(`38e41ff`, `b95ed53`, `d48788a`)
+- **5D-3**:`gemini-cli` / `codex-cli` chat-only 變體(no agent flag)— 給 per-skill routing 用(`eed104d`)
+
+## Phase 5C — Local STT(2026-05-08)
+
+- whisper.cpp Rust binding (`whisper-rs`)+ rubato 重採樣,100% 離線
+- `stt_provider: "whisper-local"` + `model_path` 指向 GGML 模型(small 466MB 夠用)
+- commit: `cd56c9e`
+
+## Phase 5A — Multi-provider(2026-05-08)
+
+- **5A-1**:`OllamaProvider` — 本機 LLM(qwen3:8b)+ tool calling + warm-up + `keep_alive=30m`(`c5a6289`, `2ff9e77`)
+- **5A-2**:`ClaudeCliProvider` — `claude --print` chat-only subprocess(`3f5d948`)
+- **5A-3a**:per-skill provider routing(agent + 個別 skill 走不同 provider)(`74222b9`)
+
+## Phase 4B + 4C — 系統整合(2026-05-07~08)
+
+- **4B-1**:Wayland-compatible global hotkey via `xdg-desktop-portal` GlobalShortcuts(GNOME 唯一可用)(`ced5c9e`)
+- **4B-2**:Active / Background mode + tray toggle + `set_mode` skill(`afb7d20`)
+- **4B-3**:Floating Mori widget + GNOME Wayland always-on-top fix(`44580c6`)
+- **4C**:Primary-selection 讀取 + `ydotool` paste-back(Linux)(`45244b6`)
+
+## Phase 3 — Context Capture(2026-05-07 / 2026-05-12)
+
+- **3A**:剪貼簿自動進 context + system prompt(`874cdac`)
+- **3B**:URL detection(純 Rust scanner)+ `fetch_url` skill(reqwest + HTML strip,8KB cap),trigger 鎖在「這個 / 這篇」指示詞(`d414186`, `268def8`)
+
+## Phase 2 — 基礎 text skills(2026-05-07)
+
+- `translate` / `polish` / `summarize` / `compose` 四個純 LLM skill
+- commit: `0185cc8`
+
+## Phase 1 — Voice MVP(2026-05-07)
+
+- **1A**:Workspace + traits + docs scaffold(`a6d191e`)
+- **1B**:Voice pipeline 端到端 — hotkey + mic + Whisper(`209ff6d`)
+- **1C**:Chat-back pipeline + `LocalMarkdownMemoryStore` I/O(`d9d7455`)
+- **1D + 1E**:`SkillRegistry` + `RememberSkill` + multi-turn + `RecallMemorySkill`(`45dfcc0`)
+- **1F**:Conversation history + tray icon + forget/edit skills(`e72d37a`)

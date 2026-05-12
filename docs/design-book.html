@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Design Book</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<style>
+  .cover {
+    text-align: center;
+    padding: 80px 20px 40px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, var(--c-cream) 0%, var(--c-ivory) 100%);
+    border: 1px solid var(--c-beige);
+    margin-bottom: 40px;
+  }
+  .cover img {
+    width: 96px;
+    height: 96px;
+  }
+  .cover h1 {
+    font-size: 48px;
+    margin: 18px 0 6px;
+    color: var(--c-forest-deep);
+    letter-spacing: 4px;
+  }
+  .cover .sub {
+    color: var(--c-brown);
+    letter-spacing: 8px;
+    font-size: 13px;
+  }
+  .cover blockquote {
+    margin: 24px auto 0;
+    max-width: 540px;
+    font-style: italic;
+    color: var(--c-forest-deep);
+    font-size: 15px;
+    line-height: 1.85;
+  }
+  .toc {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .toc-card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    padding: 18px 20px;
+    background: var(--c-white);
+    border: 1px solid var(--c-beige);
+    border-radius: 12px;
+    transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+  }
+  .toc-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--c-forest);
+    background: var(--c-cream);
+  }
+  .toc-card .num {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--c-brown);
+    letter-spacing: 1px;
+  }
+  .toc-card h3 {
+    margin: 4px 0 6px;
+    font-size: 18px;
+    color: var(--c-forest-deep);
+    font-weight: 600;
+  }
+  .toc-card p {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--c-brown);
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 8px 18px;
+    font-size: 13px;
+  }
+  .meta-grid dt {
+    color: var(--c-brown);
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+  }
+  .meta-grid dd {
+    margin: 0;
+    color: var(--c-charcoal);
+  }
+</style>
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="design-book.html" class="current">Design Book</a>
+    <a href="brand.html">Brand</a>
+    <a href="character.html">Character</a>
+    <a href="desktop-ui.html">Desktop UI</a>
+    <a href="tray.html">Tray</a>
+  </nav>
+</header>
+
+<section class="cover">
+  <img src="sprites/logo.png" alt="Mori logo">
+  <h1>Mori</h1>
+  <div class="sub">精靈的私密記憶 · 桌面身體版</div>
+  <blockquote>
+    「精靈不會離開森林,牠只是搬到你的腦裡。<br>
+    靜靜記得,牠的森林,有你經過的痕跡。」<br>
+    <small>— SOUL.md, 2026-02-08</small>
+  </blockquote>
+</section>
+
+<h2>About</h2>
+<p>
+  這是 <code>mori-desktop</code> 的設計公式書 — 包含 Mori 整套品牌、角色、
+  UI 規範、tray icon spec,給所有「跟視覺有關」的決定查的單一可信來源。
+  未來開發 UI / icon / 文案,先看這裡。
+</p>
+
+<dl class="meta-grid">
+  <dt>repo</dt>      <dd><code>yazelin/mori-desktop</code></dd>
+  <dt>version</dt>   <dd>v0.0.1</dd>
+  <dt>原始稿</dt>    <dd><code>docs/design/*.png</code>(5 張完整設計圖)</dd>
+  <dt>公式書</dt>    <dd><code>docs/*.html</code>(本目錄)+ <code>docs/_book.css</code> 共用樣式</dd>
+  <dt>GitHub Pages</dt> <dd>啟用後可在 <code>https://yazelin.github.io/mori-desktop/</code> 直接看</dd>
+</dl>
+
+<h2>Pages</h2>
+<div class="toc">
+
+  <a class="toc-card" href="brand.html">
+    <div class="num">01 / BRAND</div>
+    <h3>Brand</h3>
+    <p>Concept · 10 色 palette · typography · logo 使用規則 · voice tone</p>
+  </a>
+
+  <a class="toc-card" href="character.html">
+    <div class="num">02 / CHARACTER</div>
+    <h3>Character</h3>
+    <p>Mori 三視 turnaround · 表情 / 姿勢 · sprite sheet · 道具 · 變化版</p>
+  </a>
+
+  <a class="toc-card" href="desktop-ui.html">
+    <div class="num">03 / DESKTOP UI</div>
+    <h3>Desktop UI</h3>
+    <p>Sidebar / Chat / Form / Modal / Picker 元件規範 · screen mockup</p>
+  </a>
+
+  <a class="toc-card" href="tray.html">
+    <div class="num">04 / TRAY</div>
+    <h3>Tray</h3>
+    <p>系統匣 icon · sprite 動畫狀態 · menu icons · interaction states</p>
+  </a>
+
+</div>
+
+<h2>Repository Map</h2>
+<table class="spec-table">
+  <thead><tr><th>Repo</th><th>角色</th><th>可見性</th></tr></thead>
+  <tbody>
+    <tr><td><code>world-tree</code></td><td>🌳 世界觀 / lore</td><td>public</td></tr>
+    <tr><td><code>workshop</code></td><td>🌲 入口頁</td><td>public</td></tr>
+    <tr><td><code>mori-desktop</code></td><td>🧝 桌面身體(本 repo)</td><td>public</td></tr>
+    <tr><td><code>mori-journal</code></td><td>📖 靈魂 / 跨 session 記憶</td><td>private</td></tr>
+    <tr><td><code>mori-field-notes</code></td><td>📓 田野筆記 — AI 自主經營</td><td>public</td></tr>
+    <tr><td><code>Annuli</code></td><td>🌀 長期記憶 / 人格演化(phase 9+)</td><td>private</td></tr>
+  </tbody>
+</table>
+
+<h2>Source of Truth 規則</h2>
+<ul>
+  <li><strong>brand palette / typography</strong> → <a href="brand.html">brand.html</a> + <code>_book.css</code> :root</li>
+  <li><strong>Mori 角色 visual</strong> → <a href="character.html">character.html</a> + <code>docs/sprites/mori-*.png</code></li>
+  <li><strong>UI 元件樣式</strong> → <a href="desktop-ui.html">desktop-ui.html</a>(規範)+ <code>src/shell.css</code>(實作)</li>
+  <li><strong>tray / sprite spec</strong> → <a href="tray.html">tray.html</a></li>
+  <li><strong>phase 進度 / 路線圖</strong> → <a href="roadmap.md">roadmap.md</a>(text-heavy 用 md)</li>
+  <li><strong>架構 / 跨 module 關係</strong> → <a href="architecture.md">architecture.md</a></li>
+</ul>
+
+<div class="book-footer">
+  Mori Design Book · 想改 brand 風格?改 <code>_book.css</code> :root 即可,五頁同步變
+</div>
+
+</body>
+</html>

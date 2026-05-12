@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Hotkeys</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<style>
+  .kbd-row {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 12px 18px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--c-beige);
+    align-items: baseline;
+  }
+  .kbd-row:last-child { border-bottom: none; }
+  .kbd-row kbd {
+    background: var(--c-cream);
+    border: 1px solid var(--c-beige);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+    color: var(--c-forest-deep);
+  }
+  .kbd-row .desc {
+    color: var(--c-charcoal);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .group-title {
+    color: var(--c-forest-deep);
+    font-size: 16px;
+    margin: 28px 0 8px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="hotkeys.html" class="current">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Hotkeys</h1>
+<div class="page-subtitle">GLOBAL · MAIN WINDOW · PICKER</div>
+
+<p class="lead">
+  Mori 雙模式架構:前綴鍵選模式,數字鍵選 profile。共 20 個全域熱鍵 +
+  picker / chat / tray 內熱鍵。Linux Wayland 透過
+  <code>xdg-desktop-portal</code> GlobalShortcuts 註冊(第一次跑會跳權限對話框)。
+</p>
+
+<h2 class="group-title">全域熱鍵 · Toggle</h2>
+<div class="kbd-row">
+  <div><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd></div>
+  <div class="desc">開始 / 結束錄音(兩個模式共用)</div>
+</div>
+<div class="kbd-row">
+  <div><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Esc</kbd></div>
+  <div class="desc">中斷錄音 / 中斷 Mori 思考</div>
+</div>
+<div class="kbd-row">
+  <div><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>P</kbd></div>
+  <div class="desc">開啟 Profile Picker overlay(↑↓ / Tab / Enter)</div>
+</div>
+
+<h2 class="group-title">VoiceInput 模式 · <code>Alt+N</code></h2>
+<p>切到 voice profile N(<code>~/.mori/voice_input/USER-NN.*.md</code>)。
+   按完接著按 <code>Ctrl+Alt+Space</code> 錄音,STT → 單輪 LLM cleanup → 貼到游標。</p>
+<div class="kbd-row">
+  <div><kbd>Alt</kbd> + <kbd>0</kbd> ~ <kbd>9</kbd></div>
+  <div class="desc">切到對應編號的 voice_input profile</div>
+</div>
+
+<h2 class="group-title">Agent 模式 · <code>Ctrl+Alt+N</code></h2>
+<p>切到 agent profile N(<code>~/.mori/agent/AGENT-NN.*.md</code>)。
+   按完接著按 <code>Ctrl+Alt+Space</code> 錄音,STT → Mori agent loop → chat 回應 / 執行動作。</p>
+<div class="kbd-row">
+  <div><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>0</kbd> ~ <kbd>9</kbd></div>
+  <div class="desc">切到對應編號的 agent profile</div>
+</div>
+
+<h2 class="group-title">Picker Overlay · <code>Ctrl+Alt+P</code></h2>
+<div class="kbd-row">
+  <div><kbd>↑</kbd> / <kbd>↓</kbd> 或 <kbd>k</kbd> / <kbd>j</kbd></div>
+  <div class="desc">上下選 profile(3-item carousel)</div>
+</div>
+<div class="kbd-row">
+  <div><kbd>Tab</kbd> 或 <kbd>←</kbd> / <kbd>→</kbd></div>
+  <div class="desc">切 VoiceInput / Agent 兩組</div>
+</div>
+<div class="kbd-row">
+  <div><kbd>Enter</kbd></div>
+  <div class="desc">確認切換</div>
+</div>
+<div class="kbd-row">
+  <div><kbd>Esc</kbd></div>
+  <div class="desc">取消(picker 關閉)</div>
+</div>
+
+<h2 class="group-title">主視窗 Chat Panel</h2>
+<div class="kbd-row">
+  <div><kbd>Ctrl</kbd> + <kbd>Enter</kbd></div>
+  <div class="desc">送出 textarea 訊息(textarea 內)</div>
+</div>
+
+<h2 class="group-title">Tray Menu</h2>
+<p>系統匣右鍵點 Mori icon:</p>
+<ul>
+  <li>三個 mode 切換:對話模式 / 語音輸入模式 / 休眠(關麥克風)</li>
+  <li>Voice profile 子選單:列全部 <code>USER-*.md</code></li>
+  <li>Agent profile 子選單:列全部 <code>AGENT-*.md</code></li>
+  <li>顯示主視窗 / 退出</li>
+</ul>
+
+<h2 class="group-title">UI 內小按鈕</h2>
+<ul>
+  <li><strong>Sidebar 左下角 ☀ / 🌙</strong> — quick toggle dark ↔ light theme</li>
+  <li><strong>主視窗 sidebar 6 tab</strong> — Chat / Profiles / Config / Memory / Skills / Deps</li>
+  <li><strong>Chat panel 右上</strong> — 休眠 toggle / 重置對話 / status modal</li>
+  <li><strong>雙擊 Floating sprite</strong> — 切顯示主視窗</li>
+  <li><strong>拖曳 Floating sprite</strong> — 移動桌面位置</li>
+</ul>
+
+<h2 class="group-title">Linux 系統熱鍵衝突</h2>
+<p>如果 <code>Ctrl+Alt+Esc</code> 註冊不上,GNOME 預設綁了 <code>cycle-panels</code>:</p>
+<pre><code>gsettings set org.gnome.desktop.wm.keybindings cycle-panels "[]"</code></pre>
+
+<p>細部 troubleshoot 見 <a href="troubleshooting.html">Troubleshooting</a>。</p>
+
+<div class="book-footer">
+  Mori Docs · Hotkeys
+</div>
+
+</body>
+</html>

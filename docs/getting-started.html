@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Getting Started</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<style>
+  .screenshot {
+    display: block;
+    max-width: 100%;
+    margin: 16px 0;
+    border-radius: 10px;
+    border: 1px solid var(--c-beige);
+  }
+  .screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .screenshot-grid figure { margin: 0; }
+  .screenshot-grid figcaption {
+    font-size: 11.5px;
+    color: var(--c-brown);
+    text-align: center;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html" class="current">Getting Started</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Getting Started</h1>
+<div class="page-subtitle">INSTALL · DEV · FIRST RUN</div>
+
+<p class="lead">
+  從 0 到 Mori 在你 Ubuntu 上跑起來 — 三步驟。
+</p>
+
+<div class="note">
+  <strong>主力平台:Ubuntu 26.04 + GNOME Wayland。</strong>
+  Windows / macOS 的 paste-back / 全域熱鍵尚未接,主視窗 UI 跑得起來但語音輸入流程不完整。
+  歡迎 fork + PR 幫忙補 — 見 <a href="https://github.com/yazelin/mori-desktop/issues">GitHub Issues</a>。
+</div>
+
+<h2>1. 系統需求</h2>
+<ul>
+  <li>Rust 1.94+</li>
+  <li>Node 22+</li>
+  <li>(Linux)Tauri 2 build deps + <code>wl-clipboard</code> + <code>ydotool</code></li>
+</ul>
+
+<p>
+  Ubuntu 26.04 一條龍 setup script:
+  <a href="https://github.com/yazelin/ubuntu-26.04-setup"><code>yazelin/ubuntu-26.04-setup</code></a>
+</p>
+
+<pre><code>./setup-rust.sh           # Rust toolchain
+./setup-tauri-deps.sh     # WebKitGTK + ALSA + tray libs
+./setup-wayland-input.sh  # wl-clipboard + ydotool daemon</code></pre>
+
+<p>
+  <strong>裝完要重開機一次</strong> 讓 <code>input</code> group 生效(<code>ydotool</code> 需要)。
+</p>
+
+<h2>2. Clone + Build</h2>
+<pre><code>git clone https://github.com/yazelin/mori-desktop.git
+cd mori-desktop
+
+cargo build --workspace   # workspace 才會 build mori-cli (Bash CLI proxy 需要)
+npm install</code></pre>
+
+<h2>3. 跑 Dev 模式</h2>
+<pre><code>npm run tauri dev</code></pre>
+
+<p>
+  第一次 build 在 Intel Ultra 上 ~3 分鐘。之後 incremental ~10 秒。
+</p>
+
+<div class="note">
+  <strong>注意</strong>:<code>npm run tauri dev</code> 只 build <code>mori-tauri</code>。
+  <code>mori</code> CLI(Bash CLI proxy 用)要另外跑 <code>cargo build -p mori-cli</code>,
+  binary 在 <code>target/debug/mori</code>。
+</div>
+
+<h2>主畫面截圖</h2>
+<p>主視窗 = sidebar shell(6 個 tab)+ 桌面常駐 floating sprite + Ctrl+Alt+P picker overlay。</p>
+
+<div class="screenshot-grid">
+  <figure>
+    <img class="screenshot" src="screenshots/main-dark.png" alt="主視窗 Dark theme">
+    <figcaption>主視窗 · Mori Dark theme</figcaption>
+  </figure>
+  <figure>
+    <img class="screenshot" src="screenshots/main-light.png" alt="主視窗 Light theme">
+    <figcaption>主視窗 · Mori Light theme</figcaption>
+  </figure>
+  <figure>
+    <img class="screenshot" src="screenshots/picker.png" alt="Profile Picker">
+    <figcaption>Ctrl+Alt+P Profile Picker</figcaption>
+  </figure>
+  <figure>
+    <img class="screenshot" src="screenshots/floating.png" alt="Floating Mori sprite">
+    <figcaption>桌面常駐 sprite + chat bubble</figcaption>
+  </figure>
+</div>
+
+<h2>第一次啟動會發生的事</h2>
+<ol>
+  <li><strong>GNOME 跳權限對話框</strong>:問你要不要讓 Mori 註冊全域熱鍵 — 點「<strong>新增(Add)</strong>」。
+    誤點拒絕的修法見 <a href="troubleshooting.html#hotkey">Troubleshooting → 全域熱鍵</a></li>
+  <li><strong><code>~/.mori/</code> 建立</strong>:config.json stub / themes/dark.json / themes/light.json / 空的 voice_input / agent 目錄</li>
+  <li><strong>主視窗顯示</strong>:sidebar shell + 桌面右下 floating sprite(160×160)</li>
+  <li><strong>第一次按 Ctrl+Alt+Space</strong>:錄音 → STT → 但會抱怨「沒設 LLM provider」<br>
+    → 去 Config tab 填 Groq key(預設 provider)或選離線組合 — 見 <a href="providers.html">Providers</a></li>
+</ol>
+
+<h2>下一步</h2>
+<ul>
+  <li><a href="hotkeys.html">Hotkeys</a> — 全域熱鍵 + UI 內熱鍵清單</li>
+  <li><a href="providers.html">Providers</a> — Groq / Gemini / Ollama / Claude-CLI 四種設定</li>
+  <li><a href="../README.md">README</a> — 整體介紹 + 進度 + 規劃</li>
+  <li><a href="../CHANGELOG.md">CHANGELOG</a> — phase 演進歷史</li>
+</ul>
+
+<div class="book-footer">
+  Mori Design Book · Getting Started
+</div>
+
+</body>
+</html>

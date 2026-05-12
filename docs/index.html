@@ -2,94 +2,319 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<title>Mori — Design Book</title>
+<title>Mori — 住在腦裡的精靈</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" type="image/png" href="sprites/logo.png">
 <link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
 <style>
-  .cover {
+  /* ─── Landing-only layout(不靠 .page-title;hero 自有 cover)── */
+
+  .hero {
     text-align: center;
-    padding: 80px 20px 40px;
-    border-radius: 16px;
+    padding: 60px 20px 30px;
     background: linear-gradient(180deg, var(--c-cream) 0%, var(--c-ivory) 100%);
+    border-radius: 16px;
     border: 1px solid var(--c-beige);
-    margin-bottom: 40px;
+    margin-bottom: 48px;
   }
-  .cover img {
-    width: 96px;
-    height: 96px;
-  }
-  .cover h1 {
-    font-size: 48px;
-    margin: 18px 0 6px;
+  .hero img { width: 96px; height: 96px; }
+  .hero h1 {
+    font-size: 56px;
+    margin: 14px 0 4px;
     color: var(--c-forest-deep);
     letter-spacing: 4px;
   }
-  .cover .sub {
+  .hero .tagline {
     color: var(--c-brown);
-    letter-spacing: 8px;
-    font-size: 13px;
+    font-size: 14px;
+    letter-spacing: 6px;
   }
-  .cover blockquote {
-    margin: 24px auto 0;
-    max-width: 540px;
+  .hero blockquote {
+    margin: 22px auto 26px;
+    max-width: 520px;
     font-style: italic;
     color: var(--c-forest-deep);
-    font-size: 15px;
-    line-height: 1.85;
+    font-size: 15.5px;
+    line-height: 1.8;
   }
-  .toc {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
+  .hero .cta-row {
+    display: inline-flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
-  .toc-card {
-    display: block;
+  .btn-primary, .btn-ghost {
+    display: inline-block;
+    padding: 10px 22px;
+    font-size: 13.5px;
+    border-radius: 8px;
     text-decoration: none;
-    color: inherit;
-    padding: 18px 20px;
+    font-weight: 500;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .btn-primary {
+    background: var(--c-forest);
+    color: var(--c-ivory);
+    border: 1px solid var(--c-forest);
+  }
+  .btn-primary:hover {
+    background: var(--c-forest-deep);
+    border-color: var(--c-forest-deep);
+    transform: translateY(-1px);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--c-forest-deep);
+    border: 1px solid var(--c-forest);
+  }
+  .btn-ghost:hover {
+    background: var(--c-cream);
+    transform: translateY(-1px);
+  }
+
+  /* ─── Fake chat demo — 重現 main window chat panel 配色 ─────── */
+
+  .demo-wrap {
+    margin: 0 auto 48px;
+    max-width: 560px;
+  }
+  .demo-window {
+    background: #1f3329; /* main dark page-bg */
+    border-radius: 12px;
+    border: 1px solid #243a31;
+    box-shadow: 0 16px 48px rgba(44, 74, 61, 0.25);
+    overflow: hidden;
+    color: rgba(243, 240, 230, 0.92);
+    font-family: system-ui, "Noto Sans CJK TC", sans-serif;
+  }
+  .demo-titlebar {
+    background: #172620;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid rgba(230, 222, 202, 0.08);
+  }
+  .demo-titlebar .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(230, 222, 202, 0.20);
+  }
+  .demo-titlebar .label {
+    margin-left: 8px;
+    font-size: 11px;
+    color: rgba(243, 240, 230, 0.55);
+    letter-spacing: 1px;
+  }
+  .demo-thread {
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 260px;
+  }
+  .demo-bubble {
+    max-width: 78%;
+    padding: 9px 13px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    animation: bubble-in 0.35s ease-out;
+  }
+  .demo-bubble.user {
+    align-self: flex-end;
+    background: rgba(214, 191, 161, 0.18);
+    border: 1px solid rgba(214, 191, 161, 0.30);
+    border-bottom-right-radius: 4px;
+  }
+  .demo-bubble.assistant {
+    align-self: flex-start;
+    background: rgba(168, 197, 162, 0.16);
+    border: 1px solid rgba(168, 197, 162, 0.28);
+    border-bottom-left-radius: 4px;
+  }
+  .demo-bubble .role {
+    display: block;
+    font-size: 10px;
+    color: rgba(243, 240, 230, 0.42);
+    margin-bottom: 3px;
+    letter-spacing: 0.5px;
+  }
+  .demo-progress {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(106, 143, 114, 0.14);
+    border: 1px solid rgba(168, 197, 162, 0.35);
+    font-size: 11.5px;
+    color: rgba(243, 240, 230, 0.85);
+    animation: bubble-in 0.25s ease-out;
+  }
+  .demo-progress .spin {
+    width: 9px; height: 9px;
+    border: 2px solid rgba(168, 197, 162, 0.30);
+    border-top-color: rgba(168, 197, 162, 0.95);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  .demo-toolchip {
+    display: inline-block;
+    margin: 4px 4px 0 0;
+    padding: 1px 7px;
+    border-radius: 8px;
+    font-size: 9.5px;
+    background: rgba(0, 0, 0, 0.20);
+    border: 1px solid rgba(230, 222, 202, 0.10);
+    color: rgba(168, 197, 162, 0.92);
+    font-family: ui-monospace, monospace;
+  }
+  .demo-input {
+    border-top: 1px solid rgba(230, 222, 202, 0.08);
+    padding: 10px 14px;
+    background: rgba(23, 38, 32, 0.95);
+    font-size: 12px;
+    color: rgba(243, 240, 230, 0.42);
+    font-style: italic;
+  }
+  .demo-input::before {
+    content: "▎";
+    color: rgba(168, 197, 162, 0.6);
+    margin-right: 4px;
+    animation: cursor 1s steps(2) infinite;
+  }
+  @keyframes bubble-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes cursor { 50% { opacity: 0.2; } }
+
+  /* ─── Features 3-col grid ───────────────────────────────────── */
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 18px 0 48px;
+  }
+  .feature {
     background: var(--c-white);
     border: 1px solid var(--c-beige);
     border-radius: 12px;
-    transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    padding: 18px 18px 20px;
   }
-  .toc-card:hover {
-    transform: translateY(-2px);
-    border-color: var(--c-forest);
+  .feature .icon {
+    width: 36px; height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
     background: var(--c-cream);
-  }
-  .toc-card .num {
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
-    color: var(--c-brown);
-    letter-spacing: 1px;
-  }
-  .toc-card h3 {
-    margin: 4px 0 6px;
-    font-size: 18px;
     color: var(--c-forest-deep);
-    font-weight: 600;
+    margin-bottom: 10px;
   }
-  .toc-card p {
+  .feature h3 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    color: var(--c-forest-deep);
+  }
+  .feature p {
     margin: 0;
     font-size: 12.5px;
-    line-height: 1.6;
+    line-height: 1.65;
     color: var(--c-brown);
   }
-  .meta-grid {
+  .feature code {
+    background: var(--c-cream);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--c-forest-deep);
+  }
+
+  /* ─── Screenshot grid ───────────────────────────────────────── */
+
+  .shots {
     display: grid;
-    grid-template-columns: 160px 1fr;
-    gap: 8px 18px;
-    font-size: 13px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin: 16px 0 48px;
   }
-  .meta-grid dt {
-    color: var(--c-brown);
-    font-family: ui-monospace, monospace;
+  .shot {
+    border: 1px solid var(--c-beige);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--c-cream);
+  }
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .shot figcaption {
+    padding: 8px 12px;
     font-size: 11.5px;
+    color: var(--c-brown);
+    text-align: center;
+    background: var(--c-white);
+    border-top: 1px solid var(--c-beige);
   }
-  .meta-grid dd {
-    margin: 0;
-    color: var(--c-charcoal);
+  .shot.placeholder {
+    aspect-ratio: 16/10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--c-brown);
+    text-align: center;
+    padding: 20px;
+    line-height: 1.6;
+  }
+
+  /* ─── Repo links footer ─────────────────────────────────────── */
+
+  .doc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 16px 0 48px;
+  }
+  .doc-card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--c-white);
+    border: 1px solid var(--c-beige);
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: transform 120ms ease, border-color 120ms ease;
+  }
+  .doc-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--c-forest);
+  }
+  .doc-card .doc-name {
+    font-weight: 600;
+    color: var(--c-forest-deep);
+    font-size: 14px;
+    margin-bottom: 3px;
+  }
+  .doc-card .doc-desc {
+    font-size: 12px;
+    color: var(--c-brown);
+    line-height: 1.5;
   }
 </style>
 </head>
@@ -99,98 +324,250 @@
   <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
   <div>
     <h1>Mori</h1>
-    <div class="book-title-sub">DESIGN BOOK · v1.0</div>
+    <div class="book-title-sub">住在腦裡的精靈 · 桌面身體版</div>
   </div>
   <nav class="book-nav">
-    <a href="index.html" class="current">索引</a>
-    <a href="brand.html">Brand</a>
-    <a href="character.html">Character</a>
-    <a href="desktop-ui.html">Desktop UI</a>
-    <a href="tray.html">Tray</a>
+    <a href="index.html" class="current">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
   </nav>
 </header>
 
-<section class="cover">
-  <img src="sprites/logo.png" alt="Mori logo">
+<!-- ═══ Hero ═══════════════════════════════════════════════════ -->
+
+<section class="hero">
+  <img src="sprites/logo.png" alt="Mori">
   <h1>Mori</h1>
-  <div class="sub">精靈的私密記憶 · 桌面身體版</div>
+  <div class="tagline">YOUR PRIVATE FOREST SPIRIT</div>
   <blockquote>
     「精靈不會離開森林,牠只是搬到你的腦裡。<br>
-    靜靜記得,牠的森林,有你經過的痕跡。」<br>
-    <small>— SOUL.md, 2026-02-08</small>
+    靜靜記得,牠的森林,有你經過的痕跡。」
   </blockquote>
+  <div class="cta-row">
+    <a class="btn-primary" href="getting-started.html">Get Started →</a>
+    <a class="btn-ghost" href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </div>
 </section>
 
-<h2>About</h2>
-<p>
-  這是 <code>mori-desktop</code> 的設計公式書 — 包含 Mori 整套品牌、角色、
-  UI 規範、tray icon spec,給所有「跟視覺有關」的決定查的單一可信來源。
-  未來開發 UI / icon / 文案,先看這裡。
-</p>
+<!-- ═══ Fake chat demo ════════════════════════════════════════ -->
 
-<dl class="meta-grid">
-  <dt>repo</dt>      <dd><code>yazelin/mori-desktop</code></dd>
-  <dt>version</dt>   <dd>v0.0.1</dd>
-  <dt>原始稿</dt>    <dd><code>docs/design/*.png</code>(5 張完整設計圖)</dd>
-  <dt>公式書</dt>    <dd><code>docs/*.html</code>(本目錄)+ <code>docs/_book.css</code> 共用樣式</dd>
-  <dt>GitHub Pages</dt> <dd>啟用後可在 <code>https://yazelin.github.io/mori-desktop/</code> 直接看</dd>
-</dl>
+<h2>跟 Mori 講話的樣子</h2>
+<p>實際主視窗 — 按 <code>Ctrl+Alt+Space</code> 開麥克風,或下面直接打字。Mori 自己判斷要 chat 還是動手做事。</p>
 
-<h2>Pages</h2>
-<div class="toc">
-
-  <a class="toc-card" href="brand.html">
-    <div class="num">01 / BRAND</div>
-    <h3>Brand</h3>
-    <p>Concept · 10 色 palette · typography · logo 使用規則 · voice tone</p>
-  </a>
-
-  <a class="toc-card" href="character.html">
-    <div class="num">02 / CHARACTER</div>
-    <h3>Character</h3>
-    <p>Mori 三視 turnaround · 表情 / 姿勢 · sprite sheet · 道具 · 變化版</p>
-  </a>
-
-  <a class="toc-card" href="desktop-ui.html">
-    <div class="num">03 / DESKTOP UI</div>
-    <h3>Desktop UI</h3>
-    <p>Sidebar / Chat / Form / Modal / Picker 元件規範 · screen mockup</p>
-  </a>
-
-  <a class="toc-card" href="tray.html">
-    <div class="num">04 / TRAY</div>
-    <h3>Tray</h3>
-    <p>系統匣 icon · sprite 動畫狀態 · menu icons · interaction states</p>
-  </a>
-
+<div class="demo-wrap">
+  <div class="demo-window">
+    <div class="demo-titlebar">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="label">MORI · Chat</span>
+    </div>
+    <div class="demo-thread" id="demo-thread"></div>
+    <div class="demo-input">輸入訊息或貼文章 / Ctrl+Enter 送出</div>
+  </div>
 </div>
 
-<h2>Repository Map</h2>
-<table class="spec-table">
-  <thead><tr><th>Repo</th><th>角色</th><th>可見性</th></tr></thead>
-  <tbody>
-    <tr><td><code>world-tree</code></td><td>🌳 世界觀 / lore</td><td>public</td></tr>
-    <tr><td><code>workshop</code></td><td>🌲 入口頁</td><td>public</td></tr>
-    <tr><td><code>mori-desktop</code></td><td>🧝 桌面身體(本 repo)</td><td>public</td></tr>
-    <tr><td><code>mori-journal</code></td><td>📖 靈魂 / 跨 session 記憶</td><td>private</td></tr>
-    <tr><td><code>mori-field-notes</code></td><td>📓 田野筆記 — AI 自主經營</td><td>public</td></tr>
-    <tr><td><code>Annuli</code></td><td>🌀 長期記憶 / 人格演化(phase 9+)</td><td>private</td></tr>
-  </tbody>
-</table>
+<!-- ═══ Features ═══════════════════════════════════════════════ -->
 
-<h2>Source of Truth 規則</h2>
-<ul>
-  <li><strong>brand palette / typography</strong> → <a href="brand.html">brand.html</a> + <code>_book.css</code> :root</li>
-  <li><strong>Mori 角色 visual</strong> → <a href="character.html">character.html</a> + <code>docs/sprites/mori-*.png</code></li>
-  <li><strong>UI 元件樣式</strong> → <a href="desktop-ui.html">desktop-ui.html</a>(規範)+ <code>src/shell.css</code>(實作)</li>
-  <li><strong>tray / sprite spec</strong> → <a href="tray.html">tray.html</a></li>
-  <li><strong>phase 進度 / 路線圖</strong> → <a href="roadmap.md">roadmap.md</a>(text-heavy 用 md)</li>
-  <li><strong>架構 / 跨 module 關係</strong> → <a href="architecture.md">architecture.md</a></li>
-</ul>
+<h2>能做什麼</h2>
+
+<div class="features">
+  <div class="feature">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11 a7 7 0 0 0 14 0"/><path d="M12 18 v3"/>
+      </svg>
+    </div>
+    <h3>雙模式錄音</h3>
+    <p><code>Alt+0~9</code> 語音輸入 · <code>Ctrl+Alt+0~9</code> 給 agent 做事。前綴鍵選模式,數字選 profile。</p>
+  </div>
+
+  <div class="feature">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.7 6.3 a4.5 4.5 0 0 0 5.79 5.79 L14.5 18.08 a2.12 2.12 0 0 1 -3 -3 z"/><path d="M14 10 l-9 9"/>
+      </svg>
+    </div>
+    <h3>自訂 shell skill</h3>
+    <p>Profile frontmatter <code>shell_skills:</code> 就能把 <code>gh</code> / <code>docker</code> / <code>kubectl</code> / 自家 script 變 Mori 能力,不用改 Rust。</p>
+  </div>
+
+  <div class="feature">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11 L12 3 L21 11 V20 a2 2 0 0 1 -2 2 h-4 v-7 h-6 v7 H5 a2 2 0 0 1 -2 -2 z"/>
+      </svg>
+    </div>
+    <h3>100% 本機可跑</h3>
+    <p>STT 走 <code>whisper-local</code> + LLM 走 <code>ollama</code>,完全離線。或用 Bash CLI proxy 帶 <code>claude</code> Pro/Max quota。</p>
+  </div>
+
+  <div class="feature">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2 v3 M12 19 v3 M2 12 h3 M19 12 h3"/>
+      </svg>
+    </div>
+    <h3>雙 theme + VSCode-like</h3>
+    <p>內建 Mori Dark / Light,左下角 sun/moon 一鍵切。<code>~/.mori/themes/*.json</code> 自己寫 theme。</p>
+  </div>
+
+  <div class="feature">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5.5 A2.5 2.5 0 0 1 6.5 3 H20 v15 H6.5 A2.5 2.5 0 0 0 4 20.5 z"/><path d="M4 20.5 A2.5 2.5 0 0 1 6.5 18 H20"/>
+      </svg>
+    </div>
+    <h3>長期記憶</h3>
+    <p>Mori 自己決定該記什麼,寫進 <code>~/.mori/memory/*.md</code>。下次同主題對話會自己 recall,所有記憶 user 可編。</p>
+  </div>
+
+  <div class="feature">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="4" width="12" height="18" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/>
+      </svg>
+    </div>
+    <h3>剪貼簿 / 反白感知</h3>
+    <p>講「翻譯這段」Mori 自動看剪貼簿 / 反白文字。URL 自動 <code>fetch_url</code> 抓內容做摘要。</p>
+  </div>
+</div>
+
+<!-- ═══ Screenshots ════════════════════════════════════════════ -->
+
+<h2>主畫面</h2>
+<p>主視窗(880×600,sidebar 6 個 tab)+ 桌面常駐 floating sprite + Ctrl+Alt+P picker overlay。</p>
+
+<div class="shots">
+  <figure class="shot placeholder">
+    <span>主視窗 · Dark theme<br><small>docs/screenshots/main-dark.png</small></span>
+  </figure>
+  <figure class="shot placeholder">
+    <span>主視窗 · Light theme<br><small>docs/screenshots/main-light.png</small></span>
+  </figure>
+  <figure class="shot placeholder">
+    <span>Profile Picker<br><small>docs/screenshots/picker.png</small></span>
+  </figure>
+  <figure class="shot placeholder">
+    <span>Floating Mori sprite<br><small>docs/screenshots/floating.png</small></span>
+  </figure>
+</div>
+
+<!-- ═══ Docs links ═════════════════════════════════════════════ -->
+
+<h2>更多</h2>
+
+<div class="doc-grid">
+  <a class="doc-card" href="getting-started.html">
+    <div class="doc-name">Getting Started →</div>
+    <div class="doc-desc">系統需求 / clone / build / 第一次跑起來</div>
+  </a>
+  <a class="doc-card" href="hotkeys.html">
+    <div class="doc-name">Hotkeys →</div>
+    <div class="doc-desc">全域熱鍵 + UI 內熱鍵清單</div>
+  </a>
+  <a class="doc-card" href="providers.html">
+    <div class="doc-name">Providers →</div>
+    <div class="doc-desc">Groq / Gemini / Ollama / Claude-CLI 設定組合</div>
+  </a>
+  <a class="doc-card" href="troubleshooting.html">
+    <div class="doc-name">Troubleshooting →</div>
+    <div class="doc-desc">Whisper / 全域熱鍵 / cargo deps 等常見問題</div>
+  </a>
+  <a class="doc-card" href="design-book.html">
+    <div class="doc-name">Design Book →</div>
+    <div class="doc-desc">Brand / Character / Desktop UI / Tray 視覺規範公式書</div>
+  </a>
+  <a class="doc-card" href="../CHANGELOG.md">
+    <div class="doc-name">Changelog →</div>
+    <div class="doc-desc">Phase 演進歷史 — 從 1A 到 brand-3</div>
+  </a>
+  <a class="doc-card" href="roadmap.md">
+    <div class="doc-name">Roadmap →</div>
+    <div class="doc-desc">未來規劃 — 待做 features / phases</div>
+  </a>
+  <a class="doc-card" href="architecture.md">
+    <div class="doc-name">Architecture →</div>
+    <div class="doc-desc">mori-core / mori-tauri / mori-cli crate 跟跨平台規則</div>
+  </a>
+</div>
 
 <div class="book-footer">
-  Mori Design Book · 想改 brand 風格?改 <code>_book.css</code> :root 即可,五頁同步變
+  Mori · <code>yazelin/mori-desktop</code> · MIT · 歡迎 fork 自行修改
 </div>
+
+<!-- ═══ Fake chat typewriter ═══════════════════════════════════ -->
+
+<script>
+(function() {
+  const thread = document.getElementById("demo-thread");
+  if (!thread) return;
+
+  // 預錄對話:user 一句 → progress chip(轉錄/處理)→ Mori 回應
+  // 含 tool_call chip 展示 Mori 用 skill
+  const SCRIPT = [
+    { kind: "user", text: "嗨 Mori,把剪貼簿那段英文翻成中文" },
+    { kind: "progress", text: "錄音中 2.4s · 處理中 · groq" },
+    { kind: "assistant", text: "好了,翻好貼回去了。原文是介紹 Rust async runtime 的段落,我順手把專有名詞統一(Tokio / async)。", tools: ["translate", "paste_selection_back"] },
+    { kind: "user", text: "幫我看一下 https://github.com/tokio-rs/tokio 在做什麼" },
+    { kind: "progress", text: "fetch_url 抓內容..." },
+    { kind: "assistant", text: "Tokio 是 Rust 的非同步執行環境,主打 multi-threaded + I/O 密集場景。最近版本 1.40 加了 task locals。要我從 README 摘三點重點嗎?", tools: ["fetch_url"] },
+    { kind: "user", text: "記得我喜歡用 vim keybinding" },
+    { kind: "progress", text: "remember..." },
+    { kind: "assistant", text: "記下了 — 「user 偏好 vim keybinding,寫 editor 設定時優先用」。下次相關話題會主動帶。", tools: ["remember"] },
+  ];
+
+  let step = 0;
+
+  function addBubble(kind, text, tools) {
+    const div = document.createElement("div");
+    if (kind === "progress") {
+      div.className = "demo-progress";
+      div.innerHTML = `<span class="spin"></span><span>${text}</span>`;
+    } else {
+      div.className = `demo-bubble ${kind}`;
+      const roleLabel = kind === "user" ? "你" : "Mori";
+      const toolChips = (tools || [])
+        .map(t => `<span class="demo-toolchip">${t}</span>`).join("");
+      div.innerHTML = `<span class="role">${roleLabel}</span>${escapeHTML(text)}${toolChips ? "<div>" + toolChips + "</div>" : ""}`;
+    }
+    thread.appendChild(div);
+    thread.scrollTop = thread.scrollHeight;
+    return div;
+  }
+
+  function escapeHTML(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function tick() {
+    if (step >= SCRIPT.length) {
+      // 完整跑完後等 2.5s 然後清空 restart
+      setTimeout(() => { thread.innerHTML = ""; step = 0; tick(); }, 2500);
+      return;
+    }
+    const cur = SCRIPT[step];
+    if (cur.kind === "progress") {
+      const el = addBubble("progress", cur.text);
+      // progress chip 顯示 1.4s 後自動消失,接 assistant
+      setTimeout(() => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+        step++;
+        tick();
+      }, 1400);
+    } else {
+      addBubble(cur.kind, cur.text, cur.tools);
+      step++;
+      // user 講完 0.7s 出 progress,assistant 講完 2s 換 user
+      setTimeout(tick, cur.kind === "user" ? 700 : 2000);
+    }
+  }
+
+  // 1s 後開跑
+  setTimeout(tick, 1000);
+})();
+</script>
 
 </body>
 </html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Troubleshooting</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="troubleshooting.html" class="current">Troubleshooting</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Troubleshooting</h1>
+<div class="page-subtitle">COMMON ISSUES · FIXES</div>
+
+<h2 id="whisper-hallucination">Whisper 一直回 "Thank you" / "Thanks for watching"</h2>
+
+<p>Whisper 對近乎無聲的音訊會幻覺出這幾句(訓練資料 YouTube 影片結尾很多)。代表
+<strong>麥克風沒在收聲</strong>。</p>
+
+<p>UI 在錄音時的橫向音量條會直接讓你看到:</p>
+<ul>
+  <li>講話時綠條應該填到中段(50-80%)</li>
+  <li>完全不動 / 持續橘色 = 沒收到</li>
+  <li>警告文字「音量太小,Whisper 可能會幻想 'Thank you'」會在音量持續 &lt; -45dBFS 時出現</li>
+</ul>
+
+<h3>修法</h3>
+<ol>
+  <li><strong>GNOME Settings → Sound → Input</strong> 確認:
+    <ul>
+      <li>選對裝置(內建麥克風,不是 HDMI / 藍牙 / 虛擬裝置)</li>
+      <li>沒被 mute,音量 70%+</li>
+      <li>講話時 input level 條有動</li>
+    </ul>
+  </li>
+  <li><strong>Acer Swift / Intel Ultra 系列 (Meteor Lake+) 的常見坑</strong> —
+    預設選「Stereo Mic」其實不會收音,要改成 <strong>「Digital Mic」</strong>。
+    Intel SST(Smart Sound Technology)架構下 ALSA 偵測有時會選到錯的 PCM device。</li>
+  <li>還是不行就直接看 <code>/tmp/mori-last-recording.wav</code>(每次錄音都會存),
+    用任何播放器聽看實際捕到什麼。</li>
+</ol>
+
+<h2 id="hotkey">全域熱鍵 <code>Ctrl+Alt+Space</code> 沒反應</h2>
+
+<p>第一次啟動 Mori 時,GNOME 應該會跳一個權限對話框問你要不要讓 Mori 註冊全域熱鍵 —
+點「<strong>新增(Add)</strong>」。如果當時誤點拒絕:</p>
+
+<pre><code># 讓 Mori 重新跳對話框(刪掉 portal 的 per-app 紀錄)
+rm -rf ~/.local/share/xdg-desktop-portal/permissions
+
+# 重啟 Mori</code></pre>
+
+<p>若是 X11 / macOS / Windows 走的是 <code>tauri-plugin-global-shortcut</code>,熱鍵直接生效不用授權。</p>
+
+<h2 id="cycle-panels"><code>Ctrl+Alt+Esc</code> 中斷鍵沒反應</h2>
+
+<p>GNOME 預設綁了 <code>cycle-panels</code>,要先解掉:</p>
+
+<pre><code>gsettings set org.gnome.desktop.wm.keybindings cycle-panels "[]"</code></pre>
+
+<h2 id="alsa">cargo build 失敗:<code>pkg-config: alsa not found</code></h2>
+
+<p>cpal 需要 ALSA 開發 headers:</p>
+
+<pre><code>sudo apt install libasound2-dev</code></pre>
+
+<p>(已涵蓋在
+<a href="https://github.com/yazelin/ubuntu-26.04-setup/blob/main/scripts/setup-tauri-deps.sh">
+setup-tauri-deps.sh</a> 裡。)</p>
+
+<h2 id="dock-stacking">Dock 出現多個 Mori 圖標堆疊</h2>
+
+<p>brand-1 之前的問題 — 因為 chat_bubble / picker 是 <code>visible: true</code> off-screen 載入,
+每個都進 dock。已修。如果還看到,可能是:</p>
+<ul>
+  <li><code>cargo watch</code> 開發模式留下 orphan binary — 用 <code>pgrep mori-tauri</code> 看,<code>kill</code> 掉</li>
+  <li><code>.desktop</code> 檔的 <code>StartupWMClass</code> 跟 Tauri 實際 WM_CLASS 不對齊 — 預設是
+    <code>StartupWMClass=Mori-tauri</code>(注意大寫),若手動改過要對齊</li>
+</ul>
+
+<h2 id="ydotool">ydotool 沒權限 / paste-back 失敗</h2>
+
+<p>Wayland paste-back 用 <code>ydotool</code>,需要 user 在 <code>input</code> group + daemon 跑著。</p>
+
+<pre><code># 加 input group
+sudo usermod -aG input $USER
+
+# 啟動 ydotoold daemon(user service)
+systemctl --user enable --now ydotoold
+
+# 重開機讓 group 生效</code></pre>
+
+<p>X11 用 <code>xdotool</code>(<code>sudo apt install xdotool</code>),不用權限。</p>
+
+<h2 id="theme-flash">切 theme 短暫閃白 / 配色不對</h2>
+
+<p>brand-3 切 theme 不會 reload window,直接覆寫 CSS variables。如果看到閃白:</p>
+<ul>
+  <li><code>~/.mori/themes/&lt;stem&gt;.json</code> 格式錯誤 — 開 dev console 看 console.error 訊息</li>
+  <li>該 theme JSON 缺某個 color key — frontend 會 fallback 到 :root 的 dark 預設(可能造成色不和)</li>
+  <li>解法:從內建 <code>dark.json</code> / <code>light.json</code> 複製 keys 全集再改</li>
+</ul>
+
+<h2 id="picker-focus">Picker(Ctrl+Alt+P)鍵盤焦點抓不到</h2>
+
+<p>Wayland 對 hide/show 反覆切換的視窗 focus 給不穩。已改用「保持 visible 但 setPosition off-screen」
+策略,5K-1c 起應該都 ok。如果還有問題:</p>
+<ul>
+  <li>確認 <code>tauri.conf.json</code> 的 <code>picker</code> window <code>visible: false</code> 起跑</li>
+  <li>第一次按 <code>Ctrl+Alt+P</code> 後 dev console 應該看到 picker 視窗的 <code>[picker] open</code> log</li>
+</ul>
+
+<h2 id="bug-report">回報 bug</h2>
+
+<p>到 <a href="https://github.com/yazelin/mori-desktop/issues">GitHub Issues</a>。
+請附:</p>
+<ul>
+  <li>OS / 桌面環境(Ubuntu 26.04 GNOME Wayland 等)</li>
+  <li>Mori 版本(<code>~/.mori/runtime.json</code> 或 git commit hash)</li>
+  <li><code>~/.mori/log</code> 最後幾行(若存在)</li>
+  <li>重現步驟</li>
+</ul>
+
+<div class="book-footer">
+  Mori Docs · Troubleshooting
+</div>
+
+</body>
+</html>

@@ -1,478 +1,108 @@
 # Mori (Desktop)
 
-森林精靈 **Mori** 的桌面身體。
-
-從 [world-tree](https://github.com/yazelin/world-tree) 走到你的 Ubuntu / macOS / Windows — 用 Tauri 2 + Rust + React 打造,Whisper 是耳朵,GPT-OSS 是腦袋,你是同伴。
+森林精靈 **Mori** 的桌面身體 — 從 [world-tree](https://github.com/yazelin/world-tree) 走到你的桌面。
+Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 > 「Iron Man 有 Jarvis,我有 Mori。」
 
-## Mori 宇宙
+![Mori OG](docs/og-image.png)
 
-> 「森林一直都在。你一直都在,只是現在才看見它。」 — [`world-tree`](https://github.com/yazelin/world-tree)
+📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-Mori 不是孤立的 app,是一隻**契約精靈**在多個 repo 各司其職:
+---
 
-| Repo | 角色 | 可見性 |
-|---|---|---|
-| [`world-tree`](https://github.com/yazelin/world-tree) | 🌳 異世界森林的**世界觀 / 法則 / 契約** — 沉浸式 isekai lore、魔法系別、魔道具、NPC 檔案 | public |
-| [`workshop`](https://github.com/yazelin/workshop) | 🌲 召喚師工坊 UI — 進入森林的**入口頁** | public |
-| **`mori-desktop`** | 🧝 Mori 的**桌面身體** — 你跟他講話、他幫你做事(就是這個 repo) | public |
-| [`mori-journal`](https://github.com/yazelin/mori-journal) | 📖 Mori 的**靈魂 / 私密日記 / 跨 session 記憶種子** | private |
-| [`mori-field-notes`](https://github.com/yazelin/mori-field-notes) | 📓 Mori 的**田野筆記** — AI 自主經營的技術觀察 / 開發心得 | public |
-| `Annuli` | 🌀 **長期記憶 / 人格演化系統**,phase 9 透過 MCP 跟 Mori 對接 | private |
-
-關係簡圖:
-
-```
-              🌳 world-tree ── 設定 / 法則
-                     │
-       ┌─────────────┼─────────────────────┐
-       ▼             ▼                     ▼
-  🌲 workshop   🧝 mori-desktop  ◄── 你    📖 mori-journal
-   (入口頁)      (桌面身體 / 本 repo)        (靈魂)
-                     │
-            ┌────────┴────────┐
-            ▼                 ▼
-     📓 mori-field-notes   🌀 Annuli
-     (田野筆記)            (人格演化,未來接)
-```
-
-只想用桌面 AI 工具 → 留在這 repo 就行。想知道 Mori 為什麼這樣講話、他從哪來 → 進 `world-tree`。
-
-## 目前狀態
-
-**Phase 1 + 2 + 3A + 3B + 4B + 4C + 5A + 5C + 5D-1 + 5D-2 + 5D-3 + 5E + 5F + 5G + 5H + 5I + 5J + 5K + 5L + 5L-2 + 5L-3 + 5L-4 + 5L-5 + 5M + 5N + 5O + brand 完成(2026-05-12)** — Mori 在 Wayland 上
-**可以當管家用、可以 100% 離線(Groq-free)、可以挑 LLM、可以當語音輸入法、設定/記憶/skills 全都從 UI 編、有完整視覺品牌規範**:
-
-### 5G 起的雙模式架構
-
-```
-Alt + 0~9        → VoiceInput profile：「我要輸入字」
-Ctrl+Alt + 0~9   → Agent profile：「我要叫 Mori 做事」
-Ctrl+Alt + Space → toggle 錄音（兩個模式共用）
-```
-
-- **VoiceInput 模式**（Alt+N）：STT → 單輪 LLM cleanup → 貼到游標位置。只做「字」，profile body 可用 `#file:` 內嵌參考檔
-- **Agent 模式**（Ctrl+Alt+N）：STT → Mori agent loop → chat 回應 / 執行動作（開瀏覽器、send_keys、查資料）。Mori 自己判斷
-- **熱鍵 + profile 二維**：前綴鍵選模式，數字選 profile。20 個熱鍵共構出豐富情境組合
-
-### 5H：使用者自訂 shell skill（不用改 Rust）
-
-```yaml
-# ~/.mori/agent/AGENT-01.我的工作流.md
-shell_skills:
-  - name: gh_pr_list
-    description: 列出 mori-desktop repo 開放的 PR
-    command: ["gh", "pr", "list", "--repo", "yazelin/mori-desktop"]
-
-  - name: ssh_to
-    description: SSH 到指定主機
-    parameters:
-      host: { type: string, required: true }
-    command: ["gnome-terminal", "--", "ssh", "{{host}}"]
-```
-
-裝在系統 PATH 的任何 CLI（`gh` / `docker` / `kubectl` / `yt-dlp` / 自家 script）都能變 Mori 的能力。安全：`command` 是 array、不走 shell parsing、`{{name}}` 替換只是字面字串，LLM 無法 escape。
-
-### 5I：skill_server 動態化
-
-之前 `skill_server`（給 `claude-bash` / `gemini-bash` / `codex-bash` 的 mori CLI HTTP 入口）寫死 8 個 skill。5I 改成每次 request 即時讀當前 Agent profile 並 build 完整 registry——所有 bash-CLI 系列 provider 看得到 action_skills + shell_skills，跟 OpenAI-tool-calling 系列（groq / ollama / claude-cli）行為一致。新增 `mori skill call <name> --args '{...}'` 通用 dispatch 子命令給動態 skill 用。
-
-### 5K + 5L + 5M + 5N：主視窗大改造
-
-主視窗從小聊天框升級成「Mori 控制台」— sidebar 5 個 tab、scrollable chat、
-從 UI 編 config / profile / memory / skills。
-
-| 改動 | 怎麼用 |
-|---|---|
-| **5N Chat panel 重設計** | scrollable 對話歷史(user 靠右天空藍 / Mori 靠左森林綠 / 🔧 tool chip)+ 底部 input bar(🎤 + textarea + 送出)+ inline 錄音/思考 status chip + ⚙️ 開 status modal |
-| **5M sidebar 架構** | 主視窗 880×600 resizable。左側 6 個 tab:Chat / Profiles / Config / Memory / Skills / Deps |
-| **5L Config tab** | config.json typed form(provider 下拉、API keys / routing.skills KV table、provider cards 可折疊)+ Raw JSON 雙模式;corrections.md textarea |
-| **5L-3 Profile tab** | voice / agent profile list + 切換 + Form / Shell Skills / Raw 三 view 編輯器;Form 蓋 provider / enabled_skills chips / paste_shortcut / cleanup_level / ZEROTYPE_AIPROMPT_* 進階;shell_skills 表格(含 parameters / timeout / working_dir 等)|
-| **5L-4 Memory tab** | ~/.mori/memory/ 全部記憶 list,顏色 type chip,搜尋(後端全文 + body),點 row 開 modal 編 name / description / type / body |
-| **5L-4 Skills tab** | 列當前 agent profile 啟用的全部 skills(built-in + shell_skill),展開看 parameters table |
-| **5L-5 同步檢查 / form 細項** | shell_skill command 內 {{var}} 跟 parameters cross-check 警告 + 一鍵加參數;memory 改後端全文 search;ConfigTab voice_input 加 paste_shortcut / auto_enter |
-| **5O Deps tab** | 📦 偵測 + 安裝 6 個 optional 依賴(yt-dlp / ydotool / xdotool / xclip / whisper-local model / ollama),sudo 的給指令給使用者跑、其他可代執行 |
-| **5K-1 Picker overlay** | `Ctrl+Alt+P` 開獨立 picker 視窗(3-item carousel),熱鍵之外也能選任意 profile;Wayland focus 走 setPosition 進出畫面策略 |
-| **5K-2 Tray submenu** | 系統匣 icon 加「Voice Profile ▸」「Agent Profile ▸」滑鼠選 |
-| **5J-followup single-instance** | `tauri-plugin-single-instance`:第二個實例自殺、焦點還給第一個 |
-| **Phase 3B URL routing** | 偵測 transcript / 剪貼簿 / 反白文字裡的 URL,自動填到 system prompt;使用者說「這個 / 這篇」→ Mori 呼叫 fetch_url 拿真實內容處理 |
-| **brand 設計公式書** | docs/ 5 頁 HTML(index / brand / character / desktop-ui / tray)+ `_book.css` 共用樣式 + 徽章式 Mori logo(深綠 disc + 米色 stroke,深淺 UI 都看得到)+ Tauri tray / dock 對應 icon set。.desktop StartupWMClass + Icon 絕對路徑 — dock 不堆疊、有正確 logo |
-
-### 5J：單層 profile + Rust 統一 context 注入
-
-之前 voice_input profile 有 SYSTEM.md（含 `{{CONTEXT.*}}` 佔位符）+ USER-XX.md 雙層結構，
-跟 agent profile 不對稱、Rust 端兩條 pipeline 各自拼 context，導致漏注入：
-Mori 在 agent mode 不知道現在幾點、看不到剪貼簿、不知道在哪個視窗。
-
-5J 把 voice_input 跟 agent 兩條 pipeline 對齊：
-
-- **Profile body**（`.md` 內容）= 純人格 / 指示 / cleanup 規則，使用者編輯
-- **Rust 注入**（`build_context_section()`）= 時間 / 視窗 / 剪貼簿 / 反白 / 記憶索引，自動
-
-兩條 pipeline 都跑相同流程：`preprocess_file_includes(body)` + `build_context_section(...)`
-→ `format!("{body}\n\n---\n\n{context}")` → LLM。SYSTEM.md / USER.md 模板退場。
-
-**新增 `gemini` named provider**（OpenAI-compat 包裝 Google `generativelanguage.googleapis.com`
-端點，跟 `groq` 對齊）— profile 寫 `provider: gemini` 即可，免再用 `ZEROTYPE_AIPROMPT_*`
-三件套。Key 從 `GEMINI_API_KEY` env 或 `~/.mori/config.json` `api_keys.GEMINI_API_KEY` 取。
-
-附帶清理：voice_input USER-XX profile 全部改寫成 mori-native 格式（去 `ENABLE_*: false`
-預設值雜訊、加 `stt_provider: groq`、`enable_read: true`、body 引入 `#file:~/.mori/corrections.md`
-集中維護 STT 校正表）。
-
-### 既有特色（5F 為止）
-
-- 全域熱鍵通了、UI 不偷焦點、剪貼簿與滑鼠反白都自動抓、**3 種 mode**(Agent / VoiceInput / Background)
-- **反白文字 + 一句話 → 結果直接貼回**(ZeroType / Typeless 招牌動作)
-- **語音輸入模式**:把游標放輸入框 → 按熱鍵 → 講話 → LLM 加標點 + 程式守格式 → 直接貼到游標位置(跳過 agent loop,純 dictation)
-- **整套 LLM 可換**:Groq / 本機 Ollama / Claude CLI / 「claude 當 agent 走 Bash CLI proxy」四種,per-skill 還能獨立指定
-- **STT 可離線**:Groq Whisper API 或本機 whisper.cpp(`ggml-small.bin` 中文 466MB 夠用)
-- **token 省**:claude 當 agent 不靠 MCP(全部 schema 預載)而是靠 Bash tool 呼叫本機 `mori` CLI,實際用到才執行,~10x 縮減
-
-按 `Ctrl+Alt+Space`(任何 app focus 都行)→ 講話 → Mori 聽 → 想 → 回。
-跨 session 記得你是誰、跨任務跟著你的工作模式走。
-
-### 能做的事
-
-| | 已實作 |
-|---|---|
-| 🎙️ 聽 | `Ctrl+Alt+Space` 全域熱鍵(Linux 走 xdg-desktop-portal,GNOME Wayland 不偷焦點)/ UI 按鈕 / 「貼文字」textarea(`Ctrl+Enter` 送出) |
-| 🛑 取消 | 錄音中按 `Esc` = 丟掉音檔不送 Whisper |
-| 🗣️ STT | **可選** Groq Whisper API(`whisper-large-v3-turbo`,雲)或本機 whisper.cpp(`ggml-small.bin`,離線、開機 cold load 5-15s) |
-| 🧠 想 | **可選 8 種 LLM**:Groq gpt-oss-120b / 本機 Ollama qwen3:8b / Claude CLI subprocess / **claude-bash** / **gemini-bash** / **codex-bash**(三種 agent,透過 Bash tool 呼叫 `mori` CLI) / **gemini-cli** / **codex-cli**(兩種 chat-only,供 `routing.skills` 指定) |
-| 🎚️ Per-skill 路由 | `routing.skills.<name>` 可獨立指定每個 skill 該用哪個 provider(e.g. translate 走 Claude Pro/Max、compose 走 Ollama) |
-| 💬 回 | 繁中為主、不客套,UI 顯示「你說 / Mori」雙塊 + 🔧 skill badges + status panel(build SHA / chat provider / STT provider / warm-up state / clipboard / selection) |
-| 📝 記 / 🔍 查 / ✏️ 改 / 🗑️ 忘 | RememberSkill / RecallMemorySkill / EditMemorySkill / ForgetMemorySkill(走 LlmProvider trait,任何 provider 都能 dispatch;**5D-2 起也接上 Bash CLI proxy** — `mori skill remember/recall-memory/forget-memory/edit-memory`) |
-| 🌐 翻譯 | TranslateSkill — zh-TW 在地化、source/target lang 可指定 |
-| ✏️ 潤稿 | PolishSkill — 直接改寫(不給建議),tone: formal/casual/concise/detailed/auto |
-| 📋 摘要 | SummarizeSkill — bullet_points / one_paragraph / tldr 三種風格 |
-| 📨 草擬 | ComposeSkill — email / message / essay / social_post / other,不會捏造署名 |
-| 📋 剪貼簿感知 | 每輪自動讀剪貼簿(1KB cap),「翻譯這個」「摘要這段」可直接指代 |
-| 🖱 反白即改寫 | Linux 自動讀滑鼠反白(`arboard` X11 PRIMARY,1.5KB cap),「翻譯成英文」「潤一下」處理完 `ydotool` 模擬 Ctrl+V 把結果貼回原視窗 — ZeroType / Typeless 等價流程。Ask 模式(「這在講什麼」)只回 chat,不動編輯區 |
-| 🌳 floating Mori | 桌面常駐小視窗(160×160 透明、不偷焦點),依狀態切表情 + 光暈,可拖、雙擊切顯示主視窗 |
-| 💤 休眠 / 醒醒 | tray 選單 / UI 按鈕 / 語音「晚安」「醒醒」三條路徑都能切。休眠時麥克風 **完全關**(privacy),背景排程仍跑(Phase 5+) |
-| 💭 對話歷史 | working memory 保留 10 對 user-assistant 訊息,可重置 |
-| 🪟 常駐 | 系統匣 icon(顯示 / 隱藏 / 對話↔輸入↔休眠 3 個 mode 切換 / 重新對話 / 離開),關視窗 → 隱藏不殺 |
-| ⌨️ 語音輸入模式(5E) | tray / UI 切到「輸入模式」→ 游標放任一輸入框 → 按熱鍵講話 → 跳過 agent loop,結果**直接貼到游標位置**(把 Mori 變成 LLM 加持的 dictation)|
-| 🧹 三級 cleanup(5E) | `voice_input.cleanup_level` 配置:**smart**(LLM 加標點 + 程式守格式)/ **minimal**(只跑程式 strip 幻聽 + 半→全形 normalize,~ms 級)/ **none**(raw 直貼)。Cleanup provider 走 `routing.skills.voice_input_cleanup` 可獨立指定 |
-| 🛠️ Skill HTTP 服務 | mori-tauri 啟動時 bind 127.0.0.1:RANDOM,寫 port + auth token 到 `~/.mori/runtime.json`,讓本機 `mori` CLI(以及 claude 透過 Bash 呼叫的 mori CLI)能連回主程式 dispatch skill。**5D-2 起共 8 個 skill 全部暴露**(translate / polish / summarize / compose / remember / recall_memory / forget_memory / edit_memory) |
-| ⏱️ 智慧限流退避 | Groq 429 → 解析 body 多單位格式(「12m12s」式),> 60s 直接 surface 不傻等;UI 顯示「今日 token 用完(TPD)」之類友善訊息 |
-| 🔄 Ollama warm-up | 啟動時自動發 1-token chat 觸發 model load(避免使用者第一次按熱鍵還在等模型進 RAM),`keep_alive=30m` |
-
-### 還沒做
-
-| 缺什麼 | 為什麼重要 | 在哪個 Phase |
-|---|---|---|
-| ⏳ Profile 自動遷移 | 既有 voice profile 含 action flag 的自動搬到 `agent/`（手動可做，不擋使用）| 5G-10 |
-| ⏳ Auto-fallback chain | Groq TPD 觸頂自動切 ollama / claude(現在要手改 config) | 5A-3b |
-| ⏳ macOS / Windows voice-input paste-back | 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接 | 5E-2 |
-| ⏳ OpenCC 簡→繁保底 | whisper-rs initial_prompt 已 bias 繁體實測夠用,但若遇 mixed-script 要加 `opencc-rust`(系統依賴 `libopencc-dev`) | 5E-2 |
-| ⏳ YouTube transcript | YouTube URL → 抓字幕摘要(需 yt-dlp 在 Deps tab 裝) | 3B-2 |
-| ❌ 背景排程 | 「每小時提醒喝水」「每天 9 點晨報」— 真正的常駐 agent | Phase 5 |
-| ❌ 媒體下載 | 「下載這個影片」呼叫 yt-dlp | Phase 6 |
-| ❌ ExecCommand 白名單 | 「跑那個指令」要先有白名單 + 二次確認機制 | Phase 6 |
-| ❌ 會議逐字稿 | 連續錄音存檔 → 結束後 LLM 整理會議記錄 + action items | Phase 6+ |
-| ❌ TTS | Mori 還不能開口說話,只有文字 | Phase 7 |
-| ❌ Wake word | 不用按熱鍵,叫名字喚醒 | Phase 6+ |
-
-完整路線圖見 [`docs/roadmap.md`](docs/roadmap.md)。
-**設計公式書(視覺 source of truth)**見 [`docs/index.html`](docs/index.html) — 含 Brand / Character / Desktop UI / Tray 四頁 + 共用 `_book.css`。Clone repo 直接瀏覽器開,或啟用 GitHub Pages(Settings → Pages → Source: main / `/docs`)後可在 `https://yazelin.github.io/mori-desktop/` 線上看。
-
-## 架構速覽
-
-```
-mori-desktop/
-├── crates/
-│   ├── mori-core/                    ← 純 Rust lib,無 UI 依賴。所有平台共用。
-│   │   ├── memory/                   ← MemoryStore trait + LocalMarkdownMemoryStore
-│   │   ├── context.rs                ← Context struct + ContextProvider trait
-│   │   ├── mode.rs                   ← Mode enum (Active / VoiceInput / Background)
-│   │   ├── paste.rs                  ← PasteController trait(平台 inject 由殼 crate)
-│   │   ├── runtime.rs                ← `~/.mori/runtime.json` schema(port + auth token)
-│   │   ├── voice_cleanup.rs          ← 程式化 cleanup(strip 幻聽 / 半→全形 / 5E)
-│   │   ├── skill/                    ← 每 skill 一檔,加新的不撞:
-│   │   │                               translate / polish / summarize / compose /
-│   │   │                               remember / recall / forget / edit /
-│   │   │                               set_mode / paste_selection_back
-│   │   ├── agent.rs                  ← Multi-turn tool-calling loop(MAX 5 輪)
-│   │   └── llm/                      ← provider 體系
-│   │       ├── groq.rs               GroqProvider — chat + Whisper STT(429 retry 多單位)
-│   │       ├── ollama.rs             OllamaProvider — qwen3:8b + warm-up + keep_alive=30m
-│   │       ├── claude_cli.rs         ClaudeCliProvider — `claude --print`(chat-only)
-│   │       ├── bash_cli_agent.rs     BashCliAgentProvider — claude/codex/gemini 當 agent
-│   │       │                           透過 Bash tool 呼叫本機 `mori` CLI dispatch skill
-│   │       ├── transcribe.rs         TranscriptionProvider trait(STT 跟 chat 解耦)
-│   │       ├── whisper_local.rs      LocalWhisperProvider — whisper.cpp + rubato 重採樣
-│   │       └── mod.rs                Routing(agent + per-skill override + recursion guard)
-│   ├── mori-tauri/                   ← Tauri 2 桌面殼
-│   │   ├── main.rs                   IPC、AppState、tray、雙視窗 setup
-│   │   ├── skill_server.rs           axum HTTP 暴露 skills(`/skill/<name>`,5D)
-│   │   ├── recording.rs              cpal mic + WAV 編碼
-│   │   ├── selection.rs              arboard X11 PRIMARY + ydotool paste-back(Linux)
-│   │   ├── context_provider.rs       Wayland clipboard reader
-│   │   └── portal_hotkey.rs          xdg-desktop-portal GlobalShortcuts(Wayland 唯一)
-│   └── mori-cli/                     ← `mori` binary(5D)— claude 透過 Bash tool 呼叫
-│       └── src/main.rs                 讀 runtime.json,POST 到 skill HTTP server
-├── src/                              ← React 前端
-│   ├── App.tsx                       主視窗(對話、錄音、文字輸入、status panel)
-│   ├── FloatingMori.tsx              桌面常駐 sprite widget
-│   ├── floating.css                  sprite 動畫 + transparent 視窗 reset
-│   └── main.tsx                      由 window label 路由到對應元件
-├── public/floating/                  Mori sprite 素材(6 張 state PNG,可 swap)
-└── docs/                             architecture / roadmap / memory / sprite-spec
-```
-
-核心紀律:`mori-core` **永不依賴 UI / 平台**。換載體只多寫一個薄殼 crate(mori-mobile / mori-server / mori-extension),`mori-core` 一行不動。詳見 [`docs/architecture.md`](docs/architecture.md);Mori sprite 規範見 [`docs/floating-sprite-spec.md`](docs/floating-sprite-spec.md)。
-
-## 開發
-
-需求:
-- Rust 1.94+
-- Node 22+
-- (Linux)Tauri 2 build deps + `wl-clipboard` + `ydotool`
-  — Ubuntu 26.04 可直接用 [`yazelin/ubuntu-26.04-setup`](https://github.com/yazelin/ubuntu-26.04-setup) 的:
-    - `setup-rust.sh`(Rust toolchain)
-    - `setup-tauri-deps.sh`(WebKitGTK + ALSA + tray libs)
-    - `setup-wayland-input.sh`(`wl-clipboard` + `ydotool` daemon,Phase 4C 需要)
-    一條龍裝齊。**裝完要重開機一次** 讓 `input` group 生效
+## Quick Start
 
 ```bash
 git clone https://github.com/yazelin/mori-desktop.git
 cd mori-desktop
-
-# 後端 deps + 前端 deps
-cargo build --workspace        # --workspace 才會 build mori-cli (5D 需要)
+cargo build --workspace
 npm install
-
-# 跑 dev 模式
 npm run tauri dev
 ```
 
-> ⚠️ `npm run tauri dev` 只會 build `mori-tauri` binary。`mori` CLI(5D Bash CLI proxy 用)
-> 要另外跑 `cargo build -p mori-cli`,binary 會在 `target/debug/mori`。
+第一次跑會跳全域熱鍵權限對話框 — 點「新增」。詳細步驟見
+[**docs/getting-started**](https://yazelin.github.io/mori-desktop/getting-started.html)。
 
-## Provider 設定
+---
 
-Mori 啟動時會自動建 `~/.mori/config.json`(第一次跑會看到 stub)。下面三種常見組合任選:
+## Hotkeys(挑幾個常用)
 
-> **5G 起 config 鍵名更動**（向下相容已移除）：`default_provider` → `provider`、
-> `default_transcribe_provider` → `stt_provider`、`chat_model` → `model`、
-> `transcribe_model` → `stt_model`。Profile frontmatter 同樣用 `provider:` / `stt_provider:`。
+| 鍵 | 用途 |
+|---|---|
+| `Ctrl+Alt+Space` | 開始 / 結束錄音 |
+| `Ctrl+Alt+Esc` | 中斷錄音 / 思考 |
+| `Ctrl+Alt+P` | Profile picker overlay |
+| `Alt+0~9` | 切 VoiceInput profile |
+| `Ctrl+Alt+0~9` | 切 Agent profile |
 
-### 組合 A — 純雲(預設,設好 Groq key 即可)
+完整清單 → [docs/hotkeys](https://yazelin.github.io/mori-desktop/hotkeys.html)
 
-```json
-{
-  "provider": "groq",
-  "stt_provider": "groq",
-  "providers": {
-    "groq": {
-      "api_key": "gsk_...",
-      "model": "openai/gpt-oss-120b",
-      "stt_model": "whisper-large-v3-turbo"
-    }
-  }
-}
-```
+---
 
-從 [console.groq.com](https://console.groq.com) → API Keys 拿到 key。Free tier 涵蓋 Whisper(每天 7,200 秒)+ chat,個人用足夠。
+## 主力平台
 
-### 組合 A+ — 加 Gemini(5J)
+**Ubuntu 26.04 + GNOME Wayland**(主力開發 + 測試)。
 
-Gemini API 跟 Groq 一樣走 OpenAI-compat 端點,差別只在 base_url 跟 key。
-適合丟給「便宜 + 創意寫作 + 翻譯」這類 profile:
+Windows / macOS 的 paste-back / 全域熱鍵還沒接 — 主視窗 UI 跑得起來但 voice pipeline 不完整。
+歡迎 fork + PR 幫忙補,`mori-core` 是純 Rust lib 跟平台無關,寫個新殼 crate 就能接新平台。
 
-```json
-{
-  "provider": "groq",
-  "stt_provider": "groq",
-  "api_keys": {
-    "GEMINI_API_KEY": "AIza..."
-  },
-  "providers": {
-    "groq": { "api_key": "gsk_...", "model": "openai/gpt-oss-120b", "stt_model": "whisper-large-v3-turbo" },
-    "gemini": { "model": "gemini-3.1-flash-lite-preview" }
-  }
-}
-```
+---
 
-Profile 寫 `provider: gemini` 即啟用該模型。Key 從 OS env `GEMINI_API_KEY` 或 `api_keys.GEMINI_API_KEY` 取(env 優先)。
+## 目前進度
 
-### 組合 B — 100% 本機(離線、不依賴雲)
+Phase 1 → brand-3(雙 theme + VSCode-like 自訂 theme)已完成。完整 phase 演進見
+[**CHANGELOG**](CHANGELOG.md)。
 
-```json
-{
-  "provider": "ollama",
-  "stt_provider": "whisper-local",
-  "providers": {
-    "ollama": {
-      "base_url": "http://localhost:11434",
-      "model":    "qwen3:8b"
-    },
-    "whisper-local": {
-      "model_path": "/home/<user>/.mori/models/ggml-small.bin",
-      "language": "zh"
-    }
-  }
-}
-```
+**做得到的事**:
+- 雙模式(VoiceInput / Agent)+ profile 切換
+- 100% 本機可跑(`whisper-local` STT + `ollama` LLM)/ 雲端(Groq / Gemini)/ Bash CLI proxy(claude / gemini / codex Pro/Max quota)
+- 自訂 `shell_skills`(把 `gh` / `docker` / `kubectl` / 自家 script 變 Mori 能力,不用改 Rust)
+- 長期記憶(`~/.mori/memory/*.md`,user 可編)
+- 剪貼簿 / 反白 / URL 自動進 context
+- 雙 theme(dark / light)+ VSCode-like 自訂 theme(`~/.mori/themes/*.json`)
+- 完整視覺品牌系統(公式書 = 單一可信來源)
 
-需要先:
-- `ollama serve` + `ollama pull qwen3:8b`(本機 LLM,**支援 tool calling**)
-- 下載 whisper 模型:
-  ```bash
-  mkdir -p ~/.mori/models
-  wget -O ~/.mori/models/ggml-small.bin \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
-  ```
+**未來規劃**:非同步任務隊列 + AgentPulse 通知 / TTS / wake word / 媒體下載 /
+背景排程 / Annuli 長期人格演化。詳見 [**roadmap**](docs/roadmap.md)。
 
-中文場景模型大小取捨(Intel CPU 實測):base 142MB(快但常分不清同音字)/ small 466MB(夠用)/ medium 1.5GB(更準但慢)。
+---
 
-### 組合 C — Bash CLI proxy(claude 當 agent + Pro/Max quota,5D-1)
+## Mori 宇宙
 
-```json
-{
-  "provider": "claude-bash",
-  "stt_provider": "whisper-local",
-  "providers": {
-    "claude-bash": {
-      "binary": "claude",
-      "model": null,
-      "mori_cli_path": null
-    },
-    "whisper-local": {
-      "model_path": "/home/<user>/.mori/models/ggml-small.bin",
-      "language": "zh"
-    }
-  }
-}
-```
+| Repo | 角色 |
+|---|---|
+| [`world-tree`](https://github.com/yazelin/world-tree) | 異世界森林的世界觀 / lore |
+| [`workshop`](https://github.com/yazelin/workshop) | 召喚師工坊 — 進森林的入口頁 |
+| **`mori-desktop`** | **Mori 的桌面身體**(本 repo) |
+| [`mori-journal`](https://github.com/yazelin/mori-journal) | 靈魂 / 私密日記 / 跨 session 記憶種子(private) |
+| [`mori-field-notes`](https://github.com/yazelin/mori-field-notes) | 田野筆記 — AI 自主經營技術觀察 |
+| `Annuli` | 長期記憶 / 人格演化(phase 9+,private) |
 
-需要:
-- `claude` CLI 已用 `claude /login` 完成 OAuth(用 user 自己的 Pro/Max quota)
-- 下載 whisper 模型(同組合 B)
-- `cargo build -p mori-cli` 確保 `target/debug/mori` 存在
+只想用桌面 AI 工具 → 留在這 repo 就行。
 
-流程:`Ctrl+Alt+Space` → STT (whisper-local) → claude-bash 啟動 `claude --print` 子程序 → claude 看 system prompt 知道有 mori CLI → 透過 Bash tool 跑 `mori skill <name>` → mori CLI HTTP 到主程式 dispatch skill → 結果回 claude → claude 給最終回應。
+---
 
-**Token 帳**:~150 token system prompt 提一次,用到才執行。對比 MCP「全部 schema 預載」可省 ~10x。
+## 文件
 
-> 5D-1 目前只把 4 個純 LLM skill(translate / polish / summarize / compose)接上 Bash CLI proxy。memory / paste / mode 那 6 個 skill 5D-2 才補。
+| | |
+|---|---|
+| [**Landing**](https://yazelin.github.io/mori-desktop/) | 推廣首頁 + interactive demo |
+| [Getting Started](https://yazelin.github.io/mori-desktop/getting-started.html) | install / dev / 第一次跑 |
+| [Hotkeys](https://yazelin.github.io/mori-desktop/hotkeys.html) | 完整熱鍵清單 |
+| [Providers](https://yazelin.github.io/mori-desktop/providers.html) | Groq / Gemini / Ollama / Claude-CLI 設定 |
+| [Troubleshooting](https://yazelin.github.io/mori-desktop/troubleshooting.html) | Whisper / 全域熱鍵 / cargo deps |
+| [Design Book](https://yazelin.github.io/mori-desktop/design-book.html) | Brand / Character / Desktop UI / Tray 公式書 |
+| [Architecture](docs/architecture.md) | `mori-core` / `mori-tauri` / `mori-cli` 跨 module 關係 |
+| [Roadmap](docs/roadmap.md) | 未來規劃 |
+| [CHANGELOG](CHANGELOG.md) | Phase 演進歷史 |
 
-### 進階:per-skill provider 路由
+---
 
-agent 跟個別 skill 可走不同 provider:
+## 歡迎
 
-```json
-{
-  "default_provider": "groq",
-  "routing": {
-    "agent": "groq",
-    "skills": {
-      "translate": "claude-cli",
-      "polish":    "claude-cli",
-      "summarize": "claude-cli",
-      "compose":   "ollama"
-    }
-  }
-}
-```
-
-省 Groq TPD,把重活分給其他 provider。沒設 `routing` 整套退回 `default_provider`。
-
-**5D-3 新增:`gemini-cli` / `codex-cli`** — chat-only 變體,可用在 `routing.skills`。
-兩者省略 agent 旗標(`--yolo` / `--dangerously-bypass-approvals-and-sandbox`),
-non-TTY 下 tool 執行無法被核准 → 實質純文字 in/out:
-
-```json
-{
-  "default_provider": "groq",
-  "routing": {
-    "agent": "groq",
-    "skills": {
-      "translate": "gemini-cli",
-      "polish":    "gemini-cli",
-      "summarize": "codex-cli"
-    }
-  },
-  "providers": {
-    "gemini-cli": { "binary": "gemini" },
-    "codex-cli":  { "binary": "codex" }
-  }
-}
-```
-
-`binary` 選填,預設靠 PATH 找 `gemini` / `codex`。
-
-### 進階:語音輸入 cleanup_level + 專屬 provider(5E)
-
-從 tray / UI 切到「**輸入**」模式後,熱鍵語意改成 dictation。Cleanup 三級可挑:
-
-```json
-{
-  "voice_input": {
-    "cleanup_level": "smart"
-  },
-  "routing": {
-    "skills": {
-      "voice_input_cleanup": "groq"
-    }
-  }
-}
-```
-
-- `cleanup_level: "smart"`(預設):LLM 加標點 + 程式 post-process。Whisper 不出標點,LLM 是必須的;但 prompt 嚴格鎖在「加標點 / 修幻聽 / 切段」不准改詞
-- `cleanup_level: "minimal"`:跳 LLM,純程式處理(strip 幻聽 + 半→全形 + normalize)。`~ms` 級延遲、0 token,但**沒標點**
-- `cleanup_level: "none"`:raw whisper 直貼
-
-`voice_input_cleanup` provider 推薦 `groq`(gpt-oss-120b 1-2 秒 + 中文標點品質好,dictation 場景最划算)。釘 `claude-cli` 跑 user 自己 quota 也行。
-
-### Key 探測順序
-
-1. `GROQ_API_KEY` 環境變數
-2. `~/.mori/config.json` 的 `providers.groq.api_key`
-
-## Troubleshooting
-
-### Whisper 一直回 "Thank you" / "Thanks for watching"
-
-Whisper 對近乎無聲的音訊會幻覺出這幾句(訓練資料 YouTube 影片結尾很多)。代表 **麥克風沒在收聲**。
-
-UI 在錄音時的橫向音量條會直接讓你看到:
-
-- 講話時綠條應該填到中段(50-80%)
-- 完全不動 / 持續橘色 = 沒收到
-- 警告文字「音量太小,Whisper 可能會幻想 'Thank you'」會在音量持續 < -45dBFS 時出現
-
-修法:
-
-1. **GNOME Settings → Sound → Input** 確認:
-   - 選對裝置(內建麥克風,不是 HDMI / 藍牙 / 虛擬裝置)
-   - 沒被 mute,音量 70%+
-   - 講話時 input level 條有動
-
-2. **Acer Swift / Intel Ultra 系列 (Meteor Lake+) 的常見坑** — 預設選「Stereo Mic」其實不會收音,要改成 **「Digital Mic」**。Intel SST(Smart Sound Technology)架構下 ALSA 偵測有時會選到錯的 PCM device。
-
-3. 還是不行就直接看 `/tmp/mori-last-recording.wav`(每次錄音都會存),用任何播放器聽看實際捕到什麼。
-
-### 全域熱鍵 `Ctrl+Alt+Space` 沒反應
-
-第一次啟動 Mori 時,GNOME 應該會跳一個權限對話框問你要不要讓 Mori 註冊全域熱鍵 — 點「**新增**(Add)」。如果當時誤點拒絕:
-```bash
-# 讓 Mori 重新跳對話框(刪掉 portal 的 per-app 紀錄)
-rm -rf ~/.local/share/xdg-desktop-portal/permissions
-# 重啟 Mori
-```
-若是 X11 / macOS / Windows 走的是 `tauri-plugin-global-shortcut`,熱鍵直接生效不用授權。
-
-### `cargo build` 失敗:`pkg-config: alsa not found`
-
-cpal 需要 ALSA 開發 headers:
-```bash
-sudo apt install libasound2-dev
-```
-(已涵蓋在 [yazelin/ubuntu-26.04-setup 的 setup-tauri-deps.sh](https://github.com/yazelin/ubuntu-26.04-setup/blob/main/scripts/setup-tauri-deps.sh) 裡。)
+Fork 隨便改、PR 隨便發。Windows / macOS 平台殼、wake-word、TTS、其他 LLM provider —
+全部都缺。詳見 [roadmap](docs/roadmap.md)。
 
 ## License
 

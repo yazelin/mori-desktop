@@ -6,6 +6,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" type="image/png" href="sprites/logo.png">
 <link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 住在腦裡的精靈">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 住在腦裡的精靈">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
 </head>
 <body>
 
@@ -16,7 +26,8 @@
     <div class="book-title-sub">DESIGN BOOK · v1.0</div>
   </div>
   <nav class="book-nav">
-    <a href="index.html">索引</a>
+    <a href="index.html">Home</a>
+    <a href="design-book.html">Design Book</a>
     <a href="brand.html" class="current">Brand</a>
     <a href="character.html">Character</a>
     <a href="desktop-ui.html">Desktop UI</a>
@@ -197,16 +208,108 @@
   </div>
 </div>
 
-<h3>使用組合</h3>
+<h3>輔助色(brand-3 新增,dark theme 背景階)</h3>
+<p>10 色 palette 中缺「比 forest-deep 更深」的階,brand-3 補上兩階用於 dark theme:</p>
+<div class="grid grid-2">
+  <div class="swatch">
+    <div class="swatch-color" style="background:#1f3329"></div>
+    <div class="swatch-meta" style="color:#fff">
+      <span class="swatch-hex" style="color:#fff">#1f3329</span>
+      <span class="swatch-name" style="color:#ccc">forest-night</span>
+      <span class="swatch-usage" style="color:#ccc">dark theme page bg</span>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background:#172620"></div>
+    <div class="swatch-meta" style="color:#fff">
+      <span class="swatch-hex" style="color:#fff">#172620</span>
+      <span class="swatch-name" style="color:#ccc">forest-shadow</span>
+      <span class="swatch-usage" style="color:#ccc">dark theme sidebar bg(對齊 logo badge #182622)</span>
+    </div>
+  </div>
+</div>
+
+<h2>Dual Theme System(brand-3)</h2>
+<p>
+  主視窗(<code>main</code>)支援 <strong>dark + light</strong> 雙 theme。Overlay 視窗
+  (<code>floating</code> / <code>chat_bubble</code> / <code>picker</code>)永遠走 dark
+  (transparent + 高對比 glassmorphism)。
+</p>
+
+<p>
+  Theme 檔在 <code>~/.mori/themes/*.json</code>,VSCode-like 使用者可自訂:
+  複製 <code>dark.json</code> 改名 + 改色即可。Active theme 存在 <code>~/.mori/active_theme</code>
+  (一行 plain text)。CSS 全用 <code>var(--c-*)</code>,切 theme 時 frontend 用
+  <code>document.documentElement.style.setProperty</code> 覆寫 — 不 reload 視窗,平滑過渡。
+</p>
+
+<h3>Theme: Mori Dark(預設)</h3>
+<table class="spec-table">
+  <thead><tr><th>用途</th><th>CSS var</th><th>色值</th></tr></thead>
+  <tbody>
+    <tr><td>主背景</td>           <td><code>--c-page-bg</code></td>     <td><code>#1f3329</code> forest-night</td></tr>
+    <tr><td>Sidebar 背景</td>     <td><code>--c-sidebar-bg</code></td>  <td><code>#172620</code> forest-shadow</td></tr>
+    <tr><td>Modal / card</td>     <td><code>--c-surface-bg</code></td>  <td><code>#243a31</code></td></tr>
+    <tr><td>Input 底</td>         <td><code>--c-input-bg</code></td>    <td><code>rgba(0,0,0,0.30)</code></td></tr>
+    <tr><td>主文字</td>           <td><code>--c-text</code></td>        <td><code>ivory @ 0.92</code></td></tr>
+    <tr><td>強調 / heading</td>   <td><code>--c-text-strong</code></td> <td><code>ivory @ 0.98</code></td></tr>
+    <tr><td>副標 / hint</td>      <td><code>--c-text-muted</code></td>  <td><code>ivory @ 0.55</code></td></tr>
+    <tr><td>Brand name</td>       <td><code>--c-brand-text</code></td>  <td><code>cream @ 0.95</code></td></tr>
+    <tr><td>Active tab bg</td>    <td><code>--c-active-bg</code></td>   <td><code>forest @ 0.22</code></td></tr>
+    <tr><td>Active border</td>    <td><code>--c-active-border</code></td><td><code>forest-soft @ 0.45</code></td></tr>
+    <tr><td>Primary btn bg</td>   <td><code>--c-primary-bg</code></td>  <td><code>forest @ 0.28</code></td></tr>
+    <tr><td>Primary btn text</td> <td><code>--c-primary-text</code></td><td><code>cream</code></td></tr>
+    <tr><td>Focus border</td>     <td><code>--c-focus-border</code></td><td><code>forest-soft @ 0.55</code></td></tr>
+    <tr><td>Divider / border</td> <td><code>--c-divider</code> / <code>--c-border</code></td><td><code>cream @ 0.08 / 0.10</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Theme: Mori Light</h3>
+<table class="spec-table">
+  <thead><tr><th>用途</th><th>CSS var</th><th>色值</th></tr></thead>
+  <tbody>
+    <tr><td>主背景</td>           <td><code>--c-page-bg</code></td>     <td><code>#F3F0E6</code> ivory</td></tr>
+    <tr><td>Sidebar 背景</td>     <td><code>--c-sidebar-bg</code></td>  <td><code>#E6DECA</code> cream</td></tr>
+    <tr><td>Modal / card</td>     <td><code>--c-surface-bg</code></td>  <td><code>#FFFFFF</code> white</td></tr>
+    <tr><td>Input 底</td>         <td><code>--c-input-bg</code></td>    <td><code>#FFFFFF</code></td></tr>
+    <tr><td>主文字</td>           <td><code>--c-text</code></td>        <td><code>#3B2F2F</code> charcoal</td></tr>
+    <tr><td>強調 / heading</td>   <td><code>--c-text-strong</code></td> <td><code>#2C4A3D</code> forest-deep</td></tr>
+    <tr><td>副標 / hint</td>      <td><code>--c-text-muted</code></td>  <td><code>#7D6B5A</code> brown</td></tr>
+    <tr><td>Brand name</td>       <td><code>--c-brand-text</code></td>  <td><code>#2C4A3D</code> forest-deep</td></tr>
+    <tr><td>Active tab bg</td>    <td><code>--c-active-bg</code></td>   <td><code>forest @ 0.18</code></td></tr>
+    <tr><td>Active border</td>    <td><code>--c-active-border</code></td><td><code>forest @ 0.55</code></td></tr>
+    <tr><td>Primary btn bg</td>   <td><code>--c-primary-bg</code></td>  <td><code>#6A8F72</code> forest</td></tr>
+    <tr><td>Primary btn text</td> <td><code>--c-primary-text</code></td><td><code>#F3F0E6</code> ivory</td></tr>
+    <tr><td>Focus border</td>     <td><code>--c-focus-border</code></td><td><code>#6A8F72</code> forest</td></tr>
+    <tr><td>Divider / border</td> <td><code>--c-divider</code> / <code>--c-border</code></td><td><code>beige @ 0.30 / 0.45</code></td></tr>
+  </tbody>
+</table>
+
+<h3>切 theme</h3>
 <ul>
-  <li><strong>淺底主視窗</strong>(明亮 / 文字優先):
-    bg <code>#F3F0E6</code> · text <code>#3B2F2F</code> · brand <code>#2C4A3D</code> ·
-    surface <code>#FFFFFF</code> 或 <code>#E6DECA</code> · active <code>#6A8F72</code></li>
-  <li><strong>深底 floating / picker</strong>(透明背景 + 高對比):
-    bg <code>rgba(44, 74, 61, 0.95)</code> · text <code>#E6DECA</code> · active <code>#A8C5A2</code></li>
-  <li><strong>tray icon</strong>:單色 logo <code>#2C4A3D</code>(系統列淺底)/
-    <code>#E6DECA</code>(系統列深底)</li>
+  <li><strong>左下角 sun/moon button</strong> — quick toggle dark ↔ light(找同 base 內建 theme)</li>
+  <li><strong>Config tab → Theme</strong> — 完整 picker,可選任何 <code>~/.mori/themes/*.json</code></li>
+  <li>Overlay window(<code>floating</code>/<code>chat_bubble</code>/<code>picker</code>)永遠 dark,不跟 theme 切</li>
+  <li>切 theme 即時生效,不重 load。Frontend 用 <code>theme.ts::applyTheme</code> 把 colors 寫入 <code>:root</code> 的 CSS variables</li>
 </ul>
+
+<h3>自訂 theme(VSCode-like)</h3>
+<pre><code>// 複製 ~/.mori/themes/dark.json → my-forest.json
+// 改 name + 任何 color value(支援 hex / rgba / hsl / 名色)
+{
+  "name": "My Forest",
+  "base": "dark",
+  "colors": {
+    "page-bg": "#0d1a14",
+    "primary-bg": "#88AA88",
+    ...其他用 dark.json 的當預設(沒覆蓋的會用 fallback)
+  }
+}
+// Config tab → Theme select 就會列出 My Forest</code></pre>
+<p>所有 CSS variable key 對照 <code>crates/mori-tauri/themes/dark.json</code>(authoritative)。</p>
+
+<h3>Tray icon</h3>
+<p>單色 logo <code>#2C4A3D</code>(系統列淺底)/ <code>#E6DECA</code>(系統列深底)</p>
 
 <h2>Typography</h2>
 <div class="grid grid-2">
