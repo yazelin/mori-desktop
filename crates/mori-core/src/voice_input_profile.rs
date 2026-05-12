@@ -20,9 +20,12 @@
 //!   Rust field 名一致）。
 //! - 過去 voice profile 內 `enable_read: true` 因 parser 只認 SCREAMING_SNAKE 被
 //!   silently 忽略 — 5N 修好了，會真的觸發 `#file:` 預處理。
-//! - **ZEROTYPE_AIPROMPT_\* deprecated**：自訂 OpenAI-compat 端點請改用
-//!   `provider: <custom-name>` + `~/.mori/config.json` `providers.<custom-name>`
-//!   (`api_base` + `api_key_env` + `model`)。舊鍵仍可解析作為過渡。
+//!
+//! ## 5N+ 之後（過渡碼移除）
+//! - **ZEROTYPE_AIPROMPT_\* / `ResolvedProvider::OpenAiCompat` 整套移除**:自訂
+//!   OpenAI-compat 端點請寫 `provider: <custom-name>` + `~/.mori/config.json`
+//!   `providers.<custom-name>`(`api_base` + `api_key_env` + `model`)。詳見
+//!   `docs/providers.html`「進階:自訂 OpenAI-compat 端點」段。
 
 use std::path::PathBuf;
 
@@ -63,15 +66,9 @@ impl VoiceInputContext {
 // ─── Frontmatter ──────────────────────────────────────────────────────────
 
 /// 從 USER-*.md 的 YAML frontmatter 解析出來的設定。
-/// 未知鍵靜默忽略，ZeroType profile 丟進來不會炸。
+/// 未知鍵靜默忽略,不熟悉的鍵丟進來不會炸。
 #[derive(Debug, Clone)]
 pub struct VoiceInputFrontmatter {
-    // ── ZeroType API 相容鍵 ─────────────────────────────────────────
-    pub zerotype_api_base: Option<String>,
-    pub zerotype_api_key_env: Option<String>,
-    pub zerotype_model: Option<String>,
-    pub zerotype_model_effort: Option<String>,
-
     // ── Type A flags（不需要 agent loop）──────────────────────────
     /// 處理完貼回（預設 true）
     pub enable_smart_paste: bool,
@@ -90,8 +87,8 @@ pub struct VoiceInputFrontmatter {
     pub enable_run_shell: bool,
 
     // ── mori 專屬鍵 ───────────────────────────────────────────────
-    /// mori 具名 provider 快捷（groq / ollama / claude-bash / ...）
-    /// 若與 zerotype_api_base 並存，以 zerotype_api_base 為準（保留原始意圖）
+    /// mori 具名 provider 快捷（groq / ollama / claude-bash / ... / 自訂 OpenAI-compat）。
+    /// 自訂端點要在 `~/.mori/config.json` `providers.<name>` 設 api_base / api_key_env / model。
     pub provider: Option<String>,
     /// 覆蓋此 profile 的 STT provider（groq / whisper-local）
     pub stt_provider: Option<String>,
@@ -125,10 +122,6 @@ pub enum PasteShortcut {
 impl Default for VoiceInputFrontmatter {
     fn default() -> Self {
         Self {
-            zerotype_api_base: None,
-            zerotype_api_key_env: None,
-            zerotype_model: None,
-            zerotype_model_effort: None,
             enable_smart_paste: true,
             enable_auto_enter: false,
             enable_send_keys: false,
@@ -163,19 +156,8 @@ impl VoiceInputFrontmatter {
             || self.enable_run_shell
     }
 
-    /// 決定實際使用的 provider 名稱或 ZeroType API 設定。
-    /// ZeroType API 設定優先（保留原始意圖），mori provider: 作為 fallback。
+    /// 決定實際使用的 provider 名稱。`provider:` 有設用具名;沒設交給 routing。
     pub fn resolved_provider(&self) -> ResolvedProvider {
-        if let (Some(base), Some(key_env)) =
-            (&self.zerotype_api_base, &self.zerotype_api_key_env)
-        {
-            let api_key = resolve_api_key(key_env);
-            return ResolvedProvider::OpenAiCompat {
-                api_base: base.clone(),
-                api_key,
-                model: self.zerotype_model.clone().unwrap_or_default(),
-            };
-        }
         if let Some(name) = &self.provider {
             return ResolvedProvider::Named(name.clone());
         }
@@ -186,36 +168,16 @@ impl VoiceInputFrontmatter {
 /// profile 解析出來的 provider 決策。
 #[derive(Debug, Clone)]
 pub enum ResolvedProvider {
-    /// 使用 ZeroType 的 openai-compatible 設定（ZEROTYPE_AIPROMPT_* 鍵）
-    OpenAiCompat {
-        api_base: String,
-        api_key: String,
-        model: String,
-    },
-    /// 使用 mori 的具名 provider（groq / ollama / claude-bash / ...）
+    /// 使用 mori 的具名 provider(groq / ollama / claude-bash / ... / 自訂 OpenAI-compat)
     Named(String),
-    /// 沒有設定，交給呼叫端的 routing 決定
+    /// 沒有設定,交給呼叫端的 routing 決定
     Default,
 }
 
 impl ResolvedProvider {
-    /// 給 UI 顯示用的簡短名稱（groq / gemini / ollama / claude-bash / ...）
+    /// 給 UI 顯示用的簡短名稱(groq / gemini / ollama / claude-bash / 自訂 name)
     pub fn display_name(&self) -> String {
         match self {
-            ResolvedProvider::OpenAiCompat { api_base, model, .. } => {
-                if api_base.contains("googleapis") {
-                    // Gemini — 從 model 取最後一段
-                    model.split('-').next().unwrap_or("gemini").to_string()
-                } else if api_base.contains("openai.com") {
-                    "openai".to_string()
-                } else if api_base.contains("azure") {
-                    "azure".to_string()
-                } else if api_base.contains("groq") {
-                    "groq".to_string()
-                } else {
-                    "api".to_string()
-                }
-            }
             ResolvedProvider::Named(name) => name.clone(),
             ResolvedProvider::Default => "default".to_string(),
         }
@@ -297,11 +259,6 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
         }
 
         match key.as_str() {
-            // ── ZeroType 自訂端點(deprecated,改用 provider: <name> + config.json) ──
-            "zerotype_aiprompt_api_base" => fm.zerotype_api_base = non_empty(value),
-            "zerotype_aiprompt_api_key_env" => fm.zerotype_api_key_env = non_empty(value),
-            "zerotype_aiprompt_model" => fm.zerotype_model = non_empty(value),
-            "zerotype_aiprompt_model_effort" => fm.zerotype_model_effort = non_empty(value),
             // ── enable flags(canonical: lowercase enable_X)─────────────────
             "enable_smart_paste" => fm.enable_smart_paste = parse_bool(value),
             "enable_auto_enter" => fm.enable_auto_enter = parse_bool(value),
@@ -344,10 +301,8 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
     if !deprecated_uppercase.is_empty() {
         tracing::warn!(
             keys = ?deprecated_uppercase,
-            "voice profile frontmatter 用了 SCREAMING_SNAKE 寫法(過渡期 deprecated alias) — \
-             建議改成 lowercase snake_case(canonical),例 ENABLE_READ → enable_read。\
-             ZEROTYPE_AIPROMPT_* 整組會在下個版本移除,改用 provider: <name> + \
-             ~/.mori/config.json providers.<name>(api_base + api_key_env + model)。",
+            "voice profile frontmatter 用了 SCREAMING_SNAKE 寫法,canonical 是 \
+             lowercase snake_case — 例 ENABLE_READ → enable_read。下版可能移除大寫接受。",
         );
     }
     fm
@@ -378,44 +333,6 @@ fn parse_inline_string_array(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// API key 解析順序：
-/// 1. OS 環境變數（`std::env::var(key_env_name)`）
-/// 2. `~/.mori/config.json` 的 `api_keys.<key_env_name>`
-///
-/// 這讓使用者不需要設 Linux GUI 環境變數，直接在 config.json 裡管理 key：
-/// ```json
-/// { "api_keys": { "GEMINI_API_KEY": "AIza..." } }
-/// ```
-fn resolve_api_key(key_env_name: &str) -> String {
-    // 1. 先試 OS env var
-    if let Ok(val) = std::env::var(key_env_name) {
-        if !val.is_empty() {
-            return val;
-        }
-    }
-    // 2. fallback 到 ~/.mori/config.json api_keys.<name>
-    let key = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()
-        .and_then(|h| {
-            let path = std::path::PathBuf::from(h).join(".mori").join("config.json");
-            let text = std::fs::read_to_string(path).ok()?;
-            let json: serde_json::Value = serde_json::from_str(&text).ok()?;
-            json.pointer(&format!("/api_keys/{key_env_name}"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
-        .unwrap_or_default();
-
-    if key.is_empty() {
-        tracing::warn!(
-            key_env = key_env_name,
-            "API key not found in env or config.json api_keys — \
-             add to ~/.mori/config.json: {{\"api_keys\": {{\"{key_env_name}\": \"your_key\"}}}}"
-        );
-    }
-    key
-}
 
 // ─── 5E-3: VoiceInput memory inject 設定 ─────────────────────────────────
 
@@ -653,26 +570,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_profile_lowercase_zerotype_keys() {
-        // 5N: ZeroType 鍵也接受 lowercase(雖然 canonical 應該用 provider: + config.json)
-        let content = "---\nzerotype_aiprompt_api_base: https://x.example.com/v1\nzerotype_aiprompt_api_key_env: MY_KEY\nzerotype_aiprompt_model: gpt-4\n---\nbody";
-        let p = parse_profile("test", content);
-        assert_eq!(p.frontmatter.zerotype_api_base.as_deref(), Some("https://x.example.com/v1"));
-        assert_eq!(p.frontmatter.zerotype_api_key_env.as_deref(), Some("MY_KEY"));
-        assert_eq!(p.frontmatter.zerotype_model.as_deref(), Some("gpt-4"));
-    }
-
-    #[test]
-    fn parse_profile_zerotype_api_keys() {
-        let content = "---\nZEROTYPE_AIPROMPT_API_BASE: https://example.com/v1\nZEROTYPE_AIPROMPT_API_KEY_ENV: MY_KEY\nZEROTYPE_AIPROMPT_MODEL: gpt-4\n---\nPrompt body";
-        let p = parse_profile("test", content);
-        assert_eq!(p.frontmatter.zerotype_api_base.as_deref(), Some("https://example.com/v1"));
-        assert_eq!(p.frontmatter.zerotype_api_key_env.as_deref(), Some("MY_KEY"));
-        assert_eq!(p.frontmatter.zerotype_model.as_deref(), Some("gpt-4"));
-        assert_eq!(p.body, "Prompt body");
-    }
-
-    #[test]
     fn parse_profile_mori_provider() {
         let content = "---\nprovider: ollama\ncleanup_level: minimal\n---\nbody";
         let p = parse_profile("test", content);
@@ -681,18 +578,17 @@ mod tests {
     }
 
     #[test]
-    fn resolved_provider_zerotype_wins_over_mori() {
-        let content = "---\nZEROTYPE_AIPROMPT_API_BASE: https://api.example.com\nZEROTYPE_AIPROMPT_API_KEY_ENV: MY_KEY\nprovider: groq\n---\nbody";
-        let p = parse_profile("test", content);
-        // ZEROTYPE_AIPROMPT_* 優先於 provider:
-        assert!(matches!(p.frontmatter.resolved_provider(), ResolvedProvider::OpenAiCompat { .. }));
-    }
-
-    #[test]
-    fn resolved_provider_mori_named_when_no_zerotype() {
+    fn resolved_provider_named_from_provider_field() {
         let content = "---\nprovider: groq\n---\nbody";
         let p = parse_profile("test", content);
         assert!(matches!(p.frontmatter.resolved_provider(), ResolvedProvider::Named(name) if name == "groq"));
+    }
+
+    #[test]
+    fn resolved_provider_default_when_no_provider() {
+        let content = "---\nenable_read: true\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(matches!(p.frontmatter.resolved_provider(), ResolvedProvider::Default));
     }
 
     #[test]

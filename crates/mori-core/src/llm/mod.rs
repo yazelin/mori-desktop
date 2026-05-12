@@ -194,13 +194,10 @@ pub fn build_named_provider(
             // 5N: 自訂 OpenAI-compat 端點 — 在 config.json `providers.<other>` 設:
             //   {
             //     "api_base": "https://your.openai.azure.com/openai/v1",
-            //     "api_key_env": "ZEROTYPE_AIPROMPT_API_KEY_AOAI",  // 或 api_key 直接寫(不建議)
+            //     "api_key_env": "AZURE_OPENAI_API_KEY",  // 或 api_key 直接寫(不建議)
             //     "model": "gpt-4.1"
             //   }
             // 有 api_base 就視為 OpenAI-compat,沒 api_base 就 bail unknown。
-            //
-            // 取代過往 ZEROTYPE_AIPROMPT_* frontmatter 鍵的角色 — 端點細節集中在
-            // config.json,profile 只 `provider: <name>`。
             let cfg_path = mori_config_path();
             let cfg = cfg_path.as_deref();
             let api_base = cfg
@@ -280,15 +277,6 @@ pub(crate) fn resolve_api_key_at(config_path: Option<&std::path::Path>, key_env_
     config_path
         .and_then(|p| groq::read_json_pointer(p, &format!("/api_keys/{key_env_name}")))
         .filter(|s| !s.is_empty())
-}
-
-/// ZeroType `ZEROTYPE_AIPROMPT_*` 三個 frontmatter 鍵 → openai-compatible 臨時 provider。
-pub fn build_openai_compat_provider(
-    api_base: impl Into<String>,
-    api_key: impl Into<String>,
-    model: impl Into<String>,
-) -> Arc<dyn LlmProvider> {
-    Arc::new(generic_openai::GenericOpenAiProvider::new(api_base, api_key, model))
 }
 
 /// 從 `~/.mori/config.json` 蓋出**主 chat provider**。配置:

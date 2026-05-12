@@ -1,11 +1,15 @@
 //! Generic OpenAI-compatible provider.
 //!
-//! ZeroType 的 ZEROTYPE_AIPROMPT_API_BASE + KEY + MODEL 三個 frontmatter
-//! 鍵可以指向任何 OpenAI-compatible endpoint（Gemini、Azure OpenAI、OpenRouter 等）。
-//! 這個 provider 把它們組成一個完整的 LlmProvider 實作。
+//! 任何 OpenAI Chat Completions wire format 的端點(Gemini OpenAI-compat /
+//! Azure OpenAI / OpenRouter / 本地代理...)都能用這個。設定方式有兩條:
+//! - **Built-in named**:`build_named_provider("gemini", ...)` 已預設掛這個
+//!   走 google generativelanguage 端點
+//! - **自訂名(5N+)**:`~/.mori/config.json` `providers.<name>.api_base`
+//!   + `.api_key_env` + `.model`,profile 寫 `provider: <name>`,
+//!   `build_named_provider` 會偵測到 api_base 自動建這個 provider
 //!
-//! 比 GroqProvider 簡單：沒有 Groq-specific retry logic、沒有 rate-limit 解析，
-//! 只做基本的 HTTP chat completion。
+//! 比 GroqProvider 簡單:沒 Groq-specific retry / rate-limit 解析,只做
+//! 基本 HTTP chat completion。
 
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;

@@ -1475,12 +1475,10 @@ async fn run_voice_input_pipeline(
         body_expanded, context_section, voice_dict_section
     );
 
-    // 決定 LLM provider
+    // 決定 LLM provider:profile `provider:` 設了走 build_named_provider
+    // (5N+ 起 5 個 hard-coded built-in 之外會 fallback 查 config.json
+    // providers.<name>);沒設交給 routing。
     let llm_provider: Arc<dyn mori_core::llm::LlmProvider> = match profile.frontmatter.resolved_provider() {
-        ResolvedProvider::OpenAiCompat { api_base, api_key, model } => {
-            tracing::info!(provider = "openai-compat", model = %model, api_base = %api_base, "voice-input using ZeroType API config");
-            mori_core::llm::build_openai_compat_provider(api_base, api_key, model)
-        }
         ResolvedProvider::Named(name) => {
             match mori_core::llm::build_named_provider(&name, None) {
                 Ok(p) => {
