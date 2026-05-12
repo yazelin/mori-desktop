@@ -156,10 +156,16 @@ impl LlmProvider for ClaudeCliProvider {
                 .context("write prompt to claude CLI stdin")?;
         }
 
-        let output = child
-            .wait_with_output()
-            .await
-            .context("wait for claude CLI")?;
+        // brand-3 follow-up: subprocess 沒上層 timeout 兜底 — claude CLI hang
+        // (OAuth race / API glitch / 模型 loading)會讓 agent loop 永遠卡。
+        // 包 tokio::time::timeout(120s) 超時 SIGKILL(kill_on_drop 接手清 child)。
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            child.wait_with_output(),
+        )
+        .await
+        .with_context(|| format!("`{}` 超時(120s)— 子程序可能 hang", self.binary))?
+        .context("wait for claude CLI")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

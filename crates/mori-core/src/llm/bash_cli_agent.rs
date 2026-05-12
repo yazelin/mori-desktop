@@ -338,10 +338,18 @@ impl LlmProvider for BashCliAgentProvider {
                 .context("write to agent CLI stdin")?;
         }
 
-        let output = child
-            .wait_with_output()
-            .await
-            .context("wait for agent CLI")?;
+        // brand-3 follow-up: 加上層 timeout 兜底 — claude / gemini / codex bash
+        // agent CLI 雖然 kill_on_drop 已設,Ctrl+Alt+Esc 能斷;但「自然 hang」
+        // (OAuth race / mori CLI HTTP 卡 / 子程序等)沒人 cancel 會永遠等。
+        // 包 timeout(180s)— bash agent loop 比 chat-only 路徑慢(多輪 tool call
+        // 透過 Bash tool 跑),180s 比 120s 寬。
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(180),
+            child.wait_with_output(),
+        )
+        .await
+        .with_context(|| format!("`{}` agent 超時(180s)— 子程序可能 hang", self.binary))?
+        .context("wait for agent CLI")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

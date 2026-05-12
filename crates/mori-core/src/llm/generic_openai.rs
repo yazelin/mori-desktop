@@ -37,7 +37,15 @@ impl GenericOpenAiProvider {
             api_key: api_key.into(),
             model: model.into(),
             display_name: "openai-compat",
-            client: reqwest::Client::new(),
+            // brand-3 follow-up: 跟 groq.rs 同款 — reqwest 預設無 overall timeout,
+            // LLM call 偶爾 hang(stream 不結束 / API glitch)會讓 agent loop 永遠
+            // 卡 Phase::Responding。設 90s 上限,超過自動 cancel return Err → main.rs
+            // catch 後 set_phase(Error)。Gemini provider 也走這條(走 OpenAI-compat
+            // endpoint)所以這個 fix 同時 cover gemini。
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(90))
+                .build()
+                .expect("build reqwest client"),
         }
     }
 
