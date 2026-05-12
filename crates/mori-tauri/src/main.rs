@@ -1581,10 +1581,18 @@ fn build_context_section(
 
     // Phase 3B: 從 transcript / clipboard / selection 抽到的 URL
     if !mori_ctx.urls_detected.is_empty() {
-        out.push_str("\n**偵測到的網址** (使用者引用的 URL,需要時呼叫 `fetch_url` 拿內容)\n");
+        out.push_str("\n**偵測到的網址**\n");
         for u in &mori_ctx.urls_detected {
             out.push_str(&format!("- {u}\n"));
         }
+        out.push_str(
+            "\n**何時呼叫 `fetch_url`**:\n\
+             - **必須呼叫**:使用者用「這個 / 這篇 / 這頁 / 這個網址 / 裡面 / \
+             內容是什麼 / 這在講什麼 / 摘要這 / 這個怎麼樣」等指示詞引用上面的 URL\n\
+             - **不要呼叫**:使用者只是泛問該網站本身(例「rust 官網是什麼」),\
+             你的知識夠回答\n\
+             - 呼叫後,把 fetch 回傳的真實內容當作回答依據,不要再憑記憶補編\n",
+        );
     }
 
     if let Some(idx) = memory_index {
