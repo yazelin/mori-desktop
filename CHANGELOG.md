@@ -6,6 +6,36 @@
 
 ---
 
+## docs(roadmap): prune 5G-10 / 3C / 3D 三條(2026-05-13)
+
+Roadmap audit 第二輪 — 把「真的要做」跟「可能不做」混在一起會誤導讀者
+(以為 Mori 還會出這些)。三條一起砍,理由寫明:
+
+- **5G-10 Profile 自動遷移** ← 砍。5G voice/agent 設計分家時想做的 migration
+  helper(掃 voice_input/ 找 Type B flags → 自動搬到 agent/)。**已過期**:
+  - User 已手動完成所有遷移(`~/.mori/voice_input/_migrated_to_agent/`)
+  - 新 user 從 `examples/` 起跑,範本本來就 correct
+  - 遺漏的舊 user 看到 `main.rs:1493` 的 warn message 會知道該搬
+  - 這是「一次性升級工具」性質,過了升級窗口 obsolete
+- **3C Pure Wayland 跨 app 反白** ← 砍。Wayland session 沒 X11 PRIMARY
+  等價,擔心未來 Hyprland / 純 Sway / GTK4-only app 反白抓不到。**已被
+  XWayland + xclip 解掉 90%**(5O xclip 主路徑):
+  - Ubuntu 26.04 + GNOME Wayland 預設啟 XWayland(99% user)
+  - xdg-desktop-portal Selection API 規格還在演進,實作成本高
+  - 沒 user 在抱怨「Hyprland 反白抓不到」 — 沒 demand signal
+- **3D 螢幕擷取進 context** ← 砍。「Mori 看畫面」第三層感知能力。
+  **多模態 LLM 在 Mori provider stack 不友善 + 隱私破口大 + 跟既有第二
+  層(剪貼簿 + 反白)重疊度高**:
+  - Groq 沒 vision endpoint;Ollama vision 要 GPU;Claude-bash 慢
+  - 截圖風險:可能含密碼 / 私訊 / 隱私視窗
+  - 觸發機制設計難:「每次都截」太貪 / 「按新 hotkey 才截」要新 UI
+  - 80% use case 已被「user 自己反白要問的部分 → 剪貼簿」cover
+  - 多模態 LLM 普及 + Mori provider stack 有支援後再評估
+  - 順便:3D 子項 active window title 早已 done(`HotkeyWindowContext`),這次 cleanup 一起劃掉
+
+Roadmap 從此 = 「真的會做的事」,不是「想過但可能不做的事」。後者紀錄在
+CHANGELOG 這條 entry 內,以後想重啟可以回頭找。
+
 ## 3B-2 — YouTube transcript shell_skill 範本(2026-05-13)
 
 Roadmap 上「3B-2 YouTube transcript skill」原本規劃做成 built-in skill,

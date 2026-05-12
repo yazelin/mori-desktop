@@ -15,23 +15,9 @@
 
 ## 近期(Phase 5 後續)
 
-### 5G-10 — Profile 自動遷移
-既有 voice profile 含 action flag 的自動搬到 `agent/`(手動可做,不擋使用)。
-
 ### 5E-2 — macOS / Windows voice-input paste-back
 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接。
 等 contributor 補。
-
-### 3C — Pure Wayland 跨 app 反白
-**X11 + XWayland 用 xclip + PRIMARY 已 cover 90%**(`selection.rs:39` 的
-`LinuxPasteController`)。Pure Wayland(原生 GTK4 / Hyprland 等沒 XWayland 的
-session)需 `xdg-desktop-portal` Selection 介面或 app 主動分享。實用 use case
-不大,等 Wayland 生態普及再說。
-
-### 3D — 螢幕擷取進 context
-**Active app / window title 已 done** — `HotkeyWindowContext.process_name +
-window_title` 透過 xdotool 在熱鍵瞬間捕獲,Mori 看得到當前焦點。
-**螢幕擷取**(讓 Mori 看你正在看什麼)還沒做,需設計觸發時機 + 隱私邊界。
 
 ---
 
