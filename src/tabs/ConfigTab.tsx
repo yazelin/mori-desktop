@@ -583,23 +583,9 @@ function ConfigTab() {
                 ]}
               />
             </FormRow>
-            <FormRow label="auto_enter" hint="貼完後自動按 Enter 送出(每個 profile 也可 ENABLE_AUTO_ENTER override)">
-              <input
-                type="checkbox"
-                checked={!!cfg.voice_input?.auto_enter}
-                onChange={(e) =>
-                  applyPatch((c) => {
-                    const v = ensureSubObj(c, "voice_input");
-                    if (e.target.checked) {
-                      v.auto_enter = true;
-                    } else {
-                      delete v.auto_enter;
-                      if (Object.keys(v).length === 0) delete c.voice_input;
-                    }
-                  })
-                }
-              />
-            </FormRow>
+            {/* 5N: 移除 dead UI — 全域 voice_input.auto_enter 寫進 config.json
+                沒人讀,profile 內 enable_auto_enter 才是真生效的開關。設定請在
+                ProfileEditor 每個 voice profile 自己勾。 */}
           </Section>
         </>
       ) : (
