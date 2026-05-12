@@ -344,6 +344,59 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 /// Alt+N 按下（5G）：
 /// - slot 0  → 切到 Agent 模式（讓 Mori 自己判斷，不選 voice profile）
 /// - slot 1~9 → 切到 VoiceInput mode + 對應 voice profile
+// ─── 5K-1: Picker UI IPC ────────────────────────────────────────────
+
+#[derive(serde::Serialize, Clone)]
+struct ProfileEntry {
+    stem: String,
+    display: String,
+}
+
+#[tauri::command]
+fn picker_list_voice_profiles() -> Vec<ProfileEntry> {
+    mori_core::voice_input_profile::list_voice_profiles()
+        .into_iter()
+        .map(|(stem, display)| ProfileEntry { stem, display })
+        .collect()
+}
+
+#[tauri::command]
+fn picker_list_agent_profiles() -> Vec<ProfileEntry> {
+    mori_core::agent_profile::list_agent_profiles()
+        .into_iter()
+        .map(|(stem, display)| ProfileEntry { stem, display })
+        .collect()
+}
+
+#[tauri::command]
+fn picker_switch_voice_profile(
+    app: AppHandle,
+    state: tauri::State<Arc<AppState>>,
+    stem: String,
+) {
+    if !matches!(*state.mode.lock(), Mode::VoiceInput) {
+        state.set_mode(&app, Mode::VoiceInput);
+    }
+    if let Some(info) = mori_core::voice_input_profile::switch_to_profile(&stem) {
+        let _ = app.emit("voice-input-profile-switched", info.label());
+    }
+}
+
+#[tauri::command]
+fn picker_switch_agent_profile(
+    app: AppHandle,
+    state: tauri::State<Arc<AppState>>,
+    stem: String,
+) {
+    if !matches!(*state.mode.lock(), Mode::Agent) {
+        state.set_mode(&app, Mode::Agent);
+    }
+    if let Some(info) = mori_core::agent_profile::switch_to_agent_profile(&stem) {
+        let label = format!("Agent · {} · {}", info.profile_name, info.llm_provider);
+        let _ = app.emit("voice-input-profile-switched", label);
+    }
+}
+
 /// Alt+N 按下：永遠進入 VoiceInput 模式 + 載入對應 USER-0N.*.md。
 ///
 /// slot 0 = USER-00.*(預設極簡語音輸入,類似 iOS 語音輸入法,不潤稿)。
@@ -1530,6 +1583,10 @@ fn main() {
             current_mode,
             set_mode_cmd,
             cancel_recording,
+            picker_list_voice_profiles,
+            picker_list_agent_profiles,
+            picker_switch_voice_profile,
+            picker_switch_agent_profile,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -1850,6 +1907,17 @@ fn main() {
                         _ => {
                             tracing::debug!(?phase, "Ctrl+Alt+Esc fired but no in-flight work — ignored");
                         }
+                    }
+                });
+
+                // 5K-1: Ctrl+Alt+P 開 picker — 由 picker window 自己負責顯示 + 抓焦點
+                let handle_picker = app.handle().clone();
+                app.listen(portal_hotkey::PORTAL_PICKER_EVENT, move |_event| {
+                    if let Some(w) = handle_picker.get_webview_window("picker") {
+                        // picker window 啟動時被丟到 (-10000, -10000),這裡叫它把自己
+                        // center + focus(picker.tsx 那邊接 picker-open event 處理)
+                        let _ = handle_picker.emit("picker-open", ());
+                        let _ = w.set_focus();
                     }
                 });
 

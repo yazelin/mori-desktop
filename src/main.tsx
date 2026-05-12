@@ -4,9 +4,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import FloatingMori from "./FloatingMori";
 import ChatBubble from "./ChatBubble";
+import Picker from "./Picker";
 import "./styles.css";
 import "./floating.css";
 import "./chat-bubble.css";
+import "./picker.css";
 
 const label = getCurrentWindow().label;
 const root = document.getElementById("root")!;
@@ -29,6 +31,15 @@ if (label === "floating") {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <ChatBubble />
+    </React.StrictMode>,
+  );
+} else if (label === "picker") {
+  // 5K-1: Profile Picker overlay,Ctrl+Alt+P 開啟
+  document.documentElement.classList.add("picker-window");
+  document.body.classList.add("picker-window");
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <Picker />
     </React.StrictMode>,
   );
 } else {

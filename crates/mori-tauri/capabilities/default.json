@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions shared by Mori windows (main + floating + chat_bubble)",
-  "windows": ["main", "floating", "chat_bubble"],
+  "description": "Permissions shared by Mori windows (main + floating + chat_bubble + picker)",
+  "windows": ["main", "floating", "chat_bubble", "picker"],
   "permissions": [
     "core:default",
     "core:window:default",

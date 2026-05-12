@@ -48,6 +48,22 @@
         "shadow": false,
         "visible": true,
         "focus": false
+      },
+      {
+        "label": "picker",
+        "title": "Mori — 切換 Profile",
+        "width": 520,
+        "height": 480,
+        "x": -10000,
+        "y": -10000,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "visible": true,
+        "focus": false
       }
     ],
     "security": {

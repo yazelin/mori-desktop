@@ -30,11 +30,17 @@ pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
 /// 5J: 錄音中按 Ctrl+Alt+Esc 直接丟掉錄音(不送 STT、不進 chat)。
 pub const CANCEL_SHORTCUT_ID: &str = "cancel";
 
+/// 5K-1: Ctrl+Alt+P 開 picker overlay 選 profile(支援 9 個 slot 之外的)。
+pub const PICKER_SHORTCUT_ID: &str = "picker";
+
 /// Tauri event emitted when the toggle shortcut fires.
 pub const PORTAL_HOTKEY_EVENT: &str = "portal-hotkey-fired";
 
 /// Tauri event emitted when the cancel shortcut fires(錄音中丟棄)。
 pub const PORTAL_CANCEL_EVENT: &str = "portal-cancel-fired";
+
+/// Tauri event emitted when the picker shortcut fires(開 profile picker)。
+pub const PORTAL_PICKER_EVENT: &str = "portal-picker-fired";
 
 /// Prefix for VoiceInput slot shortcuts (Alt+0~9 → slot-0 … slot-9).
 const SLOT_ID_PREFIX: &str = "slot-";
@@ -116,6 +122,8 @@ pub async fn run(app: AppHandle) -> Result<()> {
             .preferred_trigger(Some(PREFERRED_TRIGGER)),
         NewShortcut::new(CANCEL_SHORTCUT_ID, "Mori — 錄音中按下取消（丟棄音檔，不送出）")
             .preferred_trigger(Some("CTRL+ALT+Escape")),
+        NewShortcut::new(PICKER_SHORTCUT_ID, "Mori — 開 Profile picker 視窗（方向鍵選）")
+            .preferred_trigger(Some("CTRL+ALT+p")),
     ];
     for i in 0..=9usize {
         shortcuts.push(
@@ -170,6 +178,10 @@ pub async fn run(app: AppHandle) -> Result<()> {
         } else if id == CANCEL_SHORTCUT_ID {
             if let Err(e) = app.emit(PORTAL_CANCEL_EVENT, ()) {
                 tracing::warn!(?e, "failed to emit portal-cancel-fired event");
+            }
+        } else if id == PICKER_SHORTCUT_ID {
+            if let Err(e) = app.emit(PORTAL_PICKER_EVENT, ()) {
+                tracing::warn!(?e, "failed to emit portal-picker-fired event");
             }
         } else if let Some(slot_str) = id.strip_prefix(AGENT_SLOT_ID_PREFIX) {
             // 注意：要先 check AGENT_SLOT_ID_PREFIX，因為它以 "slot-" 結尾，
