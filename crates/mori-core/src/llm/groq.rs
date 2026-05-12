@@ -63,7 +63,15 @@ impl GroqProvider {
             model: model.into(),
             stt_model: Self::DEFAULT_STT_MODEL.to_string(),
             base_url: Self::DEFAULT_BASE_URL.to_string(),
-            client: reqwest::Client::new(),
+            // brand-3 follow-up: reqwest 預設無 timeout — LLM call 偶爾 hang
+            // (stream 不結束 / network glitch / API 不回應)會讓 agent loop 永遠
+            // 卡 Phase::Responding。設 90s 上限,超過視為失敗 → set_phase(Error)
+            // → user 看到「LLM 回應失敗:elapsed time has reached deadline」
+            // 而非永遠卡住要 Ctrl+Alt+Esc。
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(90))
+                .build()
+                .expect("build reqwest client"),
             retry_callback: None,
         }
     }
