@@ -145,11 +145,15 @@ body.floating-window #root {
   50%      { transform: scaleX(-1) translateY(-6px) rotate(-1deg); }
 }
 
+/* 5P-8 flicker fix: 終點 -300%(frame 3 / row 3)而非 -400%(wrap 出 PNG 範圍
+   會看到 blank frame!user 看到「一下消失一下出現」cycle 就是這個)。配合
+   timing-function `steps(4, jump-none)`,4 個 step 在 0% / -100% / -200% / -300%
+   各停 1/(4-1) duration,wrap 回 0% 是瞬間切換不可見。 */
 @keyframes mori-sprite-x {
-  to { background-position-x: -400%; }
+  to { background-position-x: -300%; }
 }
 @keyframes mori-sprite-y {
-  to { background-position-y: -400%; }
+  to { background-position-y: -300%; }
 }
 
 /* ─── 狀態變化 — 角色本身用 transform / filter,aura 處理光環 ──── */
