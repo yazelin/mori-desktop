@@ -735,12 +735,14 @@ function ConfigTab() {
               <input
                 type="checkbox"
                 checked={cfg.floating?.animated ?? true}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  console.log("[Floating] animated toggle →", v);
                   applyPatch((c) => {
                     const f = ensureSubObj(c, "floating");
-                    f.animated = e.target.checked;
-                  })
-                }
+                    f.animated = v;
+                  });
+                }}
               />
             </FormRow>
             <FormRow
@@ -750,13 +752,15 @@ function ConfigTab() {
               <input
                 type="checkbox"
                 checked={cfg.floating?.wander ?? false}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  console.log("[Floating] wander toggle →", v);
                   applyPatch((c) => {
                     const f = ensureSubObj(c, "floating");
-                    if (e.target.checked) f.wander = true;
+                    if (v) f.wander = true;
                     else delete f.wander;
-                  })
-                }
+                  });
+                }}
               />
             </FormRow>
             <CharacterPicker />
