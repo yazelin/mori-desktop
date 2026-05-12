@@ -58,6 +58,7 @@ phase 演進見 [**CHANGELOG**](CHANGELOG.md)。
 - 雙模式(VoiceInput / Agent)+ profile 切換
 - 100% 本機可跑(`whisper-local` STT + `ollama` LLM)/ 雲端(Groq / Gemini)/ Bash CLI proxy(claude / gemini / codex Pro/Max quota)
 - 自訂 `shell_skills`(把 `gh` / `docker` / `kubectl` / 自家 script 變 Mori 能力,不用改 Rust)
+- 自訂 OpenAI-compat 端點 — Azure OpenAI / OpenRouter / 自家代理寫進 `~/.mori/config.json` 的 `providers.<name>`,profile 內 `provider: <name>` 就能用(見 [docs/providers](https://yazelin.github.io/mori-desktop/providers.html))
 - 外部工具 bridge pattern — `agent_mode: dispatch` profile flag,Mori 當「轉發員」
   把語音優化過的 prompt 推給其他桌面 app(範本見
   [examples/agent/AGENT-03.ZeroType Agent.md](examples/agent/AGENT-03.ZeroType%20Agent.md))

@@ -171,6 +171,61 @@ non-TTY 下 tool 執行無法被核准 → 實質純文字 in/out。</p>
 
 <p><code>binary</code> 選填,預設靠 PATH 找。</p>
 
+<h2>進階:自訂 OpenAI-compat 端點</h2>
+<p>Azure OpenAI / OpenRouter / 自家代理 / 任意 OpenAI-compat 端點都能掛進 mori
+當「具名 provider」用 — 端點細節集中在 <code>~/.mori/config.json</code>,profile 內
+只寫 <code>provider: &lt;custom-name&gt;</code>:</p>
+
+<pre><code>{
+  "api_keys": {
+    "AZURE_OPENAI_API_KEY": "<your azure key>"
+  },
+  "providers": {
+    "azure-gpt41": {
+      "api_base":     "https://your-resource.openai.azure.com/openai/v1",
+      "api_key_env":  "AZURE_OPENAI_API_KEY",
+      "model":        "gpt-4.1"
+    },
+    "openrouter-sonnet": {
+      "api_base":     "https://openrouter.ai/api/v1",
+      "api_key_env":  "OPENROUTER_API_KEY",
+      "model":        "anthropic/claude-sonnet-4"
+    }
+  }
+}</code></pre>
+
+<p>規則:</p>
+<ul>
+  <li><code>providers.&lt;name&gt;</code> 內有 <code>api_base</code> → 自動視為 OpenAI-compat,
+    取代過去 voice profile 內散置的 <code>ZEROTYPE_AIPROMPT_*</code> frontmatter 鍵</li>
+  <li><code>api_key_env</code> 指向 OS env var 名(或 <code>api_keys.&lt;name&gt;</code>);
+    也可改用 <code>api_key</code> 直接寫死(不建議,key 進 repo 風險)</li>
+  <li>沒設 <code>model</code> → mori warn,call API 多半會被拒</li>
+  <li>失敗(key 缺、api_base 沒填)→ fallback 到 <code>groq</code> + log warn,
+    讓 user 看見哪段沒填齊</li>
+</ul>
+
+<p>Profile 內怎麼用:</p>
+
+<pre><code class="language-yaml">---
+provider: azure-gpt41    # 對應上面 providers.azure-gpt41
+stt_provider: groq
+enable_read: true
+---
+profile body...
+</code></pre>
+
+<p>同 mechanism 也能塞進 <code>routing.skills</code>:某個 skill 走 Azure、其他走 Groq:</p>
+
+<pre><code>{
+  "routing": {
+    "agent": "groq",
+    "skills": {
+      "polish": "azure-gpt41"
+    }
+  }
+}</code></pre>
+
 <h2>進階:語音輸入 cleanup_level</h2>
 <p>從 tray / UI 切到「<strong>輸入模式</strong>」後,熱鍵語意變 dictation。Cleanup 三級可挑:</p>
 

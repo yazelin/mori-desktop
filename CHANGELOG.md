@@ -6,6 +6,35 @@
 
 ---
 
+## 5N — voice profile 鍵大小寫整合 + 自訂 OpenAI-compat 端點(2026-05-12)
+
+把過去散在每張 voice profile 的 `ZEROTYPE_AIPROMPT_*` frontmatter(端點 + key
++ model 三件套)收編進 `~/.mori/config.json` 的 `providers.<name>` 機制 — Azure
+OpenAI / OpenRouter / 任何 OpenAI-compat 端點都當「具名 provider」用,profile
+只負責寫 `provider: <name>`。順便把 voice profile parser 統一改 case-insensitive,
+修一個潛藏 bug。
+
+- **自訂 provider** — `build_named_provider` 在 5 個 hard-coded 名字未命中時,
+  改去查 `/providers/<name>/api_base`,有就視為 OpenAI-compat;讀
+  `api_key_env`(指 OS env 或 `api_keys.<name>`)+ `model` 組
+  `GenericOpenAiProvider`。`build_chat_provider` 同步放寬 allowlist,失敗才
+  fallback 到 groq + warn(`e6ec534`)
+- **Parser case-insensitive** — voice profile frontmatter 鍵全部 case-insensitive,
+  canonical 寫法是 lowercase snake_case;SCREAMING_SNAKE 形式偵測到 warn 一次
+  +列出遷移路徑(`872e12d`)
+- **修隱性 bug**:過去所有 `USER-XX` profile 的 `enable_read: true` 因 parser 只
+  認 SCREAMING_SNAKE 都被 silently 忽略,`#file:` 預處理一直沒生效。5N 起會
+  真的走 ReadSkill 路徑
+- **ProfileEditor 收尾** — 移除 ZEROTYPE_AIPROMPT_* details 區塊(改在
+  config.json 編);`enable_auto_enter` 用 lowercase canonical patch key;provider
+  Select 動態補 option 讓自訂 provider 名(如 `azure-gpt41`)顯示得出來
+- **6 unit tests**:custom OpenAI-compat happy path、missing api_base、missing
+  api_key、lowercase enable / mixed-case / lowercase zerotype alias
+- **docs**:`providers.html` 加「自訂 OpenAI-compat 端點」段落,範例貼 Azure +
+  OpenRouter 兩種寫法
+- **舊鍵保留**:`ZEROTYPE_AIPROMPT_*` 跟 SCREAMING `ENABLE_*` 仍作 deprecated
+  alias 解析,下個版本移除
+
 ## agent reliability / ZeroType bridge(2026-05-12)
 
 ZeroType Agent profile 卡 `Phase::Responding` 永遠不退的 bug,沿線挖出多個
