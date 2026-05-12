@@ -96,9 +96,10 @@ function spriteStyle(
     backgroundRepeat: "no-repeat",
     animationName: "mori-sprite-x, mori-sprite-y",
     animationDuration: `${duration / 4}ms, ${duration}ms`,
-    // 5P-8: jump-none → 4 step 分佈在 0% / 33% / 67% / 100% 終點 -300%,
-    // 不會 wrap 到 -400% blank。default steps(4) = jump-end 會在 cycle 結尾
-    // 瞬間 -400% 看到 blank frame(透明)— user 看到的「一下消失一下出現」就是這個
+    // 5P-9: steps(4, jump-none) 配合 keyframes `to: 100%`,4 個 step
+    // 在 0% / 33% / 67% / 100% map 到 cell 0..3。background-position 百分比
+    // 公式 `pixel = percent × (container - image)`,負百分比會把 image 推
+    // off-screen blank — 必須用正百分比。
     animationTimingFunction: "steps(4, jump-none), steps(4, jump-none)",
     animationIterationCount: "infinite, infinite",
   };
