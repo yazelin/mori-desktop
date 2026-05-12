@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use mori_core::agent::{Agent, SkillCallSummary};
+use mori_core::agent::{Agent, AgentMode, SkillCallSummary};
 use mori_core::context::{Context as MoriContext, ContextProvider};
 use mori_core::llm::groq::{GroqProvider, RetryEvent};
 use mori_core::llm::ChatMessage;
@@ -1315,8 +1315,15 @@ async fn run_agent_pipeline(
         let registry = Arc::new(registry);
 
         let agent = Agent::new(agent_provider.clone(), registry);
+        // brand-3 follow-up: profile frontmatter `agent_mode: dispatch` 讓 agent loop
+        // emit tool_call + execute 後直接結束(不再 round LLM 等 final text),
+        // 適合「轉發 / bridge」型 profile(如 ZeroType bridge)避免不必要的二次
+        // LLM call 卡 hang。預設 multi_turn(現有對話行為)。
+        let mode = AgentMode::from_str_or_default(
+            agent_profile.frontmatter.agent_mode.as_deref(),
+        );
         let turn = agent
-            .respond(&system_prompt, &history_snapshot, &transcript, &ctx)
+            .respond_with_mode(&system_prompt, &history_snapshot, &transcript, &ctx, mode)
             .await?;
         if !turn.skill_calls.is_empty() {
             tracing::info!(

@@ -33,6 +33,12 @@ pub struct AgentFrontmatter {
     pub enable_read: bool,
     /// 5H: 使用者自訂的 shell skills（依附此 profile，切走就消失）
     pub shell_skills: Vec<ShellSkillDef>,
+    /// brand-3 follow-up: agent loop 模式。預設 multi_turn(LLM emit tool_call →
+    /// execute → LLM 再 round → final text → Done),適合對話型。
+    /// 設 `dispatch` 則第一個 tool_call execute 後直接結束,不再 round LLM。
+    /// 用於「轉發 / bridge」型 profile(如 ZeroType bridge),避免不必要二次
+    /// LLM call 卡 hang。
+    pub agent_mode: Option<String>,
 }
 
 /// 5H: profile 中自訂的 shell skill 定義。每次 profile 切換時動態建立成

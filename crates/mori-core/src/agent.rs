@@ -97,6 +97,28 @@ pub struct Agent {
     skills: Arc<SkillRegistry>,
 }
 
+/// Agent 跑 loop 的模式。預設 multi-turn(LLM emit tool_call → execute →
+/// LLM 看 result → 再 round → 直到 final text),適合「思考型」對話。
+///
+/// `Dispatch` 模式給「轉發 / bridge」型 profile 用(例如 ZeroType Agent bridge):
+/// 第一輪 LLM emit tool_call + execute skill 後**直接 return**,不再 round LLM。
+/// 避免不必要的二次 LLM call 卡 hang,phase 馬上進 Done。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentMode {
+    #[default]
+    MultiTurn,
+    Dispatch,
+}
+
+impl AgentMode {
+    pub fn from_str_or_default(s: Option<&str>) -> Self {
+        match s.map(|x| x.trim().to_lowercase()) {
+            Some(ref v) if v == "dispatch" => AgentMode::Dispatch,
+            _ => AgentMode::MultiTurn,
+        }
+    }
+}
+
 impl Agent {
     pub fn new(provider: Arc<dyn LlmProvider>, skills: Arc<SkillRegistry>) -> Self {
         Self { provider, skills }
@@ -114,6 +136,20 @@ impl Agent {
         user_input: &str,
         ctx: &Context,
     ) -> Result<AgentTurn> {
+        self.respond_with_mode(system_prompt, history, user_input, ctx, AgentMode::default())
+            .await
+    }
+
+    /// 同 respond,但可指定 [`AgentMode`]。`Dispatch` 模式下,LLM emit tool_call
+    /// + execute skill 之後立刻 return,不再 round LLM 等 final text。
+    pub async fn respond_with_mode(
+        &self,
+        system_prompt: &str,
+        history: &[ChatMessage],
+        user_input: &str,
+        ctx: &Context,
+        mode: AgentMode,
+    ) -> Result<AgentTurn> {
         let mut messages = Vec::with_capacity(history.len() + 2);
         messages.push(ChatMessage::system(system_prompt));
         messages.extend_from_slice(history);
@@ -124,7 +160,8 @@ impl Agent {
         tracing::debug!(
             tool_count = tools.len(),
             tool_names = ?tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            "agent: starting multi-turn loop"
+            mode = ?mode,
+            "agent: starting loop"
         );
 
         for round in 0..MAX_ROUNDS {
@@ -196,6 +233,27 @@ impl Agent {
                     tc.name.clone(),
                     result_text,
                 ));
+            }
+
+            // Dispatch 模式:tool 都 execute 完直接 return,不再 round LLM 等
+            // final text。response 用最後一個 skill 的 user_message(或 LLM 在
+            // emit tool_call 同時送的 content,如果有)。
+            if mode == AgentMode::Dispatch {
+                let response = chat
+                    .content
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| all_skill_calls.last().map(|r| r.output.user_message.clone()))
+                    .unwrap_or_default();
+                tracing::info!(
+                    round,
+                    mode = ?mode,
+                    skill_n = all_skill_calls.len(),
+                    "agent: dispatch mode — returning after first tool round"
+                );
+                return Ok(AgentTurn {
+                    response,
+                    skill_calls: all_skill_calls,
+                });
             }
         }
 
