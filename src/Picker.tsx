@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalPosition, currentMonitor } from "@tauri-apps/api/window";
+import { IconVoiceMic, IconTree } from "./icons";
 
 type ProfileEntry = { stem: string; display: string };
 type Section = "voice" | "agent";
@@ -189,14 +190,14 @@ function Picker() {
             className={`mori-picker-tab ${section === "voice" ? "active" : ""}`}
             onClick={() => setSection("voice")}
           >
-            🎙 VoiceInput
+            <IconVoiceMic width={14} height={14} /> VoiceInput
             <span className="mori-picker-tab-count">({voice.length})</span>
           </div>
           <div
             className={`mori-picker-tab ${section === "agent" ? "active" : ""}`}
             onClick={() => setSection("agent")}
           >
-            🌳 Agent
+            <IconTree width={14} height={14} /> Agent
             <span className="mori-picker-tab-count">({agent.length})</span>
           </div>
         </div>

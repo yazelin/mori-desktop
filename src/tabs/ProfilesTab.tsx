@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ProfileEditor } from "../ProfileEditor";
+import { IconVoiceMic, IconTree } from "../icons";
 
 type ProfileEntry = { stem: string; display: string };
 type Kind = "voice" | "agent";
@@ -78,7 +79,7 @@ function ProfilesTab() {
 
       <section className="mori-profiles-section">
         <div className="mori-profiles-section-head">
-          <h3>🎙 VoiceInput Profiles ({voice.length})</h3>
+          <h3><IconVoiceMic width={14} height={14} /> VoiceInput Profiles ({voice.length})</h3>
           <NewProfileButton kind="voice" onCreated={reload} />
         </div>
         <div className="mori-profiles-list">
@@ -105,7 +106,7 @@ function ProfilesTab() {
 
       <section className="mori-profiles-section">
         <div className="mori-profiles-section-head">
-          <h3>🌳 Agent Profiles ({agent.length})</h3>
+          <h3><IconTree width={14} height={14} /> Agent Profiles ({agent.length})</h3>
           <NewProfileButton kind="agent" onCreated={reload} />
         </div>
         <div className="mori-profiles-list">

@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 
 type SaveStatus =
   | { kind: "idle" }
@@ -142,6 +143,82 @@ function ensureSubObj(obj: AnyObj, key: string): AnyObj {
   return obj[key];
 }
 
+// brand-3: theme picker — 列 ~/.mori/themes/*.json 給 user 選 / reload。
+// 內建 dark / light + 任何 user 自訂 json file 都會列出。
+function ThemeSection() {
+  const [themes, setThemes] = useState<ThemeEntry[]>([]);
+  const [active, setActive] = useState<string>("dark");
+  const [dir, setDir] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const list = await listThemes();
+      setThemes(list);
+    } catch (e) {
+      console.error("[theme] list failed", e);
+    }
+    try {
+      const res = await loadActiveTheme();
+      if (res) setActive(res[0]);
+    } catch (e) {
+      console.error("[theme] active failed", e);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    themesDir().then(setDir).catch(console.error);
+  }, []);
+
+  const handleChange = async (stem: string) => {
+    setBusy(true);
+    try {
+      await setActiveTheme(stem);
+      setActive(stem);
+    } catch (e) {
+      console.error("[theme] set active failed", e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section
+      title="Theme"
+      hint="主視窗配色。內建 Mori Dark / Mori Light;放任何 *.json 到 themes 資料夾即可加入自訂 theme(VSCode-like)。"
+    >
+      <FormRow label="theme" hint="active 樣式">
+        <select
+          className="mori-input"
+          value={active}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={busy}
+        >
+          {themes.map((t) => (
+            <option key={t.stem} value={t.stem}>
+              {t.name}
+              {t.builtin ? "" : "  (custom)"}
+              {`  · ${t.base}`}
+            </option>
+          ))}
+        </select>
+      </FormRow>
+      <FormRow label="themes folder" hint="放 *.json 進去會列在上面下拉">
+        <div className="mori-theme-path-row">
+          <code className="mori-theme-path">{dir || "(loading…)"}</code>
+          <button
+            className="mori-btn small"
+            onClick={refresh}
+            disabled={busy}
+            title="重新掃描資料夾"
+          >Reload</button>
+        </div>
+      </FormRow>
+    </Section>
+  );
+}
+
 function ConfigTab() {
   const [raw, setRaw] = useState<string>("");
   const [orig, setOrig] = useState<string>("");
@@ -262,6 +339,10 @@ function ConfigTab() {
       </p>
 
       {error && <div className="mori-config-error">{error}</div>}
+
+      {/* brand-3: theme picker(獨立於 config.json 編輯之上,因為它寫的是
+          ~/.mori/active_theme 而不是 config.json) */}
+      <ThemeSection />
 
       {/* ── View toggle ───────────────────────────────── */}
       <div className="mori-view-toggle">

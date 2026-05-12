@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { splitFrontmatter, buildProfileText, AnyObj } from "./profile-form";
+import { IconVoiceMic, IconTree, IconClose, IconWarning, IconCheck } from "./icons";
 
 type Kind = "voice" | "agent";
 
@@ -383,7 +384,7 @@ function ShellSkillCard({
                 <div className="mori-placeholder-check">
                   {usedNotDeclared.length > 0 && (
                     <div className="warn">
-                      ⚠️ command 用到但 parameters 沒宣告:
+                      <IconWarning width={12} height={12} /> command 用到但 parameters 沒宣告:
                       {usedNotDeclared.map((p) => (
                         <button
                           key={p}
@@ -402,7 +403,7 @@ function ShellSkillCard({
                   )}
                   {declaredNotUsed.length > 0 && (
                     <div className="hint">
-                      ℹ️ parameters 宣告了但 command 沒用:
+                      <span style={{ opacity: 0.7 }}>i</span> parameters 宣告了但 command 沒用:
                       {declaredNotUsed.map((p) => (
                         <span key={p} className="mori-placeholder-chip dim">{p}</span>
                       ))}
@@ -414,7 +415,7 @@ function ShellSkillCard({
                 && usedNotDeclared.length === 0
                 && declaredNotUsed.length === 0 && (
                 <div className="mori-placeholder-check ok">
-                  ✓ {usedPlaceholders.length} 個 placeholder 都對應到 parameters
+                  <IconCheck width={12} height={12} /> {usedPlaceholders.length} 個 placeholder 都對應到 parameters
                 </div>
               )}
             </div>
@@ -490,7 +491,7 @@ function ShellSkillCard({
                   className="mori-btn small ghost"
                   onClick={() => removeParam(key)}
                   title="刪除參數"
-                >✕</button>
+                ><IconClose width={11} height={11} /></button>
               </div>
             ))}
           </div>
@@ -603,7 +604,9 @@ export function ProfileEditor({
         <div className="mori-modal-header">
           <div className="mori-modal-title">
             <span className="mori-modal-kind">
-              {kind === "voice" ? "🎙 VoiceInput" : "🌳 Agent"}
+              {kind === "voice"
+                ? <><IconVoiceMic width={12} height={12} /> VoiceInput</>
+                : <><IconTree width={12} height={12} /> Agent</>}
             </span>
             <span className="mori-modal-stem">{stem}.md</span>
           </div>
@@ -623,7 +626,7 @@ export function ProfileEditor({
               onClick={() => setView("raw")}
             >Raw</button>
           </div>
-          <button className="mori-btn ghost" onClick={onClose}>✕</button>
+          <button className="mori-btn ghost" onClick={onClose} title="關閉"><IconClose width={14} height={14} /></button>
         </div>
         <div className="mori-modal-body">
           {loading ? (

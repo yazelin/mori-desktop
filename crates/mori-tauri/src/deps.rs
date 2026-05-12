@@ -50,12 +50,7 @@ pub enum CheckSpec {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind")]
 pub enum InstallSpec {
-    /// 單一 shell command(無 sudo)
-    Run {
-        cmd: &'static str,
-        args: &'static [&'static str],
-    },
-    /// 用 sh -c 包(裡面含 pipe / redirect / curl | sh 等需要 shell 的)
+    /// 用 sh -c 包(可含 pipe / redirect / curl | sh 等需要 shell 的)
     Shell { script: &'static str },
     /// 給 user 在 terminal 自己跑(needs_sudo / 多步)
     Manual { commands: &'static [&'static str] },
@@ -65,16 +60,32 @@ pub enum InstallSpec {
 pub fn registry() -> Vec<DepSpec> {
     vec![
         DepSpec {
+            id: "uv",
+            name: "uv",
+            description: "Astral 出的 Python pkg / tool manager(static binary,取代 pip / pipx,不依賴系統 python3-venv)",
+            unlocks: "yt-dlp 等 Python CLI 的安裝前置;同時是 mori 之後跑 Python skill 的標準 runtime",
+            size_hint: Some("~30MB"),
+            needs_sudo: false,
+            check: CheckSpec::File {
+                path_template: "$HOME/.local/bin/uv",
+            },
+            install: InstallSpec::Shell {
+                script: "curl -LsSf https://astral.sh/uv/install.sh | sh",
+            },
+        },
+        DepSpec {
             id: "yt-dlp",
             name: "yt-dlp",
-            description: "YouTube / 影音平台抓字幕、metadata 用 CLI",
-            unlocks: "youtube_transcript skill(待 3B-2),Mori 可以幫你摘要影片內容",
+            description: "YouTube / 影音平台抓字幕、metadata 用 CLI(由 uv 管 isolated venv)",
+            unlocks: "youtube_transcript skill(待 3B-2),Mori 可以幫你摘要影片內容。需先裝 uv。",
             size_hint: Some("~5MB Python script + deps"),
             needs_sudo: false,
-            check: CheckSpec::Which { bin: "yt-dlp" },
-            install: InstallSpec::Run {
-                cmd: "pip",
-                args: &["install", "--user", "--upgrade", "yt-dlp"],
+            check: CheckSpec::File {
+                path_template: "$HOME/.local/bin/yt-dlp",
+            },
+            install: InstallSpec::Shell {
+                // 一鍵 bootstrap:沒 uv 先 curl install.sh,再用 uv 裝 yt-dlp
+                script: "if [ ! -x \"$HOME/.local/bin/uv\" ]; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi && \"$HOME/.local/bin/uv\" tool install --upgrade yt-dlp",
             },
         },
         DepSpec {
@@ -191,19 +202,17 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
 /// 跑 install command,回傳 (stdout+stderr 合併、success flag)。
 /// 只處理 Run / Shell — Manual 不在這條路,UI 直接顯示指令給 user。
 pub fn run_install(spec: &DepSpec) -> Result<InstallResult> {
-    let (cmd, args, shell_mode) = match &spec.install {
-        InstallSpec::Run { cmd, args } => (cmd.to_string(), args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), false),
+    let (cmd, args) = match &spec.install {
         InstallSpec::Shell { script } => (
             "sh".to_string(),
             vec!["-c".to_string(), script.to_string()],
-            true,
         ),
         InstallSpec::Manual { .. } => {
             anyhow::bail!("Manual install — UI should show commands to user, not call run_install");
         }
     };
 
-    tracing::info!(dep = spec.id, cmd = %cmd, shell = shell_mode, "install start");
+    tracing::info!(dep = spec.id, cmd = %cmd, "install start");
     let output = Command::new(&cmd)
         .args(&args)
         .output()

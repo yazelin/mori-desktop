@@ -33,13 +33,13 @@ body.picker-window #root {
   width: 92%;
   max-height: 92%;
   /* brand: 深森林背景 + 葉子描邊感 */
-  background: rgba(31, 51, 41, 0.94); /* #1f3329 @ 0.94 */
+  background: var(--c-surface-bg); /* #1f3329 @ 0.94 */
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(168, 197, 162, 0.20);
+  border: 1px solid var(--c-border-strong);
   border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  color: rgba(243, 240, 230, 0.95);
+  color: var(--c-text-strong);
   font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   display: flex;
   flex-direction: column;
@@ -54,8 +54,8 @@ body.picker-window #root {
 
 .mori-picker-header {
   display: flex;
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--c-sidebar-hover-bg);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .mori-picker-tab {
@@ -64,21 +64,21 @@ body.picker-window #root {
   font-size: 13px;
   text-align: center;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--c-text-muted);
   transition: color 120ms ease, background 120ms ease;
 }
 .mori-picker-tab:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--c-sidebar-hover-bg);
+  color: var(--c-text);
 }
 .mori-picker-tab.active {
-  color: rgba(243, 240, 230, 0.98);
-  border-bottom: 2px solid rgba(168, 197, 162, 0.90);
-  background: rgba(106, 143, 114, 0.14);
+  color: var(--c-text-strong);
+  border-bottom: 2px solid var(--c-active-border);
+  background: var(--c-recording-progress-bg);
 }
 .mori-picker-tab-count {
   margin-left: 6px;
-  color: rgba(255, 255, 255, 0.40);
+  color: var(--c-text-soft);
   font-size: 11px;
 }
 
@@ -108,42 +108,42 @@ body.picker-window #root {
 .mori-picker-row.next {
   opacity: 0.55;
   font-size: 12px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--c-divider);
 }
 .mori-picker-row.prev:hover,
 .mori-picker-row.next:hover {
   opacity: 0.85;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--c-sidebar-hover-bg);
 }
 .mori-picker-row.cur {
-  background: rgba(106, 143, 114, 0.32);
-  outline: 1px solid rgba(168, 197, 162, 0.60);
+  background: var(--c-recording-bg);
+  outline: 1px solid var(--c-focus-border);
   font-size: 14px;
   font-weight: 500;
 }
 .mori-picker-row.cur:hover {
-  background: rgba(106, 143, 114, 0.42);
+  background: var(--c-primary-bg-hover);
 }
 .mori-picker-cursor {
-  color: rgba(168, 197, 162, 0.95); /* forest-soft 葉脈 */
+  color: var(--c-active-border); /* forest-soft 葉脈 */
   font-size: 14px;
   margin-right: 2px;
 }
 
 .mori-picker-display {
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--c-text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .mori-picker-row.cur .mori-picker-display {
-  color: rgba(255, 255, 255, 0.99);
+  color: var(--c-text-strong);
 }
 .mori-picker-stem {
   flex: 1;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.40);
+  color: var(--c-text-soft);
   font-family: ui-monospace, "JetBrains Mono", monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -153,14 +153,14 @@ body.picker-window #root {
 
 .mori-picker-empty {
   text-align: center;
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--c-text-soft);
   padding: 40px 24px;
   font-size: 13px;
 }
 
 .mori-picker-position {
   text-align: center;
-  color: rgba(255, 255, 255, 0.40);
+  color: var(--c-text-soft);
   font-size: 10.5px;
   margin-top: 4px;
   font-family: ui-monospace, "JetBrains Mono", monospace;
@@ -169,18 +169,18 @@ body.picker-window #root {
 .mori-picker-footer {
   padding: 10px 16px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(0, 0, 0, 0.15);
+  color: var(--c-text-muted);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-divider);
   text-align: center;
 }
 
 .mori-picker-footer kbd {
-  background: rgba(255, 255, 255, 0.10);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--c-kbd-bg);
+  border: 1px solid var(--c-kbd-border);
   border-radius: 4px;
   padding: 2px 6px;
   font-family: ui-monospace, "JetBrains Mono", monospace;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--c-kbd-text);
 }

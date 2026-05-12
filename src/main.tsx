@@ -5,6 +5,7 @@ import MainShell from "./MainShell";
 import FloatingMori from "./FloatingMori";
 import ChatBubble from "./ChatBubble";
 import Picker from "./Picker";
+import { subscribeTheme } from "./theme";
 import "./styles.css";
 import "./shell.css";
 import "./chat-panel.css";
@@ -14,6 +15,10 @@ import "./picker.css";
 
 const label = getCurrentWindow().label;
 const root = document.getElementById("root")!;
+
+// brand-3: 每個 window 都 subscribe 主 theme(load 一次 + listen "theme-changed"),
+// 任一視窗切 theme 後其他 window 收到 event 一起更新。
+subscribeTheme();
 
 if (label === "floating") {
   // The floating window has no chrome and a transparent background; we

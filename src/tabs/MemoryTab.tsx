@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconMemory, IconClose, IconRefresh } from "../icons";
 
 type MemoryEntry = {
   id: string;
@@ -129,10 +130,10 @@ function MemoryEditor({
       <div className="mori-modal mori-memory-modal" onClick={(e) => e.stopPropagation()}>
         <div className="mori-modal-header">
           <div className="mori-modal-title">
-            <span className="mori-modal-kind">📓 Memory</span>
+            <span className="mori-modal-kind"><IconMemory width={12} height={12} /> Memory</span>
             <span className="mori-modal-stem">{id}.md</span>
           </div>
-          <button className="mori-btn ghost" onClick={onClose}>✕</button>
+          <button className="mori-btn ghost" onClick={onClose} title="關閉"><IconClose width={14} height={14} /></button>
         </div>
         <div className="mori-modal-body">
           {loading ? (
@@ -279,7 +280,7 @@ function MemoryTab() {
           onChange={(e) => setFilter(e.target.value)}
         />
         <button className="mori-btn primary" onClick={createNew}>+ 新增記憶</button>
-        <button className="mori-btn" onClick={reload}>🔄</button>
+        <button className="mori-btn" onClick={reload} title="重新整理"><IconRefresh width={13} height={13} /></button>
         <span className="mori-memory-count">
           {searching ? "搜尋中…" : `${filtered.length} / ${entries.length}`}
         </span>

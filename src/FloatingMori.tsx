@@ -340,7 +340,7 @@ function FloatingMori() {
   const labelToShow: string | null =
     infoLabel
     ?? statusLabel
-    ?? (visual === "recording" && currentProfileLabel ? `🎙 ${currentProfileLabel}` : null);
+    ?? (visual === "recording" && currentProfileLabel ? `● ${currentProfileLabel}` : null);
 
   return (
     <div

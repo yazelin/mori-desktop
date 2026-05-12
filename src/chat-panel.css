@@ -6,8 +6,8 @@
   display: flex;
   flex-direction: column;
   /* brand: 深森林夜色,跟 shell main 一致 */
-  background: #1f3329;
-  color: rgba(243, 240, 230, 0.92); /* ivory */
+  background: var(--c-page-bg);
+  color: var(--c-text); /* ivory */
 }
 
 /* ─── Top bar ──────────────────────────────────────── */
@@ -17,7 +17,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--c-border);
   flex-shrink: 0;
   gap: 12px;
 }
@@ -27,14 +27,14 @@
   align-items: center;
   gap: 8px;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--c-text);
   min-width: 0;
   overflow: hidden;
 }
 .mori-chat-mode-icon { font-size: 14px; }
 .mori-chat-mode-text { font-weight: 500; }
 .mori-chat-mode-provider {
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--c-text-soft);
   font-size: 11.5px;
   font-family: ui-monospace, "JetBrains Mono", monospace;
   white-space: nowrap;
@@ -47,7 +47,7 @@
 .mori-icon-btn {
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--c-sidebar-text);
   padding: 5px 10px;
   border-radius: 6px;
   font-size: 14px;
@@ -56,8 +56,8 @@
   font-family: inherit;
 }
 .mori-icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.95);
+  background: var(--c-border);
+  color: var(--c-text-strong);
 }
 .mori-icon-btn:disabled {
   opacity: 0.35;
@@ -76,26 +76,26 @@
 }
 .mori-chat-thread::-webkit-scrollbar { width: 6px; }
 .mori-chat-thread::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--c-scrollbar-thumb);
   border-radius: 3px;
 }
 
 .mori-chat-empty {
   margin: auto;
   text-align: center;
-  color: rgba(255, 255, 255, 0.50);
+  color: var(--c-text-muted);
   font-size: 13px;
   max-width: 380px;
   line-height: 1.6;
 }
 .mori-chat-empty kbd {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--c-kbd-bg);
+  border: 1px solid var(--c-kbd-border);
   border-radius: 4px;
   padding: 2px 5px;
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  color: rgba(180, 230, 195, 0.92);
+  color: var(--c-kbd-text);
 }
 
 .mori-bubble {
@@ -109,7 +109,7 @@
 
 .mori-bubble .role-label {
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--c-text-muted);
   padding: 0 4px;
 }
 
@@ -121,14 +121,14 @@
 }
 .mori-bubble.user .bubble-body {
   /* 暖色 sand 區分 user input vs Mori 回應的森林綠 */
-  background: rgba(214, 191, 161, 0.18);
-  border: 1px solid rgba(214, 191, 161, 0.30);
+  background: var(--c-bubble-user-bg);
+  border: 1px solid var(--c-bubble-user-border);
   border-bottom-right-radius: 4px;
 }
 .mori-bubble.assistant .bubble-body {
   /* forest-soft 葉脈淺綠 = Mori 葉子 voice */
-  background: rgba(168, 197, 162, 0.16);
-  border: 1px solid rgba(168, 197, 162, 0.28);
+  background: var(--c-bubble-assistant-bg);
+  border: 1px solid var(--c-bubble-assistant-border);
   border-bottom-left-radius: 4px;
 }
 
@@ -136,10 +136,10 @@
   margin: 0;
   white-space: pre-wrap;
   word-wrap: break-word;
-  color: rgba(255, 255, 255, 0.96);
+  color: var(--c-text-strong);
 }
 .mori-bubble .bubble-body p .empty {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--c-text-soft);
   font-style: italic;
 }
 
@@ -150,21 +150,21 @@
   margin-top: 6px;
 }
 .mori-bubble .tool-chip {
-  background: rgba(0, 0, 0, 0.30);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-border);
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 10.5px;
-  color: rgba(170, 230, 185, 0.92);
+  color: var(--c-mono-color);
 }
 
 .mori-chat-error {
   align-self: stretch;
   padding: 10px 14px;
-  background: rgba(255, 80, 80, 0.10);
-  border: 1px solid rgba(255, 80, 80, 0.30);
+  background: var(--c-danger-bg);
+  border: 1px solid var(--c-danger-border);
   border-radius: 8px;
-  color: rgba(255, 200, 200, 0.95);
+  color: var(--c-danger-text);
 }
 .mori-chat-error .label {
   font-size: 11.5px;
@@ -187,25 +187,25 @@
   padding: 8px 18px;
   margin: 0 16px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--c-sidebar-hover-bg);
+  border: 1px solid var(--c-border);
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.80);
+  color: var(--c-text);
   flex-shrink: 0;
 }
 .mori-chat-progress.recording {
-  background: rgba(106, 143, 114, 0.14);
-  border-color: rgba(168, 197, 162, 0.35);
+  background: var(--c-recording-progress-bg);
+  border-color: var(--c-recording-progress-border);
 }
 .mori-chat-progress .text { font-weight: 500; }
 .mori-chat-progress .hint {
   margin-left: auto;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--c-text-soft);
 }
 .mori-chat-progress .hint kbd {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--c-border);
+  border: 1px solid var(--c-border-strong);
   border-radius: 3px;
   padding: 1px 4px;
   font-family: ui-monospace, monospace;
@@ -215,11 +215,11 @@
 
 .mori-chat-progress .dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.30);
+  background: var(--c-text-soft);
   flex-shrink: 0;
 }
 .mori-chat-progress .dot.pulse {
-  background: rgba(168, 197, 162, 0.92);
+  background: var(--c-mono-color);
   animation: mori-chat-pulse 1s ease-in-out infinite;
 }
 .mori-chat-progress .dot.spin {
@@ -242,7 +242,7 @@
   flex: 1;
   max-width: 160px;
   height: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--c-border);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -250,8 +250,8 @@
   height: 100%;
   /* forest → forest-soft 漸層 (深綠葉根 → 淺綠葉尖) */
   background: linear-gradient(90deg,
-    rgba(106, 143, 114, 0.80) 0%,
-    rgba(168, 197, 162, 0.90) 100%);
+    var(--c-meter-from) 0%,
+    var(--c-meter-to) 100%);
   transition: width 50ms linear;
 }
 .mori-level-meter .fill.quiet {
@@ -265,17 +265,17 @@
   align-items: flex-end;
   gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid rgba(230, 222, 202, 0.08);
-  background: rgba(23, 38, 32, 0.95); /* sidebar 深綠同調 */
+  border-top: 1px solid var(--c-divider);
+  background: var(--c-sidebar-bg); /* sidebar 深綠同調 */
   flex-shrink: 0;
 }
 
 .mori-mic-btn {
   width: 38px; height: 38px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: rgba(255, 255, 255, 0.90);
+  background: var(--c-border);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
@@ -283,14 +283,14 @@
   font-family: inherit;
 }
 .mori-mic-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: var(--c-border);
+  border-color: var(--c-border-strong);
 }
 .mori-mic-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .mori-mic-btn.recording {
-  background: rgba(106, 143, 114, 0.32);
-  border-color: rgba(168, 197, 162, 0.65);
-  color: rgba(230, 222, 202, 0.98); /* cream-on-forest */
+  background: var(--c-recording-bg);
+  border-color: var(--c-primary-border-hover);
+  color: var(--c-primary-text); /* cream-on-forest */
   animation: mori-chat-pulse 1.2s ease-in-out infinite;
 }
 
@@ -300,10 +300,10 @@
   min-height: 38px;
   max-height: 200px;
   padding: 9px 12px;
-  background: rgba(0, 0, 0, 0.30);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--c-text-strong);
   font-family: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -311,16 +311,16 @@
 }
 .mori-chat-textarea:focus {
   outline: none;
-  border-color: rgba(168, 197, 162, 0.55);
-  background: rgba(0, 0, 0, 0.42);
+  border-color: var(--c-focus-border);
+  background: var(--c-input-focus-bg);
 }
 .mori-chat-textarea:disabled { opacity: 0.5; }
 
 .mori-send-btn {
   padding: 9px 16px;
-  background: rgba(106, 143, 114, 0.30);
-  border: 1px solid rgba(168, 197, 162, 0.55);
-  color: rgba(230, 222, 202, 0.98);
+  background: var(--c-primary-bg);
+  border: 1px solid var(--c-focus-border);
+  color: var(--c-primary-text);
   border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
@@ -330,7 +330,7 @@
   font-family: inherit;
   transition: background 120ms ease;
 }
-.mori-send-btn:hover:not(:disabled) { background: rgba(106, 143, 114, 0.45); }
+.mori-send-btn:hover:not(:disabled) { background: var(--c-primary-bg-hover); }
 .mori-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ─── Status modal ─────────────────────────────────── */
@@ -348,18 +348,18 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--c-divider);
+  border: 1px solid var(--c-border);
   border-radius: 6px;
   font-size: 12px;
 }
 .mori-status-row .label {
-  color: rgba(255, 255, 255, 0.50);
+  color: var(--c-text-muted);
   font-family: ui-monospace, monospace;
   font-size: 11px;
 }
 .mori-status-row .value {
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--c-text);
   font-family: ui-monospace, monospace;
   font-size: 11.5px;
   max-width: 60%;

@@ -56,10 +56,26 @@ type ChatProviderInfo = {
   stt: SttInfo;
 };
 
-const MODE_LABEL: Record<Mode, { icon: string; label: string }> = {
-  agent: { icon: "💬", label: "對話模式" },
-  voice_input: { icon: "⌨️", label: "語音輸入" },
-  background: { icon: "💤", label: "休眠" },
+import {
+  IconChat as IconBubble,
+  IconKeyboard,
+  IconSleep,
+  IconSun,
+  IconRefresh,
+  IconConfig,
+  IconClose,
+  IconMic,
+  IconStop,
+  IconWarning,
+  IconWave,
+  IconTool,
+} from "./icons";
+import type { ComponentType, SVGProps } from "react";
+
+const MODE_LABEL: Record<Mode, { Icon: ComponentType<SVGProps<SVGSVGElement>>; label: string }> = {
+  agent: { Icon: IconBubble, label: "對話模式" },
+  voice_input: { Icon: IconKeyboard, label: "語音輸入" },
+  background: { Icon: IconSleep, label: "休眠" },
 };
 
 function ChatPanel() {
@@ -170,7 +186,9 @@ function ChatPanel() {
       {/* ── Top bar ─────────────────────────────────────── */}
       <div className="mori-chat-topbar">
         <div className="mori-chat-mode">
-          <span className="mori-chat-mode-icon">{MODE_LABEL[mode].icon}</span>
+          <span className="mori-chat-mode-icon">
+            {(() => { const I = MODE_LABEL[mode].Icon; return <I width={16} height={16} />; })()}
+          </span>
           <span className="mori-chat-mode-text">{MODE_LABEL[mode].label}</span>
           {chatProvider && (
             <span className="mori-chat-mode-provider">
@@ -184,7 +202,7 @@ function ChatPanel() {
             onClick={toggleSleep}
             title={mode === "background" ? "醒醒(回對話模式)" : "進休眠(關麥克風)"}
           >
-            {mode === "background" ? "☀" : "💤"}
+            {mode === "background" ? <IconSun width={16} height={16} /> : <IconSleep width={16} height={16} />}
           </button>
           <button
             className="mori-icon-btn"
@@ -192,14 +210,14 @@ function ChatPanel() {
             disabled={conv.length === 0}
             title="清掉本次對話歷史(長期記憶不動)"
           >
-            🔄
+            <IconRefresh width={16} height={16} />
           </button>
           <button
             className="mori-icon-btn"
             onClick={() => setShowStatus(true)}
             title="顯示系統狀態"
           >
-            ⚙️
+            <IconConfig width={16} height={16} />
           </button>
         </div>
       </div>
@@ -208,7 +226,10 @@ function ChatPanel() {
       <div className="mori-chat-thread" ref={threadRef}>
         {conv.length === 0 && phase.kind === "idle" && (
           <div className="mori-chat-empty">
-            <p>👋 跟 Mori 說話 — 按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 開始錄音,或下面直接打字。</p>
+            <p>
+              <span className="mori-empty-icon"><IconWave width={18} height={18} /></span>
+              {" "}跟 Mori 說話 — 按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 開始錄音,或下面直接打字。
+            </p>
           </div>
         )}
         {conv.map((turn, i) => (
@@ -217,7 +238,7 @@ function ChatPanel() {
         {inProgress && <ChatBubble turn={inProgress} />}
         {phase.kind === "error" && (
           <div className="mori-chat-error">
-            <span className="label">⚠️ 錯誤</span>
+            <span className="label"><IconWarning width={13} height={13} /> 錯誤</span>
             <p>{phase.message}</p>
           </div>
         )}
@@ -254,13 +275,13 @@ function ChatPanel() {
           disabled={pipelineBusy || mode === "background"}
           title={
             mode === "background"
-              ? "Mori 在休眠,按上方 ☀ 喚醒"
+              ? "Mori 在休眠,按上方的太陽按鈕喚醒"
               : recording
               ? "停止錄音"
               : "開始錄音(等同 Ctrl+Alt+Space)"
           }
         >
-          {recording ? "■" : "🎤"}
+          {recording ? <IconStop width={16} height={16} /> : <IconMic width={16} height={16} />}
         </button>
         <textarea
           className="mori-chat-textarea"
@@ -297,7 +318,9 @@ function ChatPanel() {
               <div className="mori-modal-title">
                 <span className="mori-modal-stem">系統狀態</span>
               </div>
-              <button className="mori-btn ghost" onClick={() => setShowStatus(false)}>✕</button>
+              <button className="mori-btn ghost" onClick={() => setShowStatus(false)} title="關閉">
+                <IconClose width={14} height={14} />
+              </button>
             </div>
             <div className="mori-modal-body">
               <StatusRows
@@ -326,7 +349,7 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
         {turn.tools_called.length > 0 && (
           <div className="bubble-tools">
             {turn.tools_called.map((t, i) => (
-              <span key={i} className="tool-chip">🔧 {t}</span>
+              <span key={i} className="tool-chip"><IconTool width={11} height={11} /> {t}</span>
             ))}
           </div>
         )}
@@ -383,11 +406,11 @@ function StatusRows({
             ? `${chatProvider.name} · ${chatProvider.model}${
                 chatProvider.name === "ollama"
                   ? warmup === "ready"
-                    ? " · ✅ 就緒"
+                    ? " · 就緒"
                     : warmup === "loading"
-                    ? " · 🔄 載入中"
+                    ? " · 載入中"
                     : warmup === "failed"
-                    ? " · ⚠️ 失敗"
+                    ? " · 失敗"
                     : ""
                   : hasKey === true
                   ? " · ready"
@@ -403,20 +426,20 @@ function StatusRows({
         value={
           chatProvider?.stt
             ? chatProvider.stt.name === "whisper-local"
-              ? `🏠 ${(chatProvider.stt.model.split("/").pop() || chatProvider.stt.model)}`
-              : `☁ ${chatProvider.stt.model}`
+              ? `[local] ${(chatProvider.stt.model.split("/").pop() || chatProvider.stt.model)}`
+              : `[cloud] ${chatProvider.stt.model}`
             : "..."
         }
       />
       <Row label="history" value={`${convLength} msgs`} />
       <Row
         label="clipboard"
-        value={lastContext?.clipboard ? `📋 ${lastContext.clipboard.length} 字` : "—"}
+        value={lastContext?.clipboard ? `${lastContext.clipboard.length} 字` : "—"}
         title={lastContext?.clipboard ?? undefined}
       />
       <Row
         label="selection"
-        value={lastContext?.selected_text ? `🖱 ${lastContext.selected_text.length} 字` : "—"}
+        value={lastContext?.selected_text ? `${lastContext.selected_text.length} 字` : "—"}
         title={lastContext?.selected_text ?? undefined}
       />
     </div>

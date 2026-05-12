@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconRefresh } from "../icons";
 
 type SkillInfo = {
   name: string;
@@ -22,7 +23,7 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
     <div className={`mori-skill-card ${expanded ? "expanded" : ""}`}>
       <div className="mori-skill-card-head" onClick={() => setExpanded(!expanded)}>
         <span className={`mori-skill-kind kind-${skill.kind}`}>
-          {skill.kind === "shell" ? "🛠 shell" : "⚙ built-in"}
+          {skill.kind === "shell" ? "shell" : "built-in"}
         </span>
         <span className="mori-skill-name">{skill.name}</span>
         <span className="mori-skill-param-count">
@@ -101,7 +102,7 @@ function SkillsTab() {
       <p className="mori-tab-hint">
         當前 active agent profile 啟用的 skills。Built-in(translate / polish /
         記憶 skill / 動作 skill 等)+ shell_skill(profile frontmatter
-        定義的自訂 CLI 包裝)。改 profile 後按 🔄 重新讀取。
+        定義的自訂 CLI 包裝)。改 profile 後按重新整理按鈕。
       </p>
 
       {error && <div className="mori-config-error">{error}</div>}
@@ -119,7 +120,7 @@ function SkillsTab() {
           className={`mori-view-tab ${filter === "shell" ? "active" : ""}`}
           onClick={() => setFilter("shell")}
         >Shell ({counts.shell})</button>
-        <button className="mori-btn" onClick={reload}>🔄</button>
+        <button className="mori-btn" onClick={reload} title="重新讀取"><IconRefresh width={13} height={13} /></button>
       </div>
 
       {loading ? (

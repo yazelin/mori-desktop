@@ -12,6 +12,7 @@ mod recording;
 mod selection;
 mod shell_skill;
 mod skill_server;
+mod theme;
 
 use std::sync::Arc;
 
@@ -386,7 +387,7 @@ fn retry_callback_for(app: AppHandle) -> mori_core::llm::groq::RetryCallback {
 // Profile / config 改完即時生效:load_active_profile() / read_provider_config()
 // 都是「呼叫時讀檔」,不會 cache。
 
-fn mori_dir() -> std::path::PathBuf {
+pub(crate) fn mori_dir() -> std::path::PathBuf {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(|h| std::path::PathBuf::from(h).join(".mori"))
@@ -615,6 +616,51 @@ async fn deps_install(id: String) -> Result<crate::deps::InstallResult, String> 
         .await
         .map_err(|e| format!("install join: {e}"))?
         .map_err(|e| format!("install: {e:#}"))
+}
+
+// ─── brand-3: Theme IPC ───────────────────────────────────────────
+
+#[tauri::command]
+fn theme_list() -> Result<Vec<crate::theme::ThemeEntry>, String> {
+    crate::theme::list().map_err(|e| format!("list themes: {e:#}"))
+}
+
+#[tauri::command]
+fn theme_read(stem: String) -> Result<crate::theme::Theme, String> {
+    crate::theme::read(&stem).map_err(|e| format!("read theme {stem}: {e:#}"))
+}
+
+/// 回 (stem, theme) 給 frontend 啟動時套用
+#[tauri::command]
+fn theme_get_active() -> Result<(String, crate::theme::Theme), String> {
+    let stem = crate::theme::get_active_stem();
+    let theme = crate::theme::read(&stem)
+        .or_else(|_| crate::theme::read("dark")) // fallback
+        .map_err(|e| format!("read active theme: {e:#}"))?;
+    Ok((stem, theme))
+}
+
+#[tauri::command]
+fn theme_set_active(stem: String) -> Result<crate::theme::Theme, String> {
+    let theme = crate::theme::read(&stem).map_err(|e| format!("read theme {stem}: {e:#}"))?;
+    crate::theme::set_active_stem(&stem).map_err(|e| format!("set active: {e:#}"))?;
+    Ok(theme)
+}
+
+/// 一鍵 toggle dark <-> light(找同 base 的內建 theme),回切換後的 (stem, theme)
+#[tauri::command]
+fn theme_toggle() -> Result<(String, crate::theme::Theme), String> {
+    let cur = crate::theme::get_active_stem();
+    let next = crate::theme::toggle_base_stem(&cur).map_err(|e| format!("toggle: {e:#}"))?;
+    let theme = crate::theme::read(&next).map_err(|e| format!("read {next}: {e:#}"))?;
+    crate::theme::set_active_stem(&next).map_err(|e| format!("set active: {e:#}"))?;
+    Ok((next, theme))
+}
+
+/// 把 themes 目錄 path 回給前端,讓 UI 顯示「打開資料夾」
+#[tauri::command]
+fn theme_dir() -> String {
+    crate::theme::themes_dir().display().to_string()
 }
 
 #[tauri::command]
@@ -970,7 +1016,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         } else {
             mori_core::llm::transcribe::active_transcribe_snapshot().name
         };
-        let _ = app.emit("voice-input-status", format!("📝 轉錄中 · {}", name));
+        let _ = app.emit("voice-input-status", format!("轉錄中 · {}", name));
     }
 
     let app_for_provider = app.clone();
@@ -1420,7 +1466,7 @@ async fn run_voice_input_pipeline(
     // 5F: 通知 floating widget 顯示處理中狀態
     {
         let provider_label = profile.frontmatter.resolved_provider().display_name();
-        let _ = app.emit("voice-input-status", format!("⚡ 處理中 · {}", provider_label));
+        let _ = app.emit("voice-input-status", format!("處理中 · {}", provider_label));
     }
 
     // 5G-1: VoiceInput 永遠單輪，純文字轉換。需要動作（open_url / send_keys 等）
@@ -2021,6 +2067,12 @@ fn main() {
             skills_list,
             deps_list,
             deps_install,
+            theme_list,
+            theme_read,
+            theme_get_active,
+            theme_set_active,
+            theme_toggle,
+            theme_dir,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -2031,6 +2083,12 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // brand-3: ensure ~/.mori/themes/ + 內建 dark.json / light.json
+            // 啟動時寫入(已存在則保留 user 編輯)
+            if let Err(e) = crate::theme::ensure_builtin() {
+                tracing::warn!(error = %e, "theme::ensure_builtin failed");
+            }
+
             // 注意:**不要**在這裡 setup() 直接 call set_always_on_top —
             // AgentPulse 沒這樣做,他們依賴 conf.json 的 alwaysOnTop hint
             // 處理初始狀態,只在 tray show handler 才 re-assert。

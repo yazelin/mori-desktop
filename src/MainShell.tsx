@@ -10,7 +10,7 @@
 // - 主區域填滿剩下空間,內捲 overflow scroll
 // - 每個 tab 一個 React component;只 mount 當前選中的 tab,避免重複 IPC
 
-import { useState, type ComponentType, type SVGProps } from "react";
+import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 import ChatPanel from "./ChatPanel";
 import ProfilesTab from "./tabs/ProfilesTab";
 import ConfigTab from "./tabs/ConfigTab";
@@ -19,7 +19,9 @@ import SkillsTab from "./tabs/SkillsTab";
 import DepsTab from "./tabs/DepsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconSkills, IconDeps,
+  IconSun, IconMoon,
 } from "./icons";
+import { toggleTheme, loadActiveTheme } from "./theme";
 
 type TabId = "chat" | "profiles" | "config" | "memory" | "skills" | "deps";
 
@@ -41,6 +43,31 @@ const TABS: TabDef[] = [
 
 function MainShell() {
   const [tab, setTab] = useState<TabId>("chat");
+  // brand-3: theme base 給 toggle button 判斷該秀 sun 還是 moon
+  const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
+
+  // 啟動時把 active theme base 同步到 state(避免 toggle 圖示對不上)
+  useEffect(() => {
+    loadActiveTheme().then((res) => {
+      if (res) setThemeBase(res[1].base);
+    });
+    // 監聽 data-theme-base 變化(從 Config tab 切 theme 也要同步)
+    const obs = new MutationObserver(() => {
+      const base = document.documentElement.getAttribute("data-theme-base");
+      if (base === "dark" || base === "light") setThemeBase(base);
+    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme-base"] });
+    return () => obs.disconnect();
+  }, []);
+
+  const handleToggle = async () => {
+    try {
+      const [, theme] = await toggleTheme();
+      setThemeBase(theme.base);
+    } catch (e) {
+      console.error("[shell] toggle theme failed", e);
+    }
+  };
 
   return (
     <div className="mori-shell">
@@ -65,6 +92,18 @@ function MainShell() {
             </button>
           ))}
         </nav>
+        <button
+          className="mori-sidebar-theme-toggle"
+          onClick={handleToggle}
+          title={themeBase === "dark" ? "切到亮色" : "切到深色"}
+        >
+          <span className="mori-sidebar-item-icon">
+            {themeBase === "dark" ? <IconSun /> : <IconMoon />}
+          </span>
+          <span className="mori-sidebar-theme-label">
+            {themeBase === "dark" ? "Light" : "Dark"}
+          </span>
+        </button>
       </aside>
 
       <main className="mori-main">

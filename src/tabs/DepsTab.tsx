@@ -4,12 +4,12 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconRefresh, IconClipboard } from "../icons";
 
 type CheckSpec =
   | { kind: "Which"; bin: string }
   | { kind: "File"; path_template: string };
 type InstallSpec =
-  | { kind: "Run"; cmd: string; args: string[] }
   | { kind: "Shell"; script: string }
   | { kind: "Manual"; commands: string[] };
 
@@ -40,18 +40,11 @@ type InstallResult = {
 
 function commandPreview(install: InstallSpec): string {
   switch (install.kind) {
-    case "Run":
-      return [install.cmd, ...install.args].map(quoteIfNeeded).join(" ");
     case "Shell":
       return install.script;
     case "Manual":
       return install.commands.join("\n");
   }
-}
-
-function quoteIfNeeded(s: string): string {
-  if (/^[A-Za-z0-9._\-\/=]+$/.test(s)) return s;
-  return `"${s.replace(/"/g, '\\"')}"`;
 }
 
 function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
@@ -119,7 +112,7 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
         <div className="mori-dep-cmd">
           <div className="mori-dep-cmd-head">
             <span className="label">{manual ? "請複製指令在 terminal 跑(需 sudo)" : "將執行的指令"}</span>
-            <button className="mori-btn small ghost" onClick={copyCmd}>📋 複製</button>
+            <button className="mori-btn small ghost" onClick={copyCmd}><IconClipboard width={12} height={12} /> 複製</button>
           </div>
           <pre>{cmdPreview}</pre>
           {manual && (
@@ -177,7 +170,7 @@ function DepsTab() {
 
       <div className="mori-deps-toolbar">
         <span className="mori-memory-count">{installedCount} / {deps.length} 已裝</span>
-        <button className="mori-btn" onClick={reload}>🔄 重新檢測</button>
+        <button className="mori-btn" onClick={reload}><IconRefresh width={13} height={13} /> 重新檢測</button>
       </div>
 
       {loading ? (
