@@ -64,18 +64,23 @@ function spriteStyle(
   spriteUrl: string | undefined,
   manifest: CharacterManifest | null,
 ): CSSProperties {
-  if (!spriteUrl) return {};
-  const grid = manifest?.sprite_spec?.grid ?? "4x4";
-  if (grid === "1x1") {
+  // 5P-3 fix: IPC 拉 data URL 是 async(~50ms),啟動瞬間 sprite map empty 會
+  // 一閃透明。fallback 到 public/floating/ 既有 PNG path 撐住(Vite 仍 serve),
+  // IPC 完成後 sprites[visual] 蓋過來,swap 順順。
+  const url = spriteUrl ?? `/floating/mori-${visual}.png`;
+  const grid = manifest?.sprite_spec?.grid ?? "1x1";
+  // 未抓到 manifest(啟動瞬間)→ 預設 1x1 不跑 animation,避免 fallback static
+  // 256×256 PNG 套 4×4 CSS 走怪 frame。Manifest 來了之後切到 4×4 才動。
+  if (grid === "1x1" || !spriteUrl) {
     return {
-      backgroundImage: `url("${spriteUrl}")`,
+      backgroundImage: `url("${url}")`,
       backgroundSize: "100% 100%",
       backgroundRepeat: "no-repeat",
     };
   }
   const duration = manifest?.loop_durations_ms?.[visual] ?? 1600;
   return {
-    backgroundImage: `url("${spriteUrl}")`,
+    backgroundImage: `url("${url}")`,
     backgroundSize: "400% 400%",
     backgroundRepeat: "no-repeat",
     animationName: "mori-sprite-x, mori-sprite-y",
