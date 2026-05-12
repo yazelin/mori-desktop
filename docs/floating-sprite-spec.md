@@ -30,28 +30,32 @@ Phase` 切換顯示。
 ## 升級到 sprite animation(未來)
 
 目前 6 張都是靜態圖。等藝術家有空時,把每張 PNG 升級成
-**3×3 sprite sheet**(同一個 state 的 9 個 motion frame),CSS 引擎
+**4×4 sprite sheet**(同一個 state 的 16 個 motion frame),CSS 引擎
 會自動播放。
 
 升級規範:
 
 - 檔名**不變**(還是 `mori-<state>.png`)
-- 內部結構:**3 column × 3 row**,共 **9 個 frame**
-- **每 frame 256×256**(整張 PNG 就是 768×768),或 **每 frame 512×512**
-  (整張 1536×1536)
+- 內部結構:**4 column × 4 row**,共 **16 個 frame**
+- **每 frame 256×256**(整張 PNG 就是 1024×1024)— 跟現在 single-frame
+  尺寸一致,引擎只要改 `background-size` 即可
 - 順序:**左→右、上→下**(row-major,跟 CSS animation 預設一致)
   ```
-  ┌───┬───┬───┐
-  │ 1 │ 2 │ 3 │
-  ├───┼───┼───┤
-  │ 4 │ 5 │ 6 │
-  ├───┼───┼───┤
-  │ 7 │ 8 │ 9 │
-  └───┴───┴───┘
+  ┌───┬───┬───┬───┐
+  │ 1 │ 2 │ 3 │ 4 │
+  ├───┼───┼───┼───┤
+  │ 5 │ 6 │ 7 │ 8 │
+  ├───┼───┼───┼───┤
+  │ 9 │10 │11 │12 │
+  ├───┼───┼───┼───┤
+  │13 │14 │15 │16 │
+  └───┴───┴───┴───┘
   ```
-- frame 1 跟 frame 9 應該銜接得起來(loop 平滑),除非是
+- frame 1 跟 frame 16 應該銜接得起來(loop 平滑),除非是
   one-shot 動畫(例如 `done` 是 0.6s 跑一次後停)
 - 背景仍是透明,陰影仍由 CSS 加
+- 16 frame 比 3×3 (9 frame) 動畫更流暢,適合 idle 呼吸 / talk
+  口型 / walk 步伐這類需要中間 frame 銜接的動作
 
 引擎側只要把 `src/FloatingMori.tsx` 裡那行 `<img src=...>` 換成:
 ```tsx
@@ -63,14 +67,15 @@ Phase` 切換顯示。
 然後 CSS 改成:
 ```css
 .mori-sprite {
-  width: 92px;
-  height: 92px;
-  background-size: 300% 300%;
-  /* 1.2s 跑完 9 格,steps(9) 讓畫面跳格不淡入 */
-  animation: mori-cycle 1.2s steps(9) infinite;
+  width: 124px;
+  height: 124px;
+  background-size: 400% 400%;
+  /* 1.6s 跑完 16 格,steps(16) 讓畫面跳格不淡入 */
+  animation: mori-cycle 1.6s steps(16) infinite;
 }
 @keyframes mori-cycle {
-  to { background-position: -288px -276px; }  /* (3-1)*size each axis */
+  /* (4-1)*size 各軸 = -3*124 = -372px */
+  to { background-position: -372px -372px; }
 }
 ```
 就完成。其他 transform / aura / opacity 的 state-specific 動效不動。

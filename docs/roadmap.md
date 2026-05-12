@@ -76,6 +76,18 @@ app 主動分享(目前只 X11 + XWayland 有反白讀取能力)。
 - **ExecCommand 白名單** — 「跑那個指令」要先有白名單 + 二次確認機制
 - **會議逐字稿** — 連續錄音存檔 → 結束後 LLM 整理會議記錄 + action items
 
+### Sprite animation — 4×4 motion sheet
+floating widget 目前 6 個 state(idle / sleeping / recording / thinking /
+done / error)各一張 256×256 static PNG,動畫只在 CSS(呼吸 / aura ring /
+水波 / 葉間光斑)。升級到 **4×4 sprite sheet**(同 state 16 個 motion frame)讓
+sprite 自身會動 — talk / walk / happy / notice 等表情切換,16 格比 9 格動畫更精細。
+規格已在 [`floating-sprite-spec.md`](floating-sprite-spec.md):
+- 每 frame 256×256 → 整張 1024×1024(跟現在 single-frame 同尺寸,引擎只要改 background-size)
+- CSS `background-size: 400% 400%` + `steps(16)` animated background-position
+- 1.6s 跑完一輪,適合 idle 呼吸 / talk 口型 / walk 步伐這類連續動作
+- `.mori-sprite` class 是唯一要動的地方,JS / Rust 不變
+- 設計稿:`docs/design/mori-2.png` 已含 sprite sheet 草圖(現是 9 格,升 16 格時擴繪)
+
 ### Phase 7 — TTS
 Mori 還不能開口說話,只有文字。預計接 OpenAI TTS / ElevenLabs / 本機 Piper。
 

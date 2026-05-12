@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Profile 範本</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 靜靜記得你經過的痕跡">
+<meta property="og:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme · 長期記憶。Tauri 2 + Rust + React 桌面 AI 助手。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 靜靜記得你經過的痕跡">
+<meta name="twitter:description" content="雙模式 voice / agent · 自訂 shell skill · 100% 本機可跑 · 雙 theme">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<style>
+  .example {
+    margin: 18px 0 28px;
+    background: var(--c-white);
+    border: 1px solid var(--c-beige);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .example-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--c-cream);
+    border-bottom: 1px solid var(--c-beige);
+  }
+  .example-head .path {
+    font-family: ui-monospace, monospace;
+    font-size: 12.5px;
+    color: var(--c-forest-deep);
+    font-weight: 500;
+  }
+  .example-head .hotkey {
+    margin-left: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--c-brown);
+    background: var(--c-white);
+    border: 1px solid var(--c-beige);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .example-body {
+    padding: 14px 18px;
+  }
+  .example-body p {
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--c-charcoal);
+  }
+  .example pre {
+    margin: 0;
+    background: var(--c-cream);
+    border: 1px solid var(--c-beige);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-x: auto;
+    color: var(--c-forest-deep);
+    white-space: pre;
+  }
+  .group-title {
+    color: var(--c-forest-deep);
+    font-size: 17px;
+    margin: 36px 0 4px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html">~/.mori/</a>
+    <a href="profile-examples.html" class="current">Profile 範本</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Profile 範本</h1>
+<div class="page-subtitle">AGENT · VOICEINPUT · COPY-PASTE STARTER PACK</div>
+
+<p class="lead">
+  Profile 是純 markdown:YAML frontmatter + body。Frontmatter 控 provider / skill /
+  cleanup 等;body 是給 LLM 的 system prompt(人格 / 行為指示)。下面範本可直接複製
+  到 <code>~/.mori/agent/</code> 或 <code>~/.mori/voice_input/</code> 用。
+</p>
+
+<div class="note">
+  <strong>Repo 內有實體檔</strong> — 全在
+  <a href="https://github.com/yazelin/mori-desktop/tree/main/examples"><code>examples/</code></a>。
+  Clone repo 後可直接:
+  <pre style="margin: 6px 0 0; background: var(--c-white); padding: 8px 12px; font-size: 11.5px;"><code>cp examples/agent/*.md       ~/.mori/agent/
+cp examples/voice_input/*.md ~/.mori/voice_input/</code></pre>
+</div>
+
+<div class="note">
+  <strong>檔名規則</strong>:<code>AGENT-NN.顯示名稱.md</code> / <code>USER-NN.顯示名稱.md</code>。
+  <code>NN</code> = 00~99 對應 <code>Ctrl+Alt+N</code> / <code>Alt+N</code> 熱鍵(N=0~9)。
+  超過 0~9 的 profile 可以從 picker(<code>Ctrl+Alt+P</code>)或 tray menu 選。
+</div>
+
+<h2 class="group-title">Agent 範本(Ctrl+Alt+N)</h2>
+
+<div class="example">
+  <div class="example-head">
+    <span class="path">agent/AGENT.md</span>
+    <span class="hotkey">Ctrl+Alt+0(預設)</span>
+  </div>
+  <div class="example-body">
+    <p>啟動時自動寫入的預設 — Mori 自由判斷該對話還是動手做事。已含 corrections.md 引用。</p>
+<pre>---
+# 預設 Mori — Ctrl+Alt+0 啟動
+provider: claude-bash
+enable_read: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)
+
+# enabled_skills 留空 = 全 built-in skill 都可用(包含 open_url / open_app
+# / send_keys / google_search / ask_chatgpt / ask_gemini / find_youtube 等)
+# enabled_skills: [translate, polish, summarize, remember, recall_memory, open_url]
+---
+你是 Mori,森林精靈、桌面 AI 同伴。
+
+## 共用 STT 校正 + 用詞偏好
+
+#file:~/.mori/corrections.md
+
+## 行為
+
+判斷使用者意圖:
+- 純對話(聊天、提問、想法討論)→ 直接回應,floating widget 會顯示
+- 想動作(開網址、開 app、查資料)→ 主動呼叫對應 skill
+- 兩者皆有 → 動作 + 簡短說明結果
+
+語氣:自然、簡潔、不客套。繁中為主。
+有記憶能力(remember / recall_memory),跨 session 記得使用者的偏好。</pre>
+  </div>
+</div>
+
+<div class="example">
+  <div class="example-head">
+    <span class="path">agent/AGENT-01.翻譯助手.md</span>
+    <span class="hotkey">Ctrl+Alt+1</span>
+  </div>
+  <div class="example-body">
+    <p>單純的中英翻譯,固定走 groq(便宜 + 中文標點品質好),只允許 translate skill。</p>
+<pre>---
+provider: groq
+enabled_skills: [translate]
+---
+你是專業翻譯。
+
+- 自動偵測來源語言,沒指定就翻成繁中
+- 保留專有名詞 / 程式碼 / URL 原樣
+- 不解釋、不前言,直接給結果
+- 多段時保持原段落結構</pre>
+  </div>
+</div>
+
+<div class="example">
+  <div class="example-head">
+    <span class="path">agent/AGENT-02.工作流.md</span>
+    <span class="hotkey">Ctrl+Alt+2</span>
+  </div>
+  <div class="example-body">
+    <p>展示自訂 <code>shell_skills</code> — 把 <code>gh</code> / <code>docker</code> 任何 CLI 變 Mori 能力,不用改 Rust。</p>
+<pre>---
+provider: claude-bash
+enable_read: true
+shell_skills:
+  - name: gh_pr_list
+    description: 列出 mori-desktop repo 開放的 PR
+    command: ["gh", "pr", "list", "--repo", "yazelin/mori-desktop"]
+
+  - name: ssh_to
+    description: SSH 到指定主機
+    parameters:
+      host: { type: string, required: true }
+    command: ["gnome-terminal", "--", "ssh", "{{host}}"]
+
+  - name: docker_ps
+    description: 列當前 running container
+    command: ["docker", "ps"]
+---
+你是 Mori 工作流助手。
+
+我交辦的事可能涉及 git / docker / SSH。可用 skill:
+- gh_pr_list — 看 mori-desktop PR
+- ssh_to(host: 主機名)— 開 terminal SSH
+- docker_ps — 列 container
+
+#file:~/.mori/corrections.md</pre>
+  </div>
+</div>
+
+<h2 class="group-title">VoiceInput 範本(Alt+N)</h2>
+
+<p>VoiceInput 模式只做「字」,不做「事」:STT → 單輪 LLM cleanup → 貼回游標。
+適合語音輸入法情境。</p>
+
+<div class="example">
+  <div class="example-head">
+    <span class="path">voice_input/USER-00.純文字輸入.md</span>
+    <span class="hotkey">Alt+0</span>
+  </div>
+  <div class="example-body">
+    <p>最小版 — 加標點 + 修明顯錯字,保留口語。</p>
+<pre>---
+provider: groq
+cleanup_level: smart
+---
+你是 mori 語音輸入助理。把 STT 輸出的純文字做最小幅度的繁中(台灣用語)校正:
+
+- 修錯字(同音字、相近詞)
+- 補標點(逗號、句號、問號)
+- 切段(長文有自然停頓處換行)
+- 保留原意,不改詞、不縮寫、不擴寫
+
+只輸出處理後的純文字,不要解釋、不要前言。</pre>
+  </div>
+</div>
+
+<div class="example">
+  <div class="example-head">
+    <span class="path">voice_input/USER-01.朋友閒聊.md</span>
+    <span class="hotkey">Alt+1</span>
+  </div>
+  <div class="example-body">
+    <p>聊天場景,允許 emoji + 半形括號吐槽,語氣放鬆。</p>
+<pre>---
+provider: groq
+cleanup_level: smart
+paste_shortcut: ctrl_v
+auto_enter: true   # 貼完按 Enter 直接送出(Slack / Discord 等)
+---
+你是 mori 朋友閒聊輸入助理。
+
+校正原則:
+- 加標點、修錯字、保留口語(「啊」「欸」「對啊」等不刪)
+- 允許半形括號吐槽 (補充)
+- 允許 emoji 若 user 口述「笑臉」「哭」等
+- 中英夾雜詞照原樣(coding / debug / commit 等)
+
+只輸出處理後文字。</pre>
+  </div>
+</div>
+
+<div class="example">
+  <div class="example-head">
+    <span class="path">voice_input/USER-02.正式信件.md</span>
+    <span class="hotkey">Alt+2</span>
+  </div>
+  <div class="example-body">
+    <p>正式書信場景 — 補完整句子、修敬語、不允許口語贅詞。</p>
+<pre>---
+provider: gemini
+cleanup_level: smart
+paste_shortcut: ctrl_v
+---
+你是 mori 正式信件輸入助理。
+
+校正規則:
+- 補完整句(主謂受結構)
+- 修標點為書面標準(「,」「。」「:」「;」「、」)
+- 刪掉口語贅詞(「然後」「就是」「對」「那個」等)
+- 不要主動加敬語,user 講啥就修啥
+- 不改詞義 / 不縮寫 / 不擴寫
+
+只輸出處理後文字,純內文不要 header / footer。</pre>
+  </div>
+</div>
+
+<h2 class="group-title">怎麼用</h2>
+
+<ol>
+  <li>從上面複製想要的範本 → 存成
+    <code>~/.mori/agent/AGENT-NN.顯示名稱.md</code> 或
+    <code>~/.mori/voice_input/USER-NN.顯示名稱.md</code></li>
+  <li>主視窗 <strong>Profiles tab</strong> 會自動列出(或主視窗 <strong>重新 reload</strong>)</li>
+  <li>按熱鍵切過去:<code>Ctrl+Alt+N</code>(agent)/ <code>Alt+N</code>(voice_input),
+    N 是檔名前綴數字</li>
+  <li>按 <code>Ctrl+Alt+Space</code> 開始錄音</li>
+  <li>改 profile 內容後不需重啟,下一次熱鍵會即時讀新內容</li>
+</ol>
+
+<h2>Frontmatter 欄位速查</h2>
+
+<table class="spec-table">
+  <thead><tr><th>key</th><th>用 在</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><code>provider</code></td><td>both</td><td>覆寫全域 <code>provider</code>(groq / gemini / ollama / claude-bash / 等)</td></tr>
+    <tr><td><code>stt_provider</code></td><td>voice</td><td>覆寫全域 <code>stt_provider</code>(groq / whisper-local)</td></tr>
+    <tr><td><code>enabled_skills</code></td><td>agent</td><td>白名單,留空 = 全 built-in 都可用</td></tr>
+    <tr><td><code>shell_skills</code></td><td>agent</td><td>自訂 CLI 包裝(array of {name, description, parameters, command, timeout_secs})</td></tr>
+    <tr><td><code>cleanup_level</code></td><td>voice</td><td><code>smart</code>(LLM)/ <code>minimal</code>(純程式)/ <code>none</code>(raw)</td></tr>
+    <tr><td><code>paste_shortcut</code></td><td>voice</td><td><code>ctrl_v</code>(一般 app)/ <code>ctrl_shift_v</code>(terminal)/ 留空(自動)</td></tr>
+    <tr><td><code>auto_enter</code></td><td>voice</td><td>貼完自動按 Enter 送出(Slack / Discord 等聊天 app 用)</td></tr>
+    <tr><td><code>enable_read</code></td><td>both</td><td>啟用 <code>#file:</code> 預處理(讓 body 引用其他 .md)</td></tr>
+  </tbody>
+</table>
+
+<p>完整欄位定義在 <code>crates/mori-core/src/agent_profile.rs</code> /
+<code>voice_input_profile.rs</code> 的 frontmatter struct。</p>
+
+<div class="book-footer">
+  Mori Docs · Profile 範本
+</div>
+
+</body>
+</html>
