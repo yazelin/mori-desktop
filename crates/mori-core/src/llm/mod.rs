@@ -279,6 +279,43 @@ pub(crate) fn resolve_api_key_at(config_path: Option<&std::path::Path>, key_env_
         .filter(|s| !s.is_empty())
 }
 
+/// 5A-3b: 依序試 chain 內每個 provider,任一成功就回傳。失敗時呼叫
+/// `on_fallback(failed_name, next_name, err)` 通知 caller(用來 emit 事件 +
+/// log warn — sync callback,mori-core 不依賴 Tauri)。
+///
+/// - `chain` 第一個是 primary,後續是 fallback。caller 自行拼好(`std::iter::once(primary)
+///   .chain(routing.fallback_for(ctx).iter().cloned())`)。
+/// - `chain` 空 → 立刻回 `Err`(設計錯誤,caller 至少要給 primary)。
+/// - 成功回 `(ChatResponse, Arc<dyn LlmProvider> /* the one that succeeded */)`。
+///   caller 通常不需要 swap long-lived 引用 — 是 per-call 視角。
+/// - 全部都失敗 → 回最後一個 error(最後一次的失敗訊息最具參考)。
+/// - 不處理 user cancel:Ctrl+Alt+Esc 透過 `JoinHandle::abort()` 砍掉父 task,
+///   in-flight `chat()` future 直接被 drop,本 fn 也跟著 drop,不會再進下一個
+///   fallback attempt。
+pub async fn chat_with_fallback(
+    chain: &[Arc<dyn LlmProvider>],
+    messages: Vec<ChatMessage>,
+    tools: Vec<ToolDefinition>,
+    mut on_fallback: impl FnMut(&str, &str, &anyhow::Error) + Send,
+) -> anyhow::Result<(ChatResponse, Arc<dyn LlmProvider>)> {
+    if chain.is_empty() {
+        anyhow::bail!("chat_with_fallback: empty provider chain (caller bug — must pass at least the primary)");
+    }
+    let mut last_err: Option<anyhow::Error> = None;
+    for (idx, p) in chain.iter().enumerate() {
+        match p.chat(messages.clone(), tools.clone()).await {
+            Ok(resp) => return Ok((resp, p.clone())),
+            Err(e) => {
+                if let Some(next) = chain.get(idx + 1) {
+                    on_fallback(p.name(), next.name(), &e);
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("chat_with_fallback: all providers failed")))
+}
+
 /// 從 `~/.mori/config.json` 蓋出**主 chat provider**。配置:
 /// - `provider`: "groq"(預設) | "ollama" | "claude-cli"
 /// - `providers.<name>.<...>` 各 provider 細節
@@ -333,6 +370,11 @@ pub struct Routing {
     ///   bash-cli-agent → spawn claude → claude call mori skill polish →
     ///   PolishSkill.exec → bash-cli-agent → spawn claude → … (無限遞迴)
     pub skill_fallback: Arc<dyn LlmProvider>,
+    /// 5A-3b: per-context fallback chain — context 名(`agent` /
+    /// `voice_input_cleanup`)→ 依序試的 fallback provider list。call site
+    /// 透過 `fallback_for(ctx)` 拿到 chain,失敗時用 `chat_with_fallback`
+    /// 走 chain。沒設定的 context → 空 slice → 退化成單試 primary。
+    pub fallback_chain: HashMap<String, Vec<Arc<dyn LlmProvider>>>,
 }
 
 impl Routing {
@@ -342,6 +384,15 @@ impl Routing {
             .get(name)
             .cloned()
             .unwrap_or_else(|| self.skill_fallback.clone())
+    }
+
+    /// 5A-3b: 取 context 名的 fallback provider list(不包含 primary)。
+    /// 無對應 → 空 slice,call site 直接退化成單試 primary。
+    pub fn fallback_for(&self, context: &str) -> &[Arc<dyn LlmProvider>] {
+        self.fallback_chain
+            .get(context)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// 從 `~/.mori/config.json` 的 `routing` block 蓋出整套 routing。
@@ -359,20 +410,57 @@ impl Routing {
             .clone()
             .unwrap_or_else(|| default.clone());
 
-        // 收集所有需要構造的 provider names — agent + 所有 skill override values
-        let mut needed: HashSet<String> = HashSet::new();
-        needed.insert(agent_name.clone());
+        // 收集 hard-required provider names — agent + 所有 skill override values。
+        // fallback_chain 不放進來,因為 fallback 容許 build 失敗(continue + warn)。
+        let mut needed_hard: HashSet<String> = HashSet::new();
+        needed_hard.insert(agent_name.clone());
         for v in cfg.skills.values() {
-            needed.insert(v.clone());
+            needed_hard.insert(v.clone());
         }
 
-        // 蓋出每個 unique provider。retry_cb 只發給 groq;其他 None。
+        // Pass 1 hard:蓋出每個 unique hard-required provider。retry_cb 只發給 groq。
+        // 任何 hard provider build 失敗 → bail。
         let mut built: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
-        for name in &needed {
+        for name in &needed_hard {
             let cb = if name == "groq" { retry_cb.clone() } else { None };
             let p = build_named_provider(name, cb)
                 .with_context(|| format!("build provider '{}'", name))?;
             built.insert(name.clone(), p);
+        }
+
+        // 5A-3b Pass 2 fallback:fallback_chain 的 provider 容許 build 失敗。
+        // 名字已 build 過(被 hard 或前一輪 fallback build)的就不重 build。
+        // build 失敗 warn + drop,該 chain 內其他 provider 仍可用。
+        let mut fallback_chain_built: HashMap<String, Vec<Arc<dyn LlmProvider>>> = HashMap::new();
+        for (ctx, names) in &cfg.fallback_chain {
+            let mut chain: Vec<Arc<dyn LlmProvider>> = Vec::new();
+            for name in names {
+                let p = match built.get(name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        let cb = if name == "groq" { retry_cb.clone() } else { None };
+                        match build_named_provider(name, cb) {
+                            Ok(p) => {
+                                built.insert(name.clone(), p.clone());
+                                p
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    context = %ctx,
+                                    provider = %name,
+                                    error = %e,
+                                    "fallback provider build failed — dropping from chain (其他 fallback 仍可用)",
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                };
+                chain.push(p);
+            }
+            if !chain.is_empty() {
+                fallback_chain_built.insert(ctx.clone(), chain);
+            }
         }
 
         let agent = built
@@ -432,12 +520,17 @@ impl Routing {
             agent.clone()
         };
 
+        let fallback_summary: HashMap<String, Vec<String>> = fallback_chain_built
+            .iter()
+            .map(|(k, v)| (k.clone(), v.iter().map(|p| p.name().to_string()).collect()))
+            .collect();
         tracing::info!(
             agent = %agent_name,
             agent_model = %agent.model(),
             agent_tools = agent.supports_tool_calling(),
             skill_fallback = %skill_fallback.name(),
             skill_overrides = ?cfg.skills,
+            fallback_chain = ?fallback_summary,
             "routing built"
         );
 
@@ -445,6 +538,7 @@ impl Routing {
             agent,
             skills,
             skill_fallback,
+            fallback_chain: fallback_chain_built,
         })
     }
 }
@@ -457,6 +551,12 @@ pub struct RoutingConfig {
     pub agent: Option<String>,
     /// `routing.skills` 的 skill→provider 對應表
     pub skills: HashMap<String, String>,
+    /// 5A-3b: per-context fallback chain。Key 是 context 名(目前認得 `agent`
+    /// / `voice_input_cleanup`),value 是依序試的 provider 名 list。主 provider
+    /// 失敗(timeout / 429 / network / 5xx)後依序試 fallback。沒設 = 空 map =
+    /// 維持原行為(error + cancel,不 fallback)。Unknown context key 視同沒設,
+    /// 不 warn — typo 自然會 silently no-op,user 看不到 fallback 觸發。
+    pub fallback_chain: HashMap<String, Vec<String>>,
 }
 
 fn read_provider_config() -> String {
@@ -499,7 +599,35 @@ pub fn read_routing_config_at(path: &std::path::Path) -> RoutingConfig {
         })
         .unwrap_or_default();
 
-    RoutingConfig { agent, skills }
+    // 5A-3b: routing.fallback_chain.<context> = [<provider>, ...]
+    // 非 array value 整個 context 丟掉;array 內非 string 元素 silently 過濾。
+    let fallback_chain: HashMap<String, Vec<String>> = json
+        .pointer("/routing/fallback_chain")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .filter_map(|(ctx, v)| {
+                    let arr = v.as_array()?;
+                    let names: Vec<String> = arr
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if names.is_empty() {
+                        None
+                    } else {
+                        Some((ctx.clone(), names))
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    RoutingConfig {
+        agent,
+        skills,
+        fallback_chain,
+    }
 }
 
 #[cfg(test)]
@@ -592,6 +720,163 @@ mod routing_tests {
         assert_eq!(cfg.skills.len(), 1);
         assert!(cfg.skills.contains_key("a"));
         assert!(!cfg.skills.contains_key("b"));
+    }
+
+    // ─── 5A-3b: fallback_chain 解析 ─────────────────────────────────────
+
+    #[test]
+    fn fallback_chain_missing_returns_empty_map() {
+        let dir = write_config(r#"{"routing":{"agent":"groq"}}"#);
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert!(cfg.fallback_chain.is_empty());
+    }
+
+    #[test]
+    fn fallback_chain_single_context() {
+        let dir = write_config(
+            r#"{"routing":{"fallback_chain":{"voice_input_cleanup":["claude-bash"]}}}"#,
+        );
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert_eq!(cfg.fallback_chain.len(), 1);
+        assert_eq!(
+            cfg.fallback_chain.get("voice_input_cleanup").map(|v| v.as_slice()),
+            Some(["claude-bash".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn fallback_chain_multi_context() {
+        let dir = write_config(
+            r#"{"routing":{"fallback_chain":{
+                "agent":["ollama","claude-bash"],
+                "voice_input_cleanup":["gemini"]
+            }}}"#,
+        );
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert_eq!(cfg.fallback_chain.get("agent").map(|v| v.len()), Some(2));
+        assert_eq!(
+            cfg.fallback_chain.get("voice_input_cleanup").map(|v| v.len()),
+            Some(1),
+        );
+    }
+
+    #[test]
+    fn fallback_chain_non_string_elements_filtered() {
+        // user 不小心打 [1, "claude-bash"] — 只留 string,不 panic
+        let dir = write_config(
+            r#"{"routing":{"fallback_chain":{"agent":[42,"claude-bash",null,""]}}}"#,
+        );
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert_eq!(
+            cfg.fallback_chain.get("agent").map(|v| v.as_slice()),
+            Some(["claude-bash".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn fallback_chain_non_array_value_skipped() {
+        // user 不小心打成 string 而非 array — 整個 context 丟掉,不留空 chain
+        let dir = write_config(
+            r#"{"routing":{"fallback_chain":{"agent":"ollama"}}}"#,
+        );
+        let cfg = read_routing_config_at(&dir.path().join("config.json"));
+        assert!(cfg.fallback_chain.is_empty(), "string value should be dropped");
+    }
+
+    // ─── 5A-3b: chat_with_fallback ─────────────────────────────────────
+
+    struct OkProvider(&'static str);
+    #[async_trait::async_trait]
+    impl LlmProvider for OkProvider {
+        fn name(&self) -> &'static str { self.0 }
+        fn model(&self) -> &str { "mock" }
+        async fn chat(
+            &self,
+            _: Vec<ChatMessage>,
+            _: Vec<ToolDefinition>,
+        ) -> anyhow::Result<ChatResponse> {
+            Ok(ChatResponse {
+                content: Some(format!("ok-{}", self.0)),
+                tool_calls: vec![],
+            })
+        }
+    }
+
+    struct FailProvider(&'static str);
+    #[async_trait::async_trait]
+    impl LlmProvider for FailProvider {
+        fn name(&self) -> &'static str { self.0 }
+        fn model(&self) -> &str { "mock" }
+        async fn chat(
+            &self,
+            _: Vec<ChatMessage>,
+            _: Vec<ToolDefinition>,
+        ) -> anyhow::Result<ChatResponse> {
+            Err(anyhow::anyhow!("fail-from-{}", self.0))
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_primary_succeeds_no_callback() {
+        let chain: Vec<Arc<dyn LlmProvider>> = vec![Arc::new(OkProvider("primary"))];
+        let mut callback_count = 0;
+        let (resp, used) = chat_with_fallback(&chain, vec![], vec![], |_, _, _| {
+            callback_count += 1;
+        })
+        .await
+        .expect("primary succeeds");
+        assert_eq!(used.name(), "primary");
+        assert_eq!(resp.content.as_deref(), Some("ok-primary"));
+        assert_eq!(callback_count, 0, "callback shouldn't fire when primary succeeds");
+    }
+
+    #[tokio::test]
+    async fn fallback_primary_fails_secondary_succeeds() {
+        let chain: Vec<Arc<dyn LlmProvider>> = vec![
+            Arc::new(FailProvider("p1")),
+            Arc::new(OkProvider("p2")),
+        ];
+        let mut events: Vec<(String, String)> = Vec::new();
+        let (resp, used) = chat_with_fallback(&chain, vec![], vec![], |failed, next, _e| {
+            events.push((failed.to_string(), next.to_string()));
+        })
+        .await
+        .expect("fallback succeeds");
+        assert_eq!(used.name(), "p2");
+        assert_eq!(resp.content.as_deref(), Some("ok-p2"));
+        assert_eq!(events, vec![("p1".to_string(), "p2".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn fallback_all_fail_returns_last_error() {
+        let chain: Vec<Arc<dyn LlmProvider>> = vec![
+            Arc::new(FailProvider("p1")),
+            Arc::new(FailProvider("p2")),
+        ];
+        let mut callbacks = 0;
+        // Arc<dyn LlmProvider> 沒 Debug,不能用 expect_err — 手動 match
+        let err = match chat_with_fallback(&chain, vec![], vec![], |_, _, _| {
+            callbacks += 1;
+        })
+        .await
+        {
+            Ok(_) => panic!("expected all to fail"),
+            Err(e) => e,
+        };
+        // 最後 attempt 的 error 訊息該帶 p2
+        assert!(format!("{err:#}").contains("fail-from-p2"), "got: {err:#}");
+        // 只 fire 1 次(p1→p2 切換時)— p2 失敗時沒下一個可切了
+        assert_eq!(callbacks, 1);
+    }
+
+    #[tokio::test]
+    async fn fallback_empty_chain_errors() {
+        let chain: Vec<Arc<dyn LlmProvider>> = vec![];
+        let err = match chat_with_fallback(&chain, vec![], vec![], |_, _, _| {}).await {
+            Ok(_) => panic!("expected empty chain to error"),
+            Err(e) => e,
+        };
+        assert!(format!("{err:#}").contains("empty provider chain"), "got: {err:#}");
     }
 
     // ─── 5J: resolve_api_key 與 gemini provider 常數 ───────────────────────
