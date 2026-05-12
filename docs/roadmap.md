@@ -18,9 +18,6 @@
 ### 5G-10 — Profile 自動遷移
 既有 voice profile 含 action flag 的自動搬到 `agent/`(手動可做,不擋使用)。
 
-### 5A-3b — Auto-fallback chain
-Groq TPD 觸頂自動切 ollama / claude(現在要手改 config)。
-
 ### 5E-2 — macOS / Windows voice-input paste-back
 目前只 Linux 走 `LinuxPasteController`(arboard + ydotool),其他平台還沒接。
 等 contributor 補。

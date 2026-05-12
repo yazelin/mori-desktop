@@ -6,6 +6,38 @@
 
 ---
 
+## 5A-3b — Per-context opt-in LLM fallback chain(2026-05-13)
+
+主 provider 失敗(Groq 429 quota / timeout / network / 5xx)以前只能 Phase::Error
++ user 手動切 config — 過去 roadmap 的「auto-fallback chain」設計回到桌上一輪後,
+user 自己抓出設計問題:「沒配置 fallback 前不該自動切,silent 切會傷透明度」。
+這版接受該回饋,做成 **opt-in、per-context** 機制:
+
+- **Schema**:`~/.mori/config.json` `routing.fallback_chain.{agent,voice_input_cleanup}`
+  各自一個 provider name list。沒設 = 維持原行為(error + cancel)
+- **觸發**:任何 `provider.chat()` 回 `Err`(quota / timeout / network / 5xx)都
+  triggers fallback。`Ctrl+Alt+Esc` 中斷不 triggers(那是 user intent,直接砍
+  pipeline)
+- **Agent 模式 option (a)**:fallback 觸發後 `respond_with_mode` 在新 provider
+  上從頭重跑(避免 `tool_call_id` 跨 provider 認不得 — groq `call_xxx` /
+  ollama incrementing / claude-bash 自訂格式都不同,mid-turn 切會 400)。所以
+  agent 模式 fallback 只 cover「第一次 LLM call 失敗」場景
+- **VoiceInput cleanup**:單輪 chat call,直接 wrap `chat_with_fallback`
+- **Build 失敗的 fallback provider**:warn + drop,其他 fallback 仍可用 — 不擋整個
+  routing build。Agent / skill 的 hard provider build 失敗仍 abort(行為不變)
+- **Transparency**:fallback 觸發時 ChatPanel 渲染一行系統訊息「`groq` 失敗,
+  自動改用 `ollama` 重試 — &lt;原因&gt;」;FloatingMori chip 透過既有
+  `voice-input-status` channel 即時改顯示新 provider 名;`provider-changed`
+  event 同步 emit 給其他 UI consumer。下次 pipeline 開始(recording / transcribing)
+  時 ChatPanel 自動清掉舊 system message
+- **New `mori_core::llm::chat_with_fallback(chain, messages, tools, on_fallback)`**:
+  sync callback signature(mori-core 不依賴 Tauri AppHandle),caller 拼好
+  primary + fallback 一條 slice 傳進來
+- **9 unit tests**:RoutingConfig.fallback_chain 5 個解析 edge case + chat_with_fallback
+  4 個 scenarios(primary succeed / fallback succeed / all fail / empty chain)
+- **docs**:`docs/providers.html` 新「進階:Fallback chain」段附範例 + 全規則;
+  `docs/roadmap.md` 5A-3b 整段砍掉
+
 ## 5E-3 — VoiceInput 可選載入相關記憶 / voice_dict 校正詞庫(2026-05-12)
 
 VoiceInput cleanup pipeline 過去純單輪 LLM 轉換,完全不參與 memory(`remember`

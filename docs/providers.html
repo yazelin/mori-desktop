@@ -250,6 +250,31 @@ profile body...
 
 <p><code>voice_input_cleanup</code> provider 推薦 <code>groq</code>(gpt-oss-120b 1-2 秒 + 中文標點品質好)。釘 <code>claude-cli</code> 跑 user 自己 quota 也行。</p>
 
+<h2>進階:Fallback chain</h2>
+<p>主 provider 失敗(429 quota / timeout / network / 5xx 都算)時自動切下一個 provider 重試 — opt-in,沒設就維持「error + cancel 該次行為」的安全預設。</p>
+
+<pre><code>{
+  "routing": {
+    "agent": "groq",
+    "fallback_chain": {
+      "agent":               ["ollama", "claude-bash"],
+      "voice_input_cleanup": ["gemini"]
+    }
+  }
+}</code></pre>
+
+<p>規則:</p>
+<ul>
+  <li>Key 是 <strong>context 名</strong>:目前認得 <code>agent</code>(Agent 模式 LLM call)、<code>voice_input_cleanup</code>(VoiceInput cleanup LLM call)。其他 key 視同沒設(typo 不會 panic)</li>
+  <li>Value 是 <strong>依序試的 provider list</strong>。主失敗 → 試第一個 fallback → 失敗 → 試第二個 → 全失敗才回 error(取最後 attempt 的訊息)</li>
+  <li>Provider 名同 routing 規格:built-in(groq / gemini / ollama / claude-bash / claude-cli / gemini-bash / codex-bash / gemini-cli / codex-cli)或 config.json `providers.&lt;name&gt;` 內定的自訂 OpenAI-compat 名</li>
+  <li><strong>觸發條件</strong>:任何 <code>provider.chat()</code> 回 <code>Err</code> — quota 429 / timeout / network / 5xx 都吃</li>
+  <li><strong>不觸發</strong>:user 按 <code>Ctrl+Alt+Esc</code> 中斷 — 那是 user intent,直接砍整個 pipeline,不會 fallback</li>
+  <li><strong>Transparency</strong>:fallback 觸發時 ChatPanel 出現一行系統訊息「<code>groq</code> 失敗,自動改用 <code>ollama</code> 重試 — &lt;原因&gt;」;FloatingMori chip 即時改顯示新 provider 名;log 同步寫 warn</li>
+  <li><strong>Agent 模式的特殊性</strong>:走 option (a)— fallback 觸發後整個 <code>respond_with_mode</code> 在新 provider 從頭重跑(避免 <code>tool_call_id</code> 跨 provider 認不得)。所以 fallback 在 agent 模式只 cover「第一次 LLM call 失敗」場景,multi-turn 中途失敗時 fallback 不會 mid-turn 接續</li>
+  <li><strong>Build 失敗的 fallback</strong>:啟動時若某個 fallback provider build 失敗(例 ollama 沒裝 binary),warn 後從 chain 拔掉,其他 fallback 仍可用 — 不擋整個 routing build</li>
+</ul>
+
 <h2>Key 探測順序</h2>
 <ol>
   <li>OS 環境變數(如 <code>GROQ_API_KEY</code>)</li>
