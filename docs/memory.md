@@ -97,6 +97,7 @@ pub enum MemoryType {
     SkillOutcome,
     Project,
     Reference,
+    VoiceDict,         // 5E-3: VoiceInput cleanup 校正詞庫
     Other(String),
 }
 
@@ -119,8 +120,45 @@ pub trait MemoryStore: Send + Sync {
 
     /// 訂閱事件流(寫入 / 更新 / 刪除)
     fn observe(&self) -> BoxStream<'static, MemoryEvent>;
+
+    /// 5E-3: 按 type 列出 memory(逐檔讀 frontmatter 過濾)
+    async fn list_by_types(&self, types: &[MemoryType]) -> Result<Vec<Memory>>;
 }
 ```
+
+## Memory type 一覽
+
+| type | 寫入 | 讀取 | 用途 |
+|---|---|---|---|
+| `user_identity` | Agent | Core index | 「我是誰」`遲名 / 角色 / 偏好風格` |
+| `preference` | Agent | Core index | 「我喜歡」`簡潔回應 / 不要 emoji` 之類個人偏好 |
+| `skill_outcome` | Agent(自動) | Core index | Skill 執行結果(translate / polish 後續可 recall) |
+| `project` | Agent | Core index | 進行中的專案脈絡 |
+| `reference` | Agent | Core index | 外部 link / Slack channel / Linear project 等 |
+| **`voice_dict`** | Agent | **VoiceInput inject_memory_types** | **5E-3:校正詞庫** — Whisper 容易翻錯的人名 / 公司名 / 專有名詞 / 個人慣用語。Voice profile 設 `inject_memory_types: [voice_dict]` 後拼進 cleanup LLM system prompt |
+| `Other(X)` | Agent | 自訂用途 | 你自己想分 type 都行 |
+
+### voice_dict 範例
+
+```markdown
+---
+name: STT 校正詞庫
+description: 人名 / 公司名 / 專有名詞 Whisper 容易翻錯的清單
+type: voice_dict
+created: 2026-05-12T22:00:00Z
+last_used: 2026-05-12T22:00:00Z
+---
+
+- **Annuli**:Mori 的長期記憶 repo 名,Whisper 容易翻成「安奴利」/「安列利」
+- **world-tree**:不要翻成「世界樹」,英文保留
+- **智凱**:同事人名,Whisper 常翻成「植凱」/「致凱」
+- 「也就是」是我慣用語,不要被改成「就是」
+```
+
+要啟用:
+1. **Agent 模式**(`Ctrl+Alt+Space`)講「幫我記一個 voice_dict:Annuli 不要翻成安奴利」→ Mori `remember` skill 寫到 `~/.mori/memory/`
+2. **Voice profile** 加 `inject_memory_types: [voice_dict]`(或全域 `config.json` `voice_input.inject_memory_types: ["voice_dict"]`)
+3. 下次 `Ctrl+Alt+Space` 講話時 cleanup LLM 會看到這份詞庫,校正時參考
 
 ## Phase 1 實作:`LocalMarkdownMemoryStore`
 

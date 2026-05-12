@@ -6,6 +6,42 @@
 
 ---
 
+## 5E-3 — VoiceInput 可選載入相關記憶 / voice_dict 校正詞庫(2026-05-12)
+
+VoiceInput cleanup pipeline 過去純單輪 LLM 轉換,完全不參與 memory(`remember`
+/ `recall_memory` 只在 Agent 模式)。痛點:Whisper 一直把「Annuli」翻成
+「安奴利」/「安列利」、人名 / 公司名常被翻錯,user 沒有地方放「校正詞庫」。
+
+5E-3 開:**VoiceInput read-only inject memory by type**(寫入仍只走 Agent)。
+
+- **新 `MemoryType::VoiceDict` variant**:校正詞庫專用,跟 user_identity /
+  preference / project / reference / skill_outcome 並列為 first-class type。
+  `MemoryType::as_str()` + `MemoryType::parse()` 集中 stringify / parse,
+  DRY 掉 markdown.rs + main.rs 兩處重複(`5E-3a`)
+- **`MemoryStore::list_by_types(&[MemoryType])`** trait default impl:
+  逐檔 frontmatter 過濾(memory 通常 <50 篇,IO 量小不需 cache)
+- **Voice profile frontmatter 新鍵 `inject_memory_types: [voice_dict]`**:
+  inline array 寫法。`None`(沒寫)→ 走 config 全域 fallback;`Some(vec![])`
+  → 強制不 inject(即使 config 全域有設)。新增 hand-rolled
+  `parse_inline_string_array` helper(`5E-3b`)
+- **全域 `config.json` `voice_input.inject_memory_types`** 作為 profile 沒設時
+  的 default。`resolve_inject_memory_types(profile)` 統一 fallback 鏈,各 string
+  經 `MemoryType::parse` 轉
+- **Voice pipeline 注入點**(`crates/mori-tauri/src/main.rs:1449` 附近):
+  只在 `cleanup_level: smart` fetch memory(minimal/none 跳 LLM 不需要);
+  新 `build_voice_dict_section()` helper 拼成「校正參考」段落,提示 LLM
+  「這是參考詞表,**不是** user 想說的話,不要照搬輸出」。失敗 fallback 空
+  字串,不擋 cleanup pipeline(`5E-3c`)
+- **UI**:`MemoryTab` `TYPE_OPTIONS` 加 `voice_dict`(user 能建這型 memory);
+  `ProfileEditor` 加 `MemoryTypeChipsEditor` 多選 chips,讓 voice profile
+  勾選要 inject 哪些 type;`ConfigTab` voice_input section 加全域 fallback
+  chips(`5E-3d`)
+- **7 unit tests**:list_by_types filter / MemoryType parse + roundtrip /
+  inline array parser / profile inject_memory_types Some/None/empty / resolve
+  fallback chain
+- **docs**:`docs/memory.md` 加完整 type 對照表 + `voice_dict` 範例 +
+  Agent remember → VoiceInput inject 串接流程
+
 ## 5N — voice profile 鍵大小寫整合 + 自訂 OpenAI-compat 端點(2026-05-12)
 
 把過去散在每張 voice profile 的 `ZEROTYPE_AIPROMPT_*` frontmatter(端點 + key
