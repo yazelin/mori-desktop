@@ -160,6 +160,9 @@ mod set_mode;
 // Phase 4C: 反白 → 講話 → 結果貼回
 mod paste_selection;
 
+// Phase 3B: URL 偵測 + 抓網址內容
+mod fetch_url;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -173,6 +176,8 @@ pub use translate::TranslateSkill;
 
 pub use set_mode::SetModeSkill;
 pub use paste_selection::PasteSelectionBackSkill;
+
+pub use fetch_url::FetchUrlSkill;
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 

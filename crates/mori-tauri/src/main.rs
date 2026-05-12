@@ -28,8 +28,8 @@ use mori_core::paste::PasteController;
 #[cfg(target_os = "linux")]
 use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
-    ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
-    RememberSkill, SetModeSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
+    ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill, PolishSkill,
+    RecallMemorySkill, RememberSkill, SetModeSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
@@ -624,6 +624,7 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
     registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
     registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
     registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+    registry.register(Arc::new(FetchUrlSkill::new()));
     registry.register(Arc::new(RememberSkill::new(mem_arc.clone())));
     registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
     registry.register(Arc::new(ForgetMemorySkill::new(mem_arc.clone())));
@@ -1082,7 +1083,16 @@ async fn run_agent_pipeline(
 
     // Phase 3A:抓現場 context(目前只有剪貼簿)。Provider 是 Tauri 平台特定。
     let ctx_provider = context_provider::TauriContextProvider::new(app.clone());
-    let ctx = ctx_provider.capture().await;
+    let mut ctx = ctx_provider.capture().await;
+    // Phase 3B: 從 clipboard / selection / transcript 抽 URL
+    populate_urls_detected(&mut ctx, &transcript);
+    if !ctx.urls_detected.is_empty() {
+        tracing::info!(
+            urls = ctx.urls_detected.len(),
+            first = %ctx.urls_detected.first().map(|s| s.as_str()).unwrap_or(""),
+            "context urls_detected",
+        );
+    }
     if let Some(clip) = &ctx.clipboard {
         tracing::info!(
             chars = clip.chars().count(),
@@ -1171,6 +1181,9 @@ async fn run_agent_pipeline(
         }
         if allows("compose") {
             registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+        }
+        if allows("fetch_url") {
+            registry.register(Arc::new(mori_core::skill::FetchUrlSkill::new()));
         }
         // set_mode 永遠註冊（「晚安」「醒醒」是核心功能，無法被 disable）
         let mode_controller: Arc<dyn ModeController> = Arc::new(StateModeController {
@@ -1334,7 +1347,9 @@ async fn run_voice_input_pipeline(
     // 5J: 統一單層 profile body + Rust 注入 context section
     let win_ctx = state.hotkey_window_context.lock().clone();
     let ctx_provider = context_provider::TauriContextProvider::new(app.clone());
-    let mori_ctx = ctx_provider.capture().await;
+    let mut mori_ctx = ctx_provider.capture().await;
+    // Phase 3B: VoiceInput 也偵測 URL,LLM cleanup 時知道 transcript 裡有網址
+    populate_urls_detected(&mut mori_ctx, &transcript);
 
     let body_expanded = mori_core::agent_profile::preprocess_file_includes(
         &profile.body,
@@ -1501,6 +1516,29 @@ async fn run_voice_input_pipeline(
 /// 把使用者的「現場資訊」整理成結構清晰的 markdown 區塊，附加在 profile body
 /// 之後。包含時間 / 視窗 / 剪貼簿 / 反白 / 記憶（agent 才用），所有資訊都在
 /// 一處組裝，profile body 不用再寫這些東西。
+/// Phase 3B: 從 clipboard / selected_text / transcript 抽 URL,填到 ctx.urls_detected。
+/// 各來源合併、去重、依出現順序。
+fn populate_urls_detected(ctx: &mut MoriContext, transcript: &str) {
+    use mori_core::url_detect::extract_urls;
+    let mut all: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let push = |all: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, urls: Vec<String>| {
+        for u in urls {
+            if seen.insert(u.clone()) {
+                all.push(u);
+            }
+        }
+    };
+    push(&mut all, &mut seen, extract_urls(transcript));
+    if let Some(c) = &ctx.clipboard {
+        push(&mut all, &mut seen, extract_urls(c));
+    }
+    if let Some(s) = &ctx.selected_text {
+        push(&mut all, &mut seen, extract_urls(s));
+    }
+    ctx.urls_detected = all;
+}
+
 fn build_context_section(
     win_ctx: &HotkeyWindowContext,
     mori_ctx: &MoriContext,
@@ -1539,6 +1577,14 @@ fn build_context_section(
             "- 反白文字: {}\n",
             mori_ctx.selected_text.as_deref().unwrap_or("(無)"),
         ));
+    }
+
+    // Phase 3B: 從 transcript / clipboard / selection 抽到的 URL
+    if !mori_ctx.urls_detected.is_empty() {
+        out.push_str("\n**偵測到的網址** (使用者引用的 URL,需要時呼叫 `fetch_url` 拿內容)\n");
+        for u in &mori_ctx.urls_detected {
+            out.push_str(&format!("- {u}\n"));
+        }
     }
 
     if let Some(idx) = memory_index {

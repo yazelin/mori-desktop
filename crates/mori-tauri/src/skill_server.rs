@@ -129,6 +129,8 @@ fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
     registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
     registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
     registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+    // Phase 3B: URL fetching
+    registry.register(Arc::new(mori_core::skill::FetchUrlSkill::new()));
 
     // Memory skills
     registry.register(Arc::new(RememberSkill::new(memory.clone())));
