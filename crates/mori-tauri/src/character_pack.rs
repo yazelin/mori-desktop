@@ -107,6 +107,11 @@ const SPRITE_RECORDING: &[u8] = include_bytes!("../../../public/floating/mori-re
 const SPRITE_THINKING: &[u8] = include_bytes!("../../../public/floating/mori-thinking.png");
 const SPRITE_DONE: &[u8] = include_bytes!("../../../public/floating/mori-done.png");
 const SPRITE_ERROR: &[u8] = include_bytes!("../../../public/floating/mori-error.png");
+// 5P-7+:walking / dragging 兩個 optional state 也內嵌 placeholder(都是 idle.png
+// copy 一份),避免 IPC fallback chain 每次 trigger 都跑到第 3 階(自己 idle)。
+// 等正式 sprite generator 出真 16-frame walking / dragging sheet 後覆蓋同檔名。
+const SPRITE_WALKING: &[u8] = include_bytes!("../../../public/floating/mori-walking.png");
+const SPRITE_DRAGGING: &[u8] = include_bytes!("../../../public/floating/mori-dragging.png");
 
 pub fn characters_dir() -> PathBuf {
     crate::mori_dir().join("characters")
@@ -154,6 +159,8 @@ pub fn ensure_default() -> Result<()> {
         ("thinking", SPRITE_THINKING),
         ("done", SPRITE_DONE),
         ("error", SPRITE_ERROR),
+        ("walking", SPRITE_WALKING),
+        ("dragging", SPRITE_DRAGGING),
     ] {
         let p = sprite_dir.join(format!("{state}.png"));
         if !p.exists() {
@@ -220,6 +227,8 @@ fn default_manifest() -> CharacterManifest {
         ("thinking", "loop", 2000),
         ("done", "one-shot", 600),
         ("error", "one-shot", 800),
+        ("walking", "loop", 1000),
+        ("dragging", "loop", 1500),
     ] {
         loop_modes.insert(state.to_string(), mode.to_string());
         loop_durations_ms.insert(state.to_string(), dur);
@@ -241,8 +250,10 @@ fn default_manifest() -> CharacterManifest {
             "thinking".into(),
             "done".into(),
             "error".into(),
+            "walking".into(),
+            "dragging".into(),
         ],
-        optional_states: vec!["walking".into(), "dragging".into()],
+        optional_states: vec![],
         loop_modes,
         loop_durations_ms,
         sprite_spec: SpriteSpec {
