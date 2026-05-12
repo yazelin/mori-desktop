@@ -39,6 +39,17 @@ const BUILT_IN_SKILLS = [
   "ask_chatgpt", "ask_gemini", "find_youtube", "paste_selection_back",
 ];
 
+// 5E-3: VoiceInput cleanup 可選 inject 的 memory type — voice profile 內勾選後,
+// 對應 ~/.mori/memory/ 那些 type 的 memory 會被拼進 cleanup LLM 的 system prompt。
+const INJECTABLE_MEMORY_TYPES = [
+  "voice_dict", // 校正詞庫(人名 / 公司名 / 專有名詞)
+  "preference",
+  "user_identity",
+  "project",
+  "reference",
+  "skill_outcome",
+];
+
 function FormRow({
   label,
   hint,
@@ -163,6 +174,16 @@ function FrontmatterForm({
               }}
             />
           </FormRow>
+
+          <FormRow
+            label="inject_memory_types"
+            hint="cleanup LLM 注入 ~/.mori/memory 內這些 type 的 memory(空 = 走 config 預設;勾任一 = profile 自己決定)"
+          >
+            <MemoryTypeChipsEditor
+              value={Array.isArray(fm.inject_memory_types) ? fm.inject_memory_types : []}
+              onChange={(v) => patch("inject_memory_types", v)}
+            />
+          </FormRow>
         </>
       )}
 
@@ -174,6 +195,35 @@ function FrontmatterForm({
           />
         </FormRow>
       )}
+    </div>
+  );
+}
+
+// ─── Memory type chips (5E-3: VoiceInput inject_memory_types)──────
+
+function MemoryTypeChipsEditor({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const toggle = (t: string) => {
+    if (value.includes(t)) onChange(value.filter((x) => x !== t));
+    else onChange([...value, t]);
+  };
+  return (
+    <div className="mori-skill-chips">
+      {INJECTABLE_MEMORY_TYPES.map((t) => (
+        <button
+          key={t}
+          className={`mori-skill-chip ${value.includes(t) ? "on" : ""}`}
+          onClick={() => toggle(t)}
+          type="button"
+        >
+          {value.includes(t) ? "✓ " : ""}{t}
+        </button>
+      ))}
     </div>
   );
 }

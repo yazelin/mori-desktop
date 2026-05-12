@@ -31,6 +31,7 @@ const TYPE_OPTIONS = [
   "skill_outcome",
   "project",
   "reference",
+  "voice_dict", // 5E-3:VoiceInput cleanup 校正詞庫 / 專有名詞 / 個人慣用語
 ];
 
 function FormRow({

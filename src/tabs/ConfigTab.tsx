@@ -215,6 +215,44 @@ function ThemeSection() {
   );
 }
 
+// 5E-3: VoiceInput inject_memory_types chips。同 ProfileEditor 的
+// MemoryTypeChipsEditor 邏輯,獨立放這避免兩個 tsx 互相 import。
+const INJECTABLE_MEMORY_TYPES = [
+  "voice_dict",
+  "preference",
+  "user_identity",
+  "project",
+  "reference",
+  "skill_outcome",
+];
+
+function ConfigMemoryTypeChips({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const toggle = (t: string) => {
+    if (value.includes(t)) onChange(value.filter((x) => x !== t));
+    else onChange([...value, t]);
+  };
+  return (
+    <div className="mori-skill-chips">
+      {INJECTABLE_MEMORY_TYPES.map((t) => (
+        <button
+          key={t}
+          type="button"
+          className={`mori-skill-chip ${value.includes(t) ? "on" : ""}`}
+          onClick={() => toggle(t)}
+        >
+          {value.includes(t) ? "✓ " : ""}{t}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ConfigTab() {
   const [raw, setRaw] = useState<string>("");
   const [orig, setOrig] = useState<string>("");
@@ -586,6 +624,28 @@ function ConfigTab() {
             {/* 5N: 移除 dead UI — 全域 voice_input.auto_enter 寫進 config.json
                 沒人讀,profile 內 enable_auto_enter 才是真生效的開關。設定請在
                 ProfileEditor 每個 voice profile 自己勾。 */}
+
+            <FormRow
+              label="inject_memory_types"
+              hint="cleanup LLM 注入哪些 memory type 當校正詞庫(profile 沒設時的全域 default)"
+            >
+              <ConfigMemoryTypeChips
+                value={Array.isArray(cfg.voice_input?.inject_memory_types)
+                  ? cfg.voice_input!.inject_memory_types
+                  : []}
+                onChange={(next) =>
+                  applyPatch((c) => {
+                    const v = ensureSubObj(c, "voice_input");
+                    if (next.length === 0) {
+                      delete v.inject_memory_types;
+                      if (Object.keys(v).length === 0) delete c.voice_input;
+                    } else {
+                      v.inject_memory_types = next;
+                    }
+                  })
+                }
+              />
+            </FormRow>
           </Section>
         </>
       ) : (
