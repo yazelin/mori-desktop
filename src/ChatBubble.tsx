@@ -47,8 +47,10 @@ function ChatBubble() {
     const unlistenHide = listen("chat-bubble-hide", async () => {
       console.log("[chat_bubble] hide");
       try {
-        await win.hide();
-      } catch (err) { console.error("[chat_bubble] hide error", err); }
+        // 5K-1c: 跟 picker 同樣策略,移 off-screen 而非 hide() —
+        // visible 保留,WMClass group 已建立,後續 show 不會再造成 dock 堆疊
+        await win.setPosition(new LogicalPosition(-10000, -10000));
+      } catch (err) { console.error("[chat_bubble] move off-screen error", err); }
       setText("");
     });
 

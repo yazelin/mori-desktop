@@ -66,9 +66,12 @@ function Picker() {
   const close = async () => {
     setOpen(false);
     const win = getCurrentWindow();
+    // 5K-1c: Wayland 對 hide/show 反覆切換 focus 給不穩,改用「保持 visible 但移
+    // off-screen」— 第一次 show() 後 GNOME 把 picker 歸到 Mori-tauri WMClass group
+    // (因 skipTaskbar 不堆 dock),之後 setPosition 進/出畫面 focus 穩。
     try {
-      await win.hide();
-    } catch (e) { console.error("[picker] hide failed", e); }
+      await win.setPosition(new LogicalPosition(-10000, -10000));
+    } catch (e) { console.error("[picker] move off-screen failed", e); }
   };
 
   const confirm = async () => {
@@ -103,6 +106,8 @@ function Picker() {
       setVoiceIdx(0);
       setAgentIdx(0);
       await centerOnPrimaryMonitor();
+      // 第一次 show()(visible:false → true);之後 close 不 hide 只移 off-screen,
+      // 所以這裡 show() 第二次以後是 no-op 但安全。
       try { await win.show(); } catch (e) { console.error("[picker] show failed", e); }
       setOpen(true);
       // Wayland 救援:多次 setFocus + focus rootRef(state 還沒 commit 前先 retry)
