@@ -84,9 +84,19 @@
 }
 
 .mori-sidebar-item-icon {
-  font-size: 16px;
+  /* line-art SVG;color inherit 自 sidebar-item(active 變亮) */
   width: 20px;
-  text-align: center;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* 跟文字略低調(非 active 時) */
+  opacity: 0.85;
+}
+.mori-sidebar-item.active .mori-sidebar-item-icon {
+  opacity: 1;
+  color: rgba(168, 197, 162, 0.98); /* forest-soft active */
 }
 .mori-sidebar-item-text {
   display: flex;
