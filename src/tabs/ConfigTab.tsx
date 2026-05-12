@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
+import { Select } from "../Select";
 
 type SaveStatus =
   | { kind: "idle" }
@@ -189,20 +190,15 @@ function ThemeSection() {
       hint="主視窗配色。內建 Mori Dark / Mori Light;放任何 *.json 到 themes 資料夾即可加入自訂 theme(VSCode-like)。"
     >
       <FormRow label="theme" hint="active 樣式">
-        <select
-          className="mori-input"
+        <Select
           value={active}
-          onChange={(e) => handleChange(e.target.value)}
+          onChange={handleChange}
           disabled={busy}
-        >
-          {themes.map((t) => (
-            <option key={t.stem} value={t.stem}>
-              {t.name}
-              {t.builtin ? "" : "  (custom)"}
-              {`  · ${t.base}`}
-            </option>
-          ))}
-        </select>
+          options={themes.map((t) => ({
+            value: t.stem,
+            label: `${t.name}${t.builtin ? "" : "  (custom)"}  · ${t.base}`,
+          }))}
+        />
       </FormRow>
       <FormRow label="themes folder" hint="放 *.json 進去會列在上面下拉">
         <div className="mori-theme-path-row">
@@ -381,26 +377,18 @@ function ConfigTab() {
             hint="所有 profile 沒指定 provider 時用這個。VoiceInput profile 可以再 override 自己的 stt_provider。"
           >
             <FormRow label="provider" hint="主對話 / agent LLM">
-              <select
-                className="mori-input"
+              <Select
                 value={getStr(cfg, "provider", "groq")}
-                onChange={(e) =>
-                  applyPatch((c) => setStrOrUndef(c, "provider", e.target.value))
-                }
-              >
-                {ALL_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+                onChange={(v) => applyPatch((c) => setStrOrUndef(c, "provider", v))}
+                options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
+              />
             </FormRow>
             <FormRow label="stt_provider" hint="Whisper STT">
-              <select
-                className="mori-input"
+              <Select
                 value={getStr(cfg, "stt_provider", "groq")}
-                onChange={(e) =>
-                  applyPatch((c) => setStrOrUndef(c, "stt_provider", e.target.value))
-                }
-              >
-                {STT_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+                onChange={(v) => applyPatch((c) => setStrOrUndef(c, "stt_provider", v))}
+                options={STT_PROVIDERS.map((p) => ({ value: p, label: p }))}
+              />
             </FormRow>
           </Section>
 
@@ -524,24 +512,23 @@ function ConfigTab() {
             hint="個別 skill 走不同 provider。沒設 = 全部用上面 provider。"
           >
             <FormRow label="agent" hint="agent loop 用哪個 provider(預設 = provider)">
-              <select
-                className="mori-input"
+              <Select
                 value={cfg.routing?.agent ?? ""}
-                onChange={(e) =>
+                allowEmpty
+                emptyLabel="(同 provider)"
+                onChange={(v) =>
                   applyPatch((c) => {
                     const r = ensureSubObj(c, "routing");
-                    if (e.target.value === "") {
+                    if (v === "") {
                       delete r.agent;
                       if (Object.keys(r).length === 0) delete c.routing;
                     } else {
-                      r.agent = e.target.value;
+                      r.agent = v;
                     }
                   })
                 }
-              >
-                <option value="">(同 provider)</option>
-                {ALL_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+                options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
+              />
             </FormRow>
             <FormRow label="skills" hint="skill_name → provider(空 = 用 agent / provider)">
               <KvTable
@@ -559,41 +546,42 @@ function ConfigTab() {
             hint="VoiceInput 模式的全域預設;每個 voice profile 都可以 override 自己這幾項。"
           >
             <FormRow label="cleanup_level" hint="smart=LLM+程式 / minimal=只程式 / none=raw 直貼">
-              <select
-                className="mori-input"
+              <Select
                 value={cfg.voice_input?.cleanup_level ?? "smart"}
-                onChange={(e) =>
+                onChange={(v) =>
                   applyPatch((c) => {
-                    const v = ensureSubObj(c, "voice_input");
-                    v.cleanup_level = e.target.value;
+                    const vi = ensureSubObj(c, "voice_input");
+                    vi.cleanup_level = v;
                   })
                 }
-              >
-                <option value="smart">smart</option>
-                <option value="minimal">minimal</option>
-                <option value="none">none</option>
-              </select>
+                options={[
+                  { value: "smart", label: "smart" },
+                  { value: "minimal", label: "minimal" },
+                  { value: "none", label: "none" },
+                ]}
+              />
             </FormRow>
             <FormRow label="paste_shortcut" hint="貼回游標時用的快捷鍵預設">
-              <select
-                className="mori-input"
+              <Select
                 value={cfg.voice_input?.paste_shortcut ?? ""}
-                onChange={(e) =>
+                allowEmpty
+                emptyLabel="(自動偵測)"
+                onChange={(val) =>
                   applyPatch((c) => {
                     const v = ensureSubObj(c, "voice_input");
-                    if (e.target.value === "") {
+                    if (val === "") {
                       delete v.paste_shortcut;
                       if (Object.keys(v).length === 0) delete c.voice_input;
                     } else {
-                      v.paste_shortcut = e.target.value;
+                      v.paste_shortcut = val;
                     }
                   })
                 }
-              >
-                <option value="">(自動偵測 — process name → terminal 用 ctrl_shift_v、其他用 ctrl_v)</option>
-                <option value="ctrl_v">ctrl_v(一般 app)</option>
-                <option value="ctrl_shift_v">ctrl_shift_v(terminal)</option>
-              </select>
+                options={[
+                  { value: "ctrl_v", label: "ctrl_v(一般 app)" },
+                  { value: "ctrl_shift_v", label: "ctrl_shift_v(terminal)" },
+                ]}
+              />
             </FormRow>
             <FormRow label="auto_enter" hint="貼完後自動按 Enter 送出(每個 profile 也可 ENABLE_AUTO_ENTER override)">
               <input

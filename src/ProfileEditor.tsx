@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { splitFrontmatter, buildProfileText, AnyObj } from "./profile-form";
 import { IconVoiceMic, IconTree, IconClose, IconWarning, IconCheck } from "./icons";
+import { Select } from "./Select";
 
 type Kind = "voice" | "agent";
 
@@ -82,25 +83,23 @@ function FrontmatterForm({
   return (
     <div className="mori-frontmatter-form">
       <FormRow label="provider" hint="LLM provider">
-        <select
-          className="mori-input"
+        <Select
           value={fm.provider ?? ""}
-          onChange={(e) => patch("provider", e.target.value)}
-        >
-          <option value="">(同 ~/.mori/config.json)</option>
-          {ALL_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
+          allowEmpty
+          emptyLabel="(同 ~/.mori/config.json)"
+          onChange={(v) => patch("provider", v)}
+          options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
+        />
       </FormRow>
 
       <FormRow label="stt_provider" hint="STT provider override(僅 voice 有用)">
-        <select
-          className="mori-input"
+        <Select
           value={fm.stt_provider ?? ""}
-          onChange={(e) => patch("stt_provider", e.target.value)}
-        >
-          <option value="">(同 config)</option>
-          {STT_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
+          allowEmpty
+          emptyLabel="(同 config)"
+          onChange={(v) => patch("stt_provider", v)}
+          options={STT_PROVIDERS.map((p) => ({ value: p, label: p }))}
+        />
       </FormRow>
 
       <FormRow label="enable_read" hint="開了 body 才能用 #file: 引用">
@@ -114,28 +113,30 @@ function FrontmatterForm({
       {kind === "voice" && (
         <>
           <FormRow label="paste_shortcut" hint="貼回游標時用的快捷鍵">
-            <select
-              className="mori-input"
+            <Select
               value={fm.paste_shortcut ?? ""}
-              onChange={(e) => patch("paste_shortcut", e.target.value)}
-            >
-              <option value="">(自動偵測)</option>
-              <option value="ctrl_v">ctrl_v(一般 app)</option>
-              <option value="ctrl_shift_v">ctrl_shift_v(terminal)</option>
-            </select>
+              allowEmpty
+              emptyLabel="(自動偵測)"
+              onChange={(v) => patch("paste_shortcut", v)}
+              options={[
+                { value: "ctrl_v", label: "ctrl_v(一般 app)" },
+                { value: "ctrl_shift_v", label: "ctrl_shift_v(terminal)" },
+              ]}
+            />
           </FormRow>
 
           <FormRow label="cleanup_level" hint="覆蓋全域 cleanup_level">
-            <select
-              className="mori-input"
+            <Select
               value={fm.cleanup_level ?? ""}
-              onChange={(e) => patch("cleanup_level", e.target.value)}
-            >
-              <option value="">(用 config 預設)</option>
-              <option value="smart">smart</option>
-              <option value="minimal">minimal</option>
-              <option value="none">none</option>
-            </select>
+              allowEmpty
+              emptyLabel="(用 config 預設)"
+              onChange={(v) => patch("cleanup_level", v)}
+              options={[
+                { value: "smart", label: "smart" },
+                { value: "minimal", label: "minimal" },
+                { value: "none", label: "none" },
+              ]}
+            />
           </FormRow>
 
           <FormRow label="ENABLE_AUTO_ENTER" hint="貼完後模擬 Enter">
@@ -464,15 +465,15 @@ function ShellSkillCard({
                   }}
                   defaultValue={key}
                 />
-                <select
-                  className="mori-input"
+                <Select
                   value={(def as any).type ?? "string"}
-                  onChange={(e) => updateParam(key, "type", e.target.value)}
-                >
-                  <option value="string">string</option>
-                  <option value="number">number</option>
-                  <option value="boolean">boolean</option>
-                </select>
+                  onChange={(v) => updateParam(key, "type", v)}
+                  options={[
+                    { value: "string", label: "string" },
+                    { value: "number", label: "number" },
+                    { value: "boolean", label: "boolean" },
+                  ]}
+                />
                 <label className="mori-shell-param-required">
                   <input
                     type="checkbox"

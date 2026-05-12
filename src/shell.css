@@ -607,17 +607,133 @@
   border-color: var(--c-focus-border);
   background: var(--c-input-focus-bg);
 }
-select.mori-input {
-  font-family: system-ui, sans-serif;
-  cursor: pointer;
-  /* brand-3: 讓 webkit native dropdown 跟著 :root color-scheme(theme.ts 套上)
-     走 — 切 light theme 時 dropdown 也是 light、dark 時 dark */
-  color-scheme: light dark;
+/* brand-3 follow-up: native <select> 改用 src/Select.tsx custom component。
+   Linux webkit2gtk 的 GTK dropdown 配色被 system GTK theme 鎖死,CSS color-scheme
+   也救不回 light 主視窗下 dark dropdown 的衝突,只能自繪。 */
+
+.mori-select {
+  position: relative;
+  display: block;
+  width: 100%;
 }
-select.mori-input option {
-  background: var(--c-surface-bg);
+.mori-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
   color: var(--c-text);
+  padding: 6px 10px;
+  font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+  box-sizing: border-box;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
 }
+.mori-select-trigger:hover:not(:disabled) {
+  border-color: var(--c-border-strong);
+}
+.mori-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.mori-select.open .mori-select-trigger {
+  border-color: var(--c-focus-border);
+  background: var(--c-input-focus-bg);
+}
+.mori-select-value {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mori-select-placeholder {
+  color: var(--c-text-soft);
+  font-style: italic;
+}
+.mori-select-caret {
+  display: inline-flex;
+  align-items: center;
+  color: var(--c-text-muted);
+  transition: transform 120ms ease;
+}
+.mori-select.open .mori-select-caret { transform: rotate(180deg); }
+
+.mori-select-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--c-surface-bg);
+  border: 1px solid var(--c-border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  animation: mori-select-appear 0.12s ease-out;
+}
+@keyframes mori-select-appear {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mori-select-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--c-text);
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 80ms ease;
+}
+.mori-select-option:hover,
+.mori-select-option.hover {
+  background: var(--c-sidebar-hover-bg);
+  color: var(--c-text-strong);
+}
+.mori-select-option.selected {
+  background: var(--c-active-bg);
+  color: var(--c-text-strong);
+  font-weight: 500;
+}
+.mori-select-option.selected.hover {
+  background: var(--c-primary-bg);
+}
+.mori-select-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--c-text-soft);
+  font-size: 11.5px;
+}
+
+.mori-select-clearable {
+  position: relative;
+}
+.mori-select-clear {
+  position: absolute;
+  top: 50%;
+  right: 30px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.mori-select-clear:hover { color: var(--c-text-strong); background: var(--c-sidebar-hover-bg); }
 
 /* ─── KV table ─────────────────────────────────────────────── */
 

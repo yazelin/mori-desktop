@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconMemory, IconClose, IconRefresh } from "../icons";
+import { Select } from "../Select";
 
 type MemoryEntry = {
   id: string;
@@ -155,15 +156,11 @@ function MemoryEditor({
                 />
               </FormRow>
               <FormRow label="type">
-                <select
-                  className="mori-input"
+                <Select
                   value={memoryType}
-                  onChange={(e) => setMemoryType(e.target.value)}
-                >
-                  {TYPE_OPTIONS.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                  onChange={setMemoryType}
+                  options={TYPE_OPTIONS.map((t) => ({ value: t, label: t }))}
+                />
               </FormRow>
               {detail && (
                 <FormRow label="timestamps" hint="自動維護(寫入時更新 last_used)">
