@@ -75,7 +75,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
     "category": "Productivity",
     "shortDescription": "森林精靈 Mori 的桌面身體",
     "longDescription": "Mori 是個跨平台的 AI 管家,聽你說話、處理你的任務、記住你的偏好。"

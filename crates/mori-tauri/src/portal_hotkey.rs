@@ -217,6 +217,10 @@ fn ensure_desktop_file() -> Result<()> {
     let exe_str = exe.to_str().context("current_exe path is not valid UTF-8")?;
 
     let path = dir.join(format!("{APP_ID}.desktop"));
+    // 5O fix: StartupWMClass 必須跟 Tauri 視窗實際 WM_CLASS 一致,GNOME taskbar
+    // 才會把多個視窗(main / floating / chat_bubble / picker)歸到同一個 app
+    // entry,不會每次重啟堆一條。Tauri 2 在 GTK/X11 下 WM_CLASS = "mori-tauri" /
+    // "Mori-tauri"(Cargo.toml package name)。
     let content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
@@ -225,7 +229,7 @@ fn ensure_desktop_file() -> Result<()> {
          Exec={exe_str}\n\
          Icon=mori\n\
          Categories=Utility;AudioVideo;\n\
-         StartupWMClass=Mori\n\
+         StartupWMClass=Mori-tauri\n\
          X-GNOME-UsesNotifications=true\n\
          NoDisplay=false\n",
     );
