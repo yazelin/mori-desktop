@@ -91,7 +91,11 @@ function ChatBubble() {
     const win = getCurrentWindow();
     const bubble = bubbleRef.current;
     const sync = () => {
-      const h = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, bubble.offsetHeight));
+      // 不用 MIN_HEIGHT clamp,window 直接跟 card content height(含 padding
+      // + border)走;不然短文字時 window > card 會看到底部 body bg 條,
+      // 長文字逐漸縮短時 window 也不會跟著縮。MAX_HEIGHT 上限保留,避免
+      // 超長 transcript / response 鋪滿整個螢幕。
+      const h = Math.min(MAX_HEIGHT, bubble.offsetHeight);
       win.setSize(new LogicalSize(WIDTH, h)).catch(() => {});
     };
     sync();

@@ -6,6 +6,172 @@
 
 ---
 
+## 5S — Config UI IA 重組 + floating 雜項微調(2026-05-13)
+
+Config tab 從「按 JSON 結構平鋪 sections」改成「按使用者心智模型分組的
+sub-tab」+ HintTooltip,垂直密度收緊一半;順便修一輪 floating /
+chat-bubble / picker 多螢幕 + z-order + 即時生效細節 + 新增 floating
+shape / backplate 自訂 config。
+
+### Config tab IA 重組(主菜)
+
+**Sub-tab nav**:左側垂直 strip,7 個分頁按使用者心智模型分組,X11
+sub-tab 只在 X11 session 顯示:
+
+| Sub-tab | 內容 |
+|---|---|
+| Quick setup | provider / stt_provider / API Keys |
+| LLM / Provider | Provider 設定(× 6 cards)+ Routing(進階) |
+| Voice input | cleanup_level / inject_memory_types |
+| Appearance | Theme + Floating animated/wander + Character pack |
+| X11 only(條件 render)| Floating shape / radius / backplate |
+| Corrections | corrections.md(獨立 save) |
+| Raw JSON | 整份 config.json 直接編 |
+
+**HintTooltip**:每個 `FormRow` 的 `hint` 從 inline 長文字(占垂直空間)
+改 ⓘ icon hover/focus popover。垂直密度大幅收緊,長說明不喧賓奪主。
+
+**SVG icons 取代 emoji**:Sub-tab nav 一開始用 emoji(🌱🤖🎙️ 等)違反
+設計書 [`docs/desktop-ui.html`](docs/desktop-ui.html) 第 193 條
+「Line-art SVG icon 取代 emoji」,改用既有 `src/icons.tsx` 的
+`IconHome / IconCloud / IconVoiceMic / IconTree / IconKeyboard /
+IconClipboard / IconPencil`。
+
+**Sticky save bar**:頂端固定,還原 + 儲存 + status badge 一條,
+所有 form sub-tabs 共用(corrections.md 仍有自己的 save 因為寫不同檔)。
+
+### Floating shape + backplate 自訂(`~/.mori/config.json`)
+
+新增 `floating.x11_shape / x11_shape_radius / x11_backplate` 三欄,
+ConfigTab X11 sub-tab 提供 UI:
+
+- **x11_shape** = `"square"` / `"rounded"` / `"circle"`(預設 circle)
+  - **即時生效** — Tauri command `apply_floating_shape` shell-out
+    x11rb 重套 XShape clip + React 同步 `--floating-shape-radius`
+    CSS variable 讓 inner pseudo border 跟 OS 邊形對齊(不會出現「OS
+    切方角但 CSS 還圓 → 兩個框」)
+  - 新 `x11_shape::clear_clip` 給 square 模式用(設 bounding region
+    = 整個 window rectangle = 等同沒套 XShape)
+- **x11_shape_radius**:rounded 模式的角弧 px(1~80,Rust 端 × scaleFactor
+  轉 physical)
+- **x11_backplate** = `"plain"` / `"logo"`
+  - plain = CSS 漸層底,跟 theme 走
+  - logo = 美術背板 PNG,自動跟 theme 切 dark / light
+  - **User 可自訂**:放自己 PNG 在 `~/.mori/floating/backplate-dark.png`
+    + `backplate-light.png`,Tauri command `read_floating_backplate`
+    讀檔 base64 → data URL 餵 CSS variable。沒檔 fallback 到 shipped
+    Mori logo(`public/floating/backplate-x11-{dark,light}.png`)
+- bootstrap stub `floating` section 寫進這三欄,user 看 `~/.mori/config.json`
+  就知道有什麼可改
+
+### Chat bubble 自動 resize
+
+之前用 `min-height: 100vh` 修「下方露白」反而把 card 釘在 window 高度,
+內容變少 window 不縮 → bubble 永遠 stuck 在最大尺寸。改成:
+
+- 拿掉 `min-height: 100vh` X11 fallback CSS
+- ChatBubble.tsx `sync()` 移除 `MIN_HEIGHT` clamp,`bubble.offsetHeight`
+  直接驅動 setSize,長 ↔ 短雙向跟隨
+- MAX_HEIGHT 480 上限保留(超長 transcript 不鋪滿整個螢幕)
+
+### Chat bubble 偏左 / z-order 被壓修
+
+- **偏左**:`showChatBubble` 用 `outerPosition()` 算 sprite center,
+  mutter X11 對 transparent+decorationless 視窗的 outer 會把 shadow
+  margin 算進去 → bubble 偏左。改 `innerPosition()` 取 content 真實
+  top-left
+- **z-order**:floating + chat_bubble 都 `alwaysOnTop:true`,同 ABOVE
+  layer 內順序看「誰最後被 raise」,floating 因互動頻繁(hover / drag)
+  排前面 → chat_bubble 被壓在下面看不到字。setAlwaysOnTop toggle
+  只翻 state 不 re-raise,真正 raise 需要顯式 XRaiseWindow。
+  新 `force_raise_window` Tauri command shell-out
+  `xdotool search --pid $$ --name "Mori (chat)" windowraise`,
+  ChatBubble.tsx show 完 invoke 一下確保 chat_bubble 在最上層
+
+### Picker 多螢幕 + X11 focus 雜項
+
+- `centerOnActiveMonitor` 取代 `centerOnPrimaryMonitor`:用
+  `cursorPosition()` 偵測滑鼠所在螢幕,fallback primary。修「按
+  Ctrl+Alt+P 看不到視窗」實際是 picker 開在使用者不在看的那台螢幕
+- X11 上 close 改真 `hide()`(Wayland 維持 setPosition off-screen 偷渡):
+  X11 setPosition 偷渡會讓 window 始終 mapped,下次 show() 是 no-op、
+  setFocus() 被 mutter focus-stealing-prevention 拒。真 hide → 下次
+  show 觸發 mutter remap 自動把 focus 給新 mapped window
+- X11 上 `.mori-picker-card` 用 `position: absolute; inset: 0` 強制
+  撐到 100% window(card border 直接當 window 邊框,不留 4% body bg
+  外露變成「框內又有框」)。中間 `carousel-body` 加 `flex: 1` 撐開
+  到 footer 底,不出現「card 沒貼到底」的視覺
+
+### Floating wander 多螢幕
+
+`walkOnce()` 原本只用 `primaryMonitor()` 算邊界 → Mori 被拖到第二
+螢幕後,wander 仍用 primary 座標 → 走到不存在的位置(看不見)。改用
+`availableMonitors()` 找 Mori 中心點目前在哪台 monitor,限制 wander
+在那台範圍內。設計哲學:Mori 待哪台就在那台 wander,使用者拖才換螢幕。
+
+### Status modal session info
+
+ChatPanel `⚙️` 開的 status modal 加一條 `session` row,顯示偵測到的
+session type + 走哪條 hotkey path(x11 · plugin / wayland · portal /
+linux-other / non-linux)。user 報 bug 截這張就一目了然。
+新 Tauri command `linux_session_type` 回傳字串。
+
+### Starter USER-00
+
+slot 0(Alt+0)切過去 floating sprite 頭上沒 chip 提示 — 因為
+voice_input/ 沒實體 USER-00 檔(slot 0 走內建 fallback PROFILE_MD)。
+補 ship `USER-00.純文字輸入.md` 從 examples/voice_input/,floating
+頭上 chip 終於有「USER-00 純文字輸入」顯示。
+
+### 變動檔案
+
+- Rust
+  - `crates/mori-tauri/Cargo.toml`:加 `x11rb` shape feature + `raw-window-handle`
+  - `crates/mori-tauri/src/main.rs`:
+    - `apply_floating_shape` / `read_floating_backplate` / `linux_session_type`
+      / `force_raise_window` 4 個新 Tauri commands(全在 invoke_handler
+      註冊)
+    - X11 path 內 `find_window_xid` → `raw_window_handle` 直接拿 floating
+      XID 不靠 xdotool name search(避免誤觸其他 Mori 視窗)
+    - shape startup task 改讀 `floating.x11_shape` config(square / rounded /
+      circle 分流套對應 clip)
+    - picker listener tracing 加詳細 chain log
+  - `crates/mori-tauri/src/x11_shape.rs`:`clear_clip`(square 模式用)+
+    既有 `apply_circle_clip` / `apply_rounded_clip`
+  - `crates/mori-core/src/llm/groq.rs`:bootstrap stub `floating` section
+    加 `x11_shape` / `x11_shape_radius` / `x11_backplate`
+- React
+  - `src/tabs/ConfigTab.tsx`:整段 return 重構 — sub-tab nav + 條件
+    render + sticky savebar + HintTooltip(取代 inline hint span)+
+    SVG icons
+  - `src/FloatingMori.tsx`:
+    - `availableMonitors` + 中心點偵測 wander limit
+    - `showChatBubble` / drag-end 改用 `innerPosition`
+    - `applyX11Backplate` 助手 + config save 時 set CSS variable +
+      invoke `apply_floating_shape`
+  - `src/ChatBubble.tsx`:`setAlwaysOnTop` toggle + invoke
+    `force_raise_window`、sync() 移除 MIN_HEIGHT clamp
+  - `src/Picker.tsx`:`centerOnActiveMonitor` + X11 path hide/show
+  - `src/floating.css` / `chat-bubble.css` / `picker.css`:X11 fallback
+    細節微調,backplate 用 CSS variable,shape radius variable 同步
+  - `src/shell.css`:`.mori-config-layout` / `.mori-config-subnav` /
+    `.mori-config-subtab` / `.mori-config-savebar` / `.mori-hint` 新增
+- Assets
+  - `public/floating/backplate-x11-dark.png` + `backplate-x11-light.png`:
+    shipped Mori logo 雙 theme(取代之前 backplate-x11.png 單檔)
+
+### 已知限制
+
+- HintTooltip 的 popover top:22px 固定,接近頁面右側可能溢出 — 下版
+  做 boundary detect 自動翻轉到左側 / 上方
+- ConfigTab sticky savebar 跟 sub-tab subnav 都 sticky,scroll 時兩者
+  可能 z-index 競爭(目前 subnav top:60px 避開 savebar);小視窗縮窄
+  可能交疊
+- X11 user 自訂 backplate 仍需放在固定路徑(`~/.mori/floating/`),
+  之後可加 file picker UI 讓 user 不用手動 cp
+
+---
+
 ## 5R-followup-3 — XShape OS-level 圓形 floating + 單螢幕 wander(2026-05-13)
 
 清掉 5Q 留下的兩個 pending tasks:

@@ -8,11 +8,20 @@
 //   未列在 form 的 key 也會保留(round-trip 不丟資料)
 // - 儲存:寫整個 JSON 物件
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type SVGProps } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
+import {
+  IconHome,
+  IconCloud,
+  IconVoiceMic,
+  IconTree,
+  IconKeyboard,
+  IconClipboard,
+  IconPencil,
+} from "../icons";
 
 // 5P-6: character pack picker
 type CharacterEntry = {
@@ -81,10 +90,66 @@ function FormRow({
     <div className="mori-form-row">
       <div className="mori-form-row-label">
         <span>{label}</span>
-        {hint && <span className="mori-form-row-hint">{hint}</span>}
+        {hint && <HintTooltip>{hint}</HintTooltip>}
       </div>
       <div className="mori-form-row-input">{children}</div>
     </div>
+  );
+}
+
+/** ⓘ icon + hover/focus 後出 popover 顯示 hint。把長 hint 從 inline 文字
+ *  改成 on-demand 提示,大幅減少 Config tab 垂直密度。 */
+function HintTooltip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="mori-hint" tabIndex={0} aria-label="說明">
+      <span className="mori-hint-icon">ⓘ</span>
+      <span className="mori-hint-popover">{children}</span>
+    </span>
+  );
+}
+
+type SubTabId = "quick" | "llm" | "voice" | "appearance" | "x11" | "corrections" | "raw";
+
+interface SubTabSpec {
+  id: SubTabId;
+  label: string;
+  Icon: React.ComponentType<SVGProps<SVGSVGElement>>;
+}
+
+/** Config tab 左側垂直 sub-nav。x11 sub-tab 由 caller 決定是否傳入。 */
+function SubTabNav({
+  active,
+  onChange,
+  tabs,
+  dirtyJson,
+}: {
+  active: SubTabId;
+  onChange: (id: SubTabId) => void;
+  tabs: SubTabSpec[];
+  dirtyJson: boolean;
+}) {
+  return (
+    <nav className="mori-config-subnav">
+      {tabs.map((t) => {
+        const Icon = t.Icon;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            className={`mori-config-subtab ${active === t.id ? "active" : ""}`}
+            onClick={() => onChange(t.id)}
+          >
+            <span className="mori-config-subtab-icon">
+              <Icon width={14} height={14} />
+            </span>
+            <span className="mori-config-subtab-label">{t.label}</span>
+            {dirtyJson && t.id === "raw" && (
+              <span className="mori-config-subtab-dirty" title="JSON 有未存改動" />
+            )}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -353,7 +418,14 @@ function CharacterPicker() {
 function ConfigTab() {
   const [raw, setRaw] = useState<string>("");
   const [orig, setOrig] = useState<string>("");
-  const [view, setView] = useState<"form" | "raw">("form");
+  // 5R-followup-4: sub-tab IA。raw 也是其中一個 sub-tab(取代舊的
+  // form / raw 二選一 toggle)。
+  const [subTab, setSubTab] = useState<SubTabId>("quick");
+  // X11 session 偵測 — 用來條件 render「X11 only」sub-tab(Wayland 看不到)
+  const [isX11, setIsX11] = useState(false);
+  useEffect(() => {
+    invoke<boolean>("is_x11_session").then(setIsX11).catch(() => {});
+  }, []);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
 
@@ -464,65 +536,66 @@ function ConfigTab() {
   const dirty = raw !== orig;
   const corrDirty = corrText !== corrOrig;
 
+  // 5R-followup-4: Sub-tab IA — 把 sections 按使用者心智模型分組,不再
+  // 全部塞在一條 form 裡 scroll 累。X11 sub-tab 條件 render。
+  const subTabs: SubTabSpec[] = [
+    { id: "quick", label: "Quick setup", Icon: IconHome },
+    { id: "llm", label: "LLM / Provider", Icon: IconCloud },
+    { id: "voice", label: "Voice input", Icon: IconVoiceMic },
+    { id: "appearance", label: "Appearance", Icon: IconTree },
+    ...(isX11 ? [{ id: "x11" as SubTabId, label: "X11 only", Icon: IconKeyboard }] : []),
+    { id: "corrections" as SubTabId, label: "Corrections", Icon: IconClipboard },
+    { id: "raw", label: "Raw JSON", Icon: IconPencil },
+  ];
+
   return (
     <div className="mori-tab mori-tab-config">
       <h2 className="mori-tab-title">Config</h2>
-      <p className="mori-tab-hint">
-        編輯 ~/.mori/config.json + corrections.md。改完不需要重啟,下一次熱鍵
-        會即時讀新設定。Form view 蓋常用欄位,Raw JSON view 給 routing.skills 等進階。
-      </p>
 
       {error && <div className="mori-config-error">{error}</div>}
 
-      {/* brand-3: theme picker(獨立於 config.json 編輯之上,因為它寫的是
-          ~/.mori/active_theme 而不是 config.json) */}
-      <ThemeSection />
-
-      {/* ── View toggle ───────────────────────────────── */}
-      <div className="mori-view-toggle">
+      {/* Sticky save bar — 一個位置存所有 config.json fields。corrections.md
+          有獨立 save 在它自己 sub-tab。 */}
+      <div className="mori-config-savebar">
+        <span className="mori-config-savebar-hint">
+          ~/.mori/config.json · 改完不用重啟,下次熱鍵讀新值
+        </span>
+        <StatusBadge status={status} />
         <button
-          className={`mori-view-tab ${view === "form" ? "active" : ""}`}
-          onClick={() => setView("form")}
-        >
-          Form
-        </button>
+          className="mori-btn"
+          onClick={() => setRaw(orig)}
+          disabled={!dirty}
+        >還原</button>
         <button
-          className={`mori-view-tab ${view === "raw" ? "active" : ""}`}
-          onClick={() => setView("raw")}
-        >
-          Raw JSON {rawError ? "⚠" : ""}
-        </button>
-        <div className="mori-view-toggle-actions">
-          <StatusBadge status={status} />
-          <button
-            className="mori-btn"
-            onClick={() => setRaw(orig)}
-            disabled={!dirty}
-          >還原</button>
-          <button
-            className="mori-btn primary"
-            onClick={saveConfig}
-            disabled={!dirty || !!rawError}
-            title="存 config.json(provider / routing / Floating Mori 等所有上面設定)"
-          >儲存 config.json</button>
-        </div>
+          className="mori-btn primary"
+          onClick={saveConfig}
+          disabled={!dirty || !!rawError}
+          title="存 config.json"
+        >儲存</button>
       </div>
 
-      {view === "form" ? (
-        <>
-          {/* ── Defaults ───────────────────────────────── */}
+      <div className="mori-config-layout">
+        <SubTabNav
+          active={subTab}
+          onChange={setSubTab}
+          tabs={subTabs}
+          dirtyJson={!!rawError}
+        />
+        <div className="mori-config-content">
+          {/* ── Quick setup ─────────────────────────────── */}
+          {subTab === "quick" && <>
           <Section
-            title="預設"
+            title="預設 Provider"
             hint="所有 profile 沒指定 provider 時用這個。VoiceInput profile 可以再 override 自己的 stt_provider。"
           >
-            <FormRow label="provider" hint="主對話 / agent LLM">
+            <FormRow label="provider" hint="主對話 / agent 用的 LLM">
               <Select
                 value={getStr(cfg, "provider", "groq")}
                 onChange={(v) => applyPatch((c) => setStrOrUndef(c, "provider", v))}
                 options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
               />
             </FormRow>
-            <FormRow label="stt_provider" hint="Whisper STT">
+            <FormRow label="stt_provider" hint="Whisper STT(語音轉文字)">
               <Select
                 value={getStr(cfg, "stt_provider", "groq")}
                 onChange={(v) => applyPatch((c) => setStrOrUndef(c, "stt_provider", v))}
@@ -531,7 +604,6 @@ function ConfigTab() {
             </FormRow>
           </Section>
 
-          {/* ── API keys ───────────────────────────────── */}
           <Section
             title="API Keys"
             hint="OS env var 找不到時的 fallback。Key 名建議 *_API_KEY,值會以密碼欄位呈現。"
@@ -544,8 +616,10 @@ function ConfigTab() {
               valueIsSecret
             />
           </Section>
+          </>}
 
-          {/* ── Providers ──────────────────────────────── */}
+          {/* ── LLM / Provider ──────────────────────────── */}
+          {subTab === "llm" && <>
           <Section
             title="Provider 設定"
             hint="只列你會用的就好。空著的 provider 啟動時用內建預設(api_base / model 等)。"
@@ -645,7 +719,6 @@ function ConfigTab() {
             />
           </Section>
 
-          {/* ── Routing(進階)───────────────────────────── */}
           <Section
             title="Routing(進階)"
             hint="個別 skill 走不同 provider。沒設 = 全部用上面 provider。"
@@ -678,8 +751,10 @@ function ConfigTab() {
               />
             </FormRow>
           </Section>
+          </>}
 
           {/* ── Voice input ────────────────────────────── */}
+          {subTab === "voice" && <>
           <Section
             title="VoiceInput"
             hint="VoiceInput 模式的全域預設;每個 voice profile 都可以 override 自己這幾項。"
@@ -700,10 +775,6 @@ function ConfigTab() {
                 ]}
               />
             </FormRow>
-            {/* 5N: 移除 dead UI — 全域 voice_input.auto_enter / .paste_shortcut
-                兩條都不會被 backend 讀(只讀 profile.frontmatter 對應 key)。
-                每個 voice profile 自己在 ProfileEditor 內勾,別在 Config 全域設。 */}
-
             <FormRow
               label="inject_memory_types"
               hint="cleanup LLM 注入哪些 memory type 當校正詞庫(profile 沒設時的全域 default)"
@@ -726,11 +797,14 @@ function ConfigTab() {
               />
             </FormRow>
           </Section>
+          </>}
 
-          {/* ── Floating Mori ─────────────────────────── */}
+          {/* ── Appearance ─────────────────────────────── */}
+          {subTab === "appearance" && <>
+          <ThemeSection />
           <Section
             title="Floating Mori"
-            hint="桌面 floating widget(160×160)的視覺行為。Sprite / 角色資產走 character pack — ~/.mori/characters/<active>/。"
+            hint="桌面 floating widget 的視覺行為。Sprite 資產走 character pack(~/.mori/characters/<active>/)。"
           >
             <FormRow
               label="animated"
@@ -749,7 +823,7 @@ function ConfigTab() {
             </FormRow>
             <FormRow
               label="wander"
-              hint="讓 Mori 在桌面隨機走動(實驗性,需 animated ON;走動 sprite 沒上來前先 placeholder)"
+              hint="讓 Mori 在桌面隨機走動(實驗性,需 animated ON;多螢幕只在 Mori 目前所在那台走)"
             >
               <input
                 type="checkbox"
@@ -765,49 +839,122 @@ function ConfigTab() {
             </FormRow>
             <CharacterPicker />
           </Section>
-        </>
-      ) : (
-        <Section title="" >
-          <textarea
-            className={`mori-config-textarea ${rawError ? "has-error" : ""}`}
-            spellCheck={false}
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            rows={28}
-          />
-          {rawError && (
-            <div className="mori-config-error">JSON parse error: {rawError}</div>
-          )}
-        </Section>
-      )}
+          </>}
 
-      {/* ── Corrections.md ────────────────────────────── */}
-      <Section
-        title="corrections.md"
-        hint="共用 STT 校正表(voice / agent profile 用 #file: 引用)"
-      >
-        <textarea
-          className="mori-config-textarea"
-          spellCheck={false}
-          value={corrText}
-          onChange={(e) => setCorrText(e.target.value)}
-          rows={14}
-        />
-        <div className="mori-config-actions">
-          <button
-            className="mori-btn primary"
-            onClick={saveCorrections}
-            disabled={!corrDirty}
-            title="只存 corrections.md(STT 同音校正詞表),不存 config.json"
-          >儲存 corrections.md</button>
-          <button
-            className="mori-btn"
-            onClick={() => setCorrText(corrOrig)}
-            disabled={!corrDirty}
-          >還原</button>
-          <StatusBadge status={corrStatus} />
+          {/* ── X11 only ────────────────────────────────── */}
+          {subTab === "x11" && isX11 && <>
+          <Section
+            title="Floating 外觀(X11)"
+            hint="只在 X11 session 有效。Wayland 上 body 真透明、XShape 沒對應 API,這幾項都沒影響。"
+          >
+            <FormRow
+              label="x11 shape"
+              hint="floating window OS-level 形狀。改完 save 即時套用(XShape clip 重新計算 + 套上)。"
+            >
+              <Select
+                value={cfg.floating?.x11_shape ?? "circle"}
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    const f = ensureSubObj(c, "floating");
+                    f.x11_shape = v;
+                  })
+                }
+                options={[
+                  { value: "square", label: "正方(無圓角)" },
+                  { value: "rounded", label: "圓角矩形" },
+                  { value: "circle", label: "圓形(玻璃球)" },
+                ]}
+              />
+            </FormRow>
+            <FormRow
+              label="x11 shape radius"
+              hint="圓角矩形的角弧(px),只在 x11_shape = rounded 時用。1 ~ 80。"
+            >
+              <input
+                type="number"
+                min={1}
+                max={80}
+                value={cfg.floating?.x11_shape_radius ?? 16}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const f = ensureSubObj(c, "floating");
+                    f.x11_shape_radius = Number(e.target.value) || 16;
+                  })
+                }
+                style={{ width: 70 }}
+              />
+            </FormRow>
+            <FormRow
+              label="x11 backplate"
+              hint="floating window 內部底圖。logo 模式可放自己 PNG 在 ~/.mori/floating/backplate-{dark,light}.png 取代預設 Mori logo,即時生效。"
+            >
+              <Select
+                value={cfg.floating?.x11_backplate ?? "plain"}
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    const f = ensureSubObj(c, "floating");
+                    f.x11_backplate = v;
+                  })
+                }
+                options={[
+                  { value: "plain", label: "素色(跟著 theme 漸層)" },
+                  { value: "logo", label: "背板(美術 PNG / 自訂)" },
+                ]}
+              />
+            </FormRow>
+          </Section>
+          </>}
+
+          {/* ── Corrections.md(獨立檔,獨立 save) ────────── */}
+          {subTab === "corrections" && <>
+          <Section
+            title="corrections.md"
+            hint="共用 STT 校正詞表。Voice / Agent profile 用 #file: ../corrections.md 引用,LLM 看 system prompt 時讀進去。"
+          >
+            <textarea
+              className="mori-config-textarea"
+              spellCheck={false}
+              value={corrText}
+              onChange={(e) => setCorrText(e.target.value)}
+              rows={20}
+            />
+            <div className="mori-config-actions">
+              <button
+                className="mori-btn primary"
+                onClick={saveCorrections}
+                disabled={!corrDirty}
+                title="只存 corrections.md,不存 config.json"
+              >儲存 corrections.md</button>
+              <button
+                className="mori-btn"
+                onClick={() => setCorrText(corrOrig)}
+                disabled={!corrDirty}
+              >還原</button>
+              <StatusBadge status={corrStatus} />
+            </div>
+          </Section>
+          </>}
+
+          {/* ── Raw JSON view ──────────────────────────── */}
+          {subTab === "raw" && <>
+          <Section
+            title="Raw JSON"
+            hint="整份 ~/.mori/config.json,給 power user 直接編 routing.skills / shell_skills 等沒在表單裡的進階欄位。"
+          >
+            <textarea
+              className={`mori-config-textarea ${rawError ? "has-error" : ""}`}
+              spellCheck={false}
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              rows={28}
+            />
+            {rawError && (
+              <div className="mori-config-error">JSON parse error: {rawError}</div>
+            )}
+          </Section>
+          </>}
         </div>
-      </Section>
+      </div>
     </div>
   );
 }

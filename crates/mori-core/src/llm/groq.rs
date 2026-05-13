@@ -382,7 +382,26 @@ impl GroqProvider {
                 //             好再考慮開預設 true。
                 "floating": {
                     "animated": true,
-                    "wander": false
+                    "wander": false,
+                    // ── 5R-followup-3:X11 only 視覺定制 ──────────────────
+                    // Wayland 沒這些 knob(body 本來就 transparent,XShape 也
+                    // 沒對應 API)。X11 上自由切。
+                    //
+                    // x11_shape:floating window OS-level bounding region
+                    // - "square"  = 不套 XShape,純矩形面板
+                    // - "rounded" = 圓角矩形,角弧 x11_shape_radius(px)
+                    // - "circle"  = 完整圓形(=「玻璃球」感)
+                    // 改完要重啟 Mori 才生效(XShape 在 startup 套一次)。
+                    "x11_shape": "circle",
+                    "x11_shape_radius": 16,
+                    // x11_backplate:floating window 內部底圖
+                    // - "plain"   = CSS 漸層底,跟 theme 走(--c-page-bg 等)
+                    // - "logo"    = 美術背板 PNG,自動跟 theme 切 dark / light
+                    // logo 模式下使用者可放自己 PNG 在
+                    //   ~/.mori/floating/backplate-dark.png
+                    //   ~/.mori/floating/backplate-light.png
+                    // 有就用沒就 fallback 到 shipped Mori logo。
+                    "x11_backplate": "plain"
                 }
             });
             std::fs::write(&config, serde_json::to_string_pretty(&stub)?)?;

@@ -64,6 +64,10 @@ arboard = "3"
 # 緣 AA half-alpha 會破,XShape 是 1-bit alpha clip(in / out),完全沒
 # AA、沒半透明,跟 compositor 無關。x11rb 純 Rust,不需系統 libxcb-shape-dev。
 x11rb = { version = "0.13", features = ["shape"] }
+# 拿 Tauri WebviewWindow 的 X11 XID 給 XShape clip 用。xdotool name search
+# 是 regex 容易誤觸其他 Mori 視窗(main / chat_bubble / picker),走
+# raw_window_handle 直接抓那個 webview 對應的 XID 才精準。
+raw-window-handle = "0.6"
 
 [features]
 default = ["custom-protocol"]

@@ -221,27 +221,111 @@ fn linux_session_type() -> String {
 ///
 /// Wayland 不需要(compositor 對 alwaysOnTop 處理乾淨,且 wayland 沒有
 /// 對應的 XRaiseWindow 等價 API,任何「raise」都不會被允許)。
-/// 用 xdotool 找這個 process 名為 `title` 的 X11 window ID。給
-/// XShape clip 等需要 raw XID 的場景。Linux 限定。
+/// 從 `~/.mori/config.json` 讀 `floating.x11_shape` + `x11_shape_radius`,
+/// 缺欄位 fallback 預設值。回 `(shape_str, radius_logical_px)`。
 #[cfg(target_os = "linux")]
-fn find_window_xid(title: &str) -> anyhow::Result<u32> {
-    use anyhow::Context as _;
-    let pid = std::process::id().to_string();
-    let output = std::process::Command::new("xdotool")
-        .args(["search", "--pid", &pid, "--name", title])
-        .output()
-        .context("spawn xdotool search")?;
-    if !output.status.success() {
-        anyhow::bail!("xdotool search exited {:?}", output.status);
+fn read_floating_shape(config_path: &std::path::Path) -> (String, u32) {
+    let default = ("circle".to_string(), 16u32);
+    let Ok(text) = std::fs::read_to_string(config_path) else {
+        return default;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return default;
+    };
+    let Some(floating) = json.get("floating") else {
+        return default;
+    };
+    let shape = floating
+        .get("x11_shape")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&default.0)
+        .to_string();
+    let radius = floating
+        .get("x11_shape_radius")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32)
+        .unwrap_or(default.1);
+    (shape, radius)
+}
+
+/// 讀使用者 `~/.mori/floating/backplate-{dark,light}.png`,有的話以 base64
+/// data URL 回給 React 餵 CSS;沒有就回 null,讓 React 用 shipped fallback。
+///
+/// 為什麼用 data URL 而不是 Tauri asset protocol:asset protocol 需要 in
+/// tauri.conf.json security 開啟 + 設 scope,加 capabilities 規則才能跨
+/// window 用。data URL 直接是字串,React → CSS variable → background-image
+/// 一條龍,不動 Tauri 設定。檔案 ~500KB,base64 後 ~700KB,記憶體 OK。
+/// 即時套用 floating window XShape clip。React ConfigTab save 後 invoke
+/// 這個 → user 改 shape / radius 不用重啟 Mori。
+///
+/// `shape` = "square" | "rounded" | "circle"
+/// `radius` = logical px(只 rounded 用),Rust 端轉 physical(× scaleFactor)
+#[tauri::command]
+fn apply_floating_shape(
+    app: AppHandle,
+    shape: String,
+    radius: u32,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if !x11_hotkey::is_x11_session() {
+            // Wayland 沒對應 API,no-op
+            return Ok(());
+        }
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let win = app
+            .get_webview_window("floating")
+            .ok_or_else(|| "floating window not found".to_string())?;
+        let size = win.inner_size().map_err(|e| e.to_string())?;
+        let handle = win.window_handle().map_err(|e| e.to_string())?;
+        let xid = match handle.as_raw() {
+            RawWindowHandle::Xlib(x) => x.window as u32,
+            other => return Err(format!("not Xlib window handle: {:?}", other)),
+        };
+        let scale = win.scale_factor().unwrap_or(1.0);
+        let r_phys = (radius as f64 * scale).round() as u32;
+        tracing::info!(xid, shape = %shape, radius_logical = radius, radius_phys = r_phys, "apply_floating_shape");
+        let result = match shape.as_str() {
+            "square" => x11_shape::clear_clip(xid, size.width, size.height),
+            "rounded" => x11_shape::apply_rounded_clip(xid, size.width, size.height, r_phys),
+            _ /* circle 或未知 */ => x11_shape::apply_circle_clip(xid, size.width, size.height),
+        };
+        result.map_err(|e| format!("XShape apply: {e}"))?;
     }
-    let stdout = String::from_utf8(output.stdout).context("xdotool stdout utf8")?;
-    let id_str = stdout
-        .lines()
-        .next()
-        .with_context(|| format!("no window matched name '{title}'"))?
-        .trim();
-    let xid: u32 = id_str.parse().context("parse xdotool xid")?;
-    Ok(xid)
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, shape, radius);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_floating_backplate(theme: String) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use base64::Engine as _;
+        let Some(home) = std::env::var("HOME").ok() else {
+            return Err("HOME not set".to_string());
+        };
+        let allowed_theme = matches!(theme.as_str(), "dark" | "light");
+        if !allowed_theme {
+            return Err(format!("invalid theme '{theme}', expected 'dark' or 'light'"));
+        }
+        let path = std::path::PathBuf::from(home)
+            .join(".mori/floating")
+            .join(format!("backplate-{theme}.png"));
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(Some(format!("data:image/png;base64,{b64}")))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = theme;
+        Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -2394,6 +2478,8 @@ fn main() {
             is_x11_session,
             linux_session_type,
             force_raise_window,
+            apply_floating_shape,
+            read_floating_backplate,
             build_info,
             chat_provider_info,
             current_phase,
@@ -2749,17 +2835,65 @@ fn main() {
                     // WM_NAME),sleep 一下再去 xdotool search 抓 XID。500ms 在
                     // 開機階段夠 mutter 把 window 註冊好。失敗的話 log warn 不
                     // bail,Mori 還是能用,只是 floating 仍是矩形。
+                    // X11 floating XShape — shape 由 ~/.mori/config.json
+                    // floating.x11_shape 決定("square" | "rounded" | "circle"),
+                    // square 直接 skip 不 apply。
+                    let app_for_shape = app.handle().clone();
+                    let shape_config_path = mori_config_path.clone();
                     tauri::async_runtime::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        match find_window_xid("Mori (floating)") {
-                            Ok(xid) => {
-                                if let Err(e) = x11_shape::apply_circle_clip(xid, 160, 160) {
-                                    tracing::warn!(?e, "XShape circle clip failed");
-                                }
-                            }
+                        let (shape, radius) = read_floating_shape(&shape_config_path);
+                        if shape == "square" {
+                            tracing::info!("x11_shape = square, skipping XShape clip");
+                            return;
+                        }
+                        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                        let Some(win) = app_for_shape.get_webview_window("floating") else {
+                            tracing::warn!("no floating window for XShape");
+                            return;
+                        };
+                        let size = match win.inner_size() {
+                            Ok(s) => s,
                             Err(e) => {
-                                tracing::warn!(?e, "could not find floating XID for XShape");
+                                tracing::warn!(?e, "floating inner_size failed");
+                                return;
                             }
+                        };
+                        let handle = match win.window_handle() {
+                            Ok(h) => h,
+                            Err(e) => {
+                                tracing::warn!(?e, "floating window_handle failed");
+                                return;
+                            }
+                        };
+                        let xid = match handle.as_raw() {
+                            RawWindowHandle::Xlib(x) => x.window as u32,
+                            other => {
+                                tracing::warn!(?other, "floating not Xlib window handle");
+                                return;
+                            }
+                        };
+                        tracing::info!(
+                            xid,
+                            width = size.width,
+                            height = size.height,
+                            shape = %shape,
+                            radius,
+                            "floating XShape config + XID resolved"
+                        );
+                        let result = match shape.as_str() {
+                            "rounded" => {
+                                // radius 是 logical px,要轉 physical(scaleFactor)
+                                let scale = win.scale_factor().unwrap_or(1.0);
+                                let r_phys = (radius as f64 * scale).round() as u32;
+                                x11_shape::apply_rounded_clip(xid, size.width, size.height, r_phys)
+                            }
+                            _ /* circle or unknown */ => {
+                                x11_shape::apply_circle_clip(xid, size.width, size.height)
+                            }
+                        };
+                        if let Err(e) = result {
+                            tracing::warn!(?e, xid, "XShape clip failed");
                         }
                     });
                 } else {

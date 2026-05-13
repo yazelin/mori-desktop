@@ -43,9 +43,35 @@ pub fn apply_circle_clip(xid: u32, w: u32, h: u32) -> Result<()> {
     Ok(())
 }
 
+/// 清除 X11 window 的 bounding clip — 把 region 設成整個視窗矩形,等同
+/// 「沒套 XShape」的預設狀態。給 user 切回 square 模式時用。
+pub fn clear_clip(xid: u32, w: u32, h: u32) -> Result<()> {
+    let (conn, _) = RustConnection::connect(None).context("X11 connect")?;
+    let rect = Rectangle {
+        x: 0,
+        y: 0,
+        width: w as u16,
+        height: h as u16,
+    };
+    conn.shape_rectangles(
+        SO::SET,
+        SK::BOUNDING,
+        x11rb::protocol::xproto::ClipOrdering::UNSORTED,
+        xid,
+        0,
+        0,
+        &[rect],
+    )
+    .context("XShape clear request")?
+    .check()
+    .context("XShape clear check")?;
+    conn.flush().context("X11 flush")?;
+    tracing::info!(xid, w, h, "cleared XShape bounding clip (square)");
+    Ok(())
+}
+
 /// 給 X11 window 套圓角矩形 bounding clip。`(w, h)` 視窗尺寸,`radius` 角弧。
 /// 中間矩形 + 4 個角圓弧區段。半徑超過 min(w,h)/2 自動 clamp。
-#[allow(dead_code)]
 pub fn apply_rounded_clip(xid: u32, w: u32, h: u32, radius: u32) -> Result<()> {
     let (conn, _) = RustConnection::connect(None).context("X11 connect")?;
     let r = radius.min(w / 2).min(h / 2);

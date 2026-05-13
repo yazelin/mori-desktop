@@ -37,16 +37,81 @@ body.floating-window {
 
    Class 由 Rust 在 X11 session 偵測到時透過 webview eval 注入。 */
 body.floating-window.x11-fallback {
-  /* 第一版的淡綠漸層 — page bg → surface bg 的對角光感,兩端都 opaque,
-     X11 上整體 alpha=1 安全。半透明試過會出現雙層渲染怪事,撤回。 */
-  background: linear-gradient(
-    135deg,
-    var(--c-page-bg) 0%,
-    var(--c-surface-bg) 100%
-  ) !important;
+  /* XShape OS-level clip 已經把邊緣硬切了,inside 內 CSS 可以盡情用 soft
+     alpha / blur / 漸層,不怕邊緣 half-alpha 外洩 — alpha 永遠在 opaque
+     base 上 composite,輸出全 alpha=1 給 X server。
+
+     Base = "plain" 模式(config: floating.x11_backplate = "plain"):
+     右下 vignette + 對角漸層,純色跟著 theme variable 走。 */
+  background:
+    radial-gradient(
+      circle at 75% 80%,
+      rgba(0, 0, 0, 0.20) 0%,
+      rgba(0, 0, 0, 0.06) 40%,
+      transparent 70%
+    ),
+    linear-gradient(
+      135deg,
+      var(--c-page-bg) 0%,
+      var(--c-surface-bg) 60%,
+      var(--c-page-bg) 100%
+    ) !important;
+  position: relative;
+}
+/* logo 模式(config: floating.x11_backplate = "logo"):疊一張 backplate PNG。
+   URL 由 React 從 CSS variable 餵 — user 自訂優先讀 ~/.mori/floating/
+   backplate-{dark,light}.png 經 base64 data URL,沒有 fallback 到 shipped
+   public/floating/backplate-x11-{dark,light}.png。fallback url 直接寫在
+   CSS variable 裡讓「沒登入 react 也能 graceful」(雖然實際不會發生)。 */
+body.floating-window.x11-fallback.backplate-logo {
+  background:
+    radial-gradient(
+      circle at 75% 80%,
+      rgba(0, 0, 0, 0.20) 0%,
+      rgba(0, 0, 0, 0.06) 40%,
+      transparent 70%
+    ),
+    var(--floating-backplate-dark, url('/floating/backplate-x11-dark.png')) center center / cover no-repeat,
+    linear-gradient(
+      135deg,
+      var(--c-page-bg) 0%,
+      var(--c-surface-bg) 100%
+    ) !important;
+}
+html[data-theme-base="light"] body.floating-window.x11-fallback.backplate-logo {
+  background:
+    radial-gradient(
+      circle at 75% 80%,
+      rgba(0, 0, 0, 0.12) 0%,
+      rgba(0, 0, 0, 0.03) 40%,
+      transparent 70%
+    ),
+    var(--floating-backplate-light, url('/floating/backplate-x11-light.png')) center center / cover no-repeat,
+    linear-gradient(
+      135deg,
+      var(--c-page-bg) 0%,
+      var(--c-surface-bg) 100%
+    ) !important;
+}
+/* X11 floating 的 border ring + 內部光暈。多層 inset shadow 模擬玻璃球
+   邊緣高光、底側陰影。border-radius 跟 XShape config(circle / rounded /
+   square)同步,由 React 從 config 算 --floating-shape-radius CSS variable
+   餵下來,fallback 50%(circle)。 */
+body.floating-window.x11-fallback::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border: 1.5px solid var(--c-border-strong, rgba(168, 197, 162, 0.75));
+  border-radius: var(--floating-shape-radius, 50%);
+  pointer-events: none;
+  z-index: 100;
   box-shadow:
-    inset 0 0 0 1px var(--c-border, rgba(168, 197, 162, 0.18)),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+    /* 上緣高光 */
+    inset 0 2px 3px -1px rgba(255, 255, 255, 0.22),
+    /* 底緣陰影 */
+    inset 0 -2px 4px -1px rgba(0, 0, 0, 0.28),
+    /* 內側細白光環 */
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* X11 上強制 sprite-area 置中 — 原本 fixed top-left 假設 window 剛好 160×160,
@@ -56,6 +121,15 @@ body.floating-window.x11-fallback .mori-sprite-area {
   top: 50% !important;
   left: 50% !important;
   transform: translate(-50%, -50%);
+}
+/* X11 上 floating 是 XShape 圓形 clip — chip 在 top:4 那麼上方圓很窄(~50px)
+   會被切。下移到圓較寬處 + 配合圓的弧度橫向延伸,完整可見。
+   top:30 處圓內寬 ~125px(dx = sqrt(80²-50²) × 2),left/right:18 給 124px
+   chip 剛好填滿。Wayland 維持原本 top:4 緊貼上緣。 */
+body.floating-window.x11-fallback .mori-info-label {
+  top: 22px;
+  left: 26px;
+  right: 26px;
 }
 body.floating-window:active {
   cursor: grabbing;

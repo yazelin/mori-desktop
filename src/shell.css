@@ -585,18 +585,159 @@
 }
 .mori-form-row-label {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--c-text);
   font-family: ui-monospace, monospace;
 }
 .mori-form-row-hint {
+  /* legacy:5R-followup-4 之前的 inline hint。新版 FormRow 改用 HintTooltip,
+     這條保留是萬一還有舊地方用 plain hint span。 */
   font-family: system-ui, sans-serif;
   font-size: 10.5px;
   color: var(--c-text-muted);
 }
 .mori-form-row-input { min-width: 0; }
+
+/* ─── 5R-followup-4: Config sub-tab IA ────────────────────────────────
+   左側垂直 sub-nav + 右側 content + 頂端 sticky save bar。
+   把原本一條 form 全部攤平 scroll 累的 UX 拆成「按使用者心智模型分組」。 */
+
+.mori-config-layout {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.mori-config-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--c-divider);
+  padding-right: 10px;
+  align-self: start;
+  position: sticky;
+  top: 60px;
+}
+
+.mori-config-subtab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--c-text-muted);
+  position: relative;
+  transition: background 120ms ease, color 120ms ease;
+}
+.mori-config-subtab:hover {
+  background: var(--c-sidebar-hover-bg);
+  color: var(--c-text);
+}
+.mori-config-subtab.active {
+  background: var(--c-sidebar-active-bg, var(--c-sidebar-hover-bg));
+  color: var(--c-text-strong);
+  font-weight: 500;
+}
+.mori-config-subtab-icon {
+  font-size: 13px;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.mori-config-subtab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mori-config-subtab-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-recording-bg, #d46b6b);
+  flex-shrink: 0;
+}
+
+.mori-config-content {
+  min-width: 0;
+}
+
+.mori-config-savebar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--c-page-bg);
+  border-bottom: 1px solid var(--c-divider);
+  margin: 0 -14px 0;
+}
+.mori-config-savebar-hint {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--c-text-muted);
+}
+
+/* ─── Hint tooltip(ⓘ icon → hover/focus popover)─────────────── */
+.mori-hint {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  margin-left: 4px;
+  cursor: help;
+  outline: none;
+}
+.mori-hint-icon {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--c-divider);
+  color: var(--c-text-muted);
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, sans-serif;
+  transition: background 120ms ease, color 120ms ease;
+}
+.mori-hint:hover .mori-hint-icon,
+.mori-hint:focus-within .mori-hint-icon {
+  background: var(--c-border-strong, var(--c-border));
+  color: var(--c-text);
+}
+.mori-hint-popover {
+  display: none;
+  position: absolute;
+  top: 22px;
+  left: 0;
+  z-index: 1000;
+  background: var(--c-surface-bg);
+  border: 1px solid var(--c-border-strong, var(--c-border));
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--c-text);
+  width: 280px;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  font-family: system-ui, sans-serif;
+}
+.mori-hint:hover .mori-hint-popover,
+.mori-hint:focus-within .mori-hint-popover {
+  display: block;
+}
 
 .mori-input {
   width: 100%;

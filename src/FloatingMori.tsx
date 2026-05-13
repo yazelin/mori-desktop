@@ -162,6 +162,42 @@ type CharacterManifest = {
   };
 };
 
+/**
+ * X11 backplate 模式套用:
+ * - "plain"  → 移除 .backplate-logo class,CSS 走純漸層
+ * - "logo"   → 加 class、讀 user 自訂 PNG(`~/.mori/floating/backplate-{dark,light}.png`)
+ *              成 data URL 餵 CSS variable。沒有自訂檔就清空 var → CSS fallback
+ *              到 shipped `public/floating/backplate-x11-{dark,light}.png`
+ *
+ * Wayland body bg 是 transparent,backplate-logo class 的 background-image
+ * 也會被 inherit transparent !important 蓋掉,沒副作用。
+ */
+async function applyX11Backplate(mode: string) {
+  const body = document.body;
+  const root = document.documentElement;
+  if (mode !== "logo") {
+    body.classList.remove("backplate-logo");
+    root.style.removeProperty("--floating-backplate-dark");
+    root.style.removeProperty("--floating-backplate-light");
+    return;
+  }
+  // logo 模式 — 先加 class 讓 CSS shipped fallback 立刻生效,
+  // 然後 async 讀 user 自訂 PNG,有的話覆寫 CSS variable
+  body.classList.add("backplate-logo");
+  for (const theme of ["dark", "light"] as const) {
+    try {
+      const dataUrl = await invoke<string | null>("read_floating_backplate", { theme });
+      if (dataUrl) {
+        root.style.setProperty(`--floating-backplate-${theme}`, `url(${dataUrl})`);
+      } else {
+        root.style.removeProperty(`--floating-backplate-${theme}`);
+      }
+    } catch (e) {
+      console.warn(`[FloatingMori] read_floating_backplate ${theme} failed`, e);
+    }
+  }
+}
+
 function FloatingMori() {
   const [mode, setMode] = useState<Mode>("agent");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -223,6 +259,30 @@ function FloatingMori() {
           animated: parsed?.floating?.animated ?? true,
           wander: parsed?.floating?.wander ?? false,
         });
+        // X11 backplate 動態套用(Wayland body 透明,sub-rule 不會匹配,沒副作用)
+        const backplate = parsed?.floating?.x11_backplate ?? "plain";
+        await applyX11Backplate(backplate);
+        // X11 shape:CSS pseudo border-radius + OS-level XShape clip 都即時
+        // 同步,改 config save 就生效不用重啟。
+        const shape = parsed?.floating?.x11_shape ?? "circle";
+        const shapeRadius = parsed?.floating?.x11_shape_radius ?? 16;
+        const cssRadius =
+          shape === "square"
+            ? "0"
+            : shape === "rounded"
+              ? `${shapeRadius}px`
+              : "50%";
+        document.documentElement.style.setProperty(
+          "--floating-shape-radius",
+          cssRadius,
+        );
+        // OS-level XShape — Rust 端拿 floating XID 重套 clip。Wayland no-op。
+        await invoke("apply_floating_shape", {
+          shape,
+          radius: shapeRadius,
+        }).catch((err: unknown) =>
+          console.warn("[FloatingMori] apply_floating_shape failed", err),
+        );
       } catch (e) {
         // config.json 不存在 / 壞掉 → 用 default
         console.warn("[FloatingMori] config_read failed, using defaults", e);
