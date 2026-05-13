@@ -15,12 +15,20 @@
 //! ## 流程
 //!
 //! - 讀反白：`xclip -selection primary -o`
-//! - 寫剪貼簿 + paste：`xclip -selection clipboard -i` → `ydotool key Ctrl+V`
+//! - 寫剪貼簿：`xclip -selection clipboard -i`
+//! - 送 paste 鍵:
+//!   - **X11 session**(`XDG_SESSION_TYPE=x11`)→ `xdotool key ctrl+v`
+//!     不需 daemon / 不需 group 權限,直接走 X server。
+//!   - **Wayland session** → `ydotool key 29:1 47:1 47:0 29:0`
+//!     需要 `ydotoold` daemon + user 在 `input` group。
 //!
 //! ## Setup
 //!
-//! `sudo bash setup-wayland-input.sh` from yazelin/ubuntu-26.04-setup
-//! installs `xclip` + `wl-clipboard` + `ydotool`, adds user to `input` group.
+//! - **Ubuntu 24.04 + X11**:`sudo apt install xclip xdotool` 就夠了,
+//!   沒有 daemon 要設、沒有 group 要加。
+//! - **Ubuntu 26.04 + Wayland**:`sudo bash setup-wayland-input.sh` from
+//!   yazelin/ubuntu-26.04-setup 一次裝 `xclip` + `wl-clipboard` + `ydotool`
+//!   + 加 `input` group + 啟 `ydotoold` user service。
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -138,51 +146,82 @@ impl LinuxPasteController {
         tokio::time::sleep(Duration::from_millis(80)).await;
 
         use mori_core::voice_input_profile::PasteShortcut;
-        // Linux keycodes: 29=Ctrl, 42=Shift, 47=V
         let use_shift_v = match override_shortcut {
             Some(PasteShortcut::CtrlShiftV) => true,
             Some(PasteShortcut::CtrlV) => false,
             None => needs_shift_for_paste(process_name),
         };
-        let (keys, label) = if use_shift_v {
-            (
-                vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"],
-                "Ctrl+Shift+V",
-            )
+        let label = if use_shift_v { "Ctrl+Shift+V" } else { "Ctrl+V" };
+
+        // X11 session 用 xdotool — 不需 ydotoold daemon、不需 user 在 input
+        // group,直接走 X server,Ubuntu 24.04 + X11 開箱可用。
+        // Wayland session 仍用 ydotool(XGrabKey 在 Wayland 被擋,paste key
+        // 注入也是,只能走 uinput-level 的 ydotool)。
+        let on_x11 = crate::x11_hotkey::is_x11_session();
+        let outcome = if on_x11 {
+            run_xdotool_paste(use_shift_v)
         } else {
-            (vec!["29:1", "47:1", "47:0", "29:0"], "Ctrl+V")
+            run_ydotool_paste(use_shift_v)
         };
 
-        let mut cmd = Command::new("ydotool");
-        cmd.arg("key");
-        for k in &keys {
-            cmd.arg(k);
-        }
-        let ydotool_outcome = cmd.status();
-
-        match ydotool_outcome {
-            Ok(s) if s.success() => {
+        match outcome {
+            Ok(()) => {
                 tracing::info!(
                     chars = text.chars().count(),
                     target_process = %process_name,
                     paste_keys = label,
-                    "paste-back: ydotool {} dispatched", label,
+                    tool = if on_x11 { "xdotool" } else { "ydotool" },
+                    "paste-back dispatched",
                 );
                 Ok(PasteResult::Pasted)
             }
-            Ok(s) => {
-                tracing::warn!(
-                    status = ?s,
-                    "ydotool exited non-zero — text in clipboard but paste-key not sent.",
-                );
-                Ok(PasteResult::ClipboardOnly)
-            }
             Err(e) => {
-                tracing::warn!(?e, "ydotool failed to spawn — text in clipboard only.");
+                tracing::warn!(
+                    ?e,
+                    tool = if on_x11 { "xdotool" } else { "ydotool" },
+                    "paste-back tool failed — text in clipboard only.",
+                );
                 Ok(PasteResult::ClipboardOnly)
             }
         }
     }
+}
+
+/// X11:`xdotool key ctrl+v` / `ctrl+shift+v`。
+/// xdotool 走 X server XTEST extension,無需 daemon 或 group 權限。
+fn run_xdotool_paste(use_shift_v: bool) -> Result<()> {
+    let key_spec = if use_shift_v { "ctrl+shift+v" } else { "ctrl+v" };
+    let status = Command::new("xdotool")
+        .args(["key", key_spec])
+        .status()
+        .context("spawn xdotool — is xdotool installed? sudo apt install xdotool")?;
+    if !status.success() {
+        anyhow::bail!("xdotool exited {status}");
+    }
+    Ok(())
+}
+
+/// Wayland:`ydotool key 29:1 47:1 47:0 29:0`(Linux keycode 序列)。
+/// Linux keycodes:29=Ctrl, 42=Shift, 47=V。
+/// 需 ydotoold daemon + user 在 input group。
+fn run_ydotool_paste(use_shift_v: bool) -> Result<()> {
+    let keys: &[&str] = if use_shift_v {
+        &["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
+    } else {
+        &["29:1", "47:1", "47:0", "29:0"]
+    };
+    let mut cmd = Command::new("ydotool");
+    cmd.arg("key");
+    for k in keys {
+        cmd.arg(k);
+    }
+    let status = cmd
+        .status()
+        .context("spawn ydotool — is ydotoold daemon running + user in input group?")?;
+    if !status.success() {
+        anyhow::bail!("ydotool exited {status}");
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -193,14 +232,24 @@ impl PasteController for LinuxPasteController {
     }
 }
 
-/// 啟動時的健康檢查 — 看 wl-clipboard / ydotool 在不在 PATH,缺什麼
-/// 早警告。**不要** fail app — 反白即改寫只是 phase 4C 的功能,沒它
-/// Mori 還是能跑(語音、剪貼簿、記憶都不受影響)。只是讓 user 早點
-/// 知道為何 paste-back 待會會 fallback 到 ClipboardOnly。
+/// 啟動時的健康檢查 — 看必要工具在不在 PATH,缺什麼早警告。**不要**
+/// fail app — 反白即改寫只是 phase 4C 的功能,沒它 Mori 還是能跑(語音、
+/// 剪貼簿、記憶都不受影響)。只是讓 user 早點知道為何 paste-back 待會
+/// 會 fallback 到 ClipboardOnly。
+///
+/// 依 session type 檢不同工具:
+/// - X11(`XDG_SESSION_TYPE=x11`)→ `xclip` + `xdotool`(走 X server,
+///   無需 daemon,Ubuntu 24.04 + X11 開箱可用)
+/// - Wayland → `xclip` + `ydotool`(需 daemon + input group,setup-wayland-
+///   input.sh 一次裝齊)
 pub fn warn_if_setup_missing() {
-    // 5F: 改用 xclip 取代 arboard（避免 wl-clipboard portal 對話框）。
-    // 讀反白 + 寫剪貼簿都走 xclip shell-out，paste 鍵盤模擬走 ydotool。
-    for tool in ["xclip", "ydotool"] {
+    let on_x11 = crate::x11_hotkey::is_x11_session();
+    let required: &[&str] = if on_x11 {
+        &["xclip", "xdotool"]
+    } else {
+        &["xclip", "ydotool"]
+    };
+    for tool in required {
         let ok = Command::new("which")
             .arg(tool)
             .stdout(Stdio::null())
@@ -209,10 +258,15 @@ pub fn warn_if_setup_missing() {
             .map(|s| s.success())
             .unwrap_or(false);
         if !ok {
+            let hint = if on_x11 {
+                "sudo apt install xclip xdotool"
+            } else {
+                "跑 yazelin/ubuntu-26.04-setup 的 setup-wayland-input.sh 裝齊"
+            };
             tracing::warn!(
                 tool,
-                "selection / paste-back tool missing — phase 4C 功能會降級。\
-                 跑 yazelin/ubuntu-26.04-setup 的 setup-wayland-input.sh 裝齊。",
+                hint,
+                "selection / paste-back tool missing — phase 4C 功能會降級。",
             );
         }
     }

@@ -6,6 +6,35 @@
 
 ---
 
+## 5Q-followup — X11 paste-back 走 xdotool(2026-05-13)
+
+5Q 上完後使用者回報「轉錄結果沒貼到游標」。根因:paste-back path
+hardcode `ydotool key`,Wayland-first 設計沒考慮到 24.04 X11 user 通常
+沒裝 `ydotoold` daemon、也沒加 `input` group(ydotool 兩個前置條件)。
+
+### 修法
+
+`crates/mori-tauri/src/selection.rs::paste_back_for_process` 加 session
+偵測(複用 `x11_hotkey::is_x11_session()`):
+- **X11** → `xdotool key ctrl+v` / `ctrl+shift+v`(走 X server XTEST,
+  無需 daemon / 無需 group 權限,Ubuntu 24.04 + X11 開箱可用)
+- **Wayland** → `ydotool key 29:1 47:1 47:0 29:0`(走 uinput,維持原路徑)
+
+兩條 path 拆成 `run_xdotool_paste` / `run_ydotool_paste` helper,error
+handling 一致(失敗都 fallback 到 `PasteResult::ClipboardOnly`)。
+
+`warn_if_setup_missing()` 啟動健康檢查也跟著分流:X11 檢 `xclip` +
+`xdotool`、Wayland 檢 `xclip` + `ydotool`,缺哪個就給對應的 install hint。
+
+Setup script 連動:X11 user 只需要 `sudo apt install xclip xdotool`,
+不用整套 setup-wayland-input.sh。
+
+### 變動檔案
+
+- `crates/mori-tauri/src/selection.rs`
+
+---
+
 ## 5Q — X11 session 支援 + 自訂熱鍵(2026-05-13)
 
 Ubuntu 24.04 LTS + X11 session 跑得起來了。Mori 原本 Wayland-only(走
