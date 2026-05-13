@@ -391,7 +391,9 @@ pub fn preprocess_file_includes(body: &str, enable: bool) -> String {
     if !enable {
         return body.to_string();
     }
-    let home = match std::env::var("HOME") {
+    // Windows 不設 HOME env var,只有 USERPROFILE。fallback 它一致 mori_dir()
+    // 行為,讓 `#file:~/...` 在 Windows 也展開到 `%USERPROFILE%\...`。
+    let home = match std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
         Ok(h) => h,
         Err(_) => return body.to_string(),
     };
@@ -458,10 +460,16 @@ fn read_inline(
     let canonical = path
         .canonicalize()
         .map_err(|e| format!("檔案不存在或無權讀取: {e}"))?;
-    if !canonical.starts_with(home_root) {
+    // Windows std::fs::canonicalize 回 `\\?\C:\...` 前綴(extended-length
+    // path syntax),home_root 是 `C:\Users\yazel` 沒前綴 → starts_with
+    // 永遠 false。同樣 canonicalize home_root 一次,兩邊形狀對齊。
+    let home_canonical = home_root
+        .canonicalize()
+        .unwrap_or_else(|_| home_root.to_path_buf());
+    if !canonical.starts_with(&home_canonical) {
         return Err(format!(
-            "路徑超出 HOME ({}) 子樹，拒絕讀取",
-            home_root.display()
+            "路徑超出 HOME ({}) 子樹,拒絕讀取",
+            home_canonical.display()
         ));
     }
     if already_read >= FILE_INCLUDE_TOTAL_MAX_BYTES {
@@ -614,10 +622,13 @@ mod tests {
 
     #[test]
     fn preprocess_file_includes_reads_real_file() {
-        // 用 tempfile 在 HOME 子樹下測試成功讀取
-        let home = std::env::var("HOME").unwrap_or_default();
+        // 用 tempfile 在 HOME 子樹下測試成功讀取。Windows fallback USERPROFILE
+        // 跟 production code 同樣邏輯。
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
         if home.is_empty() {
-            return; // skip 沒 HOME 環境（CI 容器等）
+            return; // skip 沒 HOME/USERPROFILE 環境(headless CI 容器等)
         }
         let tmp = std::path::PathBuf::from(&home).join(".mori-test-fileref.txt");
         std::fs::write(&tmp, "FILE_CONTENT_MARKER\n").unwrap();
