@@ -181,7 +181,9 @@ impl LocalMarkdownMemoryStore {
 }
 ```
 
-實際實作會在 phase 1 落地,phase 1 commit 只先有 trait + 空 impl。
+目前實作:`LocalMarkdownMemoryStore`(`crates/mori-core/src/memory/markdown.rs`)
+全套 read / write / search / delete / observe 都已落地。grep + LLM 判斷的搜尋
+路徑已 ship,vector embedding 等下階段才上(見 phase 表)。
 
 ## 跨裝置(Phase 7+ 願景)
 
@@ -216,7 +218,7 @@ pub struct AnnuliMcpMemoryStore {
 
 把 `read` / `write` / `search` 都轉成 MCP tool calls 給 Annuli 處理。Mori 變成 Annuli 的客戶端,共用同一個靈魂。
 
-Phase 1 不接 Annuli,先用 LocalMarkdown 建立信心,等 Annuli 那邊穩定再切換。
+目前不接 Annuli,先用 LocalMarkdown 建立信心,等 Annuli 那邊穩定再切換。
 
 ## 跟 Claude Code auto-memory 的關係
 

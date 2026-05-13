@@ -69,7 +69,9 @@
 </p>
 
 <h2>Expressions</h2>
-<p>共 8 種表情 — UI sprite(<code>public/floating/mori-*.png</code>)目前用 6 個:</p>
+<p>UI sprite 用 6 個 state(idle / recording / thinking / done / error / sleeping),
+sprite 從 active character pack 讀(<code>~/.mori/characters/&lt;active&gt;/sprites/&lt;state&gt;.png</code>)。
+規範見 <a href="character-pack.md">character-pack.md</a>:</p>
 <div class="grid grid-6">
   <div class="card" style="text-align:center">
     <img src="sprites/mori-idle.png" alt="idle" style="width:100%">
@@ -116,29 +118,30 @@
   </tbody>
 </table>
 
-<h2>Sprite Sheet (For Animations)</h2>
+<h2>Sprite Sheet(5P 4×4 系統)</h2>
 <p>
-  動畫用 sprite 規格:每個 state 8 frames @ 12 fps,256×256 透明 PNG,
-  循序排成水平 sprite sheet(總寬度 = 2048px、高度 = 256px)。
-</p>
-<p>
-  目前實作:單 PNG / state(static pose)+ CSS keyframes 做呼吸 / 旋轉 / bounce
-  動畫。未來換成 sprite-sheet animation(`background-position` step animation)
-  時,把單張 256×256 換成 2048×256 sheet 即可,React 端 CSS class 不用大改。
+  每個 state 對應一張 <strong>1024×1024 PNG-32</strong> sprite sheet,內含
+  <strong>4×4 共 16 個 frame</strong>(每 frame 256×256),row-major 順序播放。
+  整套規格(manifest schema / loop mode / duration)集中在
+  <a href="character-pack.md">character-pack.md</a>。
 </p>
 
 <dl class="meta-grid">
-  <dt>frame size</dt>  <dd>256 × 256 px</dd>
-  <dt>frame count</dt> <dd>8 per state</dd>
-  <dt>fps</dt>         <dd>12</dd>
-  <dt>loop type</dt>   <dd>idle / recording / thinking → ping-pong;done / error → 1 次;sleeping → 慢循環</dd>
-  <dt>實作位置</dt>    <dd><code>src/floating.css</code> @keyframes mori-* + <code>FloatingMori.tsx</code></dd>
+  <dt>整張 sheet</dt>  <dd>1024 × 1024 px</dd>
+  <dt>每 frame</dt>    <dd>256 × 256 px</dd>
+  <dt>grid</dt>        <dd>4 × 4(16 frame)</dd>
+  <dt>順序</dt>        <dd>row-major,左→右、上→下</dd>
+  <dt>loop_mode</dt>   <dd>idle / sleeping / recording / thinking = <code>loop</code>;done / error = <code>one-shot</code></dd>
+  <dt>duration</dt>    <dd>manifest <code>loop_durations_ms[state]</code> — idle 3000、sleeping 5000、recording 1500、thinking 2000、done 600、error 800</dd>
+  <dt>實作位置</dt>    <dd><code>src/FloatingMori.tsx</code> + <code>src/floating.css</code>(兩軸獨立 <code>steps(4)</code>)</dd>
 </dl>
 
 <h2>Poses & Actions</h2>
 <p>
   設計稿中有 8 種額外動作(讀書、提燈、撫貓、揮手、走路、思考等),目前 desktop 版
-  只用 idle / recording / thinking / done / error / sleeping 6 種。未來擴充:
+  正式採用 idle / recording / thinking / done / error / sleeping 6 種(character-pack
+  manifest 的 <code>states</code> 必含項)。Manifest 內 <code>optional_states</code> 已
+  預留 <code>walking</code> / <code>dragging</code>,未來擴充:
 </p>
 <ul>
   <li>📚 reading — 使用者打開「閱讀模式」(planned)</li>
@@ -170,7 +173,9 @@
 <h2>Color Variations</h2>
 <p>
   設計稿底部有 Mori 的色彩變化版(夏 / 秋 / 冬 / 夜)— 給未來「節日 sprite」用。
-  目前 desktop 只發行森林綠主版,變化版 phase 6+ 才開放挑。
+  目前 desktop 預設只 ship 森林綠主版;變化版未來會做成獨立 character pack
+  (見 <a href="character-pack.md">character-pack.md</a>),從 Config tab → Appearance
+  → Character picker 切換。
 </p>
 
 <h2>Voice Tone(角色說話風格)</h2>

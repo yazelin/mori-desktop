@@ -20,21 +20,29 @@
 
 ```
 mori-desktop/
-├── Cargo.toml                  workspace
-├── package.json                前端 deps
+├── Cargo.toml                       workspace
+├── package.json                     前端 deps
 ├── crates/
-│   ├── mori-core/              ★ 大腦
+│   ├── mori-core/                   ★ 大腦(純 Rust lib,跨平台)
 │   │   └── src/
-│   │       ├── lib.rs          公開 API 入口
-│   │       ├── memory/         MemoryStore trait + 實作
-│   │       ├── context.rs      Context struct + ContextProvider trait
-│   │       ├── skill.rs        Skill trait + 內建 skills
-│   │       ├── llm/            LlmProvider trait + GroqProvider
-│   │       └── voice.rs        Whisper 客戶端
-│   └── mori-tauri/             桌面殼
-│       └── src/main.rs         IPC handlers + Tauri scaffold
-├── src/                        React 前端
-└── docs/
+│   │       ├── lib.rs               公開 API 入口
+│   │       ├── agent.rs             Agent loop(LLM + tool dispatch)
+│   │       ├── agent_profile.rs     ~/.mori/agent/*.md 解析
+│   │       ├── voice_input_profile.rs  ~/.mori/voice_input/*.md 解析
+│   │       ├── voice_cleanup.rs     VoiceInput 模式的 STT cleanup pipeline
+│   │       ├── context.rs           Context struct + ContextProvider trait
+│   │       ├── memory/              MemoryStore trait + LocalMarkdownMemoryStore
+│   │       ├── skill/               Skill trait + 13 個 built-in skills
+│   │       ├── llm/                 LlmProvider trait + Groq/Gemini/Ollama/Claude/Bash-CLI 等
+│   │       ├── mode.rs              Mode(Active/Background) + 控制邏輯
+│   │       ├── paste.rs             PasteController trait + Linux 實作
+│   │       ├── runtime.rs           runtime.json schema + 寫入(給 mori-cli 看)
+│   │       └── url_detect.rs        從 STT 文字偵測 URL → 自動 fetch_url
+│   ├── mori-tauri/                  桌面殼
+│   │   └── src/main.rs              IPC handlers + Tauri scaffold + hotkey
+│   └── mori-cli/                    Bash CLI proxy 用的 thin client(HTTP → mori-tauri)
+├── src/                             React 前端(MainShell + tabs + Floating + Picker + ChatBubble)
+└── docs/                            公式書 + 手冊(html + md)
 ```
 
 ## 四大核心 Trait
@@ -64,64 +72,73 @@ LLM 可呼叫的工具。每個 Skill 定義:
 - `confirm_required` — destructive 操作須二次確認
 - `execute(args, context, target)` — 實際邏輯
 
-Phase 1 內建 skills:
-- `EchoSkill` — 回應使用者(基本對話)
-- `RememberSkill` — 把當前 context 寫入 memory
+目前內建 skills(`crates/mori-core/src/skill/`):
 
-Phase 2+ 加:`Translate` / `Polish` / `Summarize` / `Compose` ...
+| skill | 用途 |
+|---|---|
+| `translate` | 中英(或自動偵測)翻譯 |
+| `polish` | 修飾文字風格(不改詞義) |
+| `summarize` | 段落摘要 |
+| `compose` | 輔助寫作(信件 / 公文 / etc.) |
+| `remember` / `recall_memory` / `edit_memory` / `forget_memory` | 長期記憶 CRUD |
+| `fetch_url` | 抓 URL 內容進 context |
+| `set_mode` | LLM 主動切 Active / Background |
+| `paste_selection_back` | 把結果貼回原游標(VoiceInput pipeline) |
+| `echo` | 純對話 fallback |
+
+Agent profile 透過 frontmatter `enabled_skills:` 白名單控可用範圍;另支援
+`shell_skills:` 自訂 — 把任意 CLI(`gh` / `docker` / 自家 script)包裝成
+Mori 能呼叫的 skill,不必改 Rust。
 
 ### 4. `LlmProvider`
 
 LLM 通訊抽象。一份 agent 程式碼能打 Groq、Ollama、OpenAI、Anthropic 等任意 OpenAI 相容後端。
 
-Phase 1 實作:
-- `GroqProvider`(雲端,主力)
-- `OllamaProvider`(本地,fallback / 隱私任務)
+目前實作(`crates/mori-core/src/llm/`):
+
+| provider | 用途 |
+|---|---|
+| `groq` | 雲端,主力(預設) |
+| `gemini` | Gemini API 走 OpenAI-compat 端點 |
+| `ollama` | 本機 LLM,fallback / 隱私任務 |
+| `claude-bash` / `gemini-bash` / `codex-bash` | Bash CLI proxy(用 user 自己 Pro/Max quota) |
+| `claude-cli` / `gemini-cli` / `codex-cli` | 同上但限 chat-only(無 agent loop) |
+| `whisper-local` | 本機 Whisper STT(`whisper.cpp` ggml) |
+| 自訂 OpenAI-compat | `providers.<name>` 內 `api_base` + `api_key_env`,Azure / OpenRouter / 自家代理 |
 
 每個 Skill 可指定「想用哪個 provider + 哪個 model」,允許:
 - 任務 → 模型 精細搭配(翻譯用 8b-instant、寫作用 gpt-oss-120b、敏感資料用本地 qwen3:8b)
-- Fallback chain(Groq 限流 → 切本地)
+- Fallback chain(Groq 限流 → 切本地)— `routing.fallback_chain` per-context 設定
 - Privacy-first 旗標(`Privacy::LocalOnly` 強制不離本機)
 
-## 啟動流程(Phase 1 簡化版)
+## 錄音流程(目前實作)
 
 ```
-使用者按 Ctrl+Alt+M
+使用者按 Ctrl+Alt+Space(toggle 模式 = 一按切換、hold 模式 = 按住開錄)
    ↓
-mori-tauri:全域熱鍵觸發
+mori-tauri:全域熱鍵觸發 — X11 走 XGrabKey、Wayland 走 xdg-desktop-portal
    ↓
-mori-tauri:開麥克風,錄音
-   ↓ (使用者再按一次熱鍵)
+mori-tauri:開麥克風,錄音(floating sprite 切到 recording state)
+   ↓ (toggle:再按一次;hold:放開)
 mori-tauri:停止錄音 → 拿到 audio bytes
    ↓
-mori-tauri 呼叫 mori-core::voice::transcribe(audio)
+mori-core:呼叫當前 stt_provider(groq Whisper API / whisper-local)→ transcript
    ↓
-mori-core:呼叫 GroqProvider Whisper API → 拿到 transcript
+依模式分支:
+   ├─ VoiceInput 模式 → cleanup LLM 加標點 / 修錯字 → paste_selection_back 貼回游標
+   └─ Agent 模式     → LLM 看 transcript + Context + Skill schema → tool call loop
+                       → Skill::execute(args, context) → 結果丟回 LLM → 最終回應
    ↓
-mori-tauri:emit("transcript", text) 給前端
-   ↓
-React UI:顯示 transcript
-```
-
-Phase 2+ 把這條流程接上 Skill dispatch:
-
-```
-... transcript 拿到後 ...
-   ↓
-mori-core:LLM 看 transcript + Context + 所有 Skill schema
-   ↓ tool call decision
-mori-core:Skill::execute(args, context)
-   ↓
-回傳結果 → 前端顯示 / TTS 念出
+mori-tauri:phase-changed event → React UI / floating sprite 同步狀態
 ```
 
 ## 安全紀律
 
-寫入 architecture 而不是 phase 5 才想:
+寫入 architecture 而不是事後才想:
 
-1. **白名單**:`ExecCommand` 等高權限 skill 只能跑 `~/.mori/skills.toml` 列出的指令
-2. **二次確認**:含 `rm` / `git reset` / `mv` 等 destructive pattern → `confirm_required: true`,執行前透過 UI 或 TTS 問使用者
-3. **Audit log**:每次 skill 呼叫寫 `~/.mori/audit.log`,含 timestamp / transcript / intent / 結果
+1. **白名單**:`shell_skills` 走 `command: [array]` 不是 raw shell,`{{name}}` 替換是字面字串(沒 shell injection 機會);未來 `ExecCommand` 高權限 skill 只能跑明確列出的指令
+2. **二次確認**(planned):含 `rm` / `git reset` / `mv` 等 destructive pattern → `confirm_required: true`,執行前透過 UI 或 TTS 問使用者
+3. **Audit log**(planned):每次 skill 呼叫寫 `~/.mori/audit.log`,含 timestamp / transcript / intent / 結果
 4. **無 raw shell**:絕不接受 LLM 生成的任意 shell command,只允許具名 skill 呼叫
 5. **隱私旗標**:`Privacy::LocalOnly` 的 skill 強制只用本地 LLM
 
@@ -138,7 +155,11 @@ mori-core:Skill::execute(args, context)
 | 滑鼠附近截圖 | ✓ | ✓ | ✓ | xdg portal |
 | 取活躍視窗 | NSWorkspace | Win32 | X11 | xdg portal |
 
-Wayland 是目前環境(Ubuntu 26.04),最多受限。Phase 4+ 處理 portal 整合。
+Wayland 是主力環境(Ubuntu 26.04 + GNOME)。5Q 起 Wayland 透過
+`xdg-desktop-portal.GlobalShortcuts` 接全域熱鍵、X11 走 `tauri-plugin-global-shortcut`
+(XGrabKey),兩條 path 共用同一份 `~/.mori/config.json hotkeys` 設定 — 詳見
+[`docs/hotkeys.html`](hotkeys.html)。剪貼簿 paste-back 跨平台分:Wayland 走
+`ydotool`(uinput-based)、X11 走 `xdotool`。
 
 ## 跨裝置擴展(phase 7+ 願景,phase 1 不寫)
 

@@ -143,8 +143,9 @@
 
 <pre><code>git clone https://github.com/yazelin/mori-desktop.git
 cd mori-desktop
-cargo build --workspace
 npm install
+npm run build              # 先建 dist/ — tauri::generate_context!() 編譯時會檢查這路徑
+cargo build --workspace    # workspace 才會 build mori-cli(Bash CLI proxy 需要)
 npm run tauri dev</code></pre>
 
 <p>
@@ -162,8 +163,15 @@ npm run tauri dev</code></pre>
 │   ├── dark.json            <span class="auto-tag">[auto] Mori Dark 內建 theme</span>
 │   └── light.json           <span class="auto-tag">[auto] Mori Light 內建 theme</span>
 ├── agent/
-│   └── AGENT.md             <span class="auto-tag">[auto] 預設 agent profile</span>
-├── voice_input/             <span class="auto-tag">[auto] 空目錄,USER-*.md 由你建</span>
+│   ├── AGENT.md             <span class="auto-tag">[auto] 預設 agent profile(Ctrl+Alt+0)</span>
+│   └── AGENT-NN.&lt;name&gt;.md  <span class="auto-tag">[auto] 5R starter:AGENT-01~04(可改 / 可刪)</span>
+├── voice_input/
+│   └── USER-NN.&lt;name&gt;.md   <span class="auto-tag">[auto] 5R starter:USER-00/01/02(可改 / 可刪)</span>
+├── characters/              <span class="auto-tag">[auto] 5P character pack:預設 mori/ + active 檔</span>
+│   ├── mori/
+│   │   ├── manifest.json
+│   │   └── sprites/         <span class="auto-tag">  6 個 state PNG(4×4 sheet)</span>
+│   └── active               <span class="auto-tag">  一行,當前 active character 名</span>
 ├── memory/                  <span class="user-tag">[lazy] 第一次 RememberSkill 寫入時建</span>
 ├── corrections.md           <span class="user-tag">[opt] 共用糾錯規則(profile #file: 引用)</span>
 └── models/                  <span class="user-tag">[opt] whisper-local 模型放這(Deps tab 一鍵下載)</span></div>
@@ -275,8 +283,9 @@ npm run tauri dev</code></pre>
   <div class="path">voice_input/</div>
   <div class="auto yes">auto</div>
   <div class="desc">
-    空目錄(<code>voice_input_profile.rs::ensure_voice_input_dir_initialized</code>)。
-    沒任何 <code>USER-*.md</code> 時 fallback 到 code 內常數
+    5R 起預設 ship 三份 starter(USER-00 純文字輸入 / USER-01 朋友閒聊 /
+    USER-02 正式信件,寫進 <code>voice_input_profile.rs::ensure_voice_input_dir_initialized</code>)。
+    全刪了又沒任何 <code>USER-*.md</code> 時 fallback 到 code 內常數
     <code>FALLBACK_PROFILE_MD</code>(基本繁中校正),不寫 disk。
   </div>
 </div>

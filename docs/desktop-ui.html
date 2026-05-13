@@ -153,7 +153,7 @@
   <thead><tr><th>class</th><th>背景</th><th>用途</th></tr></thead>
   <tbody>
     <tr><td><code>.mori-btn</code></td><td>白透</td><td>predefined neutral</td></tr>
-    <tr><td><code>.mori-btn.primary</code></td><td>天空藍(將改 forest)</td><td>主動作 / 儲存</td></tr>
+    <tr><td><code>.mori-btn.primary</code></td><td>forest</td><td>主動作 / 儲存</td></tr>
     <tr><td><code>.mori-btn.danger</code></td><td>紅</td><td>刪除 / 不可逆</td></tr>
     <tr><td><code>.mori-btn.ghost</code></td><td>無底</td><td>close ✕ / 次要</td></tr>
     <tr><td><code>.mori-btn.small</code></td><td>小 padding</td><td>row inline</td></tr>
@@ -182,7 +182,7 @@
 </table>
 
 <h2>Phase Status</h2>
-<p>主視窗 UI 完成度(2026-05-12):</p>
+<p>主視窗 UI 完成度(2026-05-13):</p>
 <ul>
   <li>✓ 5M sidebar 架構 + 6 個 tab</li>
   <li>✓ 5N Chat panel(scrollable thread + bottom input bar)</li>
@@ -193,6 +193,12 @@
   <li>✓ Line-art SVG icon 取代 emoji — sidebar 6 tab + ChatPanel / Picker / Profiles / Memory / Skills / Deps / Floating 全套(brand-2 / brand-3)</li>
   <li>✓ Dual theme + VSCode-like 自訂 — <code>~/.mori/themes/*.json</code> 可自寫(brand-3)</li>
   <li>✓ Custom Select 取代 native &lt;select&gt; — 跨 theme dropdown 配色一致(brand-3 follow-up)</li>
+  <li>✓ 5P Sprite 4×4 engine + Character pack 系統 — sprite 從 hardcoded 改 <code>~/.mori/characters/&lt;active&gt;/</code> 可換</li>
+  <li>✓ 5Q X11 session 支援 + 自訂熱鍵 — <code>~/.mori/config.json hotkeys</code> 子樹,X11 走 XGrabKey、Wayland 走 portal</li>
+  <li>✓ 5R Starter profile + 基本操作流程文件 — 預設 ship USER-00/01 + AGENT-00/01</li>
+  <li>✓ 5R-followup XShape OS-level 圓形 floating + picker / chat-bubble 多螢幕細節修</li>
+  <li>✓ 5S Config UI IA 重組 — 7 個 sub-tab 按使用者心智模型分組 + HintTooltip + sticky save bar</li>
+  <li>✓ 5T Toggle / Hold 兩種錄音熱鍵語意 — <code>hotkeys.toggle_mode</code> 控制,改完按儲存即時生效</li>
 </ul>
 
 <div class="book-footer">

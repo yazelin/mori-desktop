@@ -39,7 +39,7 @@
 <div class="page-subtitle">SYSTEM TRAY · ICONS · SPRITES · MENU</div>
 
 <p class="lead">
-  系統匣 icon 規範 + 7 個 sprite 表情 + menu icon 庫 + interaction states。<br>
+  系統匣 icon 規範 + 6 個 sprite 表情 + menu icon 庫 + interaction states。<br>
   讓 Mori 在 panel 上是「會呼吸的森林精靈」,不是死木頭按鈕。
 </p>
 
@@ -74,8 +74,13 @@
 
 <h2>Sprite Sheet(動態狀態)</h2>
 <p>
-  Floating widget 用 6 個 sprite 表情,tray dynamic 也用同一套(未來 5O-2 啟用)。
-  Sprite 在<code>public/floating/</code>跟<code>docs/sprites/</code>都有一份。
+  Floating widget 用 6 個 sprite state,5P 起每個 state 是
+  <strong>1024×1024 4×4 sheet(16 frame)</strong>,從 active character pack
+  讀(<code>~/.mori/characters/&lt;active&gt;/sprites/&lt;state&gt;.png</code>)。
+  完整規範見 <a href="character-pack.md">character-pack.md</a>;
+  state → phase 對照見 <a href="character.html">character.html</a>。
+  下方 thumbnail 用的是 design book 內的單 frame 預覽,不是實際播放的 sheet。
+  tray dynamic icon 也走同一套(planned)。
 </p>
 
 <div class="grid grid-6">
@@ -144,7 +149,7 @@
 <h2>Notifications</h2>
 <p>Mori 主動通知時(背景排程提醒 / 失敗 / etc.):</p>
 <ul>
-  <li>tray icon 短暫變 <code>notice</code> 表情 0.6s 後恢復(planned, 5O-2)</li>
+  <li>tray icon 短暫變 <code>notice</code> 表情 0.6s 後恢復(planned)</li>
   <li>用桌面通知系統(<code>tauri-plugin-notification</code>)送原生 notif</li>
   <li>Mori sprite 在 floating 同時呈現 attention pose(eyes wide / 望向 cursor)</li>
 </ul>
