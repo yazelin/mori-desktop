@@ -168,37 +168,52 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use anyhow::{anyhow, bail, Context as _, Result};
-    use std::process::Command;
+    use std::iter::once;
+    use windows::core::PCWSTR;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
         VIRTUAL_KEY,
     };
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    /// `cmd /c start "" <target>` — empty quoted title 是 `start` 的標準慣例
-    /// (避免 `start "url"` 被當成 console title);Windows 走 ShellExecute
-    /// chain 自動找 URL 預設 browser / App Paths 註冊表 / Start Menu。
-    pub fn open_url(url: &str) -> Result<()> {
-        let status = Command::new("cmd")
-            .args(["/c", "start", "", url])
-            .status()
-            .context("spawn cmd /c start")?;
-        if !status.success() {
-            bail!("cmd /c start exited {status}");
-        }
+    /// Win32 `ShellExecuteExW` 共用實作 — 走 ShellExecute chain(自動查 App
+    /// Paths 註冊表 / PATH / 預設瀏覽器 / mailto / file association),失敗
+    /// 只回 Rust Err,**不彈 Windows shell 預設的「找不到 X」白色對話框**
+    /// (`SEE_MASK_FLAG_NO_UI` 抑制 UI)。
+    ///
+    /// 之前走 `cmd /c start "" <target>` 雖然功能對,但 `start` 內部呼叫
+    /// `ShellExecuteEx` 沒帶 NO_UI 旗標,失敗 Windows 會彈那個要 user 按
+    /// 「確定」的 dialog,卡到 agent retry 流程。
+    fn shell_execute_silent(target: &str) -> Result<()> {
+        let op: Vec<u16> = "open".encode_utf16().chain(once(0)).collect();
+        let target_wide: Vec<u16> = target.encode_utf16().chain(once(0)).collect();
+
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_FLAG_NO_UI,
+            lpVerb: PCWSTR(op.as_ptr()),
+            lpFile: PCWSTR(target_wide.as_ptr()),
+            nShow: SW_SHOWNORMAL.0,
+            ..Default::default()
+        };
+
+        unsafe { ShellExecuteExW(&mut info) }
+            .with_context(|| format!("ShellExecuteExW open '{target}'"))?;
+
         Ok(())
     }
 
-    /// Windows 上沒有 .desktop 概念,直接 `cmd /c start "" <name>` — 走 ShellExecute,
-    /// 自動查 App Paths(chrome / code / firefox / winword 等都註冊在這)+ PATH。
-    /// 不保證 100% 命中 Start Menu pinned app,但開機 default app 都能開。
+    pub fn open_url(url: &str) -> Result<()> {
+        shell_execute_silent(url)
+    }
+
+    /// Windows 上沒有 .desktop 概念,走 ShellExecute 自動查 App Paths
+    /// 註冊表(chrome / code / firefox / msedge / notepad / winword 等都
+    /// 註冊在這)+ PATH + Start Menu shortcuts。不保證 100% 命中
+    /// Microsoft Store apps(那要 AUMID,roadmap)。
     pub fn open_app(name: &str) -> Result<(String, serde_json::Value)> {
-        let status = Command::new("cmd")
-            .args(["/c", "start", "", name])
-            .status()
-            .context("spawn cmd /c start")?;
-        if !status.success() {
-            bail!("cmd /c start exited {status} — '{name}' not in App Paths / PATH");
-        }
+        shell_execute_silent(name)?;
         Ok((
             format!("已開啟 {name}"),
             serde_json::json!({ "started": name }),

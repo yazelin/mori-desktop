@@ -81,6 +81,11 @@ windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
+    # OpenUrl / OpenApp 走 ShellExecuteExW + SEE_MASK_FLAG_NO_UI,失敗不彈
+    # Windows 預設的「找不到 X」白色對話框(會卡 user 按確定)。
+    # SHELLEXECUTEINFOW 在 windows 0.58 莫名 gated 在 System_Registry,要連同加。
+    "Win32_UI_Shell",
+    "Win32_System_Registry",
 ] }
 
 [features]
