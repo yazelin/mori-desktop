@@ -15,8 +15,8 @@
 | Wave | 範圍 | 預計工程量 | 狀態 |
 |---|---|---|---|
 | **Wave 0** | 設計 freeze(architecture / design / refactoring docs) | 1 天 | ✅ done(commits f576109 / eac6188 / a17c52c / 3ce7bfa) |
-| **Wave 1** | 三 repo Annuli → annuli sweep + 實作追蹤系統建立 | 半天 | 🔄 in progress |
-| **Wave 2** | annuli 內部畫線(src/core/ + src/creator/)— 機械式搬位置 | 半天-1 天 | ⏳ |
+| **Wave 1** | 三 repo Annuli → annuli sweep + 實作追蹤系統建立 | 半天 | ✅ done(URL sweep + IMPLEMENTATION-PLAN 都 commit;mori-journal 待 yazelin 手動建) |
+| **Wave 2** | annuli 內部畫線(src/core/ + src/creator/)— 機械式搬位置 + 17 step physical migration | 半天-1 天 | ✅ done 2026-05-14(annuli@0e6cec1,PR #1 squash merge,engine.py 2489 → 71 行 shim,admin.py 1674 → 全砍) |
 | **Wave 3** | annuli core 邏輯重組:events / digest / rings / curator 4 module + 路徑遷移 | 1-2 週 | ⏳ |
 | **Wave 4** | mori-desktop 接 annuli HTTP API + 主視窗 Annuli tab | 1 週 | ⏳ |
 | **Wave 5** | annuli-creator 物理拆 repo(條件成熟時) | 半天 | ⏳ 後期 |
@@ -90,38 +90,55 @@
 把現 `engine.py`(2489 行)機械式切成兩堆檔案,**不改邏輯**,只搬位置。
 讓 import paths 變成 `from annuli.core import ...` 或 `from annuli.creator import ...`。
 
-### 步驟(待做)
+### 步驟(✅ 全完成 2026-05-14,PR #1 squash @ annuli 0e6cec1)
 
-- [ ] 在 annuli repo 開 branch `refactor/split-core-creator`
-- [ ] 建 `src/annuli/core/` 子目錄
-  - [ ] `__init__.py`
-  - [ ] `soul.py`(從 engine.py 抽 SOUL 讀取相關函式)
-  - [ ] `memory.py`(persona / memory_state load+save)
-  - [ ] `events.py`(暫空 placeholder,Wave 3 才填)
-  - [ ] `rings.py`(do_reflect / load_rings 等)
-  - [ ] `curator.py`(暫空 placeholder)
-  - [ ] `digest.py`(暫空 placeholder)
-  - [ ] `scheduler.py`(從 admin.py 抽 APScheduler 跑 reflection 相關 task)
-  - [ ] `server.py`(從 admin.py 抽 Flask app,只留 memory / reflection 相關 endpoints)
-  - [ ] `bootstrap.py`(暫空 placeholder,Wave 3 接 world-tree initiate-spirit)
-  - [ ] `adapters/cli.py`(從 adapters/cli.py 搬;留下 /sleep / /status / /recall / /reset 等記憶相關 command)
-- [ ] 建 `src/annuli/creator/`
-  - [ ] `__init__.py`
-  - [ ] `explore.py`(從 engine.py 抽 do_explore + 相關 helper)
-  - [ ] `learn.py`(從 engine.py 抽 do_learn)
-  - [ ] `study.py`(從 engine.py 抽 do_study)
-  - [ ] `post.py`(從 engine.py 抽 do_post)
-  - [ ] `sync_engagement.py`(從 admin.py 抽 FB sync 相關 cron)
-  - [ ] `facebook.py`(從 adapters/ 抽 FB API integration)
-  - [ ] `scheduler.py`(從 admin.py 抽 APScheduler 跑 creator task)
-  - [ ] `server.py`(從 admin.py 抽 creator 相關 Flask routes:/drafts/* / /knowledge/* / /post/*)
-- [ ] 在 root 留 `main.py` 改成轉發到 `core.cli.run` / `creator.server.run`
-- [ ] 跑既有 CLI / web admin,確認沒壞
-- [ ] commit + push branch + merge
+- [x] 在 annuli repo 開 branch `refactor/split-core-creator`
+- [x] 建 `src/annuli/core/` 子目錄
+  - [x] `__init__.py`
+  - [x] `config.py`(path 常數 + DEFAULT_* + load_config + scheduler helpers + ensure_global_files)
+  - [x] `utils.py`(load_json / save_json / _extract_keywords / _extract_json)
+  - [x] `llm_backend.py`(call_ai / call_fast_ai + spinner)
+  - [x] `memory.py`(UserContext + load_persona / resolve_user / append_log / recall_relevant_memories)
+  - [x] `chat.py`(classify_intent / smart_recall / build_system_prompt / process_message)
+  - [x] `rings.py`(archive_ring / do_reflect / get_rings_list / get_ring_detail / reset_user / reset_all)
+  - [x] `events.py`(placeholder,Wave 3 填)
+  - [x] `digest.py`(placeholder,Wave 3 填)
+  - [x] `curator.py`(placeholder,Wave 3 填)
+  - [x] `bootstrap.py`(placeholder,Wave 3 接 world-tree initiate-spirit)
+  - [x] `scheduler.py`(placeholder,Wave 3 加 reflection task;creator scheduler 已建)
+  - [x] `server.py`(11 routes:dashboard / users / persona / config)
+  - [x] `adapters/cli.py`(10 個 core commands,creator commands 已剪)
+- [x] 建 `src/annuli/creator/`
+  - [x] `__init__.py`
+  - [x] `learn.py`(do_learn + 影片字幕 helpers + synthesize_research_topic)
+  - [x] `explore.py`(do_explore)
+  - [x] `study.py`(do_study + refine_writing_style)
+  - [x] `post.py`(generate_post + draft CRUD)
+  - [x] `images.py`(5 個 image 函式)
+  - [x] `facebook.py`(publish_to_fb + 4 個 FB helper)
+  - [x] `sync_engagement.py`(sync_post_engagement)
+  - [x] `knowledge.py`(load/save_explore_pool + 7 knowledge query)
+  - [x] `scheduler.py`(從 admin.py 抽 APScheduler + 5 個 _task_*)
+  - [x] `server.py`(22 routes:drafts / knowledge / schedule)
+- [x] `main.py` 改 dispatcher:`chat` / `admin` / `creator-admin` 三 subcommand
+- [x] `engine.py` 變 71 行純 re-export shim,`admin.py` / `adapters/cli.py` / `app.py` 砍掉(1866 行 deletion)
+- [x] e2e:CLI /status / /rings / /recall + 真實對話一輪過;curl core/creator admin routes 全 200;cross-check 404 隔離正確;既有 user CT + 2 rings 無痛讀取
+- [x] commit + push branch + squash merge(@0e6cec1)
 
-### 預期挑戰
-- engine.py 有共用 helper(load_json / save_json / log / config 等)— 要決定放 core 還是抽出 `shared/`(我建議 `core/utils.py`,creator 從 core import)
-- `config.json` 全部 reload 在哪邊?(建議:core/config.py 管,creator 透過 HTTP 拿)
+### 實際踩到的挑戰
+- engine.py 共用 helper 收進 `core/utils.py`,creator 從 core import(原計畫)
+- `config.json` reload 在 `core/config.py.load_config()`,用 lazy import 避開
+  `config <-> utils` 循環(utils 模組頂層 import STOPWORDS,所以 load_config 不能在
+  config 模組頂層 import utils.load_json,改成 function 內 lazy import)
+- creator → core 內部 import 違反邊界:smart_recall fallback / do_learn / do_study /
+  do_explore / generate_post 都需要 creator/knowledge 的查詢函式。Wave 2 stopgap
+  用 `from engine import ...` lazy import 折衷(engine 是 shim,等 Wave 3 改 HTTP
+  call 才完全切乾淨)
+- 兩個 Flask app 共用同一個 BackgroundScheduler 實例,jobs 雙邊都看得到(`from
+  annuli.creator.scheduler import scheduler`)
+- `python main.py admin` 行為改變:現在只跑 core(11 routes),drafts/knowledge/
+  schedule UI 要另外 `python main.py creator-admin --port 5001`。部署機 systemd
+  unit 需要加第二個 service 才有完整 admin 功能
 
 ---
 
@@ -234,7 +251,7 @@ Mori 的成長路上,每一步都該被記得 — 不是只在 git log,而是進
 ---
 
 **Last updated**: 2026-05-14  
-**Status**: Wave 1 in progress  
+**Status**: Wave 1 + 2 done(annuli@0e6cec1 merged)。下一步 Wave 3(`refactor/4-layer-reflection` branch)  
 **Related**:
 - `docs/design/annuli-memory.md` — 架構決策
 - `docs/architecture.md` — 三宇宙位置
