@@ -111,13 +111,46 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 
 ## 平台支援
 
+### 概況
+
 | 平台 | 狀態 |
 |---|---|
 | **Ubuntu 26.04 + GNOME Wayland** | 主力開發 + 測試 |
 | **Linux X11**(任何發行版) | 全功能 |
 | **Linux Wayland**(GNOME / KDE / ...) | 需要 `xdg-desktop-portal` ≥ 1.19 — 24.04 LTS 自帶 1.18 不夠新,熱鍵會掛(改 portal 即可) |
-| **Windows 10 / 11** | 全功能(v0.2 上線)— voice pipeline 三塊(selection 讀取、視窗 context、Ctrl+V paste-back)走 Win32 API,熱鍵走 `RegisterHotKey`。**唯一差異**:Windows OS 沒有 X11 PRIMARY selection 概念,所以「滑鼠反白即讀」要先 Ctrl+C(Linux 可以拖反白直接讀) |
-| **macOS** | 主視窗 UI 可跑,voice pipeline 三塊還沒接 — 寫一個 `selection_macos.rs` + capture_window_context Mac 變體就能上,設計上 mori-core 跟其他平台完全共用 |
+| **Windows 10 / 11** | **v0.2 全功能上線**(2026-05) — 主力 dev 機之一 |
+| **macOS** | 主視窗 UI 可跑,voice pipeline 三塊還沒接 — contributor 路徑,見 [roadmap](docs/roadmap.md) |
+
+### 功能 × 平台對照(v0.2)
+
+| 能力 | Linux X11 | Linux Wayland | Windows | macOS |
+|---|---|---|---|---|
+| 全 22 條全域熱鍵 | ✅ XGrabKey | ✅ xdg-desktop-portal ≥1.19 | ✅ Win32 `RegisterHotKey` | ❌ 沒寫 |
+| 麥克風錄音 | ✅ ALSA(cpal) | ✅ PipeWire(cpal) | ✅ WASAPI(cpal) | ⚠️ CoreAudio 沒測 |
+| 雲端 STT(Groq / OpenAI Whisper) | ✅ | ✅ | ✅ | ✅ Tauri+reqwest 跨平台 |
+| 本機 STT(whisper.cpp `whisper-server` 子程序) | ✅ | ✅ | ✅ shell-out + HTTP 架構 work | ⚠️ 沒寫(架構通,binary 沒驗) |
+| `SendInput` Ctrl+V paste-back | ✅ xdotool / ydotool | ✅ ydotool | ✅ Win32 `SendInput` | ❌ 沒寫 |
+| 滑鼠反白即讀(不必 Ctrl+C) | ✅ xclip PRIMARY | ✅ 同上 | ❌ **OS 沒這 primitive**(必先 Ctrl+C) | 部份 NSPasteboard |
+| 視窗 context(process / title) | ✅ xdotool + `/proc` | ✅ 同上 | ✅ Win32 `GetForegroundWindow` 等 | ❌ 沒寫 |
+| Mori 主視窗 + tabs(Chat / Config / Profile / Memory / Skills / Deps) | ✅ | ✅ | ✅ | ✅ |
+| Floating Mori 精靈(透明 + 動畫) | ✅ XShape 1-bit clip | ✅ CSS border-radius | ✅ Tauri transparent window | ⚠️ 沒測 |
+| Tray icon + 右鍵 menu | ✅ AppIndicator | ✅ AppIndicator | ✅ | ⚠️ 沒測 |
+| Character pack(sprite 動畫) | ✅ | ✅ | ✅ 4×4 placeholder 寫到 `%USERPROFILE%\.mori\characters\` | ✅ |
+| Built-in skills(memory / translate / polish / summarize / compose / fetch_url) | ✅ | ✅ | ✅ 全綠 self-test 過 | ✅ Tauri+HTTP 跨平台 |
+| Action skills `open_url` / `open_app` | ✅ xdg-open / `.desktop` | ✅ 同上 | ✅ Win32 `ShellExecuteExW`(silent error,不彈窗) | ❌ 沒寫 |
+| Action skill `send_keys` | ✅ ydotool 鍵碼 | ✅ 同上 | ✅ `SendInput` VK 注入 | ❌ 沒寫 |
+| URL-template skills(google_search / ask_chatgpt / ask_gemini / find_youtube) | ✅ | ✅ | ✅ 走 open_url | ❌ 沒寫 |
+| ollama 本機 LLM | ✅ | ✅ | ✅ 官方 Windows installer | ✅ |
+| claude-bash / gemini-bash / codex-bash CLI proxy | ✅ | ✅ | ✅ chain 端對端 work | ⚠️ 沒測 |
+| Memory persistence(`~/.mori/memory/*.md`) | ✅ | ✅ | ✅ 走 USERPROFILE | ✅ |
+
+### Windows 已知細微差別
+
+1. **「滑鼠反白即讀」** — Windows OS 沒有 X11 PRIMARY selection 概念。User 要用「反白 → 直接講話讓 Mori 處理」流程的話,必須**先 Ctrl+C** 把選取內容放進剪貼簿。Linux X11 可以直接拖反白讀到。
+2. **`open_app` 解析範圍** — Windows 走 `ShellExecuteExW` 自動查 App Paths 註冊表(chrome / code / firefox / msedge / notepad / winword 等預設 app)+ PATH。Start Menu 釘選的 `.lnk` shortcut 跟 Microsoft Store apps(AUMID)目前不一定能解 — roadmap 中。
+3. **本機 whisper-server 一鍵下載** — Linux 在 Deps 頁可一鍵裝;Windows 目前要從 [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) 手動下載 `whisper-bin-x64.zip` → 解壓 → 整套(.exe + .dll)放到 `%USERPROFILE%\.mori\bin\`。Deps 頁有 Manual 指令引導。
+
+### 架構備註
 
 `mori-core` 是純 Rust lib 跟平台無關;`mori-tauri` 的平台分流走
 `cfg_attr(target_os = ..., path = ...)`,加新平台等於加一份對應的
