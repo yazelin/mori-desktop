@@ -1,0 +1,107 @@
+# 發版自動化 — `git tag vX.Y.Z && git push --tags` 觸發。
+#
+# 在 Ubuntu 出 `.deb` + `.AppImage`,在 Windows 出 `.msi` + `.nsis (.exe)`,
+# 全部上傳到 GitHub Release(draft 狀態,你 review 後再 publish)。
+#
+# 同事拿安裝檔直接從 Release 頁下載,你不用拷檔案。
+#
+# 預期耗時:第一次 ~25-35 min(release profile + LTO);有 cache 之後
+# ~10-15 min(主要是 LLM dep + whisper.cpp 一次 cache,Tauri bundle 也快)。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# tauri-action 需要 contents: write 才能建 Release / 上傳 artifacts。
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # 一個平台 build fail 不擋另一個 — 半套 release 總比沒 release 好,
+      # 失敗那邊事後手動補。
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            args: ''
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain + cache ──────────────────────────────────────────
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          # release build 跟 check build 用不同 profile,cache key 分開
+          # 才不會互踩。
+          key: release
+
+      # ── Ubuntu 系統 deps(同 check.yml,但這裡是要 build 出 bundle) ───
+      - name: Install Linux Tauri + whisper.cpp build deps
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            cmake \
+            libclang-dev
+
+      # ── Node / frontend ─────────────────────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      # ── Tauri build + GitHub Release upload ─────────────────────────────
+      # `tauri-action` 自動跑:
+      #   1. `npm run build`(Vite 出 dist/)
+      #   2. `cargo build --release`(編 mori-tauri release binary)
+      #   3. `tauri build` bundle 出 .deb/.AppImage(Linux)或 .msi/.nsis(Win)
+      #   4. 建立 / 更新 GitHub Release,把 bundle 檔上傳成 release asset
+      #
+      # `releaseDraft: true` — 上傳完是 draft,你去 GitHub Releases 頁
+      # review 過再按 Publish。安全網,避免 CI 跑 fail 一半就公開的窘境。
+      - name: Build Tauri app + upload to Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # tagName 用 ${{ github.ref_name }} 拿到觸發的 tag(如 "v0.1.0")。
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mori ${{ github.ref_name }}'
+          releaseBody: |
+            ## Mori ${{ github.ref_name }}
+
+            Voice-driven desktop AI companion — see [README](https://github.com/yazelin/mori-desktop) for setup.
+
+            ### Downloads
+            - **Windows**: `.exe`(NSIS installer,推薦)or `.msi`
+            - **Linux**: `.deb`(Ubuntu / Debian)or `.AppImage`(其他發行版)
+
+            完整 changelog 見 [CHANGELOG.md](https://github.com/yazelin/mori-desktop/blob/main/CHANGELOG.md)。
+          releaseDraft: true
+          prerelease: false
+          # mori-tauri Cargo.toml + tauri.conf.json 在 crates/mori-tauri/。
+          # tauri-action 預設找 repo 根目錄,要指這個路徑它才知道去哪 build。
+          projectPath: crates/mori-tauri
+          args: ${{ matrix.args }}
