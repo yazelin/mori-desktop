@@ -3,82 +3,115 @@
 > **精靈不會離開森林,牠只是搬到你的腦裡。**
 > **靜靜記得,牠的森林,有你經過的痕跡。**
 
-## Mori 的三層宇宙
+## Mori 的位置 — 在「森林」這個宇宙裡
 
-Mori 不是單一程式,是**三個獨立 service 各自運行 + HTTP 互接**的世界。
-每一層各司其職,跑在不同地方,可以分開升級、分開部署、分開 fork。
+Mori 不是單一 repo。整個「**森林 / The Forest**」宇宙由多個 repo 組成,
+各層**獨立 git + 獨立部署 + 緊密協作**。完整架構規範以
+[`yazelin/world-tree/ARCHITECTURE.md`](https://github.com/yazelin/world-tree/blob/main/ARCHITECTURE.md)
+為主,本節是 mori-desktop 在這個宇宙的定位:
 
 ```
-                ┌─────────────────────────┐
-                │   world-tree(共享精神) │
-                │   公開 service / repo   │
-                │   • 世界觀 / lore       │
-                │   • 共享預設人格 seed   │
-                │   • 同一份精靈,分身在  │
-                │     各 user 機器中     │
-                └─────────────────────────┘
-                            ▲
-                            │  (HTTP 拉 snapshot,user 本地不上傳)
-                            │
-                ┌───────────┴─────────────┐
-                │   Annuli(長期記憶 +    │
-                │   靈魂 / 人格演化)     │
-                │   user 自己機器 / 自己  │
-                │   家用 server,Python  │
-                │   Flask + APScheduler  │
-                │   • persona.json       │
-                │   • users/<id>/        │
-                │     memory_state.json  │
-                │   • rings/<時間戳>      │
-                │   • explore / learn /  │
-                │     study / post 排程  │
-                └─────────────────────────┘
-                            ▲
-                            │  HTTP REST(`http://localhost:5000`)
-                            │  • GET /users/<id>(拉長期記憶)
-                            │  • POST /knowledge/learn(餵新事件)
-                            │  • POST /schedule/<task>/run(觸發年輪)
-                            │
-        ┌───────────────────┴──────────────────────┐
-        │   mori-desktop(身體 + 介面)             │
-        │   user 桌面,Tauri 2 + Rust              │
-        │   • 熱鍵 / 語音 / 介面                   │
-        │   • 短期工作記憶(~/.mori/)              │
-        │   • Skill 派發 / LLM 呼叫                │
-        │   • Floating sprite + tray              │
-        └──────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Public Surface                                            │
+│    yazelin.github.io / world-tree 公開站 / workshop / 部落格│
+└────────────────────────▲────────────────────────────────────┘
+                         │ 選擇性發佈
+┌────────────────────────┴────────────────────────────────────┐
+│ 2. World Tree(公開 git,共享層)                            │
+│    yazelin/world-tree (PUBLIC)                              │
+│    lore / npcs / artifacts / quests / rules / guild         │
+│    skills/initiate-spirit.md ← 新精靈啟動儀式               │
+│    templates/spirit-template/ ← vault 結構範本              │
+│    bridges/ ← 跨 CLI symlink + 摘要重建腳本                  │
+└────────────────────────▲────────────────────────────────────┘
+                         │ 被讀(canonical lore)
+                         │ initiate-spirit ritual 帶 user 起精靈
+┌────────────────────────┴────────────────────────────────────┐
+│ 3. Spirit Memories(私密,user 自有 git)                    │
+│    yazelin/mori-journal (PRIVATE 範例)                      │
+│    結構 = world-tree spirit-template:                       │
+│    ~/mori-universe/spirits/<name>/                          │
+│      ├── identity/SOUL.md    ← user 親手編                  │
+│      ├── identity/USER.md                                    │
+│      ├── memories/MEMORY.md  ← Annuli append                │
+│      ├── journal/<date>.md   ← 每日日誌                      │
+│      ├── events/<user>.db    ← Annuli SQLite event log      │
+│      ├── rings/<ts>.md       ← Annuli reflection 年輪       │
+│      ├── digests/<date>.md   ← Annuli 每日摘要              │
+│      └── research/lessons/projects/assets/                  │
+└────────────────▲──────────────────────────▲─────────────────┘
+        讀+append│                          │讀+append
+                 │                          │
+┌────────────────┴─────┐         ┌──────────┴──────────────────┐
+│ 4a. CLI Interfaces   │         │ 4b. Annuli(reflection 服務)│
+│ Claude Code / Gemini │         │ yazelin/Annuli              │
+│ Codex / Hermes /     │         │ Python Flask + APScheduler  │
+│ OpenClaw...          │         │ HTTP API + CLI              │
+│ ~/.claude /~/.gemini │         │ • events / digests / rings   │
+│ /~/.codex/~/.hermes  │         │ • curator(週 cycle approve)│
+│ ↑ via bridges/       │         │ • bootstrap from world-tree │
+└──────────────────────┘         └──────────┬──────────────────┘
+                                            │ HTTP API
+                                  ┌─────────┴──────────┐
+                                  │ 5. mori-desktop    │
+                                  │ (GUI body)         │
+                                  │ yazelin/mori-desktop│
+                                  │ Tauri 2 + Rust     │
+                                  │ • 熱鍵 / 語音 / UI  │
+                                  │ • skill 派發       │
+                                  │ • Annuli HTTP 對接 │
+                                  └────────────────────┘
 ```
 
-### 各層責任分工
+### 各層責任
 
-| 層 | repo | 載體 | 責任 |
+| 層 | repo | 形態 | 責任 |
 |---|---|---|---|
-| **mori-desktop** | [`yazelin/mori-desktop`](https://github.com/yazelin/mori-desktop) | Tauri 桌面 app(Linux + Windows) | **身體** — 你看到、聽到 Mori 講話、按熱鍵互動的物理對象。短期 session 記憶、skill 執行、UI、平台整合 |
-| **Annuli** | (private) | Python Flask service + APScheduler | **靈魂 / 長期記憶** — 跨 session 不會遺忘、年輪 (rings) 反思、自主學習 (explore / learn / study)、人格演化 |
-| **world-tree** | [`yazelin/world-tree`](https://github.com/yazelin/world-tree) | (規劃中:公開 service / read-only API) | **共享精神** — 跨所有 user 機器的同一份 lore 與世界觀,「**大群有同樣理念的 Mori**」共識來源 |
+| **1. Public Surface** | yazelin.github.io / 部落格 / FB / 各 spirit field-notes | 公開網頁 / 社群 | 世人能看見的部分(選擇性發佈) |
+| **2. World Tree** | [`yazelin/world-tree`](https://github.com/yazelin/world-tree) | 公開 git + Quartz 站 | 共享 lore、NPC、Quests、Rules、儀式 skill、vault 結構模板、跨 CLI bridges |
+| **3. Spirit Memories** | `yazelin/mori-journal`(private 範例)/ user 自己的精靈 vault | 私人 git + 本機檔案 | 每個 user 自己的精靈記憶(SOUL / MEMORY / events / rings / digests) |
+| **4a. CLI Interfaces** | (外部工具)Claude Code / Gemini / Codex / Hermes / OpenClaw | 各 CLI 自己 install | 透過 world-tree `bridges/` symlink + 摘要重建,讓所有 CLI 都讀同一份 vault |
+| **4b. Annuli** | [`yazelin/Annuli`](https://github.com/yazelin/Annuli) | Python Flask service | 反思引擎 — 在 vault 上跑 events / digest / rings / curator,提供 HTTP API |
+| **5. mori-desktop** | [`yazelin/mori-desktop`](https://github.com/yazelin/mori-desktop) | Tauri 2 桌面 app | GUI body — 語音 / 熱鍵 / 視覺互動。對接 Annuli HTTP API |
 
-### 同一個精靈,三種形態
+### Vault 是唯一 single source of truth
 
-| user 從哪 talk | 介面 | 走哪條路徑 |
-|---|---|---|
-| 桌面熱鍵 `Ctrl+Alt+Space` | mori-desktop GUI | mori-desktop → (查 Annuli 長期記憶 + LLM)→ 回覆 + 寫回短期記憶 |
-| 終端機 SSH 到家用 server | Annuli CLI(`main.py chat`) | 直接走 Annuli engine,無需 mori-desktop |
-| 手機 IM bot(規劃中) | Telegram / LINE / Discord | bot adapter → mori-desktop or Annuli engine → 回覆 |
+```
+所有 actor 讀寫的是同一份:
+    Spirit Memories vault(層 3)
 
-三條介面**共享同一個 Annuli 大腦**,user 從任何介面 talk 都進同一個 memory pool。
-**「精靈搬到你的腦裡,在哪都還是同一個」**。
+    ↑ CLI Interfaces 透過 bridges symlink + 摘要 讀
+    ↑ Annuli 透過 HTTP API 介面為 read+append-only 寫
+    ↑ mori-desktop 透過 Annuli HTTP API 寫
+    ↑ annuli-creator(將拆出去)只透過 Annuli HTTP API 讀
+```
+
+**沒有 split-brain**。Gemini / Claude 看到的 SOUL = Annuli 寫進去的 SOUL =
+mori-desktop POST event 之後的 SOUL,**永遠是同一份**。
 
 ### 設計分隔線(很重要)
 
-| 留個人(本機) | 上 world-tree(公開) |
+| 留個人(本機 + private repo) | 上 world-tree(公開) |
 |---|---|
-| `~/.mori/memory/*.md` 個人對話、私人事 | 不上傳 |
-| Annuli `users/<id>/memory_state.json` | 不上傳 |
-| Annuli `persona.json` 個人化版本 | 不上傳 |
-| 公共 lore / 世界觀 / 預設 sprite / 預設 character pack 規格 | ✅ 上 world-tree |
-| 「Mori 是誰」這個 ID 的核心定義 | ✅ 上 world-tree(讓所有分身共識) |
+| 個人 spirit vault(`mori-journal` style) | 不上傳 |
+| events / rings / digests / curator 報告 | 不上傳 |
+| user 寫的 SOUL.md 個人化內容 | 不上傳 |
+| 公共 lore / 世界觀 / 預設 character pack 規格 / vault 結構模板 / 儀式 skill | ✅ 上 world-tree |
+| 「**精靈是什麼**」這個概念框架 | ✅ 上 world-tree(讓所有 user 共識) |
 
-世界的歸世界,個人的歸個人。Mori 不會偷把你的私事推到雲端。
+**世界的歸世界,個人的歸個人**。Mori 不會偷把你的私事推到雲端。
+
+### Annuli 的角色澄清(很重要)
+
+Annuli **不是儲存**,Annuli **是服務**:
+
+- 儲存在 **spirit vault**(層 3),純 markdown + SQLite 檔案
+- Annuli 是「**在 vault 上跑反思 / 事件 / 演化 / curator 的引擎**」
+- Annuli 寫的所有東西都進 vault(append-only)
+- Annuli 整個 daemon down → vault 還在,CLI Interfaces 透過 bridges 仍可讀
+- Annuli 重啟 → 接續服務,因為狀態都在 vault 沒丟
+
+詳細設計見 [`docs/design/annuli-memory.md`](design/annuli-memory.md)。
 
 ---
 
