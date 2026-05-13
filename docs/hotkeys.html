@@ -72,10 +72,19 @@
 <div class="page-subtitle">GLOBAL · MAIN WINDOW · PICKER</div>
 
 <p class="lead">
-  Mori 雙模式架構:前綴鍵選模式,數字鍵選 profile。共 20 個全域熱鍵 +
-  picker / chat / tray 內熱鍵。Linux Wayland 透過
-  <code>xdg-desktop-portal</code> GlobalShortcuts 註冊(第一次跑會跳權限對話框)。
+  Mori 雙模式架構:前綴鍵選模式,數字鍵選 profile。共 23 個全域熱鍵
+  (toggle + cancel + picker + 10 voice slot + 10 agent slot)+ picker / chat / tray 內熱鍵。
 </p>
+
+<p>
+  Linux 啟動時自動偵測 session 走哪條 path:
+</p>
+<ul>
+  <li><strong>X11 session</strong>(<code>XDG_SESSION_TYPE=x11</code>)→
+    <code>tauri-plugin-global-shortcut</code>(XGrabKey 直接 grab,Ubuntu 24.04 + X11 可用)</li>
+  <li><strong>Wayland / XWayland</strong> → <code>xdg-desktop-portal</code> GlobalShortcuts
+    (第一次跑會跳權限對話框 — 需要 <code>xdg-desktop-portal</code> ≥ 1.19,Ubuntu 26.04+)</li>
+</ul>
 
 <h2 class="group-title">全域熱鍵 · Toggle</h2>
 <div class="kbd-row">
@@ -154,6 +163,68 @@
 <pre><code>gsettings set org.gnome.desktop.wm.keybindings cycle-panels "[]"</code></pre>
 
 <p>細部 troubleshoot 見 <a href="troubleshooting.html">Troubleshooting</a>。</p>
+
+<h2 class="group-title" id="customize">自訂熱鍵</h2>
+
+<p>編輯 <code>~/.mori/config.json</code> 的 <code>hotkeys</code> 子樹:</p>
+
+<pre><code>{
+  "hotkeys": {
+    "toggle": "Ctrl+Alt+Space",
+    "cancel": "Ctrl+Alt+Escape",
+    "picker": "Ctrl+Alt+P",
+    "voice_slot_modifier": "Alt",
+    "agent_slot_modifier": "Ctrl+Alt",
+    "voice_slot_overrides": {},
+    "agent_slot_overrides": {}
+  }
+}</code></pre>
+
+<h3>欄位</h3>
+<ul>
+  <li><code>toggle</code> / <code>cancel</code> / <code>picker</code> — 單一動作的完整 hotkey 字串</li>
+  <li><code>voice_slot_modifier</code> — 套用到 voice slot 0~9 的 modifier(預設 <code>Alt</code>,
+    產出 <code>Alt+0</code>、<code>Alt+1</code> ... <code>Alt+9</code>)</li>
+  <li><code>agent_slot_modifier</code> — 同上但用於 agent slot(預設 <code>Ctrl+Alt</code>)</li>
+  <li><code>voice_slot_overrides</code> / <code>agent_slot_overrides</code> — 個別 slot 覆寫,
+    key 是編號字串(<code>"0"</code>~<code>"9"</code>),value 是完整 hotkey 字串。例:
+    <code>{"0": "F1", "1": "F2"}</code> 把 <code>Alt+0</code> / <code>Alt+1</code> 改成 <code>F1</code> / <code>F2</code></li>
+</ul>
+
+<h3>支援的鍵名</h3>
+<ul>
+  <li><strong>Modifier</strong>:<code>Ctrl</code>(或 <code>Control</code>) /
+    <code>Alt</code>(或 <code>Option</code>) /
+    <code>Shift</code> /
+    <code>Super</code>(或 <code>Meta</code> / <code>Cmd</code>)</li>
+  <li><strong>字母</strong>:<code>A</code>~<code>Z</code>(大小寫不分)</li>
+  <li><strong>數字</strong>:<code>0</code>~<code>9</code></li>
+  <li><strong>功能鍵</strong>:<code>F1</code>~<code>F24</code></li>
+  <li><strong>命名鍵</strong>:<code>Space</code>、<code>Escape</code>、<code>Return</code>(或 <code>Enter</code>)、
+    <code>Tab</code>、<code>BackSpace</code>、<code>Delete</code>、<code>Insert</code>、
+    <code>Home</code>、<code>End</code>、<code>PageUp</code>、<code>PageDown</code>、
+    <code>Left</code>、<code>Right</code>、<code>Up</code>、<code>Down</code></li>
+  <li><strong>符號鍵</strong>:<code>Comma</code>、<code>Period</code>、<code>Slash</code>、
+    <code>Semicolon</code>、<code>Quote</code>、<code>Backquote</code> 等</li>
+</ul>
+
+<h3>改完什麼時候生效?</h3>
+<ul>
+  <li><strong>X11 session</strong> — 重啟 Mori 後生效,config 設定 100% 為準</li>
+  <li><strong>Wayland session</strong> — config 改了後要重啟 Mori <strong>且</strong> 刪掉
+    portal per-app 紀錄,Mori 才會用新值重新跟 portal 註冊:
+    <pre><code>rm -rf ~/.local/share/xdg-desktop-portal/permissions</code></pre>
+    否則 config 改了沒效。Wayland 上之後也可以直接去 <strong>GNOME Settings → Keyboard
+    → 自訂快速鍵</strong> 調 Mori 的 binding(portal 規範:compositor 是最終決定者)。</li>
+</ul>
+
+<h3>衝突偵測</h3>
+<p>啟動時會檢查兩個 action 是否綁到同一個鍵(忽略 modifier 順序),衝突會在 log 出
+<code>hotkey conflict: ... both map to ...</code> 並 abort 整批註冊 — 修 config 再重啟。</p>
+
+<h3>單鍵 grab 失敗</h3>
+<p>X11 path 上某條鍵被別的 app 先 grab(例如 GNOME 把 <code>Ctrl+Alt+Esc</code> 綁了 cycle-panels)
+,Mori 只會 log warn 跳過那條,其他 22 條照常生效。</p>
 
 <div class="book-footer">
   Mori Docs · Hotkeys

@@ -76,6 +76,11 @@
   <li>Rust 1.94+</li>
   <li>Node 22+</li>
   <li>(Linux)Tauri 2 build deps + <code>wl-clipboard</code> + <code>ydotool</code></li>
+  <li>(Linux 全域熱鍵)<code>xdg-desktop-portal</code> ≥ 1.19 — 才有
+    <code>org.freedesktop.host.portal.Registry</code> interface;
+    Ubuntu 24.04 LTS 自帶 1.18 不夠新,會掛在「register host app id with xdg-desktop-portal Registry」
+    錯誤,只能用 UI toggle 按鈕觸發,詳見
+    <a href="troubleshooting.html#portal-registry">Troubleshooting → portal Registry 找不到</a>。</li>
 </ul>
 
 <p>
@@ -95,8 +100,17 @@
 <pre><code>git clone https://github.com/yazelin/mori-desktop.git
 cd mori-desktop
 
-cargo build --workspace   # workspace 才會 build mori-cli (Bash CLI proxy 需要)
-npm install</code></pre>
+npm install
+npm run build             # 建 dist/ — tauri::generate_context!() 編譯時會檢查這路徑
+cargo build --workspace   # workspace 才會 build mori-cli (Bash CLI proxy 需要)</code></pre>
+
+<div class="note">
+  <strong>順序不能換</strong>:<code>cargo build</code> 編 <code>mori-tauri</code> 時,
+  <code>tauri::generate_context!()</code> 巨集會驗證 <code>tauri.conf.json</code> 的
+  <code>frontendDist</code>(<code>../../dist</code>)路徑存在,所以前端 <code>dist/</code>
+  必須先建好。fresh clone 直接跑 <code>cargo build</code> 會炸
+  <code>The `frontendDist` configuration is set to "../../dist" but this path doesn't exist</code>。
+</div>
 
 <h2>3. 跑 Dev 模式</h2>
 <pre><code>npm run tauri dev</code></pre>

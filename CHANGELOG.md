@@ -6,6 +6,131 @@
 
 ---
 
+## 5Q — X11 session 支援 + 自訂熱鍵(2026-05-13)
+
+Ubuntu 24.04 LTS + X11 session 跑得起來了。Mori 原本 Wayland-only(走
+`xdg-desktop-portal` GlobalShortcuts,需要 portal 1.19+ 才有
+`host.portal.Registry` interface),24.04 ship 的 portal 1.18 沒這個
+interface → 整個全域熱鍵掛掉。同時 X11 + WebKit2GTK 對 transparent
+floating window 的 half-alpha pixel 渲染不對,sprite 周圍會有黑/白方框。
+
+兩個問題分別有 fallback:**X11 session 直接走 `tauri-plugin-global-shortcut`
+的 XGrabKey 路徑**繞開 portal,**透明視窗用 opaque 卡片**(body 純色 +
+inset frame)避開 half-alpha 渲染。整套順手把熱鍵改成 user 可在
+`~/.mori/config.json` 自訂。
+
+### 設計重點
+
+- **單一 session 偵測點**:`x11_hotkey::is_x11_session()` 讀 `XDG_SESSION_TYPE`,
+  兩個 fallback path(熱鍵 + 透明)共用同一個判斷。XWayland(`wayland` session
+  跑 X 程式)**仍走 portal**,因為 Wayland compositor 不會把 XGrabKey 全域
+  key 送給 XWayland client、且仍受 ARGB 渲染問題影響
+- **熱鍵 path 統一 event 介面**:portal_hotkey 跟新 x11_hotkey 都 emit 相同
+  Tauri events(`PORTAL_HOTKEY_EVENT` 等),下游 listener 不用知道現在跑哪條
+  path,呼叫端 `main.rs` 單一 if/else 切換
+- **HotkeyConfig hybrid defaults + overrides schema**:預設整套不寫,要改才
+  寫;voice/agent slot 0~9 共用 modifier(`Alt` / `Ctrl+Alt`),個別 slot
+  可 override 成任意鍵
+- **衝突偵測 + 語法驗證**:啟動 resolve config 時兩個 action 綁同鍵直接 abort,
+  modifier 順序歸一化(Ctrl+Alt+P == Alt+Ctrl+P 視為衝突),單鍵 grab 失敗
+  log warn 跳過不影響其他
+- **X11 fallback class 注入走 React invoke 而非 Rust eval**:Rust eval 只能
+  startup 跑一次,使用者 reload webview 後 class 沒了 → 黑框回來。React 每次
+  mount 呼叫 `is_x11_session` Tauri command,reload 也會重新加 class
+- **Session diagnostic 顯示在 status modal 而非 Config tab**:read-only 環境
+  資訊跟 build SHA / provider 並列,user 報 bug 截圖即一目了然;Config tab
+  保持「編輯設定」單一職責
+
+### 子改動(時序)
+
+- **`5Q-1`** HotkeyConfig schema + parser
+  - 新檔 `crates/mori-tauri/src/hotkey_config.rs`:`HotkeyConfig` struct
+    (serde + Default)、`HotkeyAction` enum、`HotkeyBinding` resolved 形式、
+    `to_portal_trigger()` 把 `Ctrl+Alt+P` → `CTRL+ALT+p`(X11 keysym 格式)、
+    `normalize_for_compare()` 歸一 modifier 順序做衝突檢測
+  - 6 個 unit test(default 不衝突 / portal format / 衝突偵測 / slot override
+    / modifier swap 歸一 / 無效鍵拒絕)
+- **`5Q-2`** X11 session path
+  - 新檔 `crates/mori-tauri/src/x11_hotkey.rs`:`is_x11_session()` +
+    `register()` 用 `tauri-plugin-global-shortcut` 註冊全 23 鍵(toggle +
+    cancel + picker + 10 voice slot + 10 agent slot)
+  - `main.rs` setup callback 改成 `if x11_hotkey::is_x11_session()` 分支,
+    Linux non-X11 仍走 portal_hotkey
+- **`5Q-3`** portal_hotkey 改吃 HotkeyConfig
+  - `portal_hotkey::run(app, config)` 收 HotkeyConfig 參數,所有 trigger
+    從 `config.resolve()` 算出來,不再 hardcode `PREFERRED_TRIGGER` /
+    `format!("ALT+{n}")`
+- **`5Q-4`** bootstrap stub 寫進 `hotkeys` section
+  - `crates/mori-core/src/llm/groq.rs` `bootstrap_mori_config()` 新增
+    `hotkeys` 子樹,預設 toggle/cancel/picker + voice/agent slot modifier +
+    空 overrides。User 看 `~/.mori/config.json` 就知道有什麼可以改
+- **`5Q-5`** X11 透明 fallback CSS
+  - `src/floating.css` / `chat-bubble.css` / `picker.css` 加
+    `body.<window-name>.x11-fallback` selector,把 transparent bg 換成 opaque
+    (對角漸層 page-bg → surface-bg + inset frame),floating 還強制
+    sprite-area 置中(原本 fixed top-left,mutter 對 transparent+decorationless
+    視窗的 inner/outer size 有時差幾 px 造成偏位)
+  - **WebKit2GTK X11 ARGB 半 alpha 行為**:任何 alpha ≠ 0 / ≠ 1 的 pixel
+    都會被 X11 渲染成不透明,造成 sprite 周圍黑/白方框。解法:body bg 純
+    opaque,所有 aura / glow / drop-shadow / blur 都在 opaque body 內 composite
+    完才送 X11 → 輸出全 alpha=1。Tradeoff:X11 上 Mori 是方塊面板而不是真
+    floating sprite(沒 OS-level 圓角,要 XShape 才能做,留下版)
+  - Iteration history:試過背板美術 PNG / 玻璃 specular / 半透明 0.85 alpha /
+    border-radius 50%,都因為各自原因(太花 / 太暗 / 雙層渲染 / 角落 AA 半
+    alpha 留方框)被回退到最簡乾淨漸層
+- **`5Q-6`** React 端 X11 偵測 + class 注入
+  - 新增 `is_x11_session` Tauri command
+  - `src/main.tsx` 在每個 window mount 前 `invoke<boolean>("is_x11_session")`,
+    true → 加 `x11-fallback` class 到 `<html>` + `<body>`。reload 也會重套
+  - Rust setup 那邊原本的 startup eval 注入作 belt-and-suspenders 留著
+    (idempotent;首次啟動更快,React invoke 是 reload 安全網)
+- **`5Q-7`** Status modal 顯示 session info
+  - 新增 `linux_session_type` Tauri command,回傳 `"x11"` / `"wayland"` /
+    `"linux-other"` / `"non-linux"`
+  - `ChatPanel.tsx` ⚙️ status modal 加 `session` row,顯示 session type +
+    走哪條 hotkey path(`x11 · tauri-plugin-global-shortcut (XGrabKey)` /
+    `wayland · xdg-desktop-portal GlobalShortcuts` / 失效情況)。User 回報
+    bug 截這張即一目了然
+
+### 變動檔案
+
+- 新檔
+  - `crates/mori-tauri/src/hotkey_config.rs`
+  - `crates/mori-tauri/src/x11_hotkey.rs`
+  - `docs/design/mori-floating-backplate.png`(美術背板,目前 CSS 未啟用,
+    `public/floating/backplate-x11.png` 已就位,要回滾一行 CSS 即可)
+- 修改
+  - `crates/mori-tauri/src/main.rs`:模組宣告 / setup 兩條 hotkey path /
+    `is_x11_session` + `linux_session_type` commands + invoke_handler 註冊
+  - `crates/mori-tauri/src/portal_hotkey.rs`:改吃 HotkeyConfig
+  - `crates/mori-core/src/llm/groq.rs`:bootstrap stub `hotkeys` section
+  - `src/main.tsx`:invoke is_x11_session + 加 class
+  - `src/floating.css` / `chat-bubble.css` / `picker.css`:x11-fallback selector
+  - `src/ChatPanel.tsx`:status modal session row
+- Docs(下個 commit)
+  - `README.md`:Quick Start 補 `npm run build`、平台需求加 portal 1.19 提醒
+  - `docs/getting-started.html`:三步驟順序修正、系統需求加 portal 版本
+  - `docs/hotkeys.html`:23 鍵清單對齊、X11 vs Wayland path 分流說明、自訂
+    熱鍵章節(欄位 / 支援鍵名 / 生效時機 / 衝突偵測)
+  - `docs/mori-home.html`:config.json 欄位列表補 hotkeys
+  - `docs/troubleshooting.html`:`#portal-registry` 章節加 X11 自動偵測修法
+
+### 已知限制
+
+- **OS-level 圓角**:CSS `border-radius` 在 X11 透明視窗邊緣 AA 仍會碰到原本
+  half-alpha 問題。要真圓角必須 XShape clip(Rust + x11rb shape feature),
+  下版做。目前 X11 上 floating 是矩形面板
+- **Multi-monitor wander**:floating sprite 隨機走動邏輯沒檢查多螢幕可視
+  區域,有可能走到完全看不到的座標(只看 primaryMonitor)。X11 fallback 下
+  opaque card 走來走去本身也奇怪,建議搭配「X11 force-off wander」一起修
+- **bootstrap stub `floating.wander` 沒明寫**:預設行為仰賴 React `?? false`
+  fallback,沒問題但建議下版補進 stub 讓 user 看 config.json 一眼看到欄位
+- **Wayland portal trigger 改 config 後**:portal 規範實際綁定由 compositor
+  記住,Mori config 改了不會自動覆寫 → 要重啟 + `rm -rf ~/.local/share/xdg-desktop-portal/permissions`
+  讓 Mori 重新註冊。詳見 [docs/hotkeys#customize](https://yazelin.github.io/mori-desktop/hotkeys.html#customize)
+
+---
+
 ## 5P — Sprite 4×4 engine + Character pack 系統(2026-05-13)
 
 Floating Mori 從 single-frame static PNG 升級成 **4×4 sprite sheet animation**,

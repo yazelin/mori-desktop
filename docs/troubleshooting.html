@@ -94,6 +94,47 @@ rm -rf ~/.local/share/xdg-desktop-portal/permissions
 
 <p>若是 X11 / macOS / Windows 走的是 <code>tauri-plugin-global-shortcut</code>,熱鍵直接生效不用授權。</p>
 
+<h2 id="portal-registry">第一次啟動沒跳熱鍵授權對話框 / <code>portal global shortcut unavailable</code></h2>
+
+<p>log 看到這段:</p>
+
+<pre><code>ERROR mori_tauri: portal global shortcut unavailable — use the UI toggle button to trigger Mori
+  e=register host app id with xdg-desktop-portal Registry
+
+Caused by:
+    A portal frontend implementing `org.freedesktop.host.portal.Registry` was not found</code></pre>
+
+<p>這代表你的 <code>xdg-desktop-portal</code> 太舊,沒實作 <code>org.freedesktop.host.portal.Registry</code>
+interface(Mori 用這個 interface 跟 portal 註冊 app id,才有資格申請 GlobalShortcuts)。
+Mori 設計時假設 Ubuntu 26.04(GNOME 48 + xdg-desktop-portal 1.20+),24.04 LTS ship 的
+1.18.x 還沒這個 interface。</p>
+
+<p>確認版本:</p>
+
+<pre><code>dpkg -l xdg-desktop-portal xdg-desktop-portal-gnome | awk '/^ii/ {print $2, $3}'
+# 需要 xdg-desktop-portal ≥ 1.19,xdg-desktop-portal-gnome ≥ 47</code></pre>
+
+<h3>修法</h3>
+<ol>
+  <li><strong>切換到 X11 session(最簡單,24.04 LTS 適用)</strong> —
+    登出 → 登入畫面齒輪 → 選 <strong>「Ubuntu on Xorg」</strong> 再登入。Mori 啟動時偵測到
+    <code>XDG_SESSION_TYPE=x11</code> 會自動走 <code>tauri-plugin-global-shortcut</code>
+    路徑(XGrabKey 直接 grab,不需 portal),全域熱鍵立即生效不用授權對話框。</li>
+  <li><strong>升級 Ubuntu 到 26.04</strong> — Wayland 上 portal 1.20+ 才有
+    <code>host.portal.Registry</code> interface,GNOME 會跳權限對話框讓你綁鍵。</li>
+  <li><strong>不升級也不切 X11 就用 UI toggle 按鈕</strong> — Mori 仍會正常啟動,主視窗的
+    「toggle 錄音」按鈕,跟 floating sprite 點擊,都能觸發語音輸入。只是沒有全域熱鍵。</li>
+</ol>
+
+<p>確認 Mori 走哪條 path,看 log 第一行:</p>
+<pre><code>INFO mori_tauri: X11 session detected — using tauri-plugin-global-shortcut
+# 或
+INFO mori_tauri: non-X11 session detected — using xdg-desktop-portal GlobalShortcuts</code></pre>
+
+<p><strong>注意</strong>:XWayland(在 Wayland session 內跑 X11 app)<em>不算</em> X11 session —
+<code>XDG_SESSION_TYPE</code> 仍是 <code>wayland</code>,Mori 走 portal 路徑(XGrabKey 在 XWayland
+被 compositor 擋掉,所以 plugin 在那邊也不會 work)。</p>
+
 <h2 id="cycle-panels"><code>Ctrl+Alt+Esc</code> 中斷鍵沒反應</h2>
 
 <p>GNOME 預設綁了 <code>cycle-panels</code>,要先解掉:</p>

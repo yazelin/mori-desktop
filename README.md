@@ -16,8 +16,9 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 ```bash
 git clone https://github.com/yazelin/mori-desktop.git
 cd mori-desktop
-cargo build --workspace
 npm install
+npm run build              # 建 dist/ — tauri::generate_context!() 編譯時會檢查這路徑
+cargo build --workspace    # workspace 才會 build mori-cli(Bash CLI proxy 需要)
 npm run tauri dev
 ```
 
@@ -42,7 +43,10 @@ npm run tauri dev
 
 ## 主力平台
 
-**Ubuntu 26.04 + GNOME Wayland**(主力開發 + 測試)。
+**Ubuntu 26.04 + GNOME Wayland**(主力開發 + 測試)。需要 `xdg-desktop-portal` ≥ 1.19
+(才有 `org.freedesktop.host.portal.Registry` interface — 24.04 LTS 自帶的 1.18 不夠新,
+全域熱鍵會掛掉,只能用 UI toggle 按鈕觸發,詳見
+[Troubleshooting](https://yazelin.github.io/mori-desktop/troubleshooting.html#portal-registry))。
 
 Windows / macOS 的 paste-back / 全域熱鍵還沒接 — 主視窗 UI 跑得起來但 voice pipeline 不完整。
 歡迎 fork + PR 幫忙補,`mori-core` 是純 Rust lib 跟平台無關,寫個新殼 crate 就能接新平台。
