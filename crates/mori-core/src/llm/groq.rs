@@ -348,6 +348,30 @@ impl GroqProvider {
                         // null / "auto" = whisper 自偵測;也可寫 "zh" / "en" 等。
                         "language": "zh"
                     }
+                },
+                // 5R:全域熱鍵自訂(Linux only,跨平台 schema 但僅 Linux 生效)。
+                //
+                // 兩條 path 共用同一份設定:
+                // - X11 session(XDG_SESSION_TYPE=x11)走 tauri-plugin-global-shortcut,
+                //   設定 100% 由這裡決定;支援的鍵名見
+                //   https://yazelin.github.io/mori-desktop/hotkeys.html
+                // - Wayland session 走 xdg-desktop-portal GlobalShortcuts,這裡的值
+                //   只當第一次註冊時的 preferred_trigger 建議值,使用者之後改 GNOME
+                //   Settings → Keyboard 為準(portal 規範如此)。
+                //
+                // - toggle / cancel / picker:單一動作的完整 hotkey 字串。
+                // - voice_slot_modifier / agent_slot_modifier:套用到 0~9 的 modifier。
+                // - voice_slot_overrides / agent_slot_overrides:個別 slot 覆寫,
+                //   key 是 slot 編號字串("0"~"9"),value 是完整 hotkey 字串如 "F1"。
+                //   例:{"0": "F1", "1": "F2"} 把 Alt+0 / Alt+1 換成 F1 / F2。
+                "hotkeys": {
+                    "toggle": "Ctrl+Alt+Space",
+                    "cancel": "Ctrl+Alt+Escape",
+                    "picker": "Ctrl+Alt+P",
+                    "voice_slot_modifier": "Alt",
+                    "agent_slot_modifier": "Ctrl+Alt",
+                    "voice_slot_overrides": {},
+                    "agent_slot_overrides": {}
                 }
             });
             std::fs::write(&config, serde_json::to_string_pretty(&stub)?)?;

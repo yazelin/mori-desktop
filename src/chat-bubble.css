@@ -12,6 +12,13 @@ body.chat-bubble-window {
   user-select: text; /* 讓使用者可選文字複製 */
   -webkit-user-select: text;
 }
+
+/* X11 transparency fallback — 見 floating.css 同名 selector 註解。
+   chat_bubble window 內 .mori-chat-window 本來就是 opaque card,X11 上
+   body 補同色背景就讓整個視窗 alpha=1,避開 WebKit half-alpha 渲染問題。 */
+body.chat-bubble-window.x11-fallback {
+  background: var(--c-surface-bg) !important;
+}
 body.chat-bubble-window #root {
   width: 100vw;
   height: 100vh;

@@ -13,6 +13,11 @@ body.picker-window {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* X11 transparency fallback — 見 floating.css 同名 selector 註解。 */
+body.picker-window.x11-fallback {
+  background: var(--c-surface-bg) !important;
+}
 body.picker-window #root {
   width: 100vw;
   height: 100vh;

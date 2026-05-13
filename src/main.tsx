@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import MainShell from "./MainShell";
 import FloatingMori from "./FloatingMori";
@@ -19,6 +20,19 @@ const root = document.getElementById("root")!;
 // brand-3: 每個 window 都 subscribe 主 theme(load 一次 + listen "theme-changed"),
 // 任一視窗切 theme 後其他 window 收到 event 一起更新。
 subscribeTheme();
+
+// X11 透明 fallback class — 詢問 Rust 後端 session type,X11 加 class 觸發
+// CSS 的 opaque 背景 + 美術背板。每個 window mount 都跑一次,reload 後也
+// 會重新加,不像 Rust startup eval 只能一次。WebKit2GTK on X11 的 ARGB
+// alpha 處理問題見 src/floating.css 同名 selector 註解。
+invoke<boolean>("is_x11_session")
+  .then((isX11) => {
+    if (isX11) {
+      document.documentElement.classList.add("x11-fallback");
+      document.body.classList.add("x11-fallback");
+    }
+  })
+  .catch(() => {});
 
 if (label === "floating") {
   // The floating window has no chrome and a transparent background; we

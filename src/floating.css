@@ -26,6 +26,37 @@ body.floating-window {
   -webkit-user-select: none;
   cursor: grab;
 }
+
+/* ─── X11 transparency fallback ──────────────────────────────────────
+   X11 + WebKit2GTK 的 ARGB visual 對 alpha ≠ 0 / ≠ 1 的 pixel 處理不
+   好,drop-shadow / blur / 半透明 glow 會渲染成黑/白方框。把 body 換
+   成不透明背景就解 — 所有 soft effect 在 WebKit 內部 composite 起來,
+   最終輸出給 X11 的全是 alpha=1 pixel。tradeoff:Mori 在 X11 上看起來
+   像個方塊面板(矩形,沒 OS-level 圓角 — 圓角需要 XShape clip,phase 後續)
+   ,但 aura / glow / shadow 全保留。
+
+   Class 由 Rust 在 X11 session 偵測到時透過 webview eval 注入。 */
+body.floating-window.x11-fallback {
+  /* 第一版的淡綠漸層 — page bg → surface bg 的對角光感,兩端都 opaque,
+     X11 上整體 alpha=1 安全。半透明試過會出現雙層渲染怪事,撤回。 */
+  background: linear-gradient(
+    135deg,
+    var(--c-page-bg) 0%,
+    var(--c-surface-bg) 100%
+  ) !important;
+  box-shadow:
+    inset 0 0 0 1px var(--c-border, rgba(168, 197, 162, 0.18)),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+/* X11 上強制 sprite-area 置中 — 原本 fixed top-left 假設 window 剛好 160×160,
+   但 mutter 對 transparent+decorationless 視窗的 inner/outer size 有時差幾 px,
+   sprite 就跑位。translate(-50%,-50%) 配 top/left 50% 不管 body 大小都置中。 */
+body.floating-window.x11-fallback .mori-sprite-area {
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%);
+}
 body.floating-window:active {
   cursor: grabbing;
 }

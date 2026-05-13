@@ -6,7 +6,11 @@ mod action_skills;
 mod context_provider;
 mod deps;
 #[cfg(target_os = "linux")]
+mod hotkey_config;
+#[cfg(target_os = "linux")]
 mod portal_hotkey;
+#[cfg(target_os = "linux")]
+mod x11_hotkey;
 mod recording;
 #[cfg(target_os = "linux")]
 mod character_pack;
@@ -160,6 +164,48 @@ fn mori_version() -> String {
 #[tauri::command]
 fn mori_phase() -> String {
     PHASE.to_string()
+}
+
+/// 給 React 端問「現在是不是 X11 session」,React mount 時呼叫一次,
+/// 是的話加 `x11-fallback` class 到 documentElement + body,觸發 CSS
+/// 的 opaque 背景 + 背板美術 fallback。
+///
+/// 為什麼不靠 Rust startup eval — 那只能跑一次,使用者按 webview reload
+/// 後 React 重新 mount 但 class 沒了 → 背景變回 transparent → X11 黑框
+/// 又出現。React 自己 invoke 一次就解決 reload 問題。
+#[tauri::command]
+fn is_x11_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        x11_hotkey::is_x11_session()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+/// 給 Config tab 顯示用 — 回傳 session type 字串讓 user 知道
+/// Mori 偵測到什麼環境、走哪條 hotkey path。值:
+/// - `"x11"`       — Linux X11,走 tauri-plugin-global-shortcut
+/// - `"wayland"`   — Linux Wayland,走 xdg-desktop-portal GlobalShortcuts
+/// - `"linux-other"` — Linux 但 XDG_SESSION_TYPE 是 tty / 未設(headless / 容器),
+///                    熱鍵失效但 UI toggle 仍可用
+/// - `"non-linux"` — macOS / Windows,Mori 走非 Linux 分支
+#[tauri::command]
+fn linux_session_type() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        match std::env::var("XDG_SESSION_TYPE").as_deref() {
+            Ok("x11") | Ok("X11") => "x11".to_string(),
+            Ok("wayland") | Ok("Wayland") => "wayland".to_string(),
+            _ => "linux-other".to_string(),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "non-linux".to_string()
+    }
 }
 
 /// build SHA / dirty / 時間 / phase / version。值由 build.rs 在 compile
@@ -2270,6 +2316,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mori_version,
             mori_phase,
+            is_x11_session,
+            linux_session_type,
             build_info,
             chat_provider_info,
             current_phase,
@@ -2575,26 +2623,71 @@ fn main() {
                 }
             });
 
-            // ── 全域熱鍵:Ctrl+Alt+Space ───────────────────────────
-            // Linux 走 xdg-desktop-portal GlobalShortcuts(Wayland 唯一可行
-            // 的路);macOS / Windows 走 tauri-plugin-global-shortcut。
-            // 兩條路最後都呼叫 handle_hotkey_toggle。
+            // ── 全域熱鍵:Ctrl+Alt+Space + 22 個 profile 切換鍵 ──
+            // Linux 兩條 path,看 XDG_SESSION_TYPE 走哪邊:
+            // - x11      → tauri-plugin-global-shortcut(XGrabKey,不需 portal)
+            // - wayland  → xdg-desktop-portal GlobalShortcuts
+            // XWayland(wayland session 跑 X 程式)也走 portal — XGrabKey 在
+            // XWayland 下被 compositor 擋掉。macOS / Windows 走非 Linux 分支。
+            //
+            // 兩條 path 共用同一份 ~/.mori/config.json `hotkeys` 設定;X11 設
+            // 定 100% 由 config 決定,Wayland 走 portal 後使用者改 GNOME 系統
+            // 設定為準(portal 規範如此,Mori config 只當第一次註冊的建議值)。
             #[cfg(target_os = "linux")]
             {
-                let app_for_portal = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = portal_hotkey::run(app_for_portal).await {
-                        // Not fatal — UI button still works as fallback.
-                        // Common reasons: xdg-desktop-portal-gnome not installed,
-                        // user denied the permission dialog, or no portal session
-                        // (some headless / display-less envs).
+                let mori_config_path = std::env::var("HOME")
+                    .map(std::path::PathBuf::from)
+                    .map(|h| h.join(".mori/config.json"))
+                    .unwrap_or_default();
+                let hotkey_config = hotkey_config::HotkeyConfig::load(&mori_config_path);
+
+                if x11_hotkey::is_x11_session() {
+                    tracing::info!("X11 session detected — using tauri-plugin-global-shortcut");
+                    if let Err(e) = x11_hotkey::register(&app.handle(), &hotkey_config) {
                         tracing::error!(
                             ?e,
-                            "portal global shortcut unavailable — use the UI \
-                             toggle button to trigger Mori"
+                            "X11 global shortcut registration failed — \
+                             use the UI toggle button to trigger Mori"
                         );
                     }
-                });
+                    // X11 透明 fallback:在三個 transparent window 的 <body> 注入
+                    // .x11-fallback class,CSS 規則切到 opaque background,WebKit
+                    // 就不會把 drop-shadow / blur / glow 等 half-alpha 渲染成方框。
+                    // 詳細邏輯見 src/floating.css 同名 selector 註解。
+                    // JS 寫成 idempotent + DOMContentLoaded fallback,在 webview
+                    // 載入任何階段呼叫都安全。
+                    let inject_js = r#"(function(){function a(){if(document.body)document.body.classList.add('x11-fallback');else document.addEventListener('DOMContentLoaded',a)}a()})();"#;
+                    for label in &["floating", "chat_bubble", "picker"] {
+                        if let Some(w) = app.get_webview_window(label) {
+                            if let Err(e) = w.eval(inject_js) {
+                                tracing::warn!(?e, label, "x11-fallback inject failed");
+                            } else {
+                                tracing::debug!(label, "x11-fallback class injected");
+                            }
+                        }
+                    }
+                } else {
+                    tracing::info!(
+                        "non-X11 session detected — using xdg-desktop-portal GlobalShortcuts"
+                    );
+                    let app_for_portal = app.handle().clone();
+                    let portal_config = hotkey_config.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = portal_hotkey::run(app_for_portal, portal_config).await {
+                            // Not fatal — UI button still works as fallback.
+                            // Common reasons: xdg-desktop-portal-gnome too old
+                            // (no org.freedesktop.host.portal.Registry interface
+                            // — Ubuntu 24.04 LTS ships 1.18 which lacks it),
+                            // user denied the permission dialog, or no portal
+                            // session (some headless / display-less envs).
+                            tracing::error!(
+                                ?e,
+                                "portal global shortcut unavailable — use the UI \
+                                 toggle button to trigger Mori"
+                            );
+                        }
+                    });
+                }
 
                 let handle = app.handle().clone();
                 let state_for_handler = state_for_setup.clone();
@@ -2687,9 +2780,7 @@ fn main() {
                     );
                 });
 
-                tracing::info!(
-                    "spawned portal hotkey task (Ctrl+Alt+Space + Alt+0~9 + Ctrl+Alt+0~9) + tray icon"
-                );
+                tracing::info!("hotkey path ready (toggle + cancel + picker + Alt+0~9 + Ctrl+Alt+0~9) + tray icon");
             }
 
             #[cfg(not(target_os = "linux"))]

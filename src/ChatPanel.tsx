@@ -101,6 +101,7 @@ function ChatPanel() {
   const [warmup, setWarmup] = useState<WarmupState | null>(null);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [coreVersion, setCoreVersion] = useState("");
+  const [sessionType, setSessionType] = useState<string>("");
   const [lastContext, setLastContext] = useState<{
     clipboard?: string | null;
     selected_text?: string | null;
@@ -122,6 +123,7 @@ function ChatPanel() {
     invoke<string>("mori_version").then(setCoreVersion).catch(() => {});
     invoke<boolean>("has_groq_key").then(setHasKey).catch(() => {});
     invoke<BuildInfo>("build_info").then(setBuildInfo).catch(() => {});
+    invoke<string>("linux_session_type").then(setSessionType).catch(() => {});
     invoke<ChatProviderInfo>("chat_provider_info")
       .then((info) => {
         setChatProvider(info);
@@ -364,6 +366,7 @@ function ChatPanel() {
                 hasKey={hasKey}
                 lastContext={lastContext}
                 convLength={conv.length}
+                sessionType={sessionType}
               />
             </div>
           </div>
@@ -410,6 +413,7 @@ function StatusRows({
   hasKey,
   lastContext,
   convLength,
+  sessionType,
 }: {
   coreVersion: string;
   buildInfo: BuildInfo | null;
@@ -418,7 +422,24 @@ function StatusRows({
   hasKey: boolean | null;
   lastContext: { clipboard?: string | null; selected_text?: string | null } | null;
   convLength: number;
+  sessionType: string;
 }) {
+  // Mori 偵測到的 session type → 對應的 hotkey path,讓使用者報 bug 時
+  // 一眼看出走的是哪條(plugin / portal),不用翻 log。
+  const sessionPath = (() => {
+    switch (sessionType) {
+      case "x11":
+        return "x11 · tauri-plugin-global-shortcut (XGrabKey)";
+      case "wayland":
+        return "wayland · xdg-desktop-portal GlobalShortcuts";
+      case "linux-other":
+        return "linux (tty / 未設) · 全域熱鍵失效,UI 按鈕仍可用";
+      case "non-linux":
+        return "non-linux · tauri-plugin-global-shortcut";
+      default:
+        return sessionType || "...";
+    }
+  })();
   const Row = ({ label, value, title }: { label: string; value: string; title?: string }) => (
     <div className="mori-status-row">
       <span className="label">{label}</span>
@@ -432,6 +453,7 @@ function StatusRows({
         label="build"
         value={buildInfo ? `${buildInfo.sha}${buildInfo.dirty ? "*" : ""} · ${buildInfo.build_time}` : "..."}
       />
+      <Row label="session" value={sessionPath} title="Mori 偵測到的 OS session,決定走哪條全域熱鍵 path" />
       <Row
         label="chat"
         value={

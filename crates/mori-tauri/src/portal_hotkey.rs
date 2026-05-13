@@ -15,6 +15,8 @@ use ashpd::{register_host_app, AppID};
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter};
 
+use crate::hotkey_config::HotkeyConfig;
+
 /// App ID we register with the portal Registry. Must match
 /// `tauri.conf.json` `identifier` so per-app portal permissions are
 /// stored under one key. GNOME requires a registered app id before any
@@ -54,8 +56,6 @@ pub const PROFILE_SLOT_EVENT: &str = "portal-profile-slot";
 /// Tauri event emitted when Ctrl+Alt+N fires. Payload is the slot number as u8 (0–9).
 pub const AGENT_SLOT_EVENT: &str = "portal-agent-slot";
 
-const PREFERRED_TRIGGER: &str = "CTRL+ALT+space";
-
 /// Run forever, dispatching portal Activated signals into Tauri events.
 ///
 /// Spawn this in a tokio task at app start. If the portal call fails
@@ -63,7 +63,12 @@ const PREFERRED_TRIGGER: &str = "CTRL+ALT+space";
 /// returns an error and the caller should log + fall back to the UI
 /// "manual trigger" button — there's no global shortcut, but Mori still
 /// works.
-pub async fn run(app: AppHandle) -> Result<()> {
+///
+/// `config` 提供 portal `preferred_trigger` 建議值。注意 portal 規範:使
+/// 用者第一次同意後,實際綁定由 compositor 紀錄,之後 Mori config 改了
+/// 不會自動覆寫,要使用者去 GNOME Settings → Keyboard 改、或刪掉
+/// `~/.local/share/xdg-desktop-portal/permissions` 讓 Mori 重新註冊。
+pub async fn run(app: AppHandle, config: HotkeyConfig) -> Result<()> {
     // GNOME's portal-gnome looks up a `.desktop` file for our app id
     // before letting us register. Non-flatpak dev binaries don't
     // get one for free — write a minimal one into the user-level
@@ -94,47 +99,34 @@ pub async fn run(app: AppHandle) -> Result<()> {
         .await
         .context("create GlobalShortcuts session")?;
 
-    // 5G: 三組熱鍵 + 一個錄音 toggle，共 21 個全域快捷鍵
+    // 5G: 三組熱鍵 + 一個錄音 toggle、cancel、picker,共 23 個全域快捷鍵
     //
-    // Alt+0~9        → VoiceInput profile（slot 0 = USER-00 預設極簡聽寫，1~9 切 voice profile）
-    // Ctrl+Alt+0~9   → Agent profile（slot 0 = default Mori，1~9 切 agent profile）
-    // Ctrl+Alt+Space → 錄音 toggle（兩個 mode 共用）
-    let slot_ids: Vec<String> = (0u8..=9).map(|n| format!("{SLOT_ID_PREFIX}{n}")).collect();
-    let slot_descriptions: Vec<String> = std::iter::once(
-        "Mori — VoiceInput 純語音輸入（USER-00 極簡聽寫）".to_string(),
-    )
-    .chain((1u8..=9).map(|n| format!("Mori — 切換 VoiceInput Profile {n}")))
-    .collect();
-    let slot_triggers: Vec<String> = (0u8..=9).map(|n| format!("ALT+{n}")).collect();
+    // 預設:
+    // - Ctrl+Alt+Space → 錄音 toggle(兩個 mode 共用)
+    // - Ctrl+Alt+Esc   → cancel(錄音中丟掉音檔)
+    // - Ctrl+Alt+P     → picker overlay
+    // - Alt+0~9        → VoiceInput profile(slot 0 = USER-00 預設極簡聽寫,1~9 切 voice profile)
+    // - Ctrl+Alt+0~9   → Agent profile(slot 0 = default Mori,1~9 切 agent profile)
+    //
+    // 全部 trigger 從 [`HotkeyConfig`] 算出來,使用者可在 `~/.mori/config.json`
+    // `hotkeys` 子樹覆寫(見 [`crate::hotkey_config`])。
+    let bindings = config
+        .resolve()
+        .context("resolve hotkey config (check ~/.mori/config.json hotkeys section)")?;
 
-    let agent_slot_ids: Vec<String> = (0u8..=9)
-        .map(|n| format!("{AGENT_SLOT_ID_PREFIX}{n}"))
+    // 預先算好每筆的 portal trigger + id,避免在 NewShortcut builder lifetime
+    // 中 borrow 暫存 String。
+    let portal_specs: Vec<(String, String, String)> = bindings
+        .iter()
+        .map(|b| (b.action.portal_id(), b.action.description(), b.to_portal_trigger()))
         .collect();
-    let agent_slot_descriptions: Vec<String> = std::iter::once(
-        "Mori — Agent 自由判斷模式（default Mori）".to_string(),
-    )
-    .chain((1u8..=9).map(|n| format!("Mori — 切換 Agent Profile {n}")))
-    .collect();
-    let agent_slot_triggers: Vec<String> = (0u8..=9).map(|n| format!("CTRL+ALT+{n}")).collect();
 
-    let mut shortcuts = vec![
-        NewShortcut::new(TOGGLE_SHORTCUT_ID, "Mori — 開始 / 停止錄音")
-            .preferred_trigger(Some(PREFERRED_TRIGGER)),
-        NewShortcut::new(CANCEL_SHORTCUT_ID, "Mori — 錄音中按下取消（丟棄音檔，不送出）")
-            .preferred_trigger(Some("CTRL+ALT+Escape")),
-        NewShortcut::new(PICKER_SHORTCUT_ID, "Mori — 開 Profile picker 視窗（方向鍵選）")
-            .preferred_trigger(Some("CTRL+ALT+p")),
-    ];
-    for i in 0..=9usize {
-        shortcuts.push(
-            NewShortcut::new(&slot_ids[i], &slot_descriptions[i])
-                .preferred_trigger(Some(slot_triggers[i].as_str())),
-        );
-        shortcuts.push(
-            NewShortcut::new(&agent_slot_ids[i], &agent_slot_descriptions[i])
-                .preferred_trigger(Some(agent_slot_triggers[i].as_str())),
-        );
-    }
+    let shortcuts: Vec<NewShortcut> = portal_specs
+        .iter()
+        .map(|(id, desc, trigger)| {
+            NewShortcut::new(id.as_str(), desc.as_str()).preferred_trigger(Some(trigger.as_str()))
+        })
+        .collect();
 
     // First-ever call pops the GNOME permission dialog. After grant, the
     // binding persists per-user — subsequent runs are silent.
