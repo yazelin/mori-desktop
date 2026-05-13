@@ -208,6 +208,56 @@ fn linux_session_type() -> String {
     }
 }
 
+/// X11 上強制 raise window 到 always-on-top layer 頂端。
+///
+/// 場景:chat_bubble + floating 兩個視窗都 alwaysOnTop。mutter 同 layer 內順
+/// 序看「誰最後被 raise」,floating 因為使用者互動頻繁(hover / click / drag)
+/// raise event 較新,chat_bubble 雖然 alwaysOnTop:true 仍被壓在下面。
+/// setAlwaysOnTop(false → true) 只翻 state 不 re-raise,mutter 不會把它移到
+/// layer 頂端。唯一可靠的方法是顯式 XRaiseWindow,這裡 shell-out `xdotool
+/// windowraise` 是最簡單的實作。
+///
+/// Wayland 不需要(compositor 對 alwaysOnTop 處理乾淨,且 wayland 沒有
+/// 對應的 XRaiseWindow 等價 API,任何「raise」都不會被允許)。
+#[tauri::command]
+fn force_raise_window(_app: AppHandle, label: String) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if !x11_hotkey::is_x11_session() {
+            // Wayland / 其他 — 沒對應 XRaiseWindow primitive,直接 OK 不做事
+            return Ok(());
+        }
+        // 用 xdotool search --pid <self> --name "<title>" windowraise 找視窗
+        // raise — 走 X11 WM_NAME + _NET_WM_PID 雙重 filter,精準鎖定 Mori
+        // 自己這個 process 的目標視窗,不會誤觸其他 app 同名視窗。
+        let title = match label.as_str() {
+            "floating" => "Mori (floating)",
+            "chat_bubble" => "Mori (chat)",
+            "picker" => "Mori — 切換 Profile",
+            "main" => "Mori",
+            other => return Err(format!("unknown window label '{other}'")),
+        };
+        let pid = std::process::id().to_string();
+        let status = std::process::Command::new("xdotool")
+            .args(["search", "--pid", &pid, "--name", title, "windowraise"])
+            .status()
+            .map_err(|e| format!("spawn xdotool: {e}"))?;
+        if !status.success() {
+            // xdotool search 找不到符合條件視窗會 exit 1,不是真錯 — 例如 picker
+            // 還沒第一次 show 過,WM_NAME 還沒進 X server registry。log warn 不
+            // bail。
+            tracing::warn!(label, title, ?status, "xdotool windowraise exited non-zero");
+        } else {
+            tracing::debug!(label, title, "force_raise_window via xdotool");
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = label;
+    }
+    Ok(())
+}
+
 /// build SHA / dirty / 時間 / phase / version。值由 build.rs 在 compile
 /// time 經 cargo:rustc-env 注入,所以重 build 才會更新。前端用這個秀
 /// 在 status panel 上,user 一眼就能分辨「我跑的是哪個 build」。
@@ -2318,6 +2368,7 @@ fn main() {
             mori_phase,
             is_x11_session,
             linux_session_type,
+            force_raise_window,
             build_info,
             chat_provider_info,
             current_phase,
@@ -2749,10 +2800,24 @@ fn main() {
                 // 但 emit 前先 show 確保視窗顯示時機跟 focus 都對齊。
                 let handle_picker = app.handle().clone();
                 app.listen(portal_hotkey::PORTAL_PICKER_EVENT, move |_event| {
-                    if let Some(w) = handle_picker.get_webview_window("picker") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                        let _ = handle_picker.emit("picker-open", ());
+                    tracing::debug!("picker listener fired — looking up picker window");
+                    match handle_picker.get_webview_window("picker") {
+                        Some(w) => {
+                            if let Err(e) = w.show() {
+                                tracing::warn!(?e, "picker w.show() failed");
+                            }
+                            if let Err(e) = w.set_focus() {
+                                tracing::warn!(?e, "picker w.set_focus() failed");
+                            }
+                            if let Err(e) = handle_picker.emit("picker-open", ()) {
+                                tracing::warn!(?e, "picker emit picker-open failed");
+                            } else {
+                                tracing::info!("picker show + focus + emit picker-open done");
+                            }
+                        }
+                        None => {
+                            tracing::error!("picker window not found by label 'picker'");
+                        }
                     }
                 });
 

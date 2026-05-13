@@ -524,23 +524,28 @@ pub fn ensure_voice_input_dir_initialized() {
         tracing::warn!(?e, path = %dir.display(), "could not create voice_input dir");
         return;
     }
-    let starter_path = dir.join(STARTER_USER_01_FILENAME);
-    if !starter_path.exists() {
-        if let Err(e) = std::fs::write(&starter_path, STARTER_USER_01_MD) {
-            tracing::warn!(
-                ?e,
-                path = %starter_path.display(),
-                "could not write starter USER-01",
-            );
+    for (filename, content) in [
+        (STARTER_USER_00_FILENAME, STARTER_USER_00_MD),
+        (STARTER_USER_01_FILENAME, STARTER_USER_01_MD),
+    ] {
+        let starter_path = dir.join(filename);
+        if starter_path.exists() {
+            continue;
+        }
+        if let Err(e) = std::fs::write(&starter_path, content) {
+            tracing::warn!(?e, path = %starter_path.display(), "could not write starter");
         } else {
-            tracing::info!(
-                path = %starter_path.display(),
-                "created starter USER-01 (Alt+1 切到朋友閒聊模式)",
-            );
+            tracing::info!(path = %starter_path.display(), "created starter voice profile");
         }
     }
 }
 
+// 5R-followup:USER-00 ship 一份實體檔(內容跟 FALLBACK_PROFILE_MD 一致),
+// 讓 floating sprite 切 slot 0 時也有 display name 出 chip。沒這份 file
+// 的話 Alt+0 切過去就只有「mode change」沒 profile 名提示。
+const STARTER_USER_00_FILENAME: &str = "USER-00.純文字輸入.md";
+const STARTER_USER_00_MD: &str =
+    include_str!("../../../examples/voice_input/USER-00.純文字輸入.md");
 const STARTER_USER_01_FILENAME: &str = "USER-01.朋友閒聊.md";
 const STARTER_USER_01_MD: &str =
     include_str!("../../../examples/voice_input/USER-01.朋友閒聊.md");

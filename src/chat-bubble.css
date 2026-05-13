@@ -14,10 +14,21 @@ body.chat-bubble-window {
 }
 
 /* X11 transparency fallback — 見 floating.css 同名 selector 註解。
-   chat_bubble window 內 .mori-chat-window 本來就是 opaque card,X11 上
-   body 補同色背景就讓整個視窗 alpha=1,避開 WebKit half-alpha 渲染問題。 */
+   body 補同色 opaque 背景解掉 half-alpha。
+   X11 上 .mori-chat-window 必須撐到 window 高度,不然 JS 用 MIN_HEIGHT=56
+   floor + 短文字 → window > card → 底部露出 body bg(light theme 純白超明顯)。
+   用 `min-height: 100vh` 讓 card 至少跟 window 同高,內容變長 card 跟著長,
+   JS offsetHeight measure 仍正確驅動 window resize(穩定收斂:card_h = window_h
+   = max(content_h, MIN_HEIGHT))。border-radius 改方角(原圓角 AA half-alpha
+   風險),width 100vw 補滿橫向。 */
 body.chat-bubble-window.x11-fallback {
   background: var(--c-surface-bg) !important;
+}
+body.chat-bubble-window.x11-fallback .mori-chat-window {
+  min-height: 100vh;
+  width: 100vw;
+  box-sizing: border-box;
+  border-radius: 0;
 }
 body.chat-bubble-window #root {
   width: 100vw;

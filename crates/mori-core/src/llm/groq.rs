@@ -372,6 +372,17 @@ impl GroqProvider {
                     "agent_slot_modifier": "Ctrl+Alt",
                     "voice_slot_overrides": {},
                     "agent_slot_overrides": {}
+                },
+                // 5R-followup:Floating Mori widget 視覺行為。
+                // - animated:sprite 跑 4×4 sheet animation(true 預設)
+                // - wander  :Mori 桌面隨機散步(實驗性,需 animated ON)。
+                //             預設 false 是因為多螢幕邊界尚未處理乾淨,Mori
+                //             可能走到看不見的座標。Linux X11 + opaque card
+                //             下方塊「卡片」滑來滑去視覺也奇怪。等多螢幕修
+                //             好再考慮開預設 true。
+                "floating": {
+                    "animated": true,
+                    "wander": false
                 }
             });
             std::fs::write(&config, serde_json::to_string_pretty(&stub)?)?;

@@ -6,6 +6,7 @@
 // - emit("chat-bubble-hide") 關閉
 
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 
@@ -41,6 +42,14 @@ function ChatBubble() {
         await win.setSize(new LogicalSize(WIDTH, MIN_HEIGHT));
         await win.setPosition(new LogicalPosition(x, y));
         await win.show();
+        // X11:兩個視窗都 alwaysOnTop:true,同 layer 內 floating 因互動較頻
+        // 繁(hover / drag)raise 較新會壓在 chat_bubble 上面 — 文字看不到。
+        // setAlwaysOnTop toggle 只翻 state 不 re-raise within layer,要真正
+        // raise 必須走 X11 XRaiseWindow。force_raise_window 後端 shell-out
+        // xdotool windowraise 解決。Wayland no-op。
+        await invoke("force_raise_window", { label: "chat_bubble" }).catch(
+          (err: unknown) => console.warn("[chat_bubble] force_raise failed", err),
+        );
       } catch (err) { console.error("[chat_bubble] show pos/size error", err); }
     });
 

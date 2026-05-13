@@ -363,11 +363,16 @@ function FloatingMori() {
   const showChatBubble = async (text: string) => {
     try {
       const win = getCurrentWindow();
-      const pos = await win.outerPosition();
+      // 用 innerPosition() 而非 outerPosition() — 後者在 GNOME mutter +
+      // transparent + decorationless 視窗會把 shadow margin 算進去,bubble
+      // 會偏左(shadow margin 寬度的偏移)。innerPosition 是 content 區的
+      // 真實 top-left,跟 sprite 視覺位置對齊水平置中。
+      // 跟 floating 略垂直重疊 OK,ChatBubble.tsx 用 setAlwaysOnTop toggle
+      // 強制 re-raise,確保 z-order 在 floating 上方。
+      const pos = await win.innerPosition();
       const scale = await win.scaleFactor();
       const sprite_x = pos.x / scale;
       const sprite_y = pos.y / scale;
-      // bubble 中心對齊 sprite 中心
       const bubble_x = Math.max(0, sprite_x + SPRITE_SIZE / 2 - BUBBLE_WIDTH / 2);
       const bubble_y = sprite_y + SPRITE_SIZE + BUBBLE_GAP_PX;
       await emit("chat-bubble-show", { text, x: bubble_x, y: bubble_y });
@@ -565,7 +570,9 @@ function FloatingMori() {
     if (hasChatBubble) {
       try {
         const win = getCurrentWindow();
-        const pos = await win.outerPosition();
+        // 跟 showChatBubble 同 reason — innerPosition 是 content 真實 top-left,
+        // outerPosition 在 mutter X11 會把 shadow margin 算進去造成 bubble 偏移。
+        const pos = await win.innerPosition();
         const scale = await win.scaleFactor();
         const sprite_x = pos.x / scale;
         const sprite_y = pos.y / scale;

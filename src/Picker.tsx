@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalPosition, LogicalSize, currentMonitor } from "@tauri-apps/api/window";
+import { availableMonitors, cursorPosition, getCurrentWindow, LogicalPosition, LogicalSize, primaryMonitor } from "@tauri-apps/api/window";
 import { IconVoiceMic, IconTree } from "./icons";
 
 type ProfileEntry = { stem: string; display: string };
@@ -19,17 +19,44 @@ type Section = "voice" | "agent";
 const WIDTH = 520;
 const HEIGHT = 280; // 縮小:3-item carousel 不需要 480
 
-async function centerOnPrimaryMonitor() {
+// 多螢幕:picker 應該開在「使用者目前在看」的螢幕。先 currentMonitor()
+// 抓不準(picker 之前可能被丟到 off-screen,currentMonitor 回的是 off-screen
+// 落在哪台)、primaryMonitor() 也不一定是 user 在用的那台。最可靠是
+// cursorPosition() — 滑鼠在哪台螢幕,user 大概率就在那台。
+async function centerOnActiveMonitor() {
   const win = getCurrentWindow();
   try {
-    const mon = await currentMonitor();
-    if (!mon) return;
-    const scale = mon.scaleFactor || 1;
-    const screen_w = mon.size.width / scale;
-    const screen_h = mon.size.height / scale;
-    const x = Math.round((screen_w - WIDTH) / 2);
-    const y = Math.round((screen_h - HEIGHT) / 2);
+    const cursor = await cursorPosition().catch(() => null);
+    const monitors = await availableMonitors().catch(() => []);
+    let target = monitors.find((m) => {
+      if (!cursor) return false;
+      // 注意:cursorPosition 是 physical pixel,monitor.position / size 也是。
+      const right = m.position.x + m.size.width;
+      const bottom = m.position.y + m.size.height;
+      return (
+        cursor.x >= m.position.x &&
+        cursor.x < right &&
+        cursor.y >= m.position.y &&
+        cursor.y < bottom
+      );
+    });
+    // 找不到含 cursor 的(headless / cursor 在縫隙)→ fallback primary → currentMonitor
+    if (!target) {
+      target = (await primaryMonitor()) ?? undefined;
+    }
+    if (!target) {
+      console.warn("[picker] no monitor found to center on");
+      return;
+    }
+    const scale = target.scaleFactor || 1;
+    const monX = target.position.x / scale;
+    const monY = target.position.y / scale;
+    const monW = target.size.width / scale;
+    const monH = target.size.height / scale;
+    const x = Math.round(monX + (monW - WIDTH) / 2);
+    const y = Math.round(monY + (monH - HEIGHT) / 2);
     await win.setPosition(new LogicalPosition(x, y));
+    console.log("[picker] centered on monitor", { monX, monY, monW, monH, x, y });
   } catch (e) {
     console.error("[picker] center failed", e);
   }
@@ -43,6 +70,10 @@ function Picker() {
   const [agentIdx, setAgentIdx] = useState(0);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // X11 session?用 hide/show 自然 remap + focus;Wayland 維持 setPosition
+  // 偷渡(Wayland hide/show focus 不穩,X11 setPosition 又會被 mutter 拒
+  // setFocus,兩個 OS 各有偏好 path)。mount 時問一次 Rust。
+  const isX11Ref = useRef(false);
   // 把 state mirror 到 ref 給 document-level keydown listener 用
   // (listener 不會跟 state 更新 re-bind)
   const openRef = useRef(open);
@@ -58,25 +89,33 @@ function Picker() {
   voiceIdxRef.current = voiceIdx;
   agentIdxRef.current = agentIdx;
 
-  // 初次 mount:預先抓 profile lists
+  // 初次 mount:預先抓 profile lists + 查 session type
   useEffect(() => {
     invoke<ProfileEntry[]>("picker_list_voice_profiles").then(setVoice).catch(console.error);
     invoke<ProfileEntry[]>("picker_list_agent_profiles").then(setAgent).catch(console.error);
+    invoke<boolean>("is_x11_session")
+      .then((v) => { isX11Ref.current = v; })
+      .catch(() => {});
   }, []);
 
   const close = async () => {
     setOpen(false);
     const win = getCurrentWindow();
-    // 5K-1c: Wayland 對 hide/show 反覆切換 focus 給不穩,改用「保持 visible 但移
-    // off-screen」— 第一次 show() 後 GNOME 把 picker 歸到 Mori-tauri WMClass group
-    // (因 skipTaskbar 不堆 dock),之後 setPosition 進/出畫面 focus 穩。
+    if (isX11Ref.current) {
+      // X11:真的 hide。下次 show() 觸發 remap → mutter 自動把 focus 給新
+      // mapped window,不會被 focus-stealing-prevention 擋。
+      try { await win.hide(); } catch (e) { console.error("[picker] hide failed", e); }
+      return;
+    }
+    // Wayland:5K-1c — hide/show focus 不穩,改用「保持 visible 但移 off-screen」。
+    // 第一次 show() 後 GNOME 把 picker 歸到 Mori-tauri WMClass group(因
+    // skipTaskbar 不堆 dock),之後 setPosition 進/出畫面 focus 穩。
     try {
       await win.setPosition(new LogicalPosition(-10000, -10000));
     } catch (e) { console.error("[picker] move off-screen failed", e); }
-    // brand-3 follow-up: 雙保險縮成 1×1。Wayland 偶爾 setPosition 沒成功
+    // brand-3 follow-up:雙保險縮成 1×1。Wayland 偶爾 setPosition 沒成功
     // (mutter 對 transparent decorationless 視窗不穩),520×280 alwaysOnTop
-    // 透明窗停在原位會擋下面 app(navbar / explorer 區 click hit-test)。
-    // 即使 setPosition fail,1×1 窗擋不住。下次 picker-open 會再 setSize 回 520×280。
+    // 透明窗停在原位會擋下面 app。即使 setPosition fail,1×1 窗擋不住。
     try {
       await win.setSize(new LogicalSize(1, 1));
     } catch (e) { console.error("[picker] shrink failed", e); }
@@ -116,7 +155,7 @@ function Picker() {
       // close 時縮成 1×1,重開時要 setSize 回正常尺寸再 center
       try { await win.setSize(new LogicalSize(WIDTH, HEIGHT)); }
       catch (e) { console.error("[picker] resize failed", e); }
-      await centerOnPrimaryMonitor();
+      await centerOnActiveMonitor();
       // 第一次 show()(visible:false → true);之後 close 不 hide 只移 off-screen,
       // 所以這裡 show() 第二次以後是 no-op 但安全。
       try { await win.show(); } catch (e) { console.error("[picker] show failed", e); }

@@ -89,6 +89,7 @@ pub fn register(app: &AppHandle, config: &HotkeyConfig) -> Result<()> {
 /// 把 action 轉成下游 listener 已 subscribe 的 Tauri event。
 /// 跟 [`portal_hotkey::run`] 內 dispatch 一致,只是觸發源頭不同。
 fn dispatch(app: &AppHandle, action: &HotkeyAction) {
+    tracing::debug!(?action, "x11 hotkey fired");
     let emit_result = match action {
         HotkeyAction::Toggle => app.emit(PORTAL_HOTKEY_EVENT, ()),
         HotkeyAction::Cancel => app.emit(PORTAL_CANCEL_EVENT, ()),

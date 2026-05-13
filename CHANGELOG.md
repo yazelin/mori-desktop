@@ -6,6 +6,67 @@
 
 ---
 
+## 5R-followup-2 — picker / chat-bubble 在 X11 多細節修(2026-05-13)
+
+5R 上完後實測一輪,挖出 X11 + multi-monitor + alwaysOnTop 一連串小坑:
+
+### 修法
+
+- **picker 多螢幕找不到視窗** — `centerOnPrimaryMonitor()` 用 `currentMonitor()`
+  抓 picker 目前所在的螢幕,但 picker 初始位置由 Tauri 自選,落在 user 不在
+  看的那台螢幕 → user 按 Ctrl+Alt+P 看不到視窗以為失效。改成 `centerOnActiveMonitor()`:
+  `cursorPosition()` 抓滑鼠所在螢幕,fallback primary,fallback 第一個 monitor
+- **picker X11 第二次以後 focus 失靈** — 原本 close 用 `setPosition(off-screen)`
+  + `setSize(1,1)` 偷渡(Wayland focus 救援);X11 上 window 始終 mapped,
+  下次 show() 是 no-op、setFocus() 被 mutter focus-stealing-prevention 拒。
+  改成 X11 path 用真 `hide()`/`show()`,window unmap + remap 觸發 mutter 自動
+  把 focus 給新 mapped window
+- **picker X11 卡片中間有空 bg** — 即使 body bg = card bg 同色,card 92%
+  width / 4% gap 加上 card 自身 border line,視覺上像「框內又有框」。X11 上
+  用 `position: absolute; inset: 0` 強制 card 撐到 100% window,card border
+  直接當 window 邊框;carousel-body 加 `flex: 1` 撐開到 footer,沒底部空 bg
+- **chat-bubble X11 底部露白** — `.mori-chat-window` 沒設 height,JS 用
+  `MIN_HEIGHT=56` floor + 短文字時 window > card → 底部露出 body bg。light
+  theme `surface-bg #FFFFFF` 純白超明顯。改用 `min-height: 100vh` 讓 card 至少
+  跟 window 同高,內容變長 card + window 一起長(JS measure 仍正確收斂)
+- **chat-bubble 偏左** — `showChatBubble` 用 `outerPosition()` 算座標,mutter
+  X11 transparent+decorationless 視窗會把 shadow margin 算進去 → bubble 偏左
+  (shadow margin 寬度的偏移)。改用 `innerPosition()` 拿 content 真實 top-left,
+  水平正確置中。drag-end 同步 chat_bubble 位置的 emit 也跟著改
+- **chat-bubble 被壓在 floating 下面** — 兩個視窗都 `alwaysOnTop:true`,X11
+  mutter 同 ABOVE layer 內順序看「誰最後被 raise」。floating 因為使用者互動
+  頻繁(hover/drag)raise event 較新會壓在 chat_bubble 上。setAlwaysOnTop
+  toggle(false→true)只翻 state 不 re-raise,mutter 不會在 layer 內 reorder。
+  唯一可靠是顯式 `XRaiseWindow` — 新增 `force_raise_window` Tauri command
+  shell-out `xdotool search --pid $$ --name "Mori (chat)" windowraise`,
+  ChatBubble.tsx show 完 invoke 一下
+- **starter USER-00** — 5R 只 ship USER-01。USER-00(slot 0 預設極簡聽寫)
+  沒實體檔,Alt+0 切過去沒 display name → floating sprite 頭上沒 chip。
+  補 ship `USER-00.純文字輸入.md`(內容對齊 FALLBACK_PROFILE_MD 但可讓 user
+  編)。同樣 include_str! 從 examples/ 編進 binary
+- **bootstrap `floating` section** — 補進 `~/.mori/config.json` stub:
+  `floating.animated: true / wander: false`。原本 React 端 `?? false` fallback
+  穩,但 user 看 config.json 不知道有這欄位可改;explicit 寫進 stub 提示存在
+- **tracing 加碼** — `x11_hotkey::dispatch` 加 `tracing::debug!(?action,
+  "x11 hotkey fired")`,picker listener 加完整 chain log,debug 時不用瞎猜按
+  鍵到底有沒有打進來
+
+### 變動檔案
+
+- `src/Picker.tsx`:`centerOnActiveMonitor` + X11 hide/show / Wayland setPosition
+  雙 path、is_x11_session 偵測
+- `src/picker.css`:X11 absolute inset:0 fill + carousel-body flex:1
+- `src/chat-bubble.css`:X11 `min-height: 100vh` + 方角
+- `src/FloatingMori.tsx`:`showChatBubble` / drag-end 改用 innerPosition
+- `src/ChatBubble.tsx`:show 後 `invoke('force_raise_window')`
+- `crates/mori-tauri/src/main.rs`:`force_raise_window` Tauri command,
+  picker listener 加 tracing
+- `crates/mori-tauri/src/x11_hotkey.rs`:dispatch 加 tracing
+- `crates/mori-core/src/voice_input_profile.rs`:ship USER-00 starter
+- `crates/mori-core/src/llm/groq.rs`:bootstrap stub 加 `floating` section
+
+---
+
 ## 5R — Starter profiles + 基本操作流程文件(2026-05-13)
 
 5Q 把 23 個全域熱鍵都接通了,但使用者實測時發現兩個 UX 缺口:

@@ -14,9 +14,35 @@ body.picker-window {
   -webkit-user-select: none;
 }
 
-/* X11 transparency fallback — 見 floating.css 同名 selector 註解。 */
+/* X11 transparency fallback — 見 floating.css 同名 selector 註解。
+   body 純色填底解掉 half-alpha 問題。 */
 body.picker-window.x11-fallback {
   background: var(--c-surface-bg) !important;
+}
+
+/* X11 上 picker card 用 absolute inset:0 強制貼齊 — 用 flex centering +
+   width/max-height 100% 在某些 cascade 順序下還是會留 1-N px 邊(min-height
+   優先 / box-sizing 推算誤差),absolute inset 直接告訴瀏覽器「card 就是
+   root 的全部」,沒模糊空間。
+   Wayland 維持 flex centered 92% + rounded floating card 設計感。 */
+body.picker-window.x11-fallback .mori-picker-root {
+  position: relative;
+}
+body.picker-window.x11-fallback .mori-picker-card {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-height: none;
+  box-sizing: border-box;
+  border-radius: 0;
+}
+/* carousel-body 撐開到 footer,不然 footer 黏中段、card 底部一段空 bg。
+   min-height: 0 允許 flex 收縮(原本 168px hard min 在 280px card 內
+   還剩 ~80px 可被佔,設 0 不下限給 flex grow 算)。 */
+body.picker-window.x11-fallback .mori-picker-carousel-body {
+  flex: 1 1 0;
+  min-height: 0;
 }
 body.picker-window #root {
   width: 100vw;
