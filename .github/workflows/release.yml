@@ -50,7 +50,7 @@ jobs:
 
       # ── Ubuntu 系統 deps(同 check.yml) ─────────────────────────────────
       # v2:whisper-rs / whisper-rs-sys 已移除,不再需要 cmake / libclang-dev。
-      - name: Install Linux Tauri deps
+      - name: Install Linux Tauri + audio deps
         if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
@@ -59,7 +59,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libasound2-dev
 
       # ── Node / frontend ─────────────────────────────────────────────────
       - name: Setup Node

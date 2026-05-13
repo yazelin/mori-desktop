@@ -46,7 +46,7 @@ jobs:
       # Tauri 需要 GTK / WebKitGTK / AppIndicator / RSVG 的 dev headers。
       # v2:whisper-rs / whisper-rs-sys 已從 mori-core 移除(改 shell-out 接
       # whisper-server),所以不再需要 cmake / libclang-dev。
-      - name: Install Linux Tauri deps
+      - name: Install Linux Tauri + audio deps
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
@@ -55,7 +55,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libasound2-dev
 
       # Windows runner(`windows-latest`)已預裝 Visual Studio 2022 Build
       # Tools + Windows SDK,MSVC linker / windows crate 都直接可用。
