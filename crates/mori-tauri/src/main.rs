@@ -2421,7 +2421,39 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
          「what does this mean」、「這段為什麼這樣寫」)→ 直接 chat 回答,\
          **不**呼叫這個 skill,**不**動使用者編輯區。\n");
     prompt.push_str(
-        "  • Linux only — 其他平台沒這個 skill,不會出現在 tool 清單。\n\n");
+        "  • **平台差異**:Linux 走 xclip + xdotool/ydotool;Windows 走 SetClipboardData + SendInput。\
+         Windows 沒有 X11 PRIMARY selection,所以使用者必須先 Ctrl+C 才有東西可貼。\n\n");
+
+    // Action skills(phase 5G):open_url / open_app / send_keys / google_search / 等
+    prompt.push_str("**open_url(url)**:在系統預設瀏覽器開 URL。\n");
+    prompt.push_str(
+        "  • 觸發:「打開 https://...」、「開 google.com」(明確帶 URL)。\n");
+    prompt.push_str("  • url 必須是 http:// 或 https:// 開頭的絕對 URL。\n\n");
+
+    prompt.push_str("**open_app(app)**:啟動本機 app。\n");
+    prompt.push_str(
+        "  • 觸發:「打開 firefox」、「開 vscode」、「launch chrome」(明確指定 app)。\n");
+    prompt.push_str(
+        "  • **如果使用者只說「打開瀏覽器」沒指定哪個**,**不要硬猜** — \
+         直接 chat 反問「Firefox / Chrome / Edge 哪個?」(用一兩句),\
+         **不要**編造「需要授權」或其他藉口。\n");
+    prompt.push_str(
+        "  • 範例對應:「打開 firefox」→ open_app(app=\"firefox\");「打開 vscode」→ open_app(app=\"code\")。\n\n");
+
+    prompt.push_str("**send_keys(keys)**:對當下視窗送鍵盤組合。\n");
+    prompt.push_str(
+        "  • 觸發:「按 Ctrl+S」、「Alt+Tab 切視窗」、「按 Enter」(明確的鍵盤動作)。\n");
+    prompt.push_str("  • 格式:「Ctrl+S」/「Alt+Shift+Period」/「F5」。\n\n");
+
+    prompt.push_str("**google_search(query)** / **ask_chatgpt(prompt)** / **ask_gemini(prompt)** / **find_youtube(query)**:\
+                     開瀏覽器到對應網站 + 預填查詢。\n");
+    prompt.push_str(
+        "  • 觸發:「google 一下 X」/「問 ChatGPT X」/「問 Gemini X」/「YouTube 搜 X」。\n");
+    prompt.push_str("  • 不要主動叫 — 使用者明確點名才叫。\n\n");
+
+    prompt.push_str(
+        "**動作 skill 共同規則**:沒有對應 URL / app / key 等具體參數時,\
+         **反問使用者**,不要編造藉口拒絕。\n\n");
 
     // Mode skill(phase 4B-2)
     prompt.push_str("**set_mode(mode)**:切換 Active / Background。\n");
