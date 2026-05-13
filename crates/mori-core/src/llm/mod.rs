@@ -1121,10 +1121,24 @@ pub struct ProviderSnapshot {
 }
 
 pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
-    // 5A-3 起:agent 走 `routing.agent`(若設)→ `provider`(若設)→ "groq"
+    // 優先順序(高到低):
+    //   1. **active agent profile frontmatter `provider`** — 個別 profile 想用自己的
+    //      LLM 主腦(像 USER-01 走 claude-bash、AGENT-00 走 groq)
+    //   2. `routing.agent`(config.json 全域 agent override)
+    //   3. `provider`(config.json 全域預設)
+    //   4. "groq"
+    //
+    // 之前漏了 #1,主視窗 header 顯示永遠是 config 預設,跟 agent loop 實際在
+    // 用的 provider 不一致 — user 切到 claude-bash profile,header 還寫 groq,
+    // 完全 confusion。
+    let profile_provider = crate::agent_profile::load_active_agent_profile()
+        .frontmatter
+        .provider;
     let routing = read_routing_config();
     let default = read_provider_config();
-    let active = routing.agent.unwrap_or_else(|| default.clone());
+    let active = profile_provider
+        .or(routing.agent)
+        .unwrap_or_else(|| default.clone());
 
     match active.as_str() {
         "ollama" => {
