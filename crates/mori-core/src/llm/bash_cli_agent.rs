@@ -125,14 +125,22 @@ impl BashCliAgentProvider {
         }
     }
 
-    /// 嘗試自動找 mori CLI:先看 `current_exe()` 旁邊(dev:`target/debug/mori`),
+    /// 嘗試自動找 mori CLI:先看 `current_exe()` 旁邊(dev:`target/debug/mori[.exe]`),
     /// 找不到 fallback 到 PATH 上的 `mori`。
+    /// Windows 要連 `.exe` 一起檢查 — `PathBuf::exists()` 不會自動補副檔名。
     pub fn detect_mori_cli() -> PathBuf {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(parent) = exe.parent() {
-                let candidate = parent.join("mori");
-                if candidate.exists() {
-                    return candidate;
+                let names: &[&str] = if cfg!(windows) {
+                    &["mori.exe", "mori"]
+                } else {
+                    &["mori"]
+                };
+                for name in names {
+                    let candidate = parent.join(name);
+                    if candidate.exists() {
+                        return candidate;
+                    }
                 }
             }
         }
