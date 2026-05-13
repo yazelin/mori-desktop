@@ -6,6 +6,52 @@
 
 ---
 
+## 5R-followup-3 — XShape OS-level 圓形 floating + 單螢幕 wander(2026-05-13)
+
+清掉 5Q 留下的兩個 pending tasks:
+
+### XShape OS-level 圓形 floating window
+
+X11 透明矩形面板換成真圓形。CSS `border-radius` 在 X11 transparent window
+邊緣 AA 會產生 half-alpha pixel 被 mutter 渲染破。改走 X11 XShape extension
+的 1-bit alpha clip(in/out 二元,沒中間值)— OS 直接決定哪些 pixel 渲染,
+跟 compositor / WebKit alpha 完全無關。
+
+實作:
+- 新檔 `crates/mori-tauri/src/x11_shape.rs`:`apply_circle_clip(xid, w, h)`
+  把圓拆成 160 條 1px-tall scanline rectangles,送 `shape_rectangles` request
+  給 X server 組合成 bounding region。順便寫了 `apply_rounded_clip` 給未來
+  圓角矩形場景用,2 個 unit test
+- Cargo.toml mori-tauri linux 區加 `x11rb` 直接依賴 + `shape` feature
+  (x11rb 純 Rust,無系統 lib install)
+- main.rs setup X11 path 內 spawn tokio task,sleep 500ms 等 mutter 把
+  floating 視窗 WM_NAME 註冊好,用 `xdotool search --pid $$ --name "Mori (floating)"`
+  找 XID,呼叫 apply_circle_clip(xid, 160, 160)
+- 視覺:floating 整個變成圓盤(corners 4 個方角完全 OS-level transparent,
+  不依賴 compositor、沒 AA、無 half-alpha)
+
+效果:X11 上 Mori 跟 Wayland 視覺對齊(都是圓盤),aura / drop-shadow /
+glow 全保留(opaque body 內 composite)。
+
+### Multi-monitor wander 限制單螢幕
+
+`walkOnce()` 原本用 `primaryMonitor()` 拿尺寸,只認 primary monitor。Mori
+被使用者拖到第二螢幕後,wander 仍用 primary 邊界算 → 走到看不見的座標。
+
+改用 `availableMonitors()` 找 Mori 中心點所在的 monitor,wander 限制在那台
+範圍內。設計哲學:「Mori 待哪台就在那台 wander,使用者手動拖才換螢幕」 —
+不會跨螢幕亂跑,使用者也保留掌控權。
+
+### 變動檔案
+
+- 新檔 `crates/mori-tauri/src/x11_shape.rs`
+- 修改 `crates/mori-tauri/Cargo.toml`(加 x11rb shape feature)
+- 修改 `crates/mori-tauri/src/main.rs`(模組宣告 + find_window_xid helper +
+  X11 path 內 XShape apply)
+- 修改 `src/FloatingMori.tsx`(walkOnce 用 availableMonitors + 中心點偵測)
+
+---
+
 ## 5R-followup-2 — picker / chat-bubble 在 X11 多細節修(2026-05-13)
 
 5R 上完後實測一輪,挖出 X11 + multi-monitor + alwaysOnTop 一連串小坑:

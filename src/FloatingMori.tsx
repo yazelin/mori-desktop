@@ -1,7 +1,7 @@
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalPosition, primaryMonitor } from "@tauri-apps/api/window";
+import { availableMonitors, getCurrentWindow, LogicalPosition, primaryMonitor } from "@tauri-apps/api/window";
 
 type SkillCallSummary = {
   name: string;
@@ -468,21 +468,43 @@ function FloatingMori() {
         const sx = pos.x / factor;
         const sy = pos.y / factor;
 
-        // 螢幕邊界 — primaryMonitor 拿 size,floating widget 160×160
-        const monitor = await primaryMonitor();
-        const W = monitor ? monitor.size.width / factor : 1920;
-        const H = monitor ? monitor.size.height / factor : 1080;
-        const PAD = 40;
         const WIN_W = 160;
         const WIN_H = 160;
+        const PAD = 40;
 
-        // 隨機目標(不要離當前太遠也不要太近 — 100~400px 距離)
+        // 多螢幕:用 Mori 中心點找目前在哪台螢幕,wander 限制在那台範圍內。
+        // 使用者手動拖到別台 Mori 才換螢幕走 — 不會「莫名穿越螢幕」走到
+        // 螢幕間斷裂處或不存在的座標。
+        const mori_cx_physical = pos.x + (WIN_W * factor) / 2;
+        const mori_cy_physical = pos.y + (WIN_H * factor) / 2;
+        const monitors = await availableMonitors().catch(() => []);
+        let active = monitors.find((m) => {
+          const right = m.position.x + m.size.width;
+          const bottom = m.position.y + m.size.height;
+          return (
+            mori_cx_physical >= m.position.x &&
+            mori_cx_physical < right &&
+            mori_cy_physical >= m.position.y &&
+            mori_cy_physical < bottom
+          );
+        });
+        if (!active) {
+          active = (await primaryMonitor()) ?? undefined;
+        }
+        // monitor.size / position 是 physical pixel,wander 算 logical
+        const monX = active ? active.position.x / factor : 0;
+        const monY = active ? active.position.y / factor : 0;
+        const W = active ? active.size.width / factor : 1920;
+        const H = active ? active.size.height / factor : 1080;
+
+        // 隨機目標(不要離當前太遠也不要太近 — 100~400px 距離),限制在
+        // active monitor 邊界內
         let attempts = 0;
         let tx = sx;
         let ty = sy;
         while (attempts < 10) {
-          tx = PAD + Math.random() * (W - WIN_W - PAD * 2);
-          ty = PAD + Math.random() * (H - WIN_H - PAD * 2);
+          tx = monX + PAD + Math.random() * (W - WIN_W - PAD * 2);
+          ty = monY + PAD + Math.random() * (H - WIN_H - PAD * 2);
           const dx = tx - sx;
           const dy = ty - sy;
           const dist = Math.sqrt(dx * dx + dy * dy);

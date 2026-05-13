@@ -11,6 +11,8 @@ mod hotkey_config;
 mod portal_hotkey;
 #[cfg(target_os = "linux")]
 mod x11_hotkey;
+#[cfg(target_os = "linux")]
+mod x11_shape;
 mod recording;
 #[cfg(target_os = "linux")]
 mod character_pack;
@@ -219,6 +221,29 @@ fn linux_session_type() -> String {
 ///
 /// Wayland 不需要(compositor 對 alwaysOnTop 處理乾淨,且 wayland 沒有
 /// 對應的 XRaiseWindow 等價 API,任何「raise」都不會被允許)。
+/// 用 xdotool 找這個 process 名為 `title` 的 X11 window ID。給
+/// XShape clip 等需要 raw XID 的場景。Linux 限定。
+#[cfg(target_os = "linux")]
+fn find_window_xid(title: &str) -> anyhow::Result<u32> {
+    use anyhow::Context as _;
+    let pid = std::process::id().to_string();
+    let output = std::process::Command::new("xdotool")
+        .args(["search", "--pid", &pid, "--name", title])
+        .output()
+        .context("spawn xdotool search")?;
+    if !output.status.success() {
+        anyhow::bail!("xdotool search exited {:?}", output.status);
+    }
+    let stdout = String::from_utf8(output.stdout).context("xdotool stdout utf8")?;
+    let id_str = stdout
+        .lines()
+        .next()
+        .with_context(|| format!("no window matched name '{title}'"))?
+        .trim();
+    let xid: u32 = id_str.parse().context("parse xdotool xid")?;
+    Ok(xid)
+}
+
 #[tauri::command]
 fn force_raise_window(_app: AppHandle, label: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
@@ -2717,6 +2742,26 @@ fn main() {
                             }
                         }
                     }
+                    // X11 floating window → 圓形 OS-level clip(XShape)。CSS
+                    // border-radius 在 transparent X11 window 邊緣 AA 會破,XShape
+                    // 是 1-bit alpha clip,沒 AA、沒半透明,完美避開渲染問題。
+                    // window 啟動初期可能還沒 mapped(X server registry 沒登記
+                    // WM_NAME),sleep 一下再去 xdotool search 抓 XID。500ms 在
+                    // 開機階段夠 mutter 把 window 註冊好。失敗的話 log warn 不
+                    // bail,Mori 還是能用,只是 floating 仍是矩形。
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        match find_window_xid("Mori (floating)") {
+                            Ok(xid) => {
+                                if let Err(e) = x11_shape::apply_circle_clip(xid, 160, 160) {
+                                    tracing::warn!(?e, "XShape circle clip failed");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(?e, "could not find floating XID for XShape");
+                            }
+                        }
+                    });
                 } else {
                     tracing::info!(
                         "non-X11 session detected — using xdg-desktop-portal GlobalShortcuts"

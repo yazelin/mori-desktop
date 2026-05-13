@@ -2615,6 +2615,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "x11rb",
 ]
 
 [[package]]

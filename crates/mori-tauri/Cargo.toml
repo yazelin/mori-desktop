@@ -59,6 +59,11 @@ futures-util = "0.3"
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 arboard = "3"
+# 5R-followup-3:X11 上 floating window 用 XShape extension 做 OS-level 圓
+# (圓形)bounding region — CSS border-radius 在 transparent X11 視窗邊
+# 緣 AA half-alpha 會破,XShape 是 1-bit alpha clip(in / out),完全沒
+# AA、沒半透明,跟 compositor 無關。x11rb 純 Rust,不需系統 libxcb-shape-dev。
+x11rb = { version = "0.13", features = ["shape"] }
 
 [features]
 default = ["custom-protocol"]
