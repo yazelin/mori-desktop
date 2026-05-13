@@ -22,6 +22,22 @@ const DEFAULT_PICKER: &str = "Ctrl+Alt+P";
 const DEFAULT_VOICE_SLOT_MODIFIER: &str = "Alt";
 const DEFAULT_AGENT_SLOT_MODIFIER: &str = "Ctrl+Alt";
 
+/// Toggle hotkey 的語意:`Toggle` 是一按一切換錄音 / 停錄;`Hold` 是按住開錄、
+/// 放開停錄(類似 push-to-talk)。兩種模式共用同一個 chord(`toggle`),由 main.rs
+/// 根據此欄位決定 Press / Release 事件怎麼 map 到開錄 / 停錄。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToggleMode {
+    Toggle,
+    Hold,
+}
+
+impl Default for ToggleMode {
+    fn default() -> Self {
+        Self::Toggle
+    }
+}
+
 /// 反序列化 `~/.mori/config.json` 的 `hotkeys` 子樹。所有欄位皆可省略,缺的走預設。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -29,6 +45,8 @@ pub struct HotkeyConfig {
     pub toggle: String,
     pub cancel: String,
     pub picker: String,
+    /// Toggle chord 的觸發語意 — `toggle`(一按切換)或 `hold`(按住錄、放開停)。
+    pub toggle_mode: ToggleMode,
     /// 套用到 voice slot 0~9 的 modifier(預設 `Alt`)。
     pub voice_slot_modifier: String,
     /// 套用到 agent slot 0~9 的 modifier(預設 `Ctrl+Alt`)。
@@ -45,6 +63,7 @@ impl Default for HotkeyConfig {
             toggle: DEFAULT_TOGGLE.to_string(),
             cancel: DEFAULT_CANCEL.to_string(),
             picker: DEFAULT_PICKER.to_string(),
+            toggle_mode: ToggleMode::default(),
             voice_slot_modifier: DEFAULT_VOICE_SLOT_MODIFIER.to_string(),
             agent_slot_modifier: DEFAULT_AGENT_SLOT_MODIFIER.to_string(),
             voice_slot_overrides: HashMap::new(),
@@ -359,5 +378,17 @@ mod tests {
         let mut cfg = HotkeyConfig::default();
         cfg.toggle = "Ctrl+Alt+NotARealKey".to_string();
         assert!(cfg.resolve().is_err());
+    }
+
+    #[test]
+    fn toggle_mode_defaults_to_toggle() {
+        let cfg: HotkeyConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(cfg.toggle_mode, ToggleMode::Toggle);
+    }
+
+    #[test]
+    fn toggle_mode_parses_hold_lowercase() {
+        let cfg: HotkeyConfig = serde_json::from_str(r#"{"toggle_mode":"hold"}"#).unwrap();
+        assert_eq!(cfg.toggle_mode, ToggleMode::Hold);
     }
 }

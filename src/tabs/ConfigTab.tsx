@@ -108,7 +108,15 @@ function HintTooltip({ children }: { children: React.ReactNode }) {
   );
 }
 
-type SubTabId = "quick" | "llm" | "voice" | "appearance" | "x11" | "corrections" | "raw";
+type SubTabId =
+  | "quick"
+  | "llm"
+  | "voice"
+  | "appearance"
+  | "hotkey"
+  | "x11"
+  | "corrections"
+  | "raw";
 
 interface SubTabSpec {
   id: SubTabId;
@@ -423,8 +431,12 @@ function ConfigTab() {
   const [subTab, setSubTab] = useState<SubTabId>("quick");
   // X11 session 偵測 — 用來條件 render「X11 only」sub-tab(Wayland 看不到)
   const [isX11, setIsX11] = useState(false);
+  // Hotkey sub-tab 上的 session 標籤 + Wayland 提示文案要看實際 session type:
+  // "x11" | "wayland" | "linux-other" | "non-linux"。
+  const [sessionType, setSessionType] = useState<string>("non-linux");
   useEffect(() => {
     invoke<boolean>("is_x11_session").then(setIsX11).catch(() => {});
+    invoke<string>("linux_session_type").then(setSessionType).catch(() => {});
   }, []);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
@@ -543,6 +555,7 @@ function ConfigTab() {
     { id: "llm", label: "LLM / Provider", Icon: IconCloud },
     { id: "voice", label: "Voice input", Icon: IconVoiceMic },
     { id: "appearance", label: "Appearance", Icon: IconTree },
+    { id: "hotkey", label: "Hotkey", Icon: IconKeyboard },
     ...(isX11 ? [{ id: "x11" as SubTabId, label: "X11 only", Icon: IconKeyboard }] : []),
     { id: "corrections" as SubTabId, label: "Corrections", Icon: IconClipboard },
     { id: "raw", label: "Raw JSON", Icon: IconPencil },
@@ -838,6 +851,116 @@ function ConfigTab() {
               />
             </FormRow>
             <CharacterPicker />
+          </Section>
+          </>}
+
+          {/* ── Hotkey ─────────────────────────────────── */}
+          {subTab === "hotkey" && <>
+          <Section
+            title="Toggle 模式"
+            hint="Ctrl+Alt+Space(預設 chord)按下後怎麼觸發錄音。改完按 儲存 即時生效,不必重啟。"
+          >
+            <FormRow
+              label="toggle_mode"
+              hint="toggle:按一下開錄、再按一下停錄。hold:按住開錄、放開停錄(像 push-to-talk)。"
+            >
+              <Select
+                value={getStr(cfg.hotkeys, "toggle_mode", "toggle")}
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    const h = ensureSubObj(c, "hotkeys");
+                    if (v === "toggle") delete h.toggle_mode;
+                    else h.toggle_mode = v;
+                    if (Object.keys(h).length === 0) delete c.hotkeys;
+                  })
+                }
+                options={[
+                  { value: "toggle", label: "toggle(一按切換)" },
+                  { value: "hold", label: "hold(按住錄、放開停)" },
+                ]}
+              />
+            </FormRow>
+            <p className="mori-config-section-hint" style={{ marginTop: "0.4em" }}>
+              兩種模式共用同一個 chord(預設 <code>Ctrl+Alt+Space</code>),只是按下 / 放開的解讀不同。
+              按 <strong>儲存</strong> 後 Mori 立即重讀,下一次按鍵就走新模式。
+            </p>
+          </Section>
+
+          <Section
+            title="鍵位"
+            hint={
+              sessionType === "wayland"
+                ? "Wayland 上實際鍵位由系統設定決定 — 改 config.json 沒用,要去 GNOME Settings → Keyboard 改。"
+                : sessionType === "x11"
+                ? "X11 上 config.json 是 source of truth,改完重啟生效。"
+                : "Linux 以外 Mori 走 tauri-plugin-global-shortcut,鍵位仍寫死 Ctrl+Alt+Space。"
+            }
+          >
+            <FormRow
+              label="toggle"
+              hint="主錄音 chord。預設 Ctrl+Alt+Space。"
+            >
+              <input
+                type="text"
+                className="mori-input"
+                value={getStr(cfg.hotkeys, "toggle", "Ctrl+Alt+Space")}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const h = ensureSubObj(c, "hotkeys");
+                    setStrOrUndef(h, "toggle", e.target.value);
+                    if (Object.keys(h).length === 0) delete c.hotkeys;
+                  })
+                }
+                placeholder="Ctrl+Alt+Space"
+              />
+            </FormRow>
+            <FormRow
+              label="cancel"
+              hint="錄音中按這個丟掉音檔(不送 STT)。Transcribing / Responding 時 abort pipeline。"
+            >
+              <input
+                type="text"
+                className="mori-input"
+                value={getStr(cfg.hotkeys, "cancel", "Ctrl+Alt+Escape")}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const h = ensureSubObj(c, "hotkeys");
+                    setStrOrUndef(h, "cancel", e.target.value);
+                    if (Object.keys(h).length === 0) delete c.hotkeys;
+                  })
+                }
+                placeholder="Ctrl+Alt+Escape"
+              />
+            </FormRow>
+            <FormRow
+              label="picker"
+              hint="開 profile picker overlay(方向鍵選 voice / agent profile)。"
+            >
+              <input
+                type="text"
+                className="mori-input"
+                value={getStr(cfg.hotkeys, "picker", "Ctrl+Alt+P")}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const h = ensureSubObj(c, "hotkeys");
+                    setStrOrUndef(h, "picker", e.target.value);
+                    if (Object.keys(h).length === 0) delete c.hotkeys;
+                  })
+                }
+                placeholder="Ctrl+Alt+P"
+              />
+            </FormRow>
+            {sessionType === "wayland" && (
+              <p
+                className="mori-config-section-hint"
+                style={{ marginTop: "0.4em", borderLeft: "3px solid var(--mori-accent, #888)", paddingLeft: "0.6em" }}
+              >
+                Wayland portal 規範:第一次 Mori 啟動時 compositor(GNOME / KDE / …)會把預設 chord 記成「使用者要的綁定」,
+                之後改 config.json <strong>不會自動覆寫</strong>。要改實際鍵位:
+                <br />• GNOME 走 Settings → Keyboard → View and Customize Shortcuts
+                <br />• 或刪掉 <code>~/.local/share/xdg-desktop-portal/permissions</code> 讓 Mori 下次啟動重新走權限 dialog
+              </p>
+            )}
           </Section>
           </>}
 

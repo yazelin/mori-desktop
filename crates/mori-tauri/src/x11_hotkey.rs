@@ -6,8 +6,8 @@
 //! 主導。
 //!
 //! 跟 portal 路徑共用同一份 [`HotkeyConfig`],callback 也 emit 同樣的 Tauri
-//! event(`PORTAL_HOTKEY_EVENT` 等),所以 main.rs 下游 listener 不用知道現
-//! 在跑哪條 path。
+//! event(`PORTAL_HOTKEY_PRESSED` / `PORTAL_HOTKEY_RELEASED` 等),所以
+//! main.rs 下游 listener 不用知道現在跑哪條 path。
 
 use anyhow::{Context as _, Result};
 use tauri::{AppHandle, Emitter};
@@ -15,8 +15,8 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::hotkey_config::{HotkeyAction, HotkeyConfig};
 use crate::portal_hotkey::{
-    AGENT_SLOT_EVENT, PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_EVENT, PORTAL_PICKER_EVENT,
-    PROFILE_SLOT_EVENT,
+    AGENT_SLOT_EVENT, PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_PRESSED, PORTAL_HOTKEY_RELEASED,
+    PORTAL_PICKER_EVENT, PROFILE_SLOT_EVENT,
 };
 
 /// 偵測是否走 X11 path:`XDG_SESSION_TYPE=x11`。
@@ -58,11 +58,20 @@ pub fn register(app: &AppHandle, config: &HotkeyConfig) -> Result<()> {
         let app_clone = app.clone();
         let key_for_log = binding.key.clone();
         let result = app.global_shortcut().on_shortcut(shortcut, move |_app, _sc, event| {
-            // 只在 Pressed 觸發,Released 忽略(避免 toggle 連按兩次)。
-            if event.state() != tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                return;
+            // Toggle action 在 Press / Release 都 dispatch — main.rs 那層依
+            // 當下 `state.toggle_mode` 決定怎麼解讀(toggle = Press 跑 toggle、
+            // Release 忽略;hold = Press 開錄、Release 停錄)。其他 action 是
+            // 離散事件,只在 Pressed 觸發。
+            let is_pressed =
+                event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed;
+            match &action {
+                HotkeyAction::Toggle => dispatch_toggle(&app_clone, is_pressed),
+                _ => {
+                    if is_pressed {
+                        dispatch(&app_clone, &action);
+                    }
+                }
             }
-            dispatch(&app_clone, &action);
         });
 
         match result {
@@ -86,12 +95,13 @@ pub fn register(app: &AppHandle, config: &HotkeyConfig) -> Result<()> {
     Ok(())
 }
 
-/// 把 action 轉成下游 listener 已 subscribe 的 Tauri event。
+/// 把 (離散) action 轉成下游 listener 已 subscribe 的 Tauri event。
 /// 跟 [`portal_hotkey::run`] 內 dispatch 一致,只是觸發源頭不同。
+/// 注意:Toggle 不走這條,走 [`dispatch_toggle`]。
 fn dispatch(app: &AppHandle, action: &HotkeyAction) {
     tracing::debug!(?action, "x11 hotkey fired");
     let emit_result = match action {
-        HotkeyAction::Toggle => app.emit(PORTAL_HOTKEY_EVENT, ()),
+        HotkeyAction::Toggle => unreachable!("toggle action handled by dispatch_toggle"),
         HotkeyAction::Cancel => app.emit(PORTAL_CANCEL_EVENT, ()),
         HotkeyAction::Picker => app.emit(PORTAL_PICKER_EVENT, ()),
         HotkeyAction::VoiceSlot(n) => app.emit(PROFILE_SLOT_EVENT, *n),
@@ -99,5 +109,23 @@ fn dispatch(app: &AppHandle, action: &HotkeyAction) {
     };
     if let Err(e) = emit_result {
         tracing::warn!(?e, ?action, "x11 hotkey event emit failed");
+    }
+}
+
+/// Toggle chord 專用 dispatch。Press → `PORTAL_HOTKEY_PRESSED`;Release →
+/// `PORTAL_HOTKEY_RELEASED`。main.rs 那層 listener 依當下 `state.toggle_mode`
+/// 決定怎麼處理(toggle = Press 走 handle_hotkey_toggle、Release no-op;
+/// hold = Press 開錄、Release 停錄)。
+fn dispatch_toggle(app: &AppHandle, is_pressed: bool) {
+    if is_pressed {
+        tracing::debug!("x11 toggle pressed");
+        if let Err(e) = app.emit(PORTAL_HOTKEY_PRESSED, ()) {
+            tracing::warn!(?e, "x11 toggle PORTAL_HOTKEY_PRESSED emit failed");
+        }
+    } else {
+        tracing::debug!("x11 toggle released");
+        if let Err(e) = app.emit(PORTAL_HOTKEY_RELEASED, ()) {
+            tracing::warn!(?e, "x11 toggle PORTAL_HOTKEY_RELEASED emit failed");
+        }
     }
 }

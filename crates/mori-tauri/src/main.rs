@@ -112,6 +112,12 @@ pub struct AppState {
     /// Ctrl+Alt+Esc 在 Phase::Transcribing / Responding 階段可以 abort 它,
     /// kill_on_drop 會把 claude / gemini / codex 子程序連帶 SIGKILL。
     pub pipeline_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    /// 5T: Toggle chord 的當前語意 — `Toggle`(一按切換)或 `Hold`(按住錄、放開停)。
+    /// 啟動時從 `hotkey_config.toggle_mode` 讀入,`config_write` 寫完 disk 後同步
+    /// 重讀更新 → 改完即時生效不必重啟。Listener 永遠掛 PRESSED + RELEASED,在
+    /// handler 內讀這個 mutex 決定 dispatch。
+    #[cfg(target_os = "linux")]
+    pub toggle_mode: Mutex<hotkey_config::ToggleMode>,
 }
 
 impl AppState {
@@ -607,7 +613,11 @@ fn config_read() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn config_write(app: AppHandle, text: String) -> Result<(), String> {
+fn config_write(
+    app: AppHandle,
+    #[cfg(target_os = "linux")] state: tauri::State<'_, Arc<AppState>>,
+    text: String,
+) -> Result<(), String> {
     // Validate JSON parses before write,不然容易把 config.json 寫壞
     serde_json::from_str::<serde_json::Value>(&text)
         .map_err(|e| format!("invalid JSON: {e}"))?;
@@ -616,6 +626,22 @@ fn config_write(app: AppHandle, text: String) -> Result<(), String> {
     // 5P-4: 廣播 config 變動,讓 FloatingMori 等 window 重讀(目前主要給 floating
     // section 的 animated / wander toggle 即時生效用)
     let _ = app.emit("config-changed", ());
+    // 5T: 熱套用 hotkeys.toggle_mode — 重讀 disk 後把新 mode 寫進 state,
+    // 下一次 PRESSED / RELEASED 立刻走新 dispatch 不必重啟。Linux only,
+    // 非 Linux 的 fallback path 沒 hotkey config。
+    #[cfg(target_os = "linux")]
+    {
+        let cfg = hotkey_config::HotkeyConfig::load(&path);
+        let prev = *state.toggle_mode.lock();
+        if prev != cfg.toggle_mode {
+            *state.toggle_mode.lock() = cfg.toggle_mode;
+            tracing::info!(
+                ?prev,
+                new = ?cfg.toggle_mode,
+                "hotkeys.toggle_mode hot-reloaded",
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1204,6 +1230,43 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
         }
         Phase::Transcribing | Phase::Responding { .. } => {
             tracing::info!("toggle while busy — ignored");
+        }
+    }
+}
+
+/// Hold 模式 — chord 按下:相當於 toggle 模式的「開錄」分支,但只負責開,
+/// 不會 toggle。已在錄音中 / busy 時是 no-op。
+#[cfg(target_os = "linux")]
+fn handle_hotkey_pressed(app: AppHandle, state: Arc<AppState>) {
+    if matches!(*state.mode.lock(), Mode::Background) {
+        tracing::info!("hotkey press while Background → wake to Active + start recording");
+        state.set_mode(&app, Mode::Agent);
+    }
+    let current = state.phase.lock().clone();
+    match current {
+        Phase::Idle | Phase::Done { .. } | Phase::Error { .. } => {
+            *state.hotkey_window_context.lock() = capture_window_context();
+            start_recording(&app, &state);
+        }
+        Phase::Recording { .. } => {
+            tracing::debug!("hotkey press while already recording — ignored");
+        }
+        Phase::Transcribing | Phase::Responding { .. } => {
+            tracing::info!("hotkey press while busy — ignored");
+        }
+    }
+}
+
+/// Hold 模式 — chord 放開:只在 Recording 中觸發 stop_and_transcribe。
+/// 其他 phase 不動作(例如使用者放開太快、key repeat 時序、或 release 比
+/// press 還早抵達的 portal 邊角)。
+#[cfg(target_os = "linux")]
+fn handle_hotkey_released(app: AppHandle, state: Arc<AppState>) {
+    let current = state.phase.lock().clone();
+    match current {
+        Phase::Recording { .. } => stop_and_transcribe(app, state),
+        _ => {
+            tracing::debug!(?current, "hotkey released but not recording — ignored");
         }
     }
 }
@@ -2441,6 +2504,10 @@ fn main() {
         ollama_warmup: Mutex::new(None),
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
         pipeline_task: Mutex::new(None),
+        // 5T: 啟動先用 default(Toggle),Linux setup 讀 ~/.mori/config.json 後
+        // 覆寫成實際值(見下方 hotkey_config 載入處)。
+        #[cfg(target_os = "linux")]
+        toggle_mode: Mutex::new(hotkey_config::ToggleMode::default()),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -2802,6 +2869,9 @@ fn main() {
                     .map(|h| h.join(".mori/config.json"))
                     .unwrap_or_default();
                 let hotkey_config = hotkey_config::HotkeyConfig::load(&mori_config_path);
+                // 5T: 寫進 state 給後續 PRESSED/RELEASED listener 用。改 config 時
+                // config_write 會 reload 一次,所以這裡只負責「啟動快照」。
+                *state_for_setup.toggle_mode.lock() = hotkey_config.toggle_mode;
 
                 if x11_hotkey::is_x11_session() {
                     tracing::info!("X11 session detected — using tauri-plugin-global-shortcut");
@@ -2919,11 +2989,41 @@ fn main() {
                     });
                 }
 
-                let handle = app.handle().clone();
-                let state_for_handler = state_for_setup.clone();
-                app.listen(portal_hotkey::PORTAL_HOTKEY_EVENT, move |_event| {
-                    handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
+                // 5T: 永遠掛 PRESSED + RELEASED 兩個 listener,handler 內讀
+                // `state.toggle_mode` 決定 dispatch:
+                //   Toggle 模式 → PRESSED 跑 handle_hotkey_toggle;RELEASED 忽略
+                //   Hold   模式 → PRESSED 跑 handle_hotkey_pressed;RELEASED 跑 handle_hotkey_released
+                // 這樣切換 toggle_mode(config_write 寫完會 reload state mode)
+                // 不必重啟,下一次按鍵立刻走新邏輯。
+                let handle_press = app.handle().clone();
+                let state_press = state_for_setup.clone();
+                app.listen(portal_hotkey::PORTAL_HOTKEY_PRESSED, move |_event| {
+                    let mode = *state_press.toggle_mode.lock();
+                    match mode {
+                        hotkey_config::ToggleMode::Toggle => {
+                            handle_hotkey_toggle(handle_press.clone(), state_press.clone());
+                        }
+                        hotkey_config::ToggleMode::Hold => {
+                            handle_hotkey_pressed(handle_press.clone(), state_press.clone());
+                        }
+                    }
                 });
+                let handle_release = app.handle().clone();
+                let state_release = state_for_setup.clone();
+                app.listen(portal_hotkey::PORTAL_HOTKEY_RELEASED, move |_event| {
+                    let mode = *state_release.toggle_mode.lock();
+                    if mode == hotkey_config::ToggleMode::Hold {
+                        handle_hotkey_released(
+                            handle_release.clone(),
+                            state_release.clone(),
+                        );
+                    }
+                    // Toggle 模式 RELEASED 是 no-op:Press 已做完 toggle 動作。
+                });
+                tracing::info!(
+                    "hotkey toggle/hold listeners armed (mode={:?})",
+                    *state_for_setup.toggle_mode.lock(),
+                );
 
                 // 5J: Ctrl+Alt+Esc — 全域中斷
                 // - Phase::Recording → 停錄音 + 丟掉音檔不送 STT

@@ -35,8 +35,13 @@ pub const CANCEL_SHORTCUT_ID: &str = "cancel";
 /// 5K-1: Ctrl+Alt+P 開 picker overlay 選 profile(支援 9 個 slot 之外的)。
 pub const PICKER_SHORTCUT_ID: &str = "picker";
 
-/// Tauri event emitted when the toggle shortcut fires.
-pub const PORTAL_HOTKEY_EVENT: &str = "portal-hotkey-fired";
+/// Toggle chord 按下事件。Toggle 模式下 main.rs 用它跑 toggle;Hold 模式下用它
+/// 開始錄音。Portal 走 `Activated`,X11 走 `ShortcutState::Pressed`。
+pub const PORTAL_HOTKEY_PRESSED: &str = "portal-hotkey-pressed";
+
+/// Toggle chord 放開事件。Hold 模式下用它停錄送 STT;Toggle 模式下是 no-op。
+/// Portal 走 `Deactivated`,X11 走 `ShortcutState::Released`。
+pub const PORTAL_HOTKEY_RELEASED: &str = "portal-hotkey-released";
 
 /// Tauri event emitted when the cancel shortcut fires(錄音中丟棄)。
 pub const PORTAL_CANCEL_EVENT: &str = "portal-cancel-fired";
@@ -154,41 +159,68 @@ pub async fn run(app: AppHandle, config: HotkeyConfig) -> Result<()> {
         .receive_activated()
         .await
         .context("subscribe to Activated signal")?;
+    // hold 模式才需要 Deactivated,但這裡無論 mode 都訂閱:訂閱本身 cost
+    // 接近零,且 mode 切換在 main.rs 那層處理(emit 出去後讓 listener 決定
+    // 怎麼解讀),這樣 portal 層不必跟 ToggleMode coupling。
+    let mut deactivated = proxy
+        .receive_deactivated()
+        .await
+        .context("subscribe to Deactivated signal")?;
 
-    while let Some(event) = activated.next().await {
-        let id = event.shortcut_id();
-        tracing::debug!(
-            id,
-            ts_ms = event.timestamp().as_millis() as u64,
-            "portal hotkey activated",
-        );
+    loop {
+        tokio::select! {
+            Some(event) = activated.next() => {
+                let id = event.shortcut_id();
+                tracing::debug!(
+                    id,
+                    ts_ms = event.timestamp().as_millis() as u64,
+                    "portal hotkey activated",
+                );
 
-        if id == TOGGLE_SHORTCUT_ID {
-            if let Err(e) = app.emit(PORTAL_HOTKEY_EVENT, ()) {
-                tracing::warn!(?e, "failed to emit portal-hotkey-fired event");
-            }
-        } else if id == CANCEL_SHORTCUT_ID {
-            if let Err(e) = app.emit(PORTAL_CANCEL_EVENT, ()) {
-                tracing::warn!(?e, "failed to emit portal-cancel-fired event");
-            }
-        } else if id == PICKER_SHORTCUT_ID {
-            if let Err(e) = app.emit(PORTAL_PICKER_EVENT, ()) {
-                tracing::warn!(?e, "failed to emit portal-picker-fired event");
-            }
-        } else if let Some(slot_str) = id.strip_prefix(AGENT_SLOT_ID_PREFIX) {
-            // 注意：要先 check AGENT_SLOT_ID_PREFIX，因為它以 "slot-" 結尾，
-            // 直接 strip_prefix("slot-") 會誤命中。
-            if let Ok(n) = slot_str.parse::<u8>() {
-                if let Err(e) = app.emit(AGENT_SLOT_EVENT, n) {
-                    tracing::warn!(?e, slot = n, "failed to emit agent-slot event");
+                if id == TOGGLE_SHORTCUT_ID {
+                    if let Err(e) = app.emit(PORTAL_HOTKEY_PRESSED, ()) {
+                        tracing::warn!(?e, "failed to emit portal-hotkey-pressed event");
+                    }
+                } else if id == CANCEL_SHORTCUT_ID {
+                    if let Err(e) = app.emit(PORTAL_CANCEL_EVENT, ()) {
+                        tracing::warn!(?e, "failed to emit portal-cancel-fired event");
+                    }
+                } else if id == PICKER_SHORTCUT_ID {
+                    if let Err(e) = app.emit(PORTAL_PICKER_EVENT, ()) {
+                        tracing::warn!(?e, "failed to emit portal-picker-fired event");
+                    }
+                } else if let Some(slot_str) = id.strip_prefix(AGENT_SLOT_ID_PREFIX) {
+                    // 注意：要先 check AGENT_SLOT_ID_PREFIX，因為它以 "slot-" 結尾，
+                    // 直接 strip_prefix("slot-") 會誤命中。
+                    if let Ok(n) = slot_str.parse::<u8>() {
+                        if let Err(e) = app.emit(AGENT_SLOT_EVENT, n) {
+                            tracing::warn!(?e, slot = n, "failed to emit agent-slot event");
+                        }
+                    }
+                } else if let Some(slot_str) = id.strip_prefix(SLOT_ID_PREFIX) {
+                    if let Ok(n) = slot_str.parse::<u8>() {
+                        if let Err(e) = app.emit(PROFILE_SLOT_EVENT, n) {
+                            tracing::warn!(?e, slot = n, "failed to emit profile-slot event");
+                        }
+                    }
                 }
             }
-        } else if let Some(slot_str) = id.strip_prefix(SLOT_ID_PREFIX) {
-            if let Ok(n) = slot_str.parse::<u8>() {
-                if let Err(e) = app.emit(PROFILE_SLOT_EVENT, n) {
-                    tracing::warn!(?e, slot = n, "failed to emit profile-slot event");
+            Some(event) = deactivated.next() => {
+                // 只有 toggle chord 在 hold 模式下會用 Release。其他 action
+                // (cancel / picker / slot) 是離散事件,沒 release 語意。
+                let id = event.shortcut_id();
+                tracing::debug!(
+                    id,
+                    ts_ms = event.timestamp().as_millis() as u64,
+                    "portal hotkey deactivated",
+                );
+                if id == TOGGLE_SHORTCUT_ID {
+                    if let Err(e) = app.emit(PORTAL_HOTKEY_RELEASED, ()) {
+                        tracing::warn!(?e, "failed to emit portal-hotkey-released event");
+                    }
                 }
             }
+            else => break,
         }
     }
 

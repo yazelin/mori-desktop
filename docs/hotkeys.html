@@ -191,6 +191,7 @@
 <pre><code>{
   "hotkeys": {
     "toggle": "Ctrl+Alt+Space",
+    "toggle_mode": "toggle",
     "cancel": "Ctrl+Alt+Escape",
     "picker": "Ctrl+Alt+P",
     "voice_slot_modifier": "Alt",
@@ -203,6 +204,10 @@
 <h3>欄位</h3>
 <ul>
   <li><code>toggle</code> / <code>cancel</code> / <code>picker</code> — 單一動作的完整 hotkey 字串</li>
+  <li><code>toggle_mode</code> —
+    <code>"toggle"</code>(預設,一按切換錄音)或 <code>"hold"</code>(按住錄、放開停,
+    像 push-to-talk)。兩種模式共用同一個 <code>toggle</code> chord,
+    X11 / Wayland 都支援。Config UI 按「儲存」即時生效不必重啟。</li>
   <li><code>voice_slot_modifier</code> — 套用到 voice slot 0~9 的 modifier(預設 <code>Alt</code>,
     產出 <code>Alt+0</code>、<code>Alt+1</code> ... <code>Alt+9</code>)</li>
   <li><code>agent_slot_modifier</code> — 同上但用於 agent slot(預設 <code>Ctrl+Alt</code>)</li>
@@ -210,6 +215,26 @@
     key 是編號字串(<code>"0"</code>~<code>"9"</code>),value 是完整 hotkey 字串。例:
     <code>{"0": "F1", "1": "F2"}</code> 把 <code>Alt+0</code> / <code>Alt+1</code> 改成 <code>F1</code> / <code>F2</code></li>
 </ul>
+
+<h3>Toggle vs Hold 模式</h3>
+
+<p>X11 session 實機 demo(切模式 + hold 錄音 + 熱套用,29 秒):</p>
+<video src="demos/hotkey-hold-x11.mp4" controls muted preload="metadata" style="max-width: 100%; border: 1px solid var(--c-beige); border-radius: 4px;"></video>
+
+<p>都用同一個 chord(預設 <code>Ctrl+Alt+Space</code>),差別只在按下 / 放開的解讀:</p>
+<ul>
+  <li><strong>toggle</strong>(預設)— 按一下開錄、再按一下停錄。Recording 中再按就停 +
+    送 STT;Transcribing / Responding 中按 = 忽略。</li>
+  <li><strong>hold</strong> — 按住開錄、放開立刻停錄送 STT(0ms 延遲,像 Discord
+    push-to-talk)。Press 時 phase 是 Idle / Done / Error 才開錄;Release 時
+    phase 是 Recording 才停錄,其他狀態當 no-op。</li>
+</ul>
+<p>Config tab → <strong>Hotkey</strong> sub-tab 有 dropdown 可切。</p>
+
+<p>為什麼不做「bare Alt 按住 1 秒」?<code>xdg-desktop-portal</code> 規範明確 reject
+純 modifier trigger,Wayland 拿不到 bare Alt 事件,唯一跨 path 路徑是 <code>evdev</code>
+(<code>/dev/input/event*</code> + <code>input</code> group),代價過大。Chord-based hold
+等價體感反而更順(0ms 起錄 vs 1s 等待),所以走 <code>Ctrl+Alt+Space hold</code>。</p>
 
 <h3>支援的鍵名</h3>
 <ul>
@@ -230,9 +255,13 @@
 
 <h3>改完什麼時候生效?</h3>
 <ul>
-  <li><strong>X11 session</strong> — 重啟 Mori 後生效,config 設定 100% 為準</li>
-  <li><strong>Wayland session</strong> — config 改了後要重啟 Mori <strong>且</strong> 刪掉
-    portal per-app 紀錄,Mori 才會用新值重新跟 portal 註冊:
+  <li><strong>toggle_mode</strong> — Config UI 按「儲存」即時生效,下次按鍵就走新模式
+    (`config_write` 寫完 disk 後 Mori 重讀 mode 寫進 state)。直接編 config.json
+    沒走 UI 的話走重啟路徑。</li>
+  <li><strong>X11 session 的鍵位字串</strong>(toggle / cancel / picker / slot)— 重啟
+    Mori 後生效,config 設定 100% 為準</li>
+  <li><strong>Wayland session 的鍵位字串</strong> — config 改了後要重啟 Mori <strong>且</strong>
+    刪掉 portal per-app 紀錄,Mori 才會用新值重新跟 portal 註冊:
     <pre><code>rm -rf ~/.local/share/xdg-desktop-portal/permissions</code></pre>
     否則 config 改了沒效。Wayland 上之後也可以直接去 <strong>GNOME Settings → Keyboard
     → 自訂快速鍵</strong> 調 Mori 的 binding(portal 規範:compositor 是最終決定者)。</li>

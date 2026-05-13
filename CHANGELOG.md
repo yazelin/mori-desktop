@@ -6,6 +6,103 @@
 
 ---
 
+## 5T — Toggle / Hold 兩種錄音熱鍵語意(2026-05-13)
+
+`Ctrl+Alt+Space`(預設 chord)從只認得 toggle(一按切換)拓成兩種模式擇一,
+由 `~/.mori/config.json` `hotkeys.toggle_mode` 控制:
+
+- **`"toggle"`(預設)** — 按下開錄、再按下停錄。維持 5Q 以來的行為。
+- **`"hold"`** — 按住開錄、放開停錄(像 push-to-talk)。
+
+X11 session 實機 demo(切模式 + hold 錄音 + 熱套用,29 秒):
+
+<video src="docs/demos/hotkey-hold-x11.mp4" controls width="640" muted></video>
+
+兩種模式共用同一個 chord,**X11 與 Wayland 兩條 path 都支援**,沒有新權限
+成本,**改完按「儲存」即時生效不必重啟**(`config_write` 寫完 disk 後
+重讀 `HotkeyConfig` 把新 mode 寫進 `AppState`,下一次按鍵就走新 dispatch):
+
+| Path | 怎麼拿 Press / Release |
+|---|---|
+| X11(`tauri-plugin-global-shortcut`)| `ShortcutState::Pressed` / `Released` — 之前主動過濾 Released 改成 dispatch 兩邊 |
+| Wayland(`xdg-desktop-portal.GlobalShortcuts`)| 訂 `Activated` + 新增 `Deactivated` signal,`tokio::select!` 一起消費 |
+
+### 為什麼不做「bare Alt 按住 1 秒」
+
+最初 spec 是「按住單 Alt 鍵 > 1 秒才觸發」。實作評估發現:
+
+- `xdg-desktop-portal.GlobalShortcuts` 規範**明確 reject** 純 modifier 的
+  trigger,Wayland 上沒有合法路徑拿 bare Alt 事件
+- 唯一跨 X11/Wayland 拿 raw key 的方式是 `evdev`(讀 `/dev/input/event*`),
+  需要使用者進 `input` group + relogin,且 Wayland 安全模型故意不給 — 等同
+  繞過
+- chord-based hold 等價 push-to-talk 體感(0ms 延遲 vs 1s 等待),反而更
+  順手,Discord / OBS 主流 PTT 也是 chord
+
+所以改用「Ctrl+Alt+Space hold」走現有兩條 path,零權限改動。
+
+### 改動
+
+**Rust(`crates/mori-tauri/`)**
+
+- `hotkey_config.rs`:新增 `ToggleMode { Toggle, Hold }` enum + `HotkeyConfig::toggle_mode`
+  欄位(default `Toggle`,serde `rename_all = "lowercase"`)
+- `portal_hotkey.rs`:`run()` 改 `tokio::select!` 同時消費 `receive_activated()` /
+  `receive_deactivated()`;Toggle chord Press 時 emit `PORTAL_HOTKEY_PRESSED`,
+  Release 時 emit `PORTAL_HOTKEY_RELEASED`。其他 action(cancel / picker / slot)維持 Press-only
+- `x11_hotkey.rs`:Toggle chord 走新的 `dispatch_toggle()`,Press / Release 對應
+  emit 同樣兩個事件;離散 action 一樣 Press-only
+- `main.rs`:
+  - `AppState` 加 `toggle_mode: Mutex<ToggleMode>` 欄位(cfg-gated linux)
+  - 啟動時讀 `hotkey_config.toggle_mode` 寫入 state
+  - 永遠掛 `PORTAL_HOTKEY_PRESSED` + `PORTAL_HOTKEY_RELEASED` listener,
+    handler 內讀 `state.toggle_mode` 決定 dispatch:
+    - `Toggle` 模式 → PRESSED 跑 `handle_hotkey_toggle()`,RELEASED 忽略
+    - `Hold`   模式 → PRESSED 跑 `handle_hotkey_pressed()`,RELEASED 跑 `handle_hotkey_released()`
+  - `config_write` 寫完 disk 後 reload `HotkeyConfig` 並更新 `state.toggle_mode`
+    → 切模式按「儲存」立即生效
+
+**Frontend(`src/tabs/ConfigTab.tsx`)**
+
+- Config tab 新增 **Hotkey** sub-tab(在 Appearance 後),內容:
+  - **Toggle 模式** — `toggle_mode` dropdown(`toggle` / `hold`),Section hint
+    說明兩者差別 + 「改完要重啟」
+  - **鍵位** — `toggle` / `cancel` / `picker` 文字欄,header hint 依
+    `linux_session_type` 動態變(X11 提示「config 是 source of truth」,
+    Wayland 提示「實際鍵位由系統設定決定」)
+  - Wayland session 額外 render 提示框,告訴使用者怎麼改實際鍵位
+    (GNOME Settings 或刪 `~/.local/share/xdg-desktop-portal/permissions`)
+- `SubTabId` type 加 `"hotkey"`
+
+### 不變的事
+
+- Bare Alt 不會觸發任何事(避免跟 Alt+0~9 / Alt+Tab 等衝突)
+- 非 Linux(macOS / Windows)仍只走 toggle,沒接 hotkey_config(原本就沒接)
+
+### 邊角
+
+- 改 `toggle` / `cancel` / `picker` 等 chord 字串本身仍需要重啟(X11 要重 grab、
+  Wayland 要重新跟 portal 註冊);只有 `toggle_mode` 是真的熱套用
+- 直接編 `~/.mori/config.json`(不走 Config UI)不會觸發 `config_write` 因此不會
+  熱重讀 — 重啟 Mori 即可
+
+### 升級
+
+`~/.mori/config.json` 沒設 `hotkeys.toggle_mode` 走預設 `"toggle"` = 老行為,
+零 migration。想試 hold 模式:
+
+```json
+{
+  "hotkeys": {
+    "toggle_mode": "hold"
+  }
+}
+```
+
+或直接走 Config tab → Hotkey → toggle_mode dropdown。
+
+---
+
 ## 5S — Config UI IA 重組 + floating 雜項微調(2026-05-13)
 
 Config tab 從「按 JSON 結構平鋪 sections」改成「按使用者心智模型分組的
