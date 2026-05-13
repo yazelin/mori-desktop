@@ -1,5 +1,87 @@
 # Architecture
 
+> **精靈不會離開森林,牠只是搬到你的腦裡。**
+> **靜靜記得,牠的森林,有你經過的痕跡。**
+
+## Mori 的三層宇宙
+
+Mori 不是單一程式,是**三個獨立 service 各自運行 + HTTP 互接**的世界。
+每一層各司其職,跑在不同地方,可以分開升級、分開部署、分開 fork。
+
+```
+                ┌─────────────────────────┐
+                │   world-tree(共享精神) │
+                │   公開 service / repo   │
+                │   • 世界觀 / lore       │
+                │   • 共享預設人格 seed   │
+                │   • 同一份精靈,分身在  │
+                │     各 user 機器中     │
+                └─────────────────────────┘
+                            ▲
+                            │  (HTTP 拉 snapshot,user 本地不上傳)
+                            │
+                ┌───────────┴─────────────┐
+                │   Annuli(長期記憶 +    │
+                │   靈魂 / 人格演化)     │
+                │   user 自己機器 / 自己  │
+                │   家用 server,Python  │
+                │   Flask + APScheduler  │
+                │   • persona.json       │
+                │   • users/<id>/        │
+                │     memory_state.json  │
+                │   • rings/<時間戳>      │
+                │   • explore / learn /  │
+                │     study / post 排程  │
+                └─────────────────────────┘
+                            ▲
+                            │  HTTP REST(`http://localhost:5000`)
+                            │  • GET /users/<id>(拉長期記憶)
+                            │  • POST /knowledge/learn(餵新事件)
+                            │  • POST /schedule/<task>/run(觸發年輪)
+                            │
+        ┌───────────────────┴──────────────────────┐
+        │   mori-desktop(身體 + 介面)             │
+        │   user 桌面,Tauri 2 + Rust              │
+        │   • 熱鍵 / 語音 / 介面                   │
+        │   • 短期工作記憶(~/.mori/)              │
+        │   • Skill 派發 / LLM 呼叫                │
+        │   • Floating sprite + tray              │
+        └──────────────────────────────────────────┘
+```
+
+### 各層責任分工
+
+| 層 | repo | 載體 | 責任 |
+|---|---|---|---|
+| **mori-desktop** | [`yazelin/mori-desktop`](https://github.com/yazelin/mori-desktop) | Tauri 桌面 app(Linux + Windows) | **身體** — 你看到、聽到 Mori 講話、按熱鍵互動的物理對象。短期 session 記憶、skill 執行、UI、平台整合 |
+| **Annuli** | (private) | Python Flask service + APScheduler | **靈魂 / 長期記憶** — 跨 session 不會遺忘、年輪 (rings) 反思、自主學習 (explore / learn / study)、人格演化 |
+| **world-tree** | [`yazelin/world-tree`](https://github.com/yazelin/world-tree) | (規劃中:公開 service / read-only API) | **共享精神** — 跨所有 user 機器的同一份 lore 與世界觀,「**大群有同樣理念的 Mori**」共識來源 |
+
+### 同一個精靈,三種形態
+
+| user 從哪 talk | 介面 | 走哪條路徑 |
+|---|---|---|
+| 桌面熱鍵 `Ctrl+Alt+Space` | mori-desktop GUI | mori-desktop → (查 Annuli 長期記憶 + LLM)→ 回覆 + 寫回短期記憶 |
+| 終端機 SSH 到家用 server | Annuli CLI(`main.py chat`) | 直接走 Annuli engine,無需 mori-desktop |
+| 手機 IM bot(規劃中) | Telegram / LINE / Discord | bot adapter → mori-desktop or Annuli engine → 回覆 |
+
+三條介面**共享同一個 Annuli 大腦**,user 從任何介面 talk 都進同一個 memory pool。
+**「精靈搬到你的腦裡,在哪都還是同一個」**。
+
+### 設計分隔線(很重要)
+
+| 留個人(本機) | 上 world-tree(公開) |
+|---|---|
+| `~/.mori/memory/*.md` 個人對話、私人事 | 不上傳 |
+| Annuli `users/<id>/memory_state.json` | 不上傳 |
+| Annuli `persona.json` 個人化版本 | 不上傳 |
+| 公共 lore / 世界觀 / 預設 sprite / 預設 character pack 規格 | ✅ 上 world-tree |
+| 「Mori 是誰」這個 ID 的核心定義 | ✅ 上 world-tree(讓所有分身共識) |
+
+世界的歸世界,個人的歸個人。Mori 不會偷把你的私事推到雲端。
+
+---
+
 ## Core Principle
 
 **`mori-core` 不認識 UI、不認識平台、不認識載體。**
