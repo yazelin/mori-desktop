@@ -54,9 +54,13 @@ function commandPreview(install: InstallSpec): string {
 function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
   const [installing, setInstalling] = useState(false);
   const [result, setResult] = useState<InstallResult | null>(null);
-  const [showCommand, setShowCommand] = useState(false);
   const cmdPreview = commandPreview(dep.install);
   const manual = dep.install.kind === "Manual";
+  // Manual 條目初始就展開(user 本來就要看指令)— 之前 showCommand 預設 false +
+  // 顯示條件 `(showCommand || manual)` 讓 Manual block 永遠 visible,「收起」
+  // 按鈕變裝飾。改成 Manual 預設 true + 顯示條件單看 showCommand,「收起」
+  // 真的能收起。
+  const [showCommand, setShowCommand] = useState(manual);
 
   const install = async () => {
     if (manual) return; // UI 不會 disable,但 click 也不送
@@ -125,7 +129,7 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
           ⚠️ <span className="label">當前平台注意:</span> {dep.install_caveat}
         </div>
       )}
-      {!dep.status.installed && (showCommand || manual) && (
+      {!dep.status.installed && showCommand && (
         <div className="mori-dep-cmd">
           <div className="mori-dep-cmd-head">
             <span className="label">{manual ? "請複製指令在 terminal 跑(需 sudo)" : "將執行的指令"}</span>
