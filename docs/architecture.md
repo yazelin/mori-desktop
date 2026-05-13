@@ -35,7 +35,7 @@ mori-desktop/
 │   │       ├── skill/               Skill trait + 13 個 built-in skills
 │   │       ├── llm/                 LlmProvider trait + Groq/Gemini/Ollama/Claude/Bash-CLI 等
 │   │       ├── mode.rs              Mode(Active/Background) + 控制邏輯
-│   │       ├── paste.rs             PasteController trait + Linux 實作
+│   │       ├── paste.rs             PasteController trait(平台無關;Linux/Windows 實作在 mori-tauri)
 │   │       ├── runtime.rs           runtime.json schema + 寫入(給 mori-cli 看)
 │   │       └── url_detect.rs        從 STT 文字偵測 URL → 自動 fetch_url
 │   ├── mori-tauri/                  桌面殼
@@ -103,7 +103,7 @@ LLM 通訊抽象。一份 agent 程式碼能打 Groq、Ollama、OpenAI、Anthrop
 | `ollama` | 本機 LLM,fallback / 隱私任務 |
 | `claude-bash` / `gemini-bash` / `codex-bash` | Bash CLI proxy(用 user 自己 Pro/Max quota) |
 | `claude-cli` / `gemini-cli` / `codex-cli` | 同上但限 chat-only(無 agent loop) |
-| `whisper-local` | 本機 Whisper STT(`whisper.cpp` ggml) |
+| `whisper-local` | 本機 Whisper STT — **v0.2 shell-out 到 whisper.cpp 官方 `whisper-server` HTTP 子程序**(不再 in-process FFI)。引擎跟模型都使用者自選 / 可換 GPU 加速版本,詳見 [providers](providers.html#組合-b-100-本機離線不依賴雲)。 |
 | 自訂 OpenAI-compat | `providers.<name>` 內 `api_base` + `api_key_env`,Azure / OpenRouter / 自家代理 |
 
 每個 Skill 可指定「想用哪個 provider + 哪個 model」,允許:

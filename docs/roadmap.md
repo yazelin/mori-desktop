@@ -2,29 +2,44 @@
 
 歷史 phase 紀錄 → [CHANGELOG](../CHANGELOG.md)。本頁只留**未來規劃**。
 
-平台支援現況見 [README → 平台支援](../README.md#平台支援);本頁假設讀者已知道
-「主力是 Ubuntu 26.04 + GNOME Wayland,X11 全功能、Wayland 全功能、Win/Mac 殼還沒接」。
+平台支援現況見 [README → 平台支援](../README.md#平台支援)。**v0.2 之後 Linux X11 +
+Linux Wayland + Windows 10/11 都是全功能**;macOS 殼還沒接。
 
 ---
 
-## 近期 — Win / Mac 平台殼
+## 近期 — macOS 平台殼
 
-主視窗 UI / config / profile 編輯 / 主視窗內打字對話 — Win/Mac **已可用**
-(Tauri + cpal + STT + LLM 都跨平台)。**缺的是 voice input 熱鍵 pipeline 內
-三塊 platform-specific 程式**,只有 Linux 有實作:
+Windows v0.2 已上線(`selection_windows.rs` + Win32 SendInput / GetForegroundWindow
++ Win RegisterHotKey),設計上 mori-core 跟其他平台完全共用,加 macOS 同樣 pattern
+寫一份就能用。三塊要補:
 
-| 子項 | Linux 現況 | Win/Mac 要寫的 |
-|---|---|---|
-| **selection capture**(滑鼠反白 → context) | `xclip -selection primary` | Win `GetClipboardData` / Mac `NSPasteboard`(+ 反白偵測機制) |
-| **window context**(focus app / title 進 LLM context) | `xdotool getactivewindow` | Win `GetForegroundWindow` / Mac `NSWorkspace` + accessibility |
-| **paste-back**(模擬 Ctrl+V 貼回游標) | `arboard` + `ydotool` 在 `LinuxPasteController` | Win `SendInput` / Mac `NSEvent` + accessibility permission UX |
+| 子項 | Linux 現況 | Windows 現況 | Mac 要寫的 |
+|---|---|---|---|
+| **selection capture**(滑鼠反白 → context) | `xclip -selection primary` | 回 None(OS 沒這概念) | `NSPasteboard` + accessibility(可選) |
+| **window context**(focus app / title 進 LLM context) | `xdotool getactivewindow` + `/proc/<pid>/comm` | `GetForegroundWindow` + `QueryFullProcessImageNameW` | `NSWorkspace.frontmostApplication` + accessibility(視窗標題要 accessibility 權限) |
+| **paste-back**(模擬 Ctrl+V 貼回游標) | xclip + xdotool/ydotool | `SetClipboardData` + `SendInput` Ctrl+V | `NSPasteboard.writeObjects` + `CGEventCreateKeyboardEvent` Cmd+V + accessibility permission UX |
 
-不是「做完 paste-back 就支援」— 三塊都得寫。
+**架構**:寫一份 `selection_macos.rs`,在 `mori-tauri/src/main.rs` 加一行
+`#[cfg_attr(target_os = "macos", path = "selection_macos.rs")]`,定義
+`PlatformPasteController` type alias 指 Mac 版,call sites 0 改。`Cargo.toml`
+target-specific deps 區塊加 `objc2` / `core-graphics` 之類。
 
-**為什麼是 contributor 路徑**:yazelin 主力 Ubuntu,沒有 Mac/Win 日常驗證環境。
-寫了測不到 = 不知對錯。架構面 `mori-core` 純邏輯已完全跨平台,平台殼分離設計
-讓「寫一個 `selection_macos.rs` / `selection_windows.rs` mod」就能接。歡迎 fork
-+ PR,主流程 reviewer 在(`crates/mori-tauri/src/selection.rs` 是良好參考)。
+**為什麼是 contributor 路徑**:yazelin 主力 Ubuntu + Windows,沒有 Mac 日常
+驗證環境。寫了測不到 = 不知對錯。歡迎 fork + PR — 參考 `selection_windows.rs`
+寫成同樣公開 API(`read_primary_selection` / `PlatformPasteController` /
+`send_enter` / `warn_if_setup_missing`)就直接接得上。
+
+---
+
+## 近期 — Windows whisper-server 一鍵下載
+
+`crates/mori-tauri/src/deps.rs` 的 `InstallSpec::Shell` 只在 Linux work(用
+`sh -c`),Windows user 目前要手動從 whisper.cpp release 下載
+`whisper-server.exe`。要補一個 `InstallSpec::Download { url_template, dest_template,
+extract_member }` variant,走 Rust reqwest + zip extract,跨平台一致。
+
+Linux 端的 whisper-server 一鍵下載已經 work(v0.2),做法可參考 `deps.rs`
+registry 的 whisper-server entry。
 
 ---
 

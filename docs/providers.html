@@ -90,8 +90,9 @@
       "model":    "qwen3:8b"
     },
     "whisper-local": {
-      "model_path": "/home/&lt;user&gt;/.mori/models/ggml-small.bin",
-      "language": "zh"
+      "model_path":    "/home/&lt;user&gt;/.mori/models/ggml-small.bin",
+      "server_binary": "/home/&lt;user&gt;/.mori/bin/whisper-server",
+      "language":      "zh"
     }
   }
 }</code></pre>
@@ -99,14 +100,86 @@
 <p>需要先:</p>
 <ul>
   <li><code>ollama serve</code> + <code>ollama pull qwen3:8b</code>(本機 LLM,<strong>支援 tool calling</strong>)</li>
-  <li>下載 whisper 模型(或從 Deps tab 一鍵下載):
-    <pre><code>mkdir -p ~/.mori/models
+  <li><strong>下載 whisper 模型 + 引擎</strong>(Linux 從 Deps tab 一鍵下載;Windows 暫時手動):
+    <pre><code># 模型(.bin)
+mkdir -p ~/.mori/models
 wget -O ~/.mori/models/ggml-small.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin</code></pre>
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+
+# 引擎(whisper-server[.exe])— 從 whisper.cpp 官方 release 抓
+# https://github.com/ggml-org/whisper.cpp/releases/latest
+# 解壓後把 whisper-server[.exe] 放到 ~/.mori/bin/</code></pre>
   </li>
 </ul>
 
-<p>中文模型大小取捨(Intel CPU 實測):base 142MB(快但常分不清同音字)/ small 466MB(夠用)/ medium 1.5GB(更準但慢)。</p>
+<p><strong>中文模型大小取捨</strong>(Intel CPU 實測):base 142MB(快但常分不清同音字)/ small 466MB(夠用)/ medium 1.5GB(更準但慢)。</p>
+
+<h3>架構:Mori 不編 whisper.cpp,改 shell-out 子程序</h3>
+
+<p>v0.2 之後,Mori 不再 in-process 編 whisper.cpp C++ source 進 binary,改成
+<strong>spawn 官方 <code>whisper-server</code> 子程序,HTTP POST WAV 給它</strong>。
+Mori 第一次按 <code>Ctrl+Alt+Space</code> 時 lazy spawn,之後常駐;Mori 結束時
+SIGKILL 收尾。</p>
+
+<p>好處:</p>
+<ul>
+  <li><strong>引擎跟模型都可自選 + 隨時換</strong>(下一節)</li>
+  <li><strong>不需要 cmake / libclang</strong> 才能 build Mori — Linux contributor setup 從 5 min 變 1 min</li>
+  <li><strong>跨平台統一</strong> — Windows / Linux / macOS 用同一條 path</li>
+  <li><strong>引擎 crash 不會帶死 Mori</strong> — Mori 抓 exit code 報錯,下次自動重啟 server</li>
+</ul>
+
+<h3>替換引擎(GPU 加速 / 自編變體)</h3>
+
+<p>whisper.cpp <a href="https://github.com/ggml-org/whisper.cpp/releases">releases</a>
+提供多種預編 binary:</p>
+
+<table>
+  <tr><th>變體</th><th>適合誰</th><th>速度提升</th></tr>
+  <tr><td><code>whisper-bin-x64.zip</code></td><td>所有人預設(純 CPU)</td><td>基準</td></tr>
+  <tr><td><code>whisper-blas-bin-x64.zip</code></td><td>多核心 CPU 想榨更多</td><td>~30%</td></tr>
+  <tr><td><code>whisper-cublas-cuda12-bin-x64.zip</code></td><td>NVIDIA RTX / Tesla</td><td>3-5x</td></tr>
+  <tr><td><code>whisper-clblast-bin-x64.zip</code></td><td>AMD / Intel GPU(OpenCL)</td><td>2-3x</td></tr>
+  <tr><td>macOS binary</td><td>Apple Silicon</td><td>自帶 Metal,2-4x</td></tr>
+</table>
+
+<p><strong>替換流程</strong>:</p>
+<ol>
+  <li>從 whisper.cpp release 頁下載你要的變體 zip</li>
+  <li>解壓後找出 <code>whisper-server</code>(Linux)或 <code>whisper-server.exe</code>(Win)</li>
+  <li>整套(binary + 相依 <code>.dll</code> / <code>.so</code>)複製到 <code>~/.mori/bin/</code>(Win 是 <code>%USERPROFILE%\.mori\bin\</code>)</li>
+  <li>(Unix)<code>chmod +x whisper-server</code></li>
+  <li>重啟 Mori — 下次 <code>Ctrl+Alt+Space</code> 起來的就是 GPU 版,<strong>Mori 程式碼一行都不用改</strong></li>
+</ol>
+
+<p>想<strong>同時保留多版本</strong>(CPU + GPU 切換)?把 GPU 版放別處,在
+<code>config.json</code> 寫絕對路徑:</p>
+<pre><code>"providers": {
+  "whisper-local": {
+    "server_binary": "/opt/whisper-cuda/whisper-server",
+    "model_path":    "~/.mori/models/ggml-large-v3-turbo.bin",
+    "language":      "zh"
+  }
+}</code></pre>
+
+<h3>替換模型</h3>
+
+<p>同檔 <code>.bin</code> 在 Linux / Windows / macOS 通用 — 不依平台。Hugging Face
+<a href="https://huggingface.co/ggerganov/whisper.cpp/tree/main">ggerganov/whisper.cpp</a>
+有所有 ggml 格式 whisper 模型:</p>
+
+<table>
+  <tr><th>檔名</th><th>大小</th><th>適合</th></tr>
+  <tr><td><code>ggml-tiny.bin</code></td><td>78 MB</td><td>最快,只夠英文清晰錄音</td></tr>
+  <tr><td><code>ggml-base.bin</code></td><td>142 MB</td><td>低階機 / 英文場景</td></tr>
+  <tr><td><code>ggml-small.bin</code></td><td>466 MB</td><td><strong>Mori 預設,中文夠用</strong></td></tr>
+  <tr><td><code>ggml-medium.bin</code></td><td>1.5 GB</td><td>專有名詞 / 多語混雜</td></tr>
+  <tr><td><code>ggml-large-v3.bin</code></td><td>3.1 GB</td><td>最準,需要 GPU 才不慢</td></tr>
+  <tr><td><code>ggml-large-v3-turbo.bin</code></td><td>1.6 GB</td><td>large-v3 蒸餾版,2x 快</td></tr>
+</table>
+
+<p>下載任意 <code>.bin</code> 丟 <code>~/.mori/models/</code>,在 config 把
+<code>providers.whisper-local.model_path</code> 指到那個檔即可。</p>
 
 <h2>組合 C — Bash CLI proxy(claude / gemini / codex 當 agent)</h2>
 <p>用 user 自己的 Pro/Max quota,透過 Bash tool 呼叫本機 <code>mori</code> CLI dispatch skill。</p>
@@ -121,8 +194,9 @@ wget -O ~/.mori/models/ggml-small.bin \
       "mori_cli_path": null
     },
     "whisper-local": {
-      "model_path": "/home/&lt;user&gt;/.mori/models/ggml-small.bin",
-      "language": "zh"
+      "model_path":    "/home/&lt;user&gt;/.mori/models/ggml-small.bin",
+      "server_binary": "/home/&lt;user&gt;/.mori/bin/whisper-server",
+      "language":      "zh"
     }
   }
 }</code></pre>
@@ -130,7 +204,7 @@ wget -O ~/.mori/models/ggml-small.bin \
 <p>需要:</p>
 <ul>
   <li><code>claude</code> CLI 已用 <code>claude /login</code> 完成 OAuth</li>
-  <li>下載 whisper 模型(同組合 B)</li>
+  <li>下載 whisper 模型 + 引擎(同組合 B)</li>
   <li><code>cargo build -p mori-cli</code> 確保 <code>target/debug/mori</code> 存在</li>
 </ul>
 

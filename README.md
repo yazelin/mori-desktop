@@ -108,11 +108,36 @@ npm run tauri dev
 | **Ubuntu 26.04 + GNOME Wayland** | 主力開發 + 測試 |
 | **Linux X11**(任何發行版) | 全功能 |
 | **Linux Wayland**(GNOME / KDE / ...) | 需要 `xdg-desktop-portal` ≥ 1.19 — 24.04 LTS 自帶 1.18 不夠新,熱鍵會掛(改 portal 即可) |
-| **Windows / macOS** | 主視窗 UI 可跑,voice pipeline 三塊 platform-specific code 還沒接 |
+| **Windows 10 / 11** | 全功能(v0.2 上線)— voice pipeline 三塊(selection 讀取、視窗 context、Ctrl+V paste-back)走 Win32 API,熱鍵走 `RegisterHotKey`。**唯一差異**:Windows OS 沒有 X11 PRIMARY selection 概念,所以「滑鼠反白即讀」要先 Ctrl+C(Linux 可以拖反白直接讀) |
+| **macOS** | 主視窗 UI 可跑,voice pipeline 三塊還沒接 — 寫一個 `selection_macos.rs` + capture_window_context Mac 變體就能上,設計上 mori-core 跟其他平台完全共用 |
 
-`mori-core` 是純 Rust lib 跟平台無關,寫個新殼 crate 就能接新平台 —
-歡迎 fork + PR 幫忙補,細節見 [Troubleshooting](https://yazelin.github.io/mori-desktop/troubleshooting.html)
-跟 [Roadmap → Win / Mac voice pipeline](docs/roadmap.md)。
+`mori-core` 是純 Rust lib 跟平台無關;`mori-tauri` 的平台分流走
+`cfg_attr(target_os = ..., path = ...)`,加新平台等於加一份對應的
+`selection_<platform>.rs` + Cargo.toml 的 target-specific deps。
+細節見 [Troubleshooting](https://yazelin.github.io/mori-desktop/troubleshooting.html)
+跟 [Roadmap](docs/roadmap.md)。
+
+### 本機 STT 模型(`whisper-local`)— 跨平台 + 可自行替換引擎
+
+v0.2 把本機 Whisper 從 in-process FFI 改成 **shell-out 到 whisper.cpp 官方
+`whisper-server` HTTP 子程序**。意思是:
+
+1. **Mori 本身不編 whisper.cpp** — 安裝 Mori 不再需要 cmake / libclang /
+   build toolchain;binary 體積也小
+2. **引擎跟模型都使用者自選**:
+   - **模型**(`.bin`):從
+     [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
+     下載,丟到 `~/.mori/models/`(中文場景建議 `ggml-small.bin`,466MB)
+   - **引擎**(`whisper-server[.exe]`):從
+     [github.com/ggml-org/whisper.cpp/releases](https://github.com/ggml-org/whisper.cpp/releases)
+     抓對應平台 + 加速版本的 pre-built binary,放 `~/.mori/bin/`
+3. **GPU 加速一鍵切換** — 想跑 NVIDIA RTX?下載 `whisper-cublas-cuda12-bin-x64.zip`,
+   把 `whisper-server.exe` 替換到 `~/.mori/bin/` 就 4 倍速;AMD GPU 走
+   `whisper-clblast-bin-x64.zip`;macOS 自帶 Metal 加速。**Mori 程式碼一行
+   都不用改,不用重編。**
+
+Linux user 在 Mori UI 的「Deps」頁可以**一鍵下載 + 安裝**這兩塊(模型 +
+引擎 CPU 版);Windows 目前要手動下載(下個版本補一鍵安裝)。
 
 ---
 
@@ -152,10 +177,11 @@ npm run tauri dev
 
 Fork 隨便改、PR 隨便發。最缺的 issue:
 
-- Windows / macOS 平台殼(selection capture / window context / paste-back)
-- wake-word 偵測
-- TTS(Mori 講話)
-- 其他 LLM provider integration
+- **macOS 平台殼**(`selection_macos.rs` / `capture_window_context()` Mac 變體) — Windows 已上線,Mac 同樣 pattern 寫一份就能用
+- **Windows whisper-server 一鍵下載** — 目前 Deps 頁只在 Linux 自動下載引擎,Windows 要手動。需要把 `InstallSpec::Shell` 補一個 `InstallSpec::Download` variant 走 Rust reqwest + zip extract
+- **wake-word 偵測**(`openwakeword` / `Porcupine`)
+- **TTS**(Mori 講話)— OpenAI TTS / ElevenLabs / 本機 Piper
+- **其他 LLM provider integration**(Claude API native / DeepSeek / Qwen 等)
 
 更詳細的進入點 → [roadmap](docs/roadmap.md)。
 
