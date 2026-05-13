@@ -4,7 +4,9 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "predev": "cargo build -p mori-cli",
     "dev": "vite",
+    "prebuild": "cargo build -p mori-cli --release",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

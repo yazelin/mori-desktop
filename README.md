@@ -31,10 +31,12 @@ sudo bash scripts/install-linux-deps.sh
 # Windows / macOS:跳這步,Tauri prereqs 見官方文件
 
 npm install
-npm run build              # 建 dist/ — tauri::generate_context!() 編譯時會檢查這路徑
-cargo build --workspace    # workspace 才會 build mori-cli(Bash CLI proxy 需要)
-npm run tauri dev
+npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tauri
 ```
+
+> Build chain:`tauri dev` → `npm run dev` → 觸發 `predev` script → `cargo build -p mori-cli`
+> → 接著 vite dev server 起來。`npm run tauri dev` 自己又會 `cargo run --bin mori-tauri`。
+> 全部 zero config,user 啥都不用手動跑。
 
 第一次跑會做三件事:
 
