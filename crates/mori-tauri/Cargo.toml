@@ -69,6 +69,20 @@ x11rb = { version = "0.13", features = ["shape"] }
 # raw_window_handle 直接抓那個 webview 對應的 XID 才精準。
 raw-window-handle = "0.6"
 
+# Windows-only deps:
+# - windows: 官方 Microsoft Win32 binding。
+#   - Win32_UI_Input_KeyboardAndMouse: SendInput / VIRTUAL_KEY 注入 Ctrl+V / Enter
+#   - Win32_UI_WindowsAndMessaging: GetForegroundWindow / GetWindowTextW
+#   - Win32_System_Threading: OpenProcess / QueryFullProcessImageNameW (process name)
+#   - Win32_Foundation: HWND / HANDLE / CloseHandle 等基礎型別
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

@@ -49,6 +49,7 @@ pub fn build_transcription_provider(
     let default = read_stt_provider_config();
 
     match default.as_str() {
+        #[cfg(target_os = "linux")]
         "whisper-local" => {
             let p = super::whisper_local::LocalWhisperProvider::from_config()?;
             tracing::info!(
@@ -58,6 +59,13 @@ pub fn build_transcription_provider(
                 "transcription provider selected",
             );
             Ok(Arc::new(p))
+        }
+        #[cfg(not(target_os = "linux"))]
+        "whisper-local" => {
+            anyhow::bail!(
+                "whisper-local STT not supported on this platform yet (whisper-rs-sys \
+                 Windows bindgen issue). Switch stt_provider to 'groq' in ~/.mori/config.json."
+            );
         }
         other => {
             if other != "groq" {
@@ -108,6 +116,7 @@ pub fn build_named_transcription_provider(
     retry_cb: Option<groq::RetryCallback>,
 ) -> Result<Arc<dyn TranscriptionProvider>> {
     match name {
+        #[cfg(target_os = "linux")]
         "whisper-local" => {
             let p = super::whisper_local::LocalWhisperProvider::from_config()?;
             tracing::info!(
@@ -116,6 +125,13 @@ pub fn build_named_transcription_provider(
                 "transcription provider selected (profile override)",
             );
             Ok(Arc::new(p))
+        }
+        #[cfg(not(target_os = "linux"))]
+        "whisper-local" => {
+            anyhow::bail!(
+                "whisper-local STT not supported on this platform yet (whisper-rs-sys \
+                 Windows bindgen issue). Use 'groq' instead."
+            );
         }
         "groq" => {
             let key = groq::GroqProvider::discover_api_key().ok_or_else(|| {
@@ -169,11 +185,7 @@ pub fn active_transcribe_snapshot() -> TranscribeSnapshot {
             let model_path = mori_config_path()
                 .as_deref()
                 .and_then(|p| groq::read_json_pointer(p, "/providers/whisper-local/model_path"))
-                .unwrap_or_else(|| {
-                    super::whisper_local::default_model_path()
-                        .display()
-                        .to_string()
-                });
+                .unwrap_or_else(default_whisper_model_path_display);
             let language = mori_config_path()
                 .as_deref()
                 .and_then(|p| groq::read_json_pointer(p, "/providers/whisper-local/language"));
@@ -209,4 +221,29 @@ fn mori_config_path() -> Option<std::path::PathBuf> {
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()
         .map(|h| std::path::PathBuf::from(h).join(".mori").join("config.json"))
+}
+
+/// Default `.bin` path for the snapshot UI / config stub. Linux uses the real
+/// whisper_local default; non-Linux uses the same `~/.mori/models/ggml-small.bin`
+/// shape for UI consistency (whisper-local is gated off at the provider build site
+/// — this path is purely informational on non-Linux).
+fn default_whisper_model_path_display() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        super::whisper_local::default_model_path()
+            .display()
+            .to_string()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        std::path::PathBuf::from(home)
+            .join(".mori")
+            .join("models")
+            .join("ggml-small.bin")
+            .display()
+            .to_string()
+    }
 }

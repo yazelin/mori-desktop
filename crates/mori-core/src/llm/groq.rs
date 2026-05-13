@@ -310,6 +310,12 @@ impl GroqProvider {
                     "agent": null,
                     "skills": {}
                 },
+                // OS env var 找不到 *_API_KEY 時的 fallback map。UI Config tab → API Keys
+                // section 編輯;留空白即不覆蓋(env var 還是優先)。預設把常見 key 名先
+                // 列出來,user 不用按「+ 新增」也能直接填值。
+                "api_keys": {
+                    "GEMINI_API_KEY": ""
+                },
                 "providers": {
                     "groq": {
                         "api_key": "REPLACE_ME_WITH_YOUR_GROQ_API_KEY",
@@ -319,6 +325,15 @@ impl GroqProvider {
                     "ollama": {
                         "base_url": super::ollama::OllamaProvider::DEFAULT_BASE_URL,
                         "model":    super::ollama::OllamaProvider::DEFAULT_MODEL
+                    },
+                    "gemini": {
+                        // api_base 是 Google 的 OpenAI-compat 端點 — Mori 走 GenericOpenAiProvider
+                        // 重用 chat API 共同邏輯,不直接打 Gemini native REST API。
+                        "api_base": super::GEMINI_DEFAULT_API_BASE,
+                        "model": super::GEMINI_DEFAULT_MODEL
+                        // api_key 不在 providers.gemini 裡 — 從上面 api_keys.GEMINI_API_KEY
+                        // (UI Config tab → API Keys section)或 $GEMINI_API_KEY env 取。
+                        // 設計上跟 OpenAI / Anthropic 一樣統一走 api_keys map。
                     },
                     "claude-cli": {
                         // PATH 上的 binary 名稱;絕對路徑也 OK
@@ -342,9 +357,9 @@ impl GroqProvider {
                         //   wget -O ~/.mori/models/ggml-small.bin \
                         //     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
                         // 中文場景建議 small(466MB);CPU 慢可以用 base(142MB)。
-                        "model_path": super::whisper_local::default_model_path()
-                            .to_string_lossy()
-                            .into_owned(),
+                        // Windows: whisper-local 還沒接(whisper-rs-sys 0.13 Windows
+                        // bindgen issue),Windows user 用 "groq" cloud STT 即可。
+                        "model_path": default_whisper_model_path_config_string(),
                         // null / "auto" = whisper 自偵測;也可寫 "zh" / "en" 等。
                         "language": "zh"
                     }
@@ -408,6 +423,30 @@ impl GroqProvider {
             tracing::info!(path = %config.display(), "bootstrapped ~/.mori/config.json");
         }
         Ok(config)
+    }
+}
+
+/// 給 config stub 的 whisper-local 預設 model_path。Linux 直接走
+/// whisper_local::default_model_path();非 Linux 用同樣的 ~/.mori/models/
+/// 路徑字串(只是 stub,Windows 上 whisper-local provider 本身會 bail)。
+fn default_whisper_model_path_config_string() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        super::whisper_local::default_model_path()
+            .to_string_lossy()
+            .into_owned()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        std::path::PathBuf::from(home)
+            .join(".mori")
+            .join("models")
+            .join("ggml-small.bin")
+            .to_string_lossy()
+            .into_owned()
     }
 }
 

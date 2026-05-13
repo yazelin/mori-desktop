@@ -232,6 +232,22 @@ impl PasteController for LinuxPasteController {
     }
 }
 
+/// 平台抽象別名 — main.rs 透過這個用,不直接綁 Linux/Windows。
+pub type PlatformPasteController = LinuxPasteController;
+
+/// auto-enter:ydotool keycode 28 (KEY_ENTER) press+release。
+/// 失敗只 warn 不 bail — 失敗 user 自己按 Enter 即可。
+pub fn send_enter() {
+    let result = Command::new("ydotool")
+        .args(["key", "28:1", "28:0"])
+        .status();
+    match result {
+        Ok(s) if s.success() => tracing::debug!("auto-enter sent via ydotool"),
+        Ok(s) => tracing::warn!(status = ?s, "ydotool auto-enter exited non-zero"),
+        Err(e) => tracing::warn!(?e, "ydotool auto-enter spawn failed"),
+    }
+}
+
 /// 啟動時的健康檢查 — 看必要工具在不在 PATH,缺什麼早警告。**不要**
 /// fail app — 反白即改寫只是 phase 4C 的功能,沒它 Mori 還是能跑(語音、
 /// 剪貼簿、記憶都不受影響)。只是讓 user 早點知道為何 paste-back 待會

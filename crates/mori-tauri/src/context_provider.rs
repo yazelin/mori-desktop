@@ -36,14 +36,11 @@ impl ContextProvider for TauriContextProvider {
             }
         }
 
-        // Phase 4C:讀 primary selection(滑鼠反白)。Linux only;其他
-        // 平台這條路徑回 None,fall through 不影響功能。
-        #[cfg(target_os = "linux")]
-        {
-            if let Some(sel) = crate::selection::read_primary_selection() {
-                tracing::info!(chars = sel.chars().count(), "captured primary selection");
-                ctx.selected_text = Some(sel);
-            }
+        // Phase 4C:讀 primary selection(滑鼠反白)。Linux X11 真的能讀;
+        // Windows 沒這概念,selection_windows.rs 一律回 None,fall through。
+        if let Some(sel) = crate::selection::read_primary_selection() {
+            tracing::info!(chars = sel.chars().count(), "captured primary selection");
+            ctx.selected_text = Some(sel);
         }
 
         ctx

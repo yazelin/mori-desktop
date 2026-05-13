@@ -138,17 +138,15 @@ fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
     registry.register(Arc::new(ForgetMemorySkill::new(memory.clone())));
     registry.register(Arc::new(EditMemorySkill::new(memory.clone())));
 
-    // 5G-6: action skills (Linux only)
-    #[cfg(target_os = "linux")]
-    {
-        registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
-        registry.register(Arc::new(crate::action_skills::OpenAppSkill));
-        registry.register(Arc::new(crate::action_skills::SendKeysSkill));
-        registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
-        registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
-        registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
-        registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
-    }
+    // 5G-6: action skills(Linux: xdg-open / gtk-launch / ydotool;
+    // Windows: cmd /c start + SendInput)
+    registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
+    registry.register(Arc::new(crate::action_skills::OpenAppSkill));
+    registry.register(Arc::new(crate::action_skills::SendKeysSkill));
+    registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
+    registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
+    registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
+    registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
 
     // 5H: 當前 agent profile 的 shell skills
     let profile = mori_core::agent_profile::load_active_agent_profile();

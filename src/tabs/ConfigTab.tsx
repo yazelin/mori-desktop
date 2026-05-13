@@ -174,16 +174,29 @@ function KvTable({
   valuePlaceholder?: string;
   valueIsSecret?: boolean;
 }) {
+  // 之前用 props.rows 直接驅動 render — 但 parent 的 setRows callback 會把
+  // 空 key 的 row 過濾掉(不能寫進 JSON object),導致按「+ 新增」加的空白
+  // row 在下一個 render 就被父層 filter 掉、看起來像按鈕沒反應。
+  //
+  // 改用 internal state:KvTable 保有「正在編輯的」rows(含空白草稿),
+  // 父層只收到非空 key 的 rows 寫進 cfg。第一次掛載從 props 初始化;之後
+  // 不再 sync from prop(父層 cfg 改也不會把使用者打到一半的草稿沖掉)。
+  const [localRows, setLocalRows] = useState<Array<{ k: string; v: string }>>(rows);
   const update = (i: number, field: "k" | "v", value: string) => {
-    const next = [...rows];
+    const next = [...localRows];
     next[i] = { ...next[i], [field]: value };
-    setRows(next);
+    apply(next);
   };
-  const remove = (i: number) => setRows(rows.filter((_, j) => j !== i));
-  const add = () => setRows([...rows, { k: "", v: "" }]);
+  const remove = (i: number) => apply(localRows.filter((_, j) => j !== i));
+  const add = () => apply([...localRows, { k: "", v: "" }]);
+  // 寫回父層只給有 key 的 row;空白 key 是「正在 typing」的草稿,留在本地。
+  const apply = (next: Array<{ k: string; v: string }>) => {
+    setLocalRows(next);
+    setRows(next.filter((r) => r.k.trim()));
+  };
   return (
     <div className="mori-kv-table">
-      {rows.map((r, i) => (
+      {localRows.map((r, i) => (
         <div key={i} className="mori-kv-row">
           <input
             className="mori-kv-key"
@@ -619,7 +632,7 @@ function ConfigTab() {
 
           <Section
             title="API Keys"
-            hint="OS env var 找不到時的 fallback。Key 名建議 *_API_KEY,值會以密碼欄位呈現。"
+            hint="這裡填或 OS 環境變數設都可以 — Mori 先看 OS env var,沒有再讀這份 map(env 優先)。Key 名照 *_API_KEY 慣例(GEMINI_API_KEY / OPENAI_API_KEY 等),值是密碼欄位。"
           >
             <KvTable
               rows={apiKeysRows}
@@ -641,7 +654,7 @@ function ConfigTab() {
               name="groq"
               cfg={cfg.providers?.groq}
               fields={[
-                { key: "api_key", label: "api_key", secret: true, hint: "gsk_..." },
+                { key: "api_key", label: "api_key", secret: true, hint: "gsk_... — 這裡填或設 $GROQ_API_KEY env(env 優先)" },
                 { key: "model", label: "model", hint: "openai/gpt-oss-120b" },
                 { key: "stt_model", label: "stt_model", hint: "whisper-large-v3-turbo" },
               ]}
@@ -658,9 +671,9 @@ function ConfigTab() {
               cfg={cfg.providers?.gemini}
               fields={[
                 { key: "model", label: "model", hint: "gemini-3.1-flash-lite-preview" },
-                { key: "api_base", label: "api_base", hint: "(留空用預設 google 端點)" },
+                { key: "api_base", label: "api_base", hint: "https://generativelanguage.googleapis.com/v1beta/openai/" },
               ]}
-              hint="key 從 api_keys.GEMINI_API_KEY 或 OS env 取"
+              hint="API key 在上方 API Keys 區填 GEMINI_API_KEY,或設 $GEMINI_API_KEY 環境變數(env 優先)。model / api_base 留空就用預設值。"
               onPatch={(patch) =>
                 applyPatch((c) => {
                   const p = ensureSubObj(c, "providers");

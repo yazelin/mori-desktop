@@ -21,16 +21,19 @@ chrono = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
 
-# Phase 5C — local STT
+# Phase 5C — local STT (Linux only for now;whisper-rs-sys 0.13 在 Windows
+# bindgen 對 whisper_full_params 算出來的 struct size 跟 wrapper.h 不符,
+# 跨平台修要等 upstream。Windows user 走 Groq cloud STT 或 OpenAI Whisper API。)
 # whisper-rs:whisper.cpp 的 Rust binding,build 時拉 whisper.cpp source code
-#   編進 binary。需要 cmake + libclang(已是 Tauri build deps,普通 dev 機都有)。
-# hound:WAV decode/encode(沿用 mori-tauri 的版本)。LocalWhisperProvider 收
-#   到 WAV bytes 要解出 PCM samples 才能餵 whisper-rs。
-# rubato:重採樣。麥克風通常 48kHz,whisper 要 16kHz,中間需要降採樣 — 這
-#   crate 是 Rust 標準解。
+#   編進 binary。需要 cmake + libclang。
+# rubato:重採樣。麥克風通常 48kHz,whisper 要 16kHz,中間需要降採樣。
+[target.'cfg(target_os = "linux")'.dependencies]
 whisper-rs = "0.14"
-hound = "3.5"
 rubato = "0.16"
+
+# hound: WAV decode/encode。跨平台需要(mori-tauri 也用)。
+[dependencies.hound]
+version = "3.5"
 
 [dev-dependencies]
 tempfile = "3"

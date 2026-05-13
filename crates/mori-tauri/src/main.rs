@@ -1,7 +1,6 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(target_os = "linux")]
 mod action_skills;
 mod context_provider;
 mod deps;
@@ -12,8 +11,12 @@ mod x11_hotkey;
 #[cfg(target_os = "linux")]
 mod x11_shape;
 mod recording;
-#[cfg(target_os = "linux")]
 mod character_pack;
+// 5U: selection / paste-back 拆 platform-specific 檔案,公開 API 一致
+// (read_primary_selection / PlatformPasteController / send_enter /
+// warn_if_setup_missing),main.rs 跨平台 call 同一份名稱。
+#[cfg_attr(target_os = "linux", path = "selection_linux.rs")]
+#[cfg_attr(target_os = "windows", path = "selection_windows.rs")]
 mod selection;
 mod shell_skill;
 mod skill_server;
@@ -30,9 +33,7 @@ use mori_core::llm::ChatMessage;
 use mori_core::memory::markdown::LocalMarkdownMemoryStore;
 use mori_core::memory::MemoryStore;
 use mori_core::mode::{Mode, ModeController};
-#[cfg(target_os = "linux")]
 use mori_core::paste::PasteController;
-#[cfg(target_os = "linux")]
 use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill, PolishSkill,
@@ -1008,16 +1009,13 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
     registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
     registry.register(Arc::new(ForgetMemorySkill::new(mem_arc.clone())));
     registry.register(Arc::new(EditMemorySkill::new(mem_arc.clone())));
-    #[cfg(target_os = "linux")]
-    {
-        registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
-        registry.register(Arc::new(crate::action_skills::OpenAppSkill));
-        registry.register(Arc::new(crate::action_skills::SendKeysSkill));
-        registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
-        registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
-        registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
-        registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
-    }
+    registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
+    registry.register(Arc::new(crate::action_skills::OpenAppSkill));
+    registry.register(Arc::new(crate::action_skills::SendKeysSkill));
+    registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
+    registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
+    registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
+    registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
     // 當前 agent profile 的 shell skills
     let profile = mori_core::agent_profile::load_active_agent_profile();
     let shell_skill_names: std::collections::HashSet<String> = profile
@@ -1195,7 +1193,91 @@ fn capture_window_context() -> HotkeyWindowContext {
     HotkeyWindowContext { process_name, window_title, selected_text }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Windows:GetForegroundWindow + GetWindowThreadProcessId +
+/// QueryFullProcessImageNameW(process_name)+ GetWindowTextW(window_title)。
+/// selected_text 一律空 — Windows 沒 PRIMARY selection。
+///
+/// 全部 Win32 API,同步呼叫,< 10ms。失敗時各欄位回空字串,不影響主流程。
+#[cfg(target_os = "windows")]
+fn capture_window_context() -> HotkeyWindowContext {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HWND, MAX_PATH};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    };
+
+    let hwnd: HWND = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return HotkeyWindowContext::default();
+    }
+
+    // window_title
+    let title_len = unsafe { GetWindowTextLengthW(hwnd) };
+    let window_title = if title_len > 0 {
+        let mut buf = vec![0u16; (title_len as usize) + 1];
+        let written = unsafe { GetWindowTextW(hwnd, &mut buf) };
+        if written > 0 {
+            String::from_utf16_lossy(&buf[..written as usize])
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // process_name
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32)) };
+    let process_name = if pid != 0 {
+        match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+            Ok(handle) => {
+                let mut buf = vec![0u16; MAX_PATH as usize];
+                let mut size = buf.len() as u32;
+                let ok = unsafe {
+                    QueryFullProcessImageNameW(
+                        handle,
+                        PROCESS_NAME_FORMAT(0),
+                        PWSTR(buf.as_mut_ptr()),
+                        &mut size,
+                    )
+                };
+                let _ = unsafe { CloseHandle(handle) };
+                if ok.is_ok() && size > 0 {
+                    let path = String::from_utf16_lossy(&buf[..size as usize]);
+                    // 只留 basename(去 ".exe")— 跟 Linux 的 /proc/<pid>/comm 對齊
+                    std::path::Path::new(&path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            }
+            Err(_) => String::new(),
+        }
+    } else {
+        String::new()
+    };
+
+    tracing::debug!(
+        process = %process_name,
+        title = %window_title,
+        "hotkey window context captured",
+    );
+
+    HotkeyWindowContext {
+        process_name,
+        window_title,
+        selected_text: String::new(),
+    }
+}
+
+/// macOS / 其他平台 fallback — 回空 context,不影響主流程。
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn capture_window_context() -> HotkeyWindowContext {
     HotkeyWindowContext::default()
 }
@@ -1605,35 +1687,33 @@ async fn run_agent_pipeline(
             app: app.clone(),
         });
         registry.register(Arc::new(SetModeSkill::new(mode_controller)));
-        #[cfg(target_os = "linux")]
-        {
-            if allows("paste_selection_back") {
-                let paste_controller: Arc<dyn PasteController> =
-                    Arc::new(crate::selection::LinuxPasteController::new(app.clone()));
-                registry.register(Arc::new(PasteSelectionBackSkill::new(paste_controller)));
-            }
-            // 5G-6: Action skills（xdg-open / ydotool / gtk-launch）
-            if allows("open_url") {
-                registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
-            }
-            if allows("open_app") {
-                registry.register(Arc::new(crate::action_skills::OpenAppSkill));
-            }
-            if allows("send_keys") {
-                registry.register(Arc::new(crate::action_skills::SendKeysSkill));
-            }
-            if allows("google_search") {
-                registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
-            }
-            if allows("ask_chatgpt") {
-                registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
-            }
-            if allows("ask_gemini") {
-                registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
-            }
-            if allows("find_youtube") {
-                registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
-            }
+        if allows("paste_selection_back") {
+            let paste_controller: Arc<dyn PasteController> =
+                Arc::new(crate::selection::PlatformPasteController::new(app.clone()));
+            registry.register(Arc::new(PasteSelectionBackSkill::new(paste_controller)));
+        }
+        // 5G-6: Action skills(Linux 走 xdg-open / ydotool / gtk-launch,
+        // Windows 走 cmd /c start + SendInput)
+        if allows("open_url") {
+            registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
+        }
+        if allows("open_app") {
+            registry.register(Arc::new(crate::action_skills::OpenAppSkill));
+        }
+        if allows("send_keys") {
+            registry.register(Arc::new(crate::action_skills::SendKeysSkill));
+        }
+        if allows("google_search") {
+            registry.register(Arc::new(crate::action_skills::GoogleSearchSkill));
+        }
+        if allows("ask_chatgpt") {
+            registry.register(Arc::new(crate::action_skills::AskChatGptSkill));
+        }
+        if allows("ask_gemini") {
+            registry.register(Arc::new(crate::action_skills::AskGeminiSkill));
+        }
+        if allows("find_youtube") {
+            registry.register(Arc::new(crate::action_skills::FindYoutubeSkill));
         }
 
         // 5H: profile 自訂的 shell skills — 不受 enabled_skills filter 影響。
@@ -2003,9 +2083,8 @@ async fn run_voice_input_pipeline(
     // VoiceInput 模式：有最終文字就貼回游標（agent mode 也適用——LLM 工具呼叫
     // 之外還有文字回覆時當作要貼）。使用熱鍵瞬間抓到的 process name 判斷
     // terminal vs 一般 app，自動用 Ctrl+V 或 Ctrl+Shift+V。
-    #[cfg(target_os = "linux")]
     let paste_result = {
-        let controller = crate::selection::LinuxPasteController::new(app.clone());
+        let controller = crate::selection::PlatformPasteController::new(app.clone());
         controller
             .paste_back_for_process(
                 &cleaned_text,
@@ -2014,10 +2093,6 @@ async fn run_voice_input_pipeline(
             )
             .await
     };
-    #[cfg(not(target_os = "linux"))]
-    let paste_result: anyhow::Result<()> = Err(anyhow::anyhow!(
-        "voice-input paste-back not implemented on this platform yet"
-    ));
 
     if let Err(e) = paste_result {
         tracing::error!(?e, "voice-input paste-back failed");
@@ -2031,12 +2106,8 @@ async fn run_voice_input_pipeline(
     }
 
     // ENABLE_AUTO_ENTER: true → 貼完後模擬 Enter（ZeroType 語意不變）
-    #[cfg(target_os = "linux")]
     if profile.frontmatter.enable_auto_enter {
-        let _ = std::process::Command::new("ydotool")
-            .args(["key", "28:1", "28:0"])
-            .status();
-        tracing::debug!("auto-enter sent via ydotool");
+        crate::selection::send_enter();
     }
 
     tracing::info!(
@@ -2456,10 +2527,11 @@ fn main() {
             gdk_backend = %std::env::var("GDK_BACKEND").unwrap_or_default(),
             "GDK backend (forced x11 unless overridden)",
         );
-        // 反白即改寫(phase 4C)依賴 wl-clipboard + ydotool。startup 早點警告
-        // 比讓 user 試了一次「為什麼沒貼回」再 grep 程式碼好。
-        crate::selection::warn_if_setup_missing();
     }
+    // 反白即改寫(phase 4C)依賴外部工具(Linux 上是 xclip + xdotool/ydotool;
+    // Windows 是 built-in Win32 SendInput 不需任何工具)。startup 早點警告
+    // 比讓 user 試了一次「為什麼沒貼回」再 grep 程式碼好。
+    crate::selection::warn_if_setup_missing();
 
     // 確保 ~/.mori/config.json 存在(第一次跑就會寫一份 stub)
     let config_path = match GroqProvider::bootstrap_mori_config() {
