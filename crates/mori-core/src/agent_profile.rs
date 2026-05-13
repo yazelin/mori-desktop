@@ -316,23 +316,50 @@ pub fn switch_agent_slot(n: u8) -> Option<SlotSwitchInfo> {
     None
 }
 
-/// 首次啟動時建 `~/.mori/agent/` 並寫預設 AGENT.md。冪等：已存在不覆蓋。
+/// 首次啟動時建 `~/.mori/agent/` 並寫預設 AGENT.md 跟一份 starter
+/// AGENT-01。冪等:檔案已存在不覆蓋,使用者改動 / 刪除都會保留。
+///
+/// 為什麼預設多一份 starter:fresh install 只有 AGENT.md(slot 0)使用者
+/// 沒有可以「按 Ctrl+Alt+1 切看看」的東西,要先學 frontmatter 規則自己
+/// 寫 — 上手門檻太高。AGENT-01 用翻譯範本是因為 (a) translate skill 已內
+/// 建、(b) 場景具體易理解、(c) 跟對話 mode 區分明顯,讓使用者一試就懂
+/// 兩個 mode 的差異。
 pub fn ensure_agent_dir_initialized() {
     let dir = agent_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(?e, path = %dir.display(), "could not create agent dir");
         return;
     }
-    let path = dir.join("AGENT.md");
-    if path.exists() {
-        return;
+    // 預設 AGENT.md(slot 0)
+    let default_path = dir.join("AGENT.md");
+    if !default_path.exists() {
+        if let Err(e) = std::fs::write(&default_path, DEFAULT_AGENT_MD) {
+            tracing::warn!(?e, path = %default_path.display(), "could not write default AGENT.md");
+        } else {
+            tracing::info!(path = %default_path.display(), "created default AGENT.md");
+        }
     }
-    if let Err(e) = std::fs::write(&path, DEFAULT_AGENT_MD) {
-        tracing::warn!(?e, path = %path.display(), "could not write default AGENT.md");
-    } else {
-        tracing::info!(path = %path.display(), "created default AGENT.md");
+    // Starter AGENT-01(slot 1)— 翻譯助手範本
+    let starter_path = dir.join(STARTER_AGENT_01_FILENAME);
+    if !starter_path.exists() {
+        if let Err(e) = std::fs::write(&starter_path, STARTER_AGENT_01_MD) {
+            tracing::warn!(
+                ?e,
+                path = %starter_path.display(),
+                "could not write starter AGENT-01",
+            );
+        } else {
+            tracing::info!(
+                path = %starter_path.display(),
+                "created starter AGENT-01 (Ctrl+Alt+1 切到翻譯模式)",
+            );
+        }
     }
 }
+
+const STARTER_AGENT_01_FILENAME: &str = "AGENT-01.翻譯助手.md";
+const STARTER_AGENT_01_MD: &str =
+    include_str!("../../../examples/agent/AGENT-01.翻譯助手.md");
 
 /// 給上層用：取得 enabled_skills 的 HashSet，方便 contains 檢查。
 pub fn enabled_skills_set(profile: &AgentProfile) -> Option<HashSet<String>> {

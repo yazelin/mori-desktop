@@ -509,15 +509,41 @@ pub fn switch_to_slot(n: u8) -> Option<SlotSwitchInfo> {
     None
 }
 
-/// 首次啟動時建 `~/.mori/voice_input/` 目錄。
-/// 5J 起不再生成預設 SYSTEM.md / USER.md（context 注入改由 Rust 統一處理，
-/// fallback 用內建 FALLBACK_PROFILE_MD 常數，使用者不會看到該 fallback）。
+/// 首次啟動時建 `~/.mori/voice_input/` 目錄並寫一份 starter USER-01。
+/// 冪等:檔案已存在不覆蓋。slot 0 仍走內建 FALLBACK_PROFILE_MD(極簡聽寫,
+/// 不落地),slot 1 用範本讓使用者有東西可切著玩。
+///
+/// 為什麼預設多一份 starter:fresh install voice_input/ 目錄空,使用者
+/// 按 Alt+1~9 全部 fallback,要先學 frontmatter 規則自己寫 — 上手門檻高。
+/// USER-01 用「朋友閒聊」範本是因為 (a) 場景具體、(b) frontmatter 用了
+/// `enable_auto_enter` / `cleanup_level` 等實用欄位,使用者改 markdown
+/// 就能學會欄位用法。
 pub fn ensure_voice_input_dir_initialized() {
     let dir = voice_input_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(?e, path = %dir.display(), "could not create voice_input dir");
+        return;
+    }
+    let starter_path = dir.join(STARTER_USER_01_FILENAME);
+    if !starter_path.exists() {
+        if let Err(e) = std::fs::write(&starter_path, STARTER_USER_01_MD) {
+            tracing::warn!(
+                ?e,
+                path = %starter_path.display(),
+                "could not write starter USER-01",
+            );
+        } else {
+            tracing::info!(
+                path = %starter_path.display(),
+                "created starter USER-01 (Alt+1 切到朋友閒聊模式)",
+            );
+        }
     }
 }
+
+const STARTER_USER_01_FILENAME: &str = "USER-01.朋友閒聊.md";
+const STARTER_USER_01_MD: &str =
+    include_str!("../../../examples/voice_input/USER-01.朋友閒聊.md");
 
 // ─── Built-in fallback ────────────────────────────────────────────────────
 

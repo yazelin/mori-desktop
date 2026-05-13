@@ -76,6 +76,26 @@
   (toggle + cancel + picker + 10 voice slot + 10 agent slot)+ picker / chat / tray 內熱鍵。
 </p>
 
+<div class="note">
+  <strong>基本操作流程</strong>(日常用法 4 個鍵打天下):
+  <ol>
+    <li><kbd>Alt</kbd>+<kbd>0~9</kbd> 或 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0~9</kbd> —
+      選 mode + profile slot(每按一次就鎖在那個 mode)
+      <ul>
+        <li><kbd>Alt</kbd>+<kbd>0</kbd> = VoiceInput 預設極簡聽寫</li>
+        <li><kbd>Alt</kbd>+<kbd>1</kbd> = VoiceInput 預設「朋友閒聊」(starter)</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0</kbd> = Agent 預設 Mori 角色</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> = Agent 預設「翻譯助手」(starter)</li>
+      </ul>
+    </li>
+    <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> — 開始錄音 / 再按一次停止 + 自動送 STT + LLM</li>
+    <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd> — 錄音中丟音檔 / 思考中 abort LLM</li>
+    <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> — 不記 slot 數字就開 picker overlay 選</li>
+  </ol>
+  全新安裝時 slot 0 + slot 1 都有東西可用,slot 2~9 用同檔名格式自建(見
+  <a href="profile-examples.html">Profile 範本</a>)。
+</div>
+
 <p>
   Linux 啟動時自動偵測 session 走哪條 path:
 </p>

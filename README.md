@@ -27,6 +27,32 @@ npm run tauri dev
 
 ---
 
+## 基本操作流程
+
+```
+1. 選 mode(每按一次就鎖在那個 mode):
+   Alt+0          → VoiceInput slot 0(預設極簡聽寫,STT → 貼游標)
+   Alt+1          → VoiceInput slot 1(預設「朋友閒聊」,放鬆語氣 + 自動 Enter)
+   Ctrl+Alt+0     → Agent slot 0(預設 Mori 角色,STT → agent loop → 回應)
+   Ctrl+Alt+1     → Agent slot 1(預設「翻譯助手」,STT → 翻成繁中 / 英)
+
+2. 錄音 + 送出 Ctrl+Alt+Space:
+   按第一次 → 開始錄音(floating sprite 變藍水波)
+   按第二次 → 停止 + 自動送 STT + LLM(走當前 mode)
+
+3. 中斷 Ctrl+Alt+Esc:
+   錄音中按   → 丟掉音檔,不送 STT
+   思考中按   → abort LLM call,SIGKILL 子程序
+
+4. 不記 slot 數字就用 picker overlay:
+   Ctrl+Alt+P → 開 picker,方向鍵在 voice / agent profile 中選
+```
+
+預設第一次安裝 slot 0 + slot 1 都有東西可用,自訂 slot 2~9 用同檔名格式
+`AGENT-NN.<display>.md` / `USER-NN.<display>.md` 丟到 `~/.mori/agent/` /
+`~/.mori/voice_input/` 即可(範本見 [`examples/`](examples/) 或
+[Profile 範本頁](https://yazelin.github.io/mori-desktop/profile-examples.html))。
+
 ## Hotkeys(挑幾個常用)
 
 | 鍵 | 用途 |

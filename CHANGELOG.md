@@ -6,6 +6,46 @@
 
 ---
 
+## 5R — Starter profiles + 基本操作流程文件(2026-05-13)
+
+5Q 把 23 個全域熱鍵都接通了,但使用者實測時發現兩個 UX 缺口:
+
+1. **fresh install 只有 slot 0**(`AGENT.md` + 內建 voice fallback),按
+   `Alt+1` / `Ctrl+Alt+1` 全部 fallback,沒有「試試看 slot 切換」的對象
+2. **README / docs hotkey 表只列鍵不講流程**,使用者不知道日常用法是「先
+   選 mode、按 space 錄音、再按 space 送出」這個序列
+
+### 修法
+
+**Starter profiles** — `ensure_agent_dir_initialized()` 跟
+`ensure_voice_input_dir_initialized()` 改成除了預設 slot 0 之外,也寫一份
+slot 1 starter。檔案內容透過 `include_str!` 從 `examples/` 編進 binary,
+冪等:已存在不覆蓋,使用者刪除 / 改動都會保留。
+
+- **`AGENT-01.翻譯助手.md`** — 翻譯範本(provider: groq + translate skill),
+  跟對話 mode 區分明顯,使用者一試就懂兩個 mode 差異
+- **`USER-01.朋友閒聊.md`** — 放鬆語氣 + `enable_auto_enter: true`
+  自動 Enter 送出,frontmatter 用了 `cleanup_level` / `paste_shortcut` /
+  `enable_auto_enter`,使用者改 markdown 就學會欄位用法
+
+slot 2~9 仍由使用者自建(範本見 `examples/`)。
+
+**基本操作流程文件** — `README.md` / `docs/getting-started.html` /
+`docs/hotkeys.html` 都加「日常 4 個鍵打天下」段落,把「Alt+0 選 mode →
+Ctrl+Alt+Space 錄 → 再 Ctrl+Alt+Space 送 → Ctrl+Alt+Esc 中斷 →
+Ctrl+Alt+P 不記 slot 就用 picker」的序列講清楚。
+
+### 變動檔案
+
+- `crates/mori-core/src/agent_profile.rs`:`ensure_agent_dir_initialized`
+  多寫 starter AGENT-01
+- `crates/mori-core/src/voice_input_profile.rs`:`ensure_voice_input_dir_initialized`
+  多寫 starter USER-01
+- `README.md` / `docs/getting-started.html` / `docs/hotkeys.html`:新增
+  「基本操作流程」段落
+
+---
+
 ## 5Q-followup — X11 paste-back 走 xdotool(2026-05-13)
 
 5Q 上完後使用者回報「轉錄結果沒貼到游標」。根因:paste-back path
