@@ -13,24 +13,28 @@ type InstallSpec =
   | { kind: "Shell"; script: string }
   | { kind: "Manual"; commands: string[] };
 
-type DepSpec = {
-  id: string;
-  name: string;
-  description: string;
-  unlocks: string;
-  size_hint: string | null;
-  needs_sudo: boolean;
-  check: CheckSpec;
-  install: InstallSpec;
-};
-
 type DepStatus = {
   id: string;
   installed: boolean;
   detail: string | null;
 };
 
-type DepInfo = DepSpec & { status: DepStatus };
+// 後端 deps_list 已經過濾掉跟當前平台無關的條目 + 把 install 解析成當前
+// 平台適用的版本(install_overrides 不送)。前端只看一個 flat shape。
+type DepInfo = {
+  id: string;
+  name: string;
+  description: string;
+  unlocks: string;
+  size_hint: string | null;
+  needs_sudo: boolean;
+  /// 「能用但有限制」的警告 — 例:whisper-server 在 Windows = "請手動下載 .exe"。
+  /// 有值就 render 成 ⚠️ badge。
+  install_caveat: string | null;
+  check: CheckSpec;
+  install: InstallSpec;
+  status: DepStatus;
+};
 
 type InstallResult = {
   success: boolean;
@@ -85,6 +89,14 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
           <span className="mori-dep-name">{dep.name}</span>
           {dep.size_hint && <span className="mori-dep-size">{dep.size_hint}</span>}
           {dep.needs_sudo && <span className="mori-dep-sudo">sudo</span>}
+          {dep.install_caveat && (
+            <span
+              className="mori-dep-caveat"
+              title={dep.install_caveat}
+            >
+              ⚠️ 注意
+            </span>
+          )}
         </div>
         <div className="mori-dep-actions">
           {dep.status.installed ? (
@@ -108,6 +120,11 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
       <div className="mori-dep-unlocks">
         <span className="label">解鎖:</span> {dep.unlocks}
       </div>
+      {dep.install_caveat && (
+        <div className="mori-dep-caveat-detail">
+          ⚠️ <span className="label">當前平台注意:</span> {dep.install_caveat}
+        </div>
+      )}
       {!dep.status.installed && (showCommand || manual) && (
         <div className="mori-dep-cmd">
           <div className="mori-dep-cmd-head">

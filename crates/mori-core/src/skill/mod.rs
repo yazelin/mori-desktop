@@ -74,6 +74,25 @@ pub trait Skill: Send + Sync {
         Privacy::Cloud
     }
 
+    /// 此 skill 適用的平台。預設全平台支援。值對齊 `std::env::consts::OS`:
+    /// `"linux"` / `"windows"` / `"macos"`。Skill 不在 list 內的平台,Mori
+    /// 主視窗 Skills tab 不會顯示;Agent loop 也不會 expose 給 LLM。
+    fn platforms(&self) -> &'static [&'static str] {
+        &["linux", "windows", "macos"]
+    }
+
+    /// 此 skill 在當前平台「能跑但有限制」的警告。例:
+    /// - `paste_selection_back` Windows:「Windows 沒 PRIMARY selection,
+    ///   user 必須先 Ctrl+C」
+    /// - `open_app` Windows:「best-effort 走 ShellExecute,Start Menu pinned
+    ///   / Microsoft Store apps 不一定能解」
+    ///
+    /// 由 IPC layer 看當前 OS 決定送哪段(或 None);UI 拿到非 None 就 render
+    /// ⚠️ badge。
+    fn platform_caveat(&self) -> Option<&'static str> {
+        None
+    }
+
     async fn execute(&self, args: Value, context: &Context) -> Result<SkillOutput>;
 }
 

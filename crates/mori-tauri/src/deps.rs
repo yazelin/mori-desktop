@@ -32,10 +32,44 @@ pub struct DepSpec {
     pub size_hint: Option<&'static str>,
     /// 是否需要 sudo(影響「直接 install」還是「給 user 指令」UI 模式)
     pub needs_sudo: bool,
+    /// 此 dep 適用的平台。`deps_list()` IPC handler 用 `std::env::consts::OS`
+    /// 過濾,只把當前平台適用的條目送給前端。Linux-only 工具(ydotool /
+    /// xdotool / xclip)在 Windows / macOS 不會顯示。
+    /// 值對齊 Rust `std::env::consts::OS`:"linux" / "windows" / "macos"。
+    pub platforms: &'static [&'static str],
+    /// 平台 caveat — 此 dep 在當前平台「能用但有限制」時的警告字串。
+    /// 例:whisper-server 在 Windows 一鍵下載還沒接(只有 Linux Shell 腳本),
+    /// 設「請手動下載 whisper-server.exe 放到 ~/.mori/bin/」。
+    /// `None` 表示無 caveat。
+    pub install_caveat: Option<&'static str>,
     /// 檢測指令(只回 0=有 / 非 0=沒有,stdout 拿來顯示版本資訊)
     pub check: CheckSpec,
     /// 安裝指令(若 needs_sudo,只給 user 看不執行)
     pub install: InstallSpec,
+    /// 平台特定 install override。lookup 順序:此 list 內找符合 OS 的 →
+    /// 都沒有 → fallback `install`。給「跨平台支援但 install 方法各異」的
+    /// dep 用(像 whisper-server:Linux 走 Shell curl,Windows 走 Manual)。
+    pub install_overrides: &'static [(&'static str, InstallSpec)],
+}
+
+impl DepSpec {
+    /// 取得當前 OS 適用的 InstallSpec — 先看 install_overrides 有沒有
+    /// 平台特定條目,沒有再退到 install。
+    pub fn effective_install(&self) -> &InstallSpec {
+        let os = std::env::consts::OS;
+        for (platform, spec) in self.install_overrides {
+            if *platform == os {
+                return spec;
+            }
+        }
+        &self.install
+    }
+
+    /// 此 dep 是否適用當前 OS(用於 deps_list filter)。
+    pub fn applies_to_current_os(&self) -> bool {
+        let os = std::env::consts::OS;
+        self.platforms.iter().any(|p| *p == os)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +97,11 @@ pub enum InstallSpec {
 }
 
 /// mori-desktop 在意的所有 optional deps。
+///
+/// 每個 spec 有 `platforms` 欄位 — `deps_list()` IPC 會用 `std::env::consts::OS`
+/// 過濾,Linux-only 條目(ydotool / xdotool / xclip)在 Windows 不會顯示,
+/// 跨平台條目(uv / whisper-model / ollama 等)在所有平台都顯示但裝法可能
+/// 不同(走 `install_overrides`)。
 pub fn registry() -> Vec<DepSpec> {
     vec![
         DepSpec {
@@ -72,12 +111,22 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "yt-dlp 等 Python CLI 的安裝前置;同時是 mori 之後跑 Python skill 的標準 runtime",
             size_hint: Some("~30MB"),
             needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
             check: CheckSpec::File {
                 path_template: "$HOME/.local/bin/uv",
             },
             install: InstallSpec::Shell {
                 script: "curl -LsSf https://astral.sh/uv/install.sh | sh",
             },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows 用 PowerShell 一鍵裝(Astral 官方):",
+                        "powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"",
+                    ],
+                }),
+            ],
         },
         DepSpec {
             id: "yt-dlp",
@@ -86,6 +135,8 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "youtube_transcript skill(待 3B-2),Mori 可以幫你摘要影片內容。需先裝 uv。",
             size_hint: Some("~5MB Python script + deps"),
             needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
             check: CheckSpec::File {
                 path_template: "$HOME/.local/bin/yt-dlp",
             },
@@ -93,6 +144,14 @@ pub fn registry() -> Vec<DepSpec> {
                 // 一鍵 bootstrap:沒 uv 先 curl install.sh,再用 uv 裝 yt-dlp
                 script: "if [ ! -x \"$HOME/.local/bin/uv\" ]; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi && \"$HOME/.local/bin/uv\" tool install --upgrade yt-dlp",
             },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows 在 PowerShell 跑(需先有 uv):",
+                        "uv tool install --upgrade yt-dlp",
+                    ],
+                }),
+            ],
         },
         DepSpec {
             id: "ydotool",
@@ -101,6 +160,8 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "Mori 把 LLM 處理結果貼到當前游標位置(語音輸入 / 反白改寫)",
             size_hint: None,
             needs_sudo: true,
+            platforms: &["linux"],
+            install_caveat: None,
             check: CheckSpec::Which { bin: "ydotool" },
             install: InstallSpec::Manual {
                 commands: &[
@@ -112,6 +173,7 @@ pub fn registry() -> Vec<DepSpec> {
                     "# 重開機讓 group 生效",
                 ],
             },
+            install_overrides: &[],
         },
         DepSpec {
             id: "xdotool",
@@ -120,10 +182,13 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "Mori 知道你當下在哪個 app(寫 prompt context 用)",
             size_hint: None,
             needs_sudo: true,
+            platforms: &["linux"],
+            install_caveat: None,
             check: CheckSpec::Which { bin: "xdotool" },
             install: InstallSpec::Manual {
                 commands: &["sudo apt install xdotool"],
             },
+            install_overrides: &[],
         },
         DepSpec {
             id: "xclip",
@@ -132,18 +197,23 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "反白文字直接被 Mori 看到(不用 Ctrl+C);Wayland 下等同必裝",
             size_hint: None,
             needs_sudo: true,
+            platforms: &["linux"],
+            install_caveat: None,
             check: CheckSpec::Which { bin: "xclip" },
             install: InstallSpec::Manual {
                 commands: &["sudo apt install xclip"],
             },
+            install_overrides: &[],
         },
         DepSpec {
             id: "whisper-model",
             name: "whisper-local model (ggml-small.bin)",
-            description: "離線 STT 模型(466MB 中文版)。同檔 Linux / Windows 通用。",
+            description: "離線 STT 模型(466MB 中文版)。同檔 Linux / Windows / macOS 通用。",
             unlocks: "stt_provider=whisper-local 走 100% 離線 STT,不用 Groq 雲端",
             size_hint: Some("~466MB"),
             needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
             check: CheckSpec::File {
                 path_template: "$HOME/.mori/models/ggml-small.bin",
             },
@@ -152,6 +222,15 @@ pub fn registry() -> Vec<DepSpec> {
                          wget -O \"$HOME/.mori/models/ggml-small.bin\" \
                          https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
             },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# PowerShell:",
+                        "mkdir -Force $env:USERPROFILE\\.mori\\models | Out-Null",
+                        "curl.exe -L -o $env:USERPROFILE\\.mori\\models\\ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+                    ],
+                }),
+            ],
         },
         DepSpec {
             id: "whisper-server",
@@ -162,6 +241,8 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "stt_provider=whisper-local 能真的 spawn 起來跑(沒這個就只有 .bin 沒人讀)",
             size_hint: Some("~5-10MB(僅 CPU 版,GPU 版可手動換)"),
             needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
             check: CheckSpec::File {
                 path_template: "$HOME/.mori/bin/whisper-server",
             },
@@ -180,6 +261,20 @@ pub fn registry() -> Vec<DepSpec> {
                          rm -rf /tmp/whisper-cpp-bin /tmp/whisper-cpp-bin.zip && \
                          echo \"whisper-server installed to $HOME/.mori/bin/whisper-server\"",
             },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# 1. 從 whisper.cpp release 頁下載對應 zip:",
+                        "#    https://github.com/ggml-org/whisper.cpp/releases/latest",
+                        "#    CPU 版:whisper-bin-x64.zip",
+                        "#    NVIDIA GPU:whisper-cublas-cuda12-bin-x64.zip(更快)",
+                        "# 2. 解壓後找到 whisper-server.exe + 旁邊的 .dll(ggml.dll / whisper.dll 等)",
+                        "# 3. PowerShell 跑:",
+                        "mkdir -Force $env:USERPROFILE\\.mori\\bin | Out-Null",
+                        "# 4. 把整套(.exe + .dll)複製到 $env:USERPROFILE\\.mori\\bin\\",
+                    ],
+                }),
+            ],
         },
         DepSpec {
             id: "ollama",
@@ -188,10 +283,21 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "provider=ollama 走 100% 離線 LLM",
             size_hint: Some("~600MB binary,每個 model 額外 4~30GB"),
             needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
             check: CheckSpec::Which { bin: "ollama" },
             install: InstallSpec::Shell {
                 script: "curl -fsSL https://ollama.com/install.sh | sh",
             },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# 從官方下載 Windows installer:",
+                        "# https://ollama.com/download/windows",
+                        "# 下載完雙擊 OllamaSetup.exe 安裝即可。",
+                    ],
+                }),
+            ],
         },
         DepSpec {
             id: "ollama-qwen3-8b",
@@ -201,6 +307,8 @@ pub fn registry() -> Vec<DepSpec> {
             unlocks: "ollama 真的能跑 LLM(只裝 ollama binary 沒模型也叫不起來)",
             size_hint: Some("~5GB"),
             needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
             check: CheckSpec::CommandStdoutContains {
                 cmd: "ollama",
                 args: &["list"],
@@ -209,6 +317,14 @@ pub fn registry() -> Vec<DepSpec> {
             install: InstallSpec::Shell {
                 script: "ollama pull qwen3:8b",
             },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# PowerShell(需先裝 ollama):",
+                        "ollama pull qwen3:8b",
+                    ],
+                }),
+            ],
         },
     ]
 }
@@ -288,7 +404,9 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
 /// 跑 install command,回傳 (stdout+stderr 合併、success flag)。
 /// 只處理 Run / Shell — Manual 不在這條路,UI 直接顯示指令給 user。
 pub fn run_install(spec: &DepSpec) -> Result<InstallResult> {
-    let (cmd, args) = match &spec.install {
+    // 走 effective_install — 平台特定 override 優先(像 Windows 的 ollama
+    // 用 Manual variant),沒有再 fallback 預設(Linux 走 Shell 那條)。
+    let (cmd, args) = match spec.effective_install() {
         InstallSpec::Shell { script } => (
             "sh".to_string(),
             vec!["-c".to_string(), script.to_string()],

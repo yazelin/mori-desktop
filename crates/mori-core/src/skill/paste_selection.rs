@@ -76,6 +76,19 @@ impl Skill for PasteSelectionBackSkill {
         false
     }
 
+    fn platform_caveat(&self) -> Option<&'static str> {
+        // Windows 沒有 X11 PRIMARY selection — user 必須先 Ctrl+C 才有東西貼。
+        // Linux 拖反白即可讀,paste 完全自動。macOS 同 Windows。
+        if cfg!(target_os = "linux") {
+            None
+        } else {
+            Some(
+                "此平台沒有「滑鼠反白即讀」(X11 PRIMARY selection 是 Linux 特有)。\
+                 使用此 skill 前要先 Ctrl+C / Cmd+C 把選取內容放進剪貼簿。",
+            )
+        }
+    }
+
     async fn execute(&self, args: Value, _context: &Context) -> Result<SkillOutput> {
         let text = args
             .get("text")

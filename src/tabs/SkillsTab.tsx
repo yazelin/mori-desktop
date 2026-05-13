@@ -11,13 +11,32 @@ type SkillInfo = {
   description: string;
   parameters: any;
   kind: "builtin" | "shell";
+  /// 此 skill 適用的平台清單(對齊 std::env::consts::OS:linux/windows/macos)。
+  /// 後端 IPC 已過濾,前端 list 全是當前 OS 適用的;這個欄位用來顯示
+  /// 「跨平台 / 限 Linux / 限 Windows」標籤。
+  platforms: string[];
+  /// 「能用但有限制」的警告 — 例:Windows 上 paste_selection_back 需先 Ctrl+C。
+  caveat: string | null;
 };
+
+function platformLabel(platforms: string[]): { text: string; cls: string } | null {
+  // 全平台支援就不標(預設假設,標反而 noise)
+  const allOSes = ["linux", "windows", "macos"];
+  const isAll = allOSes.every((os) => platforms.includes(os));
+  if (isAll) return null;
+  if (platforms.length === 1) {
+    const os = platforms[0];
+    return { text: `限 ${os}`, cls: `platform-${os}` };
+  }
+  return { text: platforms.join(" / "), cls: "platform-mixed" };
+}
 
 function SkillCard({ skill }: { skill: SkillInfo }) {
   const [expanded, setExpanded] = useState(false);
   const props = skill.parameters?.properties ?? {};
   const required: string[] = Array.isArray(skill.parameters?.required) ? skill.parameters.required : [];
   const paramKeys = Object.keys(props);
+  const plat = platformLabel(skill.platforms);
 
   return (
     <div className={`mori-skill-card ${expanded ? "expanded" : ""}`}>
@@ -26,6 +45,12 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
           {skill.kind === "shell" ? "shell" : "built-in"}
         </span>
         <span className="mori-skill-name">{skill.name}</span>
+        {plat && (
+          <span className={`mori-skill-platform ${plat.cls}`}>{plat.text}</span>
+        )}
+        {skill.caveat && (
+          <span className="mori-skill-caveat" title={skill.caveat}>⚠️</span>
+        )}
         <span className="mori-skill-param-count">
           {paramKeys.length > 0 ? `${paramKeys.length} param${paramKeys.length > 1 ? "s" : ""}` : "no params"}
         </span>
@@ -34,6 +59,11 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
       <div className="mori-skill-card-desc">
         {skill.description}
       </div>
+      {skill.caveat && (
+        <div className="mori-skill-caveat-detail">
+          ⚠️ <span className="label">當前平台注意:</span> {skill.caveat}
+        </div>
+      )}
       {expanded && (
         <div className="mori-skill-card-body">
           {paramKeys.length === 0 ? (

@@ -1349,6 +1349,53 @@
   color: rgba(255, 230, 180, 0.95);
 }
 
+/* 平台 badge — 跟 kind badge 同尺寸,顏色不同。預設只在非全平台 skill 顯示。*/
+.mori-skill-platform {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.3px;
+  background: rgba(120, 170, 220, 0.15);
+  border: 1px solid rgba(120, 170, 220, 0.30);
+  color: rgba(180, 215, 240, 0.95);
+}
+.mori-skill-platform.platform-linux {
+  background: rgba(255, 165, 80, 0.16);
+  border-color: rgba(255, 165, 80, 0.30);
+  color: rgba(255, 195, 140, 0.95);
+}
+.mori-skill-platform.platform-windows {
+  background: rgba(100, 170, 230, 0.16);
+  border-color: rgba(100, 170, 230, 0.30);
+  color: rgba(170, 210, 240, 0.95);
+}
+.mori-skill-platform.platform-macos {
+  background: rgba(200, 200, 200, 0.16);
+  border-color: rgba(200, 200, 200, 0.30);
+  color: rgba(220, 220, 220, 0.95);
+}
+
+/* Caveat icon(放 head),hover 看 title;detail 在 desc 下方完整顯示 */
+.mori-skill-caveat {
+  font-size: 12px;
+  cursor: help;
+  opacity: 0.9;
+}
+.mori-skill-caveat-detail {
+  margin: 0.3em 0.9em 0.5em;
+  padding: 0.4em 0.7em;
+  background: rgba(255, 170, 80, 0.08);
+  border-left: 3px solid rgba(255, 170, 80, 0.55);
+  border-radius: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.mori-skill-caveat-detail .label {
+  font-weight: 500;
+  color: var(--c-warning-text);
+}
+
 /* brand-3: light theme 下 chip / badge 對比修正 — 淺綠 cream text 在
    ivory bg 上看不清,改用 forest-deep 暗字 + 加重 bg/border alpha */
 [data-theme-base="light"] .mori-skill-kind.kind-builtin {
@@ -1548,6 +1595,30 @@
   border-radius: 4px;
   color: var(--c-warning-text);
   font-family: ui-monospace, monospace;
+}
+/* 平台 caveat badge — 「能用但有限制」(例:whisper-server Windows 一鍵還沒接) */
+.mori-dep-caveat {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  background: rgba(255, 170, 80, 0.18);
+  border: 1px solid rgba(255, 170, 80, 0.40);
+  border-radius: 4px;
+  color: var(--c-warning-text);
+  cursor: help;
+}
+.mori-dep-caveat-detail {
+  margin-top: 0.4em;
+  padding: 0.4em 0.7em;
+  background: rgba(255, 170, 80, 0.08);
+  border-left: 3px solid rgba(255, 170, 80, 0.55);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-text);
+}
+.mori-dep-caveat-detail .label {
+  font-weight: 500;
+  color: var(--c-warning-text);
 }
 .mori-dep-actions { display: flex; align-items: center; gap: 8px; }
 .mori-dep-status-detail {

@@ -806,21 +806,48 @@ async fn memory_delete(state: tauri::State<'_, Arc<AppState>>, id: String) -> Re
 /// 回傳跟 memory_list 一樣的 MemoryEntry,加上 hit 程度可後續排序(現在依 store 順序)。
 // ─── 5O: Dependencies IPC ────────────────────────────────────────
 
+/// 送給前端的 DepInfo — 從 DepSpec 摘關鍵欄位,**`install` 已經是當前平台
+/// 適用的版本**(從 install_overrides 解析過),前端不用知道 overrides 存在。
+/// `platforms` / `install_overrides` 是 server-side internal,不送出。
 #[derive(serde::Serialize, Clone)]
 struct DepInfo {
-    #[serde(flatten)]
-    spec: serde_json::Value,
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    unlocks: &'static str,
+    size_hint: Option<&'static str>,
+    needs_sudo: bool,
+    /// 「能用但有限制」的警告 — 例:whisper-server 在 Windows 標 Manual。
+    /// 前端 render 成 ⚠️ badge + tooltip。
+    install_caveat: Option<&'static str>,
+    check: crate::deps::CheckSpec,
+    install: crate::deps::InstallSpec,
     status: crate::deps::DepStatus,
 }
 
 #[tauri::command]
 fn deps_list() -> Vec<DepInfo> {
+    // 過濾掉跟當前平台無關的 deps — Windows user 不用看到 ydotool / xdotool /
+    // xclip;Linux user 不用看到 Windows installer 那一堆。`applies_to_current_os()`
+    // 在 deps.rs 內看 spec.platforms 是否含 `std::env::consts::OS`。
     crate::deps::registry()
         .into_iter()
+        .filter(|spec| spec.applies_to_current_os())
         .map(|spec| {
             let status = crate::deps::check_dep(&spec);
+            // 平台特定 install override 在 server-side 已解析,前端拿到的
+            // `install` 就是當前 OS 該用的那個版本。
+            let install = spec.effective_install().clone();
             DepInfo {
-                spec: serde_json::to_value(&spec).unwrap_or(serde_json::Value::Null),
+                id: spec.id,
+                name: spec.name,
+                description: spec.description,
+                unlocks: spec.unlocks,
+                size_hint: spec.size_hint,
+                needs_sudo: spec.needs_sudo,
+                install_caveat: spec.install_caveat,
+                check: spec.check.clone(),
+                install,
                 status,
             }
         })
@@ -990,6 +1017,13 @@ struct SkillInfo {
     parameters: serde_json::Value,
     /// "builtin" | "shell"
     kind: String,
+    /// 此 skill 適用的平台清單(對齊 std::env::consts::OS:linux/windows/macos)。
+    /// IPC 層已經過濾,前端拿到的 list 全是當前 OS 適用的,這個欄位主要給 UI
+    /// 顯示「跨平台 / 限 X 平台」標籤用。
+    platforms: Vec<String>,
+    /// 「能用但有限制」的警告 — 例:Windows 上 paste_selection_back 需先 Ctrl+C。
+    /// Skill::platform_caveat() 回 None 就是 None。
+    caveat: Option<String>,
 }
 
 #[tauri::command]
@@ -1029,21 +1063,32 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
     }
     let _ = state; // suppress unused warning (state above is only used through .memory)
 
+    // 走 registry.names() 而不是 tool_definitions(),因為要拿到 Skill object
+    // 才能 call .platforms() / .platform_caveat()。順便 server-side filter
+    // 掉不適用當前 OS 的 skill,前端 list 完全乾淨。
+    let os = std::env::consts::OS;
     let skills = registry
-        .tool_definitions()
+        .names()
         .into_iter()
-        .map(|td| {
-            let kind = if shell_skill_names.contains(&td.name) {
+        .filter_map(|name| {
+            let skill = registry.get(name)?;
+            let platforms: Vec<&'static str> = skill.platforms().to_vec();
+            if !platforms.iter().any(|p| *p == os) {
+                return None; // 此 skill 不適用當前平台
+            }
+            let kind = if shell_skill_names.contains(name) {
                 "shell".to_string()
             } else {
                 "builtin".to_string()
             };
-            SkillInfo {
-                name: td.name,
-                description: td.description,
-                parameters: td.parameters,
+            Some(SkillInfo {
+                name: name.to_string(),
+                description: skill.description().to_string(),
+                parameters: skill.parameters_schema(),
                 kind,
-            }
+                platforms: platforms.into_iter().map(String::from).collect(),
+                caveat: skill.platform_caveat().map(String::from),
+            })
         })
         .collect();
     Ok(skills)

@@ -368,6 +368,21 @@ impl Skill for OpenAppSkill {
             "required": ["app"]
         })
     }
+    fn platform_caveat(&self) -> Option<&'static str> {
+        // Linux 走 .desktop search — 找到就走 gtk-launch,沒找到直接 spawn binary,
+        // 涵蓋範圍寬。Windows 走 cmd /c start → ShellExecute,只能解 App Paths
+        // 註冊表(chrome / code / firefox / winword / notepad 等預設 app)+ PATH,
+        // 解不到 Start Menu 釘選的 .lnk 或 Microsoft Store apps(AUMID 還沒做)。
+        if cfg!(target_os = "windows") {
+            Some(
+                "Windows best-effort 走 ShellExecute,只覆蓋 App Paths 註冊表 + PATH \
+                 (chrome / code / firefox / notepad 等多數預設 app OK)。\
+                 Start Menu 釘選的 .lnk 跟 Microsoft Store apps 不一定能解。",
+            )
+        } else {
+            None
+        }
+    }
     async fn execute(&self, args: Value, _ctx: &Context) -> Result<SkillOutput> {
         let name = args
             .get("app")
