@@ -44,7 +44,7 @@ Mori 不是單一 repo。整個「**森林 / The Forest**」宇宙由多個 repo
                  │                          │
 ┌────────────────┴─────┐         ┌──────────┴──────────────────┐
 │ 4a. CLI Interfaces   │         │ 4b. Annuli(reflection 服務)│
-│ Claude Code / Gemini │         │ yazelin/Annuli              │
+│ Claude Code / Gemini │         │ yazelin/annuli              │
 │ Codex / Hermes /     │         │ Python Flask + APScheduler  │
 │ OpenClaw...          │         │ HTTP API + CLI              │
 │ ~/.claude /~/.gemini │         │ • events / digests / rings   │
@@ -71,7 +71,7 @@ Mori 不是單一 repo。整個「**森林 / The Forest**」宇宙由多個 repo
 | **2. World Tree** | [`yazelin/world-tree`](https://github.com/yazelin/world-tree) | 公開 git + Quartz 站 | 共享 lore、NPC、Quests、Rules、儀式 skill、vault 結構模板、跨 CLI bridges |
 | **3. Spirit Memories** | `yazelin/mori-journal`(private 範例)/ user 自己的精靈 vault | 私人 git + 本機檔案 | 每個 user 自己的精靈記憶(SOUL / MEMORY / events / rings / digests) |
 | **4a. CLI Interfaces** | (外部工具)Claude Code / Gemini / Codex / Hermes / OpenClaw | 各 CLI 自己 install | 透過 world-tree `bridges/` symlink + 摘要重建,讓所有 CLI 都讀同一份 vault |
-| **4b. Annuli** | [`yazelin/Annuli`](https://github.com/yazelin/Annuli) | Python Flask service | 反思引擎 — 在 vault 上跑 events / digest / rings / curator,提供 HTTP API |
+| **4b. Annuli** | [`yazelin/annuli`](https://github.com/yazelin/annuli) | Python Flask service | 反思引擎 — 在 vault 上跑 events / digest / rings / curator,提供 HTTP API |
 | **5. mori-desktop** | [`yazelin/mori-desktop`](https://github.com/yazelin/mori-desktop) | Tauri 2 桌面 app | GUI body — 語音 / 熱鍵 / 視覺互動。對接 Annuli HTTP API |
 
 ### Vault 是唯一 single source of truth

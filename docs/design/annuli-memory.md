@@ -1,7 +1,7 @@
 # Annuli 架構設計 — vault-backed 反思服務
 
 > Annuli 的角色定位 + 對接 world-tree spirit vault 的設計決策。
-> **本文件描述計畫,不是已實作的事實。** 實作將在 `yazelin/Annuli` repo
+> **本文件描述計畫,不是已實作的事實。** 實作將在 `yazelin/annuli` repo
 > 內進行,本文件供 mori-desktop / world-tree / Annuli 三邊 design alignment。
 
 ---
@@ -15,7 +15,7 @@
 | **mori-journal vault** | 記憶資料的真實存放處 | Markdown vault,純檔案,跟 world-tree `templates/spirit-template/` 結構一致 |
 | **Annuli** | 在 vault 上面跑反思 / 事件 / 演化 / curator | Python Flask + APScheduler,讀寫 vault 檔案 |
 
-**Annuli 不是另一個 repo,Annuli 是 `yazelin/Annuli` 現有 repo 的重構** —
+**Annuli 不是另一個 repo,Annuli 是 `yazelin/annuli` 現有 repo 的重構** —
 讓它變成「**vault-backed reflection 服務**」。
 
 ---
@@ -363,6 +363,6 @@ new user 第一次跑 mori-desktop 或 Annuli CLI:
 **Last updated**: 2026-05-14  
 **Related repos**:
 - `yazelin/mori-desktop`(本 repo)
-- `yazelin/Annuli`(reflection service,待重構)
+- `yazelin/annuli`(reflection service,待重構)
 - `yazelin/mori-journal`(個人 vault 範例)
 - `yazelin/world-tree`(共享 lore + spirit-template)
