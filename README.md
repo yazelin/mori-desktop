@@ -24,6 +24,12 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 ```bash
 git clone https://github.com/yazelin/mori-desktop.git
 cd mori-desktop
+
+# Linux 第一次:裝 system deps(GTK / WebKit / ALSA / libssl / 等)
+# repo 自帶 script,跟 CI 跑同一份,版本跟 git 同步
+sudo bash scripts/install-linux-deps.sh
+# Windows / macOS:跳這步,Tauri prereqs 見官方文件
+
 npm install
 npm run build              # 建 dist/ — tauri::generate_context!() 編譯時會檢查這路徑
 cargo build --workspace    # workspace 才會 build mori-cli(Bash CLI proxy 需要)

@@ -143,13 +143,11 @@ INFO mori_tauri: non-X11 session detected — using xdg-desktop-portal GlobalSho
 
 <h2 id="alsa">cargo build 失敗:<code>pkg-config: alsa not found</code></h2>
 
-<p>cpal 需要 ALSA 開發 headers:</p>
+<p>cpal 需要 ALSA 開發 headers — 你跳過了 Linux Quick Start 那步 system deps 安裝:</p>
 
-<pre><code>sudo apt install libasound2-dev</code></pre>
+<pre><code>sudo bash scripts/install-linux-deps.sh</code></pre>
 
-<p>(已涵蓋在
-<a href="https://github.com/yazelin/ubuntu-26.04-setup/blob/main/scripts/setup-tauri-deps.sh">
-setup-tauri-deps.sh</a> 裡。)</p>
+<p>(repo 自帶,跟 CI 跑同一份;只想補 alsa 的話 <code>sudo apt install libasound2-dev</code> 也行。)</p>
 
 <h2 id="dock-stacking">Dock 出現多個 Mori 圖標堆疊</h2>
 
