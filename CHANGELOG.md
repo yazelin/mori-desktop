@@ -6,6 +6,111 @@
 
 ---
 
+## v0.2.0 — Windows 平台殼 + whisper.cpp shell-out 架構 + CI(2026-05-13)
+
+從 5T 之後一輪重點開發,**主要交付 Windows 10/11 全功能 + 簡化本機 STT
+build chain + GitHub Actions 自動發版**。session 內 17 個 commit,本節
+逆向整理。
+
+### 主要 feature
+
+#### Windows 平台殼上線(`feat: Windows 平台殼上線` `f2355e2` + 後續修)
+
+- **`crates/mori-tauri/src/selection_windows.rs` 新增** — `WindowsPasteController`
+  走 Tauri clipboard plugin write + Win32 `SendInput` Ctrl+V/Ctrl+Shift+V
+  注入。terminal 偵測(Windows Terminal / wt / mintty / alacritty 等)
+- **selection module cfg-attr 路徑切分**(`selection_linux.rs` /
+  `selection_windows.rs`),公開 API 一致:`read_primary_selection` /
+  `PlatformPasteController` / `send_enter` / `warn_if_setup_missing`
+- **`capture_window_context()` Windows 實作** — `GetForegroundWindow` +
+  `GetWindowThreadProcessId` + `QueryFullProcessImageNameW`(process name)+
+  `GetWindowTextW`(window title)
+- **action_skills.rs 內部 `mod platform` 分流** — Linux(xdg-open /
+  gtk-launch / ydotool)vs Windows(`ShellExecuteExW` + `SendInput` VK)
+- **`character_pack` 跨平台** — 拿掉 Linux-only cfg,Windows user 也拿到
+  default Mori sprite(寫到 `%USERPROFILE%\.mori\characters\mori\`)
+- **熱鍵全 22 條走 Win32 `RegisterHotKey`** — Ctrl+Alt+Space / Esc / P /
+  Alt+0~9 / Ctrl+Alt+0~9 都實機驗證
+
+#### whisper-local 改 shell-out 架構(`refactor: whisper-local 從 in-process FFI 改成 shell-out 到 whisper-server HTTP` `c598e12`)
+
+原本 `whisper-rs` 0.14 → `whisper-rs-sys` 0.13.1 在 cargo build 時用 cmake +
+bindgen 編 whisper.cpp C++ source 進 mori binary。**三個問題**:Windows MSVC
+bindgen 算錯 `whisper_full_params` struct size 整個編不出;Linux 也要
+cmake + libclang-dev;不能換 GPU 加速版本(user 要 fork mori 改 dep)。
+
+改成 spawn whisper.cpp **官方 pre-built `whisper-server` 子程序**,Mori 透過
+HTTP `POST /inference` 送 WAV bytes,server 回 JSON `{"text":"..."}`。
+
+**好處**:跨平台統一架構;Linux contributor 不需 cmake / libclang;user 想
+跑 NVIDIA CUDA / AMD CLBlast / Apple Metal 加速版只需**換 binary 一個檔**,
+Mori 程式碼 0 改;引擎 crash 不會帶死 Mori。
+
+**Lazy spawn** — 第一次按 Ctrl+Alt+Space 才起,~500ms warm-up 一次性
+cost,之後常駐。Drop SIGKILL 收尾。詳見 `whisper_local.rs` doc。
+
+#### GitHub Actions CI(`ci: 加 check.yml(PR cross-platform 編譯驗證)+ release.yml(tag 觸發發布)` `1e35b76` + ALSA fix `dac05b7` + setup script 自帶 `fc2830d`)
+
+- **`check.yml`** — push / PR 觸發,Ubuntu + Windows matrix 跑
+  `cargo check --workspace --all-targets`。Swatinem/rust-cache 把熱啟壓
+  ~5 分鐘
+- **`release.yml`** — `v*` tag 觸發,tauri-action 出 `.deb` / `.AppImage`
+  (Linux)+ `.msi` / `.nsis (.exe)`(Windows),自動上傳到 GitHub Release
+  (draft)
+- **`scripts/install-linux-deps.sh`** — repo 自帶,跟本機 dev / CI / docs
+  三邊指同一份 system deps 安裝邏輯(`libwebkit2gtk-4.1-dev` /
+  `libasound2-dev` 等)。改 deps 跟 code 進同一個 commit
+
+#### UI:Deps + Skills 平台 metadata(`feat(ui): 平台 metadata + caveat badge 系統` `cdb926a`)
+
+- **`DepSpec` 加 `platforms` / `install_caveat` / `install_overrides` 三欄位** —
+  Linux-only(ydotool / xdotool / xclip)在 Windows 完全隱藏;跨平台 dep
+  (whisper-server / ollama 等)在 Windows 用 Manual 變體顯示 PowerShell 指令
+- **`Skill` trait 加 `platforms()` / `platform_caveat()` 兩個 default method** —
+  `paste_selection_back` Windows caveat 標「需先 Ctrl+C」,`open_app` Windows
+  caveat 標「best-effort,Store apps 不一定能解」
+- **UI 加 ⚠️ caveat badge** — 在 head 列 hover tooltip,description 下方
+  顯示完整文字
+
+### Bug fix(都是 v0.2 sprint 內踩到的)
+
+- `fix(deps-ui)`(`974e8be`):Deps 頁「收起」按鈕真的能收起 —
+  原本 `(showCommand || manual)` 永遠 true,Manual 條目 block 永遠 visible
+- `fix(prompt)`(`c1c6358`):action skills 加 system prompt 使用守則 —
+  治 LLM「需要授權執行 mori CLI」幻覺
+- `fix(build)`(`ed8764a`):mori-cli 自動編進 `tauri dev` / `tauri build` —
+  用 npm `predev` / `prebuild` hook。之前 user 跑 `npm run tauri dev` 只會
+  build mori-tauri,`mori.exe` 不存在 → claude-bash chain 死
+- `fix(windows)`(`0fb1e0d`):`detect_mori_cli` 在 Windows 找 `mori.exe`
+  而非 `mori`(`PathBuf::exists` 不自動補副檔名)
+- `fix(windows)`(`32b3af4`):open_url / open_app 改用 `ShellExecuteExW` +
+  `SEE_MASK_FLAG_NO_UI` — 不再彈「Windows cannot find X」白色對話框
+- `fix(windows)`(`2339648`):`preprocess_file_includes` 兩個 Windows-specific
+  bug(HOME env var 沒設 → 也試 USERPROFILE;`canonicalize` 加 `\\?\` 前綴
+  讓 `starts_with` 永遠 false → home_root 也 canonicalize 一次對齊)
+- `fix(ui)`(`61ed6e2`):chat header 反映 agent profile provider override —
+  之前 user 切到 `provider: claude-bash` profile,header 還寫 groq,confusion
+- `chore(windows)`(`4e6aaad`):9 條 dead-code warnings 清掉 — cfg-gate
+  Linux-only portal helpers
+
+### 文件
+
+- `docs/providers.html`:whisper-local 段重寫 — 加 `server_binary` 欄位、
+  shell-out 架構說明、CPU / GPU 變體對照表、模型尺寸對照表
+- `docs/architecture.md`:whisper-local row 改成 shell-out + 連結 providers
+- `docs/roadmap.md`:近期計畫從「Win/Mac 平台殼」改成「macOS 平台殼」+
+  「Windows whisper-server 一鍵下載」
+- `README.md`:平台支援表升級成功能 × 平台 grid(17 行 × 4 OS)+
+  Windows 已知差別段
+
+### 自我測試
+
+`cargo test --workspace`:169 passed / 0 failed(mori-core 138、mori-tauri 31)
+Skill self-test via mori CLI:14 個 HTTP-exposed skill 全綠 + `open_app(nonexistent)`
+silent error(不彈窗)路徑證實
+
+---
+
 ## 5T — Toggle / Hold 兩種錄音熱鍵語意(2026-05-13)
 
 `Ctrl+Alt+Space`(預設 chord)從只認得 toggle(一按切換)拓成兩種模式擇一,
