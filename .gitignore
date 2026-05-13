@@ -31,3 +31,15 @@ Thumbs.db
 
 # Mori runtime data
 .mori/
+
+# Claude Code session state(不該進版本控制 — 個人 IDE-like artifact)
+.claude/
+
+# `tauri icon` 副產物:不在我們支援的平台清單裡的 icon 格式 — 我們只支援
+# Linux(PNG)+ Windows(ICO),其他都不 build / 不 commit。若日後加 Mac /
+# iOS / Android / Microsoft Store 再把對應行刪掉。
+crates/mori-tauri/icons/Square*Logo.png
+crates/mori-tauri/icons/StoreLogo.png
+crates/mori-tauri/icons/icon.icns
+crates/mori-tauri/icons/android/
+crates/mori-tauri/icons/ios/
