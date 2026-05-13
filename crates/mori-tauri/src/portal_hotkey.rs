@@ -15,7 +15,11 @@ use ashpd::{register_host_app, AppID};
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter};
 
-use crate::hotkey_config::HotkeyConfig;
+use crate::hotkey_config::{
+    HotkeyConfig, AGENT_SLOT_EVENT, AGENT_SLOT_ID_PREFIX, CANCEL_SHORTCUT_ID, PICKER_SHORTCUT_ID,
+    PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_PRESSED, PORTAL_HOTKEY_RELEASED, PORTAL_PICKER_EVENT,
+    PROFILE_SLOT_EVENT, SLOT_ID_PREFIX, TOGGLE_SHORTCUT_ID,
+};
 
 /// App ID we register with the portal Registry. Must match
 /// `tauri.conf.json` `identifier` so per-app portal permissions are
@@ -24,42 +28,6 @@ use crate::hotkey_config::HotkeyConfig;
 /// (without it, GlobalShortcuts.CreateSession returns
 /// `org.freedesktop.portal.Error.NotAllowed: An app id is required`).
 const APP_ID: &str = "ai.yazelin.mori";
-
-/// Stable id we register with the portal — the `Activated` signal
-/// echoes this back so we can tell which shortcut fired.
-pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
-
-/// 5J: 錄音中按 Ctrl+Alt+Esc 直接丟掉錄音(不送 STT、不進 chat)。
-pub const CANCEL_SHORTCUT_ID: &str = "cancel";
-
-/// 5K-1: Ctrl+Alt+P 開 picker overlay 選 profile(支援 9 個 slot 之外的)。
-pub const PICKER_SHORTCUT_ID: &str = "picker";
-
-/// Toggle chord 按下事件。Toggle 模式下 main.rs 用它跑 toggle;Hold 模式下用它
-/// 開始錄音。Portal 走 `Activated`,X11 走 `ShortcutState::Pressed`。
-pub const PORTAL_HOTKEY_PRESSED: &str = "portal-hotkey-pressed";
-
-/// Toggle chord 放開事件。Hold 模式下用它停錄送 STT;Toggle 模式下是 no-op。
-/// Portal 走 `Deactivated`,X11 走 `ShortcutState::Released`。
-pub const PORTAL_HOTKEY_RELEASED: &str = "portal-hotkey-released";
-
-/// Tauri event emitted when the cancel shortcut fires(錄音中丟棄)。
-pub const PORTAL_CANCEL_EVENT: &str = "portal-cancel-fired";
-
-/// Tauri event emitted when the picker shortcut fires(開 profile picker)。
-pub const PORTAL_PICKER_EVENT: &str = "portal-picker-fired";
-
-/// Prefix for VoiceInput slot shortcuts (Alt+0~9 → slot-0 … slot-9).
-const SLOT_ID_PREFIX: &str = "slot-";
-
-/// Prefix for Agent slot shortcuts (5G — Ctrl+Alt+0~9 → agent-slot-0 … agent-slot-9).
-const AGENT_SLOT_ID_PREFIX: &str = "agent-slot-";
-
-/// Tauri event emitted when Alt+N fires. Payload is the slot number as u8 (0–9).
-pub const PROFILE_SLOT_EVENT: &str = "portal-profile-slot";
-
-/// Tauri event emitted when Ctrl+Alt+N fires. Payload is the slot number as u8 (0–9).
-pub const AGENT_SLOT_EVENT: &str = "portal-agent-slot";
 
 /// Run forever, dispatching portal Activated signals into Tauri events.
 ///

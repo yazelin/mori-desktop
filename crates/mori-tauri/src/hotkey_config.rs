@@ -16,6 +16,49 @@ use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
 use tauri_plugin_global_shortcut::Shortcut;
 
+// ── Tauri event names + portal shortcut ids ──────────────────────────────────
+//
+// 過去這些常數住在 `portal_hotkey.rs`,但 X11 path / 非 Linux path 都會 emit
+// 同樣的事件,放在 hotkey_config 比較中性 — 不管走哪條註冊 path(X11 XGrabKey /
+// Windows RegisterHotKey / macOS Carbon / Wayland portal),listener 都認同樣的
+// event 字串。
+
+/// Portal session 註冊 toggle chord 的穩定 ID(`Activated` signal 回傳這個)。
+pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
+
+/// Portal session 註冊 cancel chord 的穩定 ID。
+pub const CANCEL_SHORTCUT_ID: &str = "cancel";
+
+/// Portal session 註冊 picker chord 的穩定 ID。
+pub const PICKER_SHORTCUT_ID: &str = "picker";
+
+/// VoiceInput slot shortcuts(Alt+0~9 → slot-0 … slot-9)的 portal id prefix。
+pub const SLOT_ID_PREFIX: &str = "slot-";
+
+/// Agent slot shortcuts(Ctrl+Alt+0~9 → agent-slot-0 … agent-slot-9)的 portal id prefix。
+pub const AGENT_SLOT_ID_PREFIX: &str = "agent-slot-";
+
+/// Toggle chord 按下事件。Toggle 模式下 main.rs 用它跑 toggle;Hold 模式下用它
+/// 開始錄音。Portal 走 `Activated`、X11 / Windows / macOS 走
+/// `ShortcutState::Pressed`。
+pub const PORTAL_HOTKEY_PRESSED: &str = "portal-hotkey-pressed";
+
+/// Toggle chord 放開事件。Hold 模式下用它停錄送 STT;Toggle 模式下是 no-op。
+/// Portal 走 `Deactivated`、X11 / Windows / macOS 走 `ShortcutState::Released`。
+pub const PORTAL_HOTKEY_RELEASED: &str = "portal-hotkey-released";
+
+/// Cancel chord 觸發事件(錄音中丟棄音檔 / busy 時 abort pipeline)。
+pub const PORTAL_CANCEL_EVENT: &str = "portal-cancel-fired";
+
+/// Picker chord 觸發事件(開 profile picker overlay)。
+pub const PORTAL_PICKER_EVENT: &str = "portal-picker-fired";
+
+/// VoiceInput slot 觸發事件(payload 是 slot 編號 u8)。
+pub const PROFILE_SLOT_EVENT: &str = "portal-profile-slot";
+
+/// Agent slot 觸發事件(payload 是 slot 編號 u8)。
+pub const AGENT_SLOT_EVENT: &str = "portal-agent-slot";
+
 const DEFAULT_TOGGLE: &str = "Ctrl+Alt+Space";
 const DEFAULT_CANCEL: &str = "Ctrl+Alt+Escape";
 const DEFAULT_PICKER: &str = "Ctrl+Alt+P";

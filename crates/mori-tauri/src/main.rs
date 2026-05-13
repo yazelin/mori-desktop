@@ -5,11 +5,9 @@
 mod action_skills;
 mod context_provider;
 mod deps;
-#[cfg(target_os = "linux")]
 mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
-#[cfg(target_os = "linux")]
 mod x11_hotkey;
 #[cfg(target_os = "linux")]
 mod x11_shape;
@@ -46,8 +44,6 @@ use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Listener, Manager, WindowEvent};
-#[cfg(not(target_os = "linux"))]
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use recording::Recorder;
 
@@ -116,7 +112,6 @@ pub struct AppState {
     /// 啟動時從 `hotkey_config.toggle_mode` 讀入,`config_write` 寫完 disk 後同步
     /// 重讀更新 → 改完即時生效不必重啟。Listener 永遠掛 PRESSED + RELEASED,在
     /// handler 內讀這個 mutex 決定 dispatch。
-    #[cfg(target_os = "linux")]
     pub toggle_mode: Mutex<hotkey_config::ToggleMode>,
 }
 
@@ -615,7 +610,7 @@ fn config_read() -> Result<String, String> {
 #[tauri::command]
 fn config_write(
     app: AppHandle,
-    #[cfg(target_os = "linux")] state: tauri::State<'_, Arc<AppState>>,
+    state: tauri::State<'_, Arc<AppState>>,
     text: String,
 ) -> Result<(), String> {
     // Validate JSON parses before write,不然容易把 config.json 寫壞
@@ -627,20 +622,16 @@ fn config_write(
     // section 的 animated / wander toggle 即時生效用)
     let _ = app.emit("config-changed", ());
     // 5T: 熱套用 hotkeys.toggle_mode — 重讀 disk 後把新 mode 寫進 state,
-    // 下一次 PRESSED / RELEASED 立刻走新 dispatch 不必重啟。Linux only,
-    // 非 Linux 的 fallback path 沒 hotkey config。
-    #[cfg(target_os = "linux")]
-    {
-        let cfg = hotkey_config::HotkeyConfig::load(&path);
-        let prev = *state.toggle_mode.lock();
-        if prev != cfg.toggle_mode {
-            *state.toggle_mode.lock() = cfg.toggle_mode;
-            tracing::info!(
-                ?prev,
-                new = ?cfg.toggle_mode,
-                "hotkeys.toggle_mode hot-reloaded",
-            );
-        }
+    // 下一次 PRESSED / RELEASED 立刻走新 dispatch 不必重啟。三大平台都支援。
+    let cfg = hotkey_config::HotkeyConfig::load(&path);
+    let prev = *state.toggle_mode.lock();
+    if prev != cfg.toggle_mode {
+        *state.toggle_mode.lock() = cfg.toggle_mode;
+        tracing::info!(
+            ?prev,
+            new = ?cfg.toggle_mode,
+            "hotkeys.toggle_mode hot-reloaded",
+        );
     }
     Ok(())
 }
@@ -1236,7 +1227,6 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
 
 /// Hold 模式 — chord 按下:相當於 toggle 模式的「開錄」分支,但只負責開,
 /// 不會 toggle。已在錄音中 / busy 時是 no-op。
-#[cfg(target_os = "linux")]
 fn handle_hotkey_pressed(app: AppHandle, state: Arc<AppState>) {
     if matches!(*state.mode.lock(), Mode::Background) {
         tracing::info!("hotkey press while Background → wake to Active + start recording");
@@ -1260,7 +1250,6 @@ fn handle_hotkey_pressed(app: AppHandle, state: Arc<AppState>) {
 /// Hold 模式 — chord 放開:只在 Recording 中觸發 stop_and_transcribe。
 /// 其他 phase 不動作(例如使用者放開太快、key repeat 時序、或 release 比
 /// press 還早抵達的 portal 邊角)。
-#[cfg(target_os = "linux")]
 fn handle_hotkey_released(app: AppHandle, state: Arc<AppState>) {
     let current = state.phase.lock().clone();
     match current {
@@ -2504,9 +2493,8 @@ fn main() {
         ollama_warmup: Mutex::new(None),
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
         pipeline_task: Mutex::new(None),
-        // 5T: 啟動先用 default(Toggle),Linux setup 讀 ~/.mori/config.json 後
-        // 覆寫成實際值(見下方 hotkey_config 載入處)。
-        #[cfg(target_os = "linux")]
+        // 5T: 啟動先用 default(Toggle),setup 讀 ~/.mori/config.json 後覆寫成
+        // 實際值(見下方 hotkey_config 載入處)。
         toggle_mode: Mutex::new(hotkey_config::ToggleMode::default()),
     });
 
@@ -2853,26 +2841,35 @@ fn main() {
             });
 
             // ── 全域熱鍵:Ctrl+Alt+Space + 22 個 profile 切換鍵 ──
-            // Linux 兩條 path,看 XDG_SESSION_TYPE 走哪邊:
-            // - x11      → tauri-plugin-global-shortcut(XGrabKey,不需 portal)
-            // - wayland  → xdg-desktop-portal GlobalShortcuts
-            // XWayland(wayland session 跑 X 程式)也走 portal — XGrabKey 在
-            // XWayland 下被 compositor 擋掉。macOS / Windows 走非 Linux 分支。
             //
-            // 兩條 path 共用同一份 ~/.mori/config.json `hotkeys` 設定;X11 設
-            // 定 100% 由 config 決定,Wayland 走 portal 後使用者改 GNOME 系統
-            // 設定為準(portal 規範如此,Mori config 只當第一次註冊的建議值)。
+            // 平台 → 註冊 path:
+            // | 平台           | path                                        |
+            // |---|---|
+            // | Linux X11      | `tauri-plugin-global-shortcut`(XGrabKey)  |
+            // | Linux Wayland  | `xdg-desktop-portal.GlobalShortcuts`        |
+            // | Windows        | `tauri-plugin-global-shortcut`(RegisterHotKey) |
+            // | macOS          | `tauri-plugin-global-shortcut`(Carbon)    |
+            //
+            // XWayland(wayland session 跑 X 程式)也走 portal — XGrabKey 在
+            // XWayland 下被 compositor 擋掉。
+            //
+            // 所有 path 共用同一份 ~/.mori/config.json `hotkeys` 設定;X11 /
+            // Win / Mac 由 config 100% 決定,Wayland 走 portal 後使用者改 GNOME
+            // 系統設定為準(portal 規範如此,Mori config 只當第一次註冊的建議值)。
+
+            // === 載入 config(跨平台)+ 寫 toggle_mode 進 state ===
+            let mori_config_path = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE")) // Windows fallback
+                .map(std::path::PathBuf::from)
+                .map(|h| h.join(".mori/config.json"))
+                .unwrap_or_default();
+            let hotkey_config = hotkey_config::HotkeyConfig::load(&mori_config_path);
+            // 5T: 寫進 state 給後續 PRESSED/RELEASED listener 用。改 config 時
+            // config_write 會 reload 一次,所以這裡只負責「啟動快照」。
+            *state_for_setup.toggle_mode.lock() = hotkey_config.toggle_mode;
+
             #[cfg(target_os = "linux")]
             {
-                let mori_config_path = std::env::var("HOME")
-                    .map(std::path::PathBuf::from)
-                    .map(|h| h.join(".mori/config.json"))
-                    .unwrap_or_default();
-                let hotkey_config = hotkey_config::HotkeyConfig::load(&mori_config_path);
-                // 5T: 寫進 state 給後續 PRESSED/RELEASED listener 用。改 config 時
-                // config_write 會 reload 一次,所以這裡只負責「啟動快照」。
-                *state_for_setup.toggle_mode.lock() = hotkey_config.toggle_mode;
-
                 if x11_hotkey::is_x11_session() {
                     tracing::info!("X11 session detected — using tauri-plugin-global-shortcut");
                     if let Err(e) = x11_hotkey::register(&app.handle(), &hotkey_config) {
@@ -2988,169 +2985,156 @@ fn main() {
                         }
                     });
                 }
-
-                // 5T: 永遠掛 PRESSED + RELEASED 兩個 listener,handler 內讀
-                // `state.toggle_mode` 決定 dispatch:
-                //   Toggle 模式 → PRESSED 跑 handle_hotkey_toggle;RELEASED 忽略
-                //   Hold   模式 → PRESSED 跑 handle_hotkey_pressed;RELEASED 跑 handle_hotkey_released
-                // 這樣切換 toggle_mode(config_write 寫完會 reload state mode)
-                // 不必重啟,下一次按鍵立刻走新邏輯。
-                let handle_press = app.handle().clone();
-                let state_press = state_for_setup.clone();
-                app.listen(portal_hotkey::PORTAL_HOTKEY_PRESSED, move |_event| {
-                    let mode = *state_press.toggle_mode.lock();
-                    match mode {
-                        hotkey_config::ToggleMode::Toggle => {
-                            handle_hotkey_toggle(handle_press.clone(), state_press.clone());
-                        }
-                        hotkey_config::ToggleMode::Hold => {
-                            handle_hotkey_pressed(handle_press.clone(), state_press.clone());
-                        }
-                    }
-                });
-                let handle_release = app.handle().clone();
-                let state_release = state_for_setup.clone();
-                app.listen(portal_hotkey::PORTAL_HOTKEY_RELEASED, move |_event| {
-                    let mode = *state_release.toggle_mode.lock();
-                    if mode == hotkey_config::ToggleMode::Hold {
-                        handle_hotkey_released(
-                            handle_release.clone(),
-                            state_release.clone(),
-                        );
-                    }
-                    // Toggle 模式 RELEASED 是 no-op:Press 已做完 toggle 動作。
-                });
-                tracing::info!(
-                    "hotkey toggle/hold listeners armed (mode={:?})",
-                    *state_for_setup.toggle_mode.lock(),
-                );
-
-                // 5J: Ctrl+Alt+Esc — 全域中斷
-                // - Phase::Recording → 停錄音 + 丟掉音檔不送 STT
-                // - Phase::Transcribing / Responding → abort pipeline task,
-                //   kill_on_drop 讓 claude / gemini / codex 子程序連帶 SIGKILL
-                // - 其他 phase → 忽略
-                let handle_cancel = app.handle().clone();
-                let state_for_cancel = state_for_setup.clone();
-                app.listen(portal_hotkey::PORTAL_CANCEL_EVENT, move |_event| {
-                    let phase = state_for_cancel.phase.lock().clone();
-                    match phase {
-                        Phase::Recording { .. } => {
-                            tracing::info!("Ctrl+Alt+Esc — cancelling current recording");
-                            if let Some(rec) = state_for_cancel.recorder.lock().take() {
-                                match rec.stop() {
-                                    Ok(audio) => {
-                                        let secs = audio.samples.len() as f32
-                                            / (audio.sample_rate as f32
-                                                * audio.channels as f32);
-                                        tracing::info!(
-                                            duration_secs = secs,
-                                            "recording cancelled via portal hotkey (audio discarded)",
-                                        );
-                                    }
-                                    Err(e) => tracing::warn!(?e, "stop on portal cancel returned err"),
-                                }
-                            }
-                            // abort 後台 pipeline(如果剛好已經 spawn 但還沒進階段)
-                            if let Some(task) = state_for_cancel.pipeline_task.lock().take() {
-                                task.abort();
-                            }
-                            state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
-                        }
-                        Phase::Transcribing | Phase::Responding { .. } => {
-                            tracing::info!(?phase, "Ctrl+Alt+Esc — aborting in-flight pipeline");
-                            if let Some(task) = state_for_cancel.pipeline_task.lock().take() {
-                                task.abort();
-                                tracing::info!("pipeline task aborted (kill_on_drop will SIGKILL child)");
-                            }
-                            state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
-                        }
-                        _ => {
-                            tracing::debug!(?phase, "Ctrl+Alt+Esc fired but no in-flight work — ignored");
-                        }
-                    }
-                });
-
-                // 5K-1: Ctrl+Alt+P 開 picker
-                //
-                // 流程:Rust 先 show() + set_focus()(確保視窗 visible + Wayland 抓焦點),
-                // 再 emit picker-open 給 React 端 center / 拉 profile 列表。
-                // visible: false 的 window webview 仍會載入,React mount 後 listener 已就位;
-                // 但 emit 前先 show 確保視窗顯示時機跟 focus 都對齊。
-                let handle_picker = app.handle().clone();
-                app.listen(portal_hotkey::PORTAL_PICKER_EVENT, move |_event| {
-                    tracing::debug!("picker listener fired — looking up picker window");
-                    match handle_picker.get_webview_window("picker") {
-                        Some(w) => {
-                            if let Err(e) = w.show() {
-                                tracing::warn!(?e, "picker w.show() failed");
-                            }
-                            if let Err(e) = w.set_focus() {
-                                tracing::warn!(?e, "picker w.set_focus() failed");
-                            }
-                            if let Err(e) = handle_picker.emit("picker-open", ()) {
-                                tracing::warn!(?e, "picker emit picker-open failed");
-                            } else {
-                                tracing::info!("picker show + focus + emit picker-open done");
-                            }
-                        }
-                        None => {
-                            tracing::error!("picker window not found by label 'picker'");
-                        }
-                    }
-                });
-
-                // 5F-2: Alt+0~9 VoiceInput profile 切換
-                let handle_slot = app.handle().clone();
-                let state_for_slot = state_for_setup.clone();
-                app.listen(portal_hotkey::PROFILE_SLOT_EVENT, move |event| {
-                    let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
-                        return;
-                    };
-                    handle_profile_slot(handle_slot.clone(), state_for_slot.clone(), slot);
-                });
-
-                // 5G-5: Ctrl+Alt+0~9 Agent profile 切換
-                let handle_agent_slot = app.handle().clone();
-                let state_for_agent_slot = state_for_setup.clone();
-                app.listen(portal_hotkey::AGENT_SLOT_EVENT, move |event| {
-                    let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
-                        return;
-                    };
-                    handle_agent_profile_slot(
-                        handle_agent_slot.clone(),
-                        state_for_agent_slot.clone(),
-                        slot,
-                    );
-                });
-
-                tracing::info!("hotkey path ready (toggle + cancel + picker + Alt+0~9 + Ctrl+Alt+0~9) + tray icon");
             }
 
+            // Windows / macOS:直接走 tauri-plugin-global-shortcut 註冊全套
+            // 22 條,跟 Linux X11 path 共用同一份 `x11_hotkey::register`(底層是
+            // 跨平台的 plugin,Windows 用 `RegisterHotKey`,macOS 用 Carbon)。
             #[cfg(not(target_os = "linux"))]
             {
-                let shortcut = Shortcut::new(
-                    Some(Modifiers::CONTROL | Modifiers::ALT),
-                    Code::Space,
-                );
-
-                let handle = app.handle().clone();
-                let state_for_handler = state_for_setup.clone();
-
-                app.global_shortcut().on_shortcut(
-                    shortcut,
-                    move |_app, _shortcut, event| {
-                        if event.state() != ShortcutState::Pressed {
-                            return;
-                        }
-                        handle_hotkey_toggle(handle.clone(), state_for_handler.clone());
-                    },
-                )?;
-
-                tracing::info!(
-                    "registered global shortcut: Ctrl+Alt+Space + tray icon"
-                );
+                if let Err(e) = x11_hotkey::register(&app.handle(), &hotkey_config) {
+                    tracing::error!(
+                        ?e,
+                        "global shortcut registration failed — \
+                         use the UI toggle button to trigger Mori"
+                    );
+                }
             }
+
+            // === 以下 listener wiring 跨平台 ===
+
+            // 5T: 永遠掛 PRESSED + RELEASED 兩個 listener,handler 內讀
+            // `state.toggle_mode` 決定 dispatch:
+            //   Toggle 模式 → PRESSED 跑 handle_hotkey_toggle;RELEASED 忽略
+            //   Hold   模式 → PRESSED 跑 handle_hotkey_pressed;RELEASED 跑 handle_hotkey_released
+            // 這樣切換 toggle_mode(config_write 寫完會 reload state mode)
+            // 不必重啟,下一次按鍵立刻走新邏輯。
+            let handle_press = app.handle().clone();
+            let state_press = state_for_setup.clone();
+            app.listen(hotkey_config::PORTAL_HOTKEY_PRESSED, move |_event| {
+                let mode = *state_press.toggle_mode.lock();
+                match mode {
+                    hotkey_config::ToggleMode::Toggle => {
+                        handle_hotkey_toggle(handle_press.clone(), state_press.clone());
+                    }
+                    hotkey_config::ToggleMode::Hold => {
+                        handle_hotkey_pressed(handle_press.clone(), state_press.clone());
+                    }
+                }
+            });
+            let handle_release = app.handle().clone();
+            let state_release = state_for_setup.clone();
+            app.listen(hotkey_config::PORTAL_HOTKEY_RELEASED, move |_event| {
+                let mode = *state_release.toggle_mode.lock();
+                if mode == hotkey_config::ToggleMode::Hold {
+                    handle_hotkey_released(handle_release.clone(), state_release.clone());
+                }
+                // Toggle 模式 RELEASED 是 no-op:Press 已做完 toggle 動作。
+            });
+            tracing::info!(
+                "hotkey toggle/hold listeners armed (mode={:?})",
+                *state_for_setup.toggle_mode.lock(),
+            );
+
+            // 5J: Ctrl+Alt+Esc — 全域中斷
+            // - Phase::Recording → 停錄音 + 丟掉音檔不送 STT
+            // - Phase::Transcribing / Responding → abort pipeline task,
+            //   kill_on_drop 讓 claude / gemini / codex 子程序連帶 SIGKILL
+            // - 其他 phase → 忽略
+            let handle_cancel = app.handle().clone();
+            let state_for_cancel = state_for_setup.clone();
+            app.listen(hotkey_config::PORTAL_CANCEL_EVENT, move |_event| {
+                let phase = state_for_cancel.phase.lock().clone();
+                match phase {
+                    Phase::Recording { .. } => {
+                        tracing::info!("Ctrl+Alt+Esc — cancelling current recording");
+                        if let Some(rec) = state_for_cancel.recorder.lock().take() {
+                            match rec.stop() {
+                                Ok(audio) => {
+                                    let secs = audio.samples.len() as f32
+                                        / (audio.sample_rate as f32 * audio.channels as f32);
+                                    tracing::info!(
+                                        duration_secs = secs,
+                                        "recording cancelled via portal hotkey (audio discarded)",
+                                    );
+                                }
+                                Err(e) => tracing::warn!(?e, "stop on portal cancel returned err"),
+                            }
+                        }
+                        // abort 後台 pipeline(如果剛好已經 spawn 但還沒進階段)
+                        if let Some(task) = state_for_cancel.pipeline_task.lock().take() {
+                            task.abort();
+                        }
+                        state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
+                    }
+                    Phase::Transcribing | Phase::Responding { .. } => {
+                        tracing::info!(?phase, "Ctrl+Alt+Esc — aborting in-flight pipeline");
+                        if let Some(task) = state_for_cancel.pipeline_task.lock().take() {
+                            task.abort();
+                            tracing::info!("pipeline task aborted (kill_on_drop will SIGKILL child)");
+                        }
+                        state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
+                    }
+                    _ => {
+                        tracing::debug!(?phase, "Ctrl+Alt+Esc fired but no in-flight work — ignored");
+                    }
+                }
+            });
+
+            // 5K-1: Ctrl+Alt+P 開 picker
+            //
+            // 流程:Rust 先 show() + set_focus()(確保視窗 visible + Wayland 抓焦點),
+            // 再 emit picker-open 給 React 端 center / 拉 profile 列表。
+            // visible: false 的 window webview 仍會載入,React mount 後 listener 已就位;
+            // 但 emit 前先 show 確保視窗顯示時機跟 focus 都對齊。
+            let handle_picker = app.handle().clone();
+            app.listen(hotkey_config::PORTAL_PICKER_EVENT, move |_event| {
+                tracing::debug!("picker listener fired — looking up picker window");
+                match handle_picker.get_webview_window("picker") {
+                    Some(w) => {
+                        if let Err(e) = w.show() {
+                            tracing::warn!(?e, "picker w.show() failed");
+                        }
+                        if let Err(e) = w.set_focus() {
+                            tracing::warn!(?e, "picker w.set_focus() failed");
+                        }
+                        if let Err(e) = handle_picker.emit("picker-open", ()) {
+                            tracing::warn!(?e, "picker emit picker-open failed");
+                        } else {
+                            tracing::info!("picker show + focus + emit picker-open done");
+                        }
+                    }
+                    None => {
+                        tracing::error!("picker window not found by label 'picker'");
+                    }
+                }
+            });
+
+            // 5F-2: Alt+0~9 VoiceInput profile 切換
+            let handle_slot = app.handle().clone();
+            let state_for_slot = state_for_setup.clone();
+            app.listen(hotkey_config::PROFILE_SLOT_EVENT, move |event| {
+                let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
+                    return;
+                };
+                handle_profile_slot(handle_slot.clone(), state_for_slot.clone(), slot);
+            });
+
+            // 5G-5: Ctrl+Alt+0~9 Agent profile 切換
+            let handle_agent_slot = app.handle().clone();
+            let state_for_agent_slot = state_for_setup.clone();
+            app.listen(hotkey_config::AGENT_SLOT_EVENT, move |event| {
+                let Ok(slot) = serde_json::from_str::<u8>(event.payload()) else {
+                    return;
+                };
+                handle_agent_profile_slot(
+                    handle_agent_slot.clone(),
+                    state_for_agent_slot.clone(),
+                    slot,
+                );
+            });
+
+            tracing::info!("hotkey path ready (toggle + cancel + picker + Alt+0~9 + Ctrl+Alt+0~9) + tray icon");
 
             Ok(())
         })

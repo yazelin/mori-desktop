@@ -1,9 +1,16 @@
-//! X11 session global shortcuts — via `tauri-plugin-global-shortcut` (XGrabKey).
+//! 直接跟 OS 註冊的全域熱鍵 path — via `tauri-plugin-global-shortcut`。
 //!
-//! Wayland 走 [`portal_hotkey`]:portal 跟 compositor 講話,使用者要去 GNOME
-//! Settings 改鍵。但 X11(包括純 X 跟 GDK_BACKEND=x11 的 Xorg session)直接
-//! XGrabKey 就能 grab 全域按鍵,不必走 portal,設定 100% 由 `~/.mori/config.json`
-//! 主導。
+//! 用在所有「不需要 portal 中介」的平台:
+//!
+//! | 平台 | 底層 |
+//! |---|---|
+//! | Linux X11(含 GDK_BACKEND=x11)| XGrabKey |
+//! | Windows | `RegisterHotKey` Win32 API |
+//! | macOS | Carbon `RegisterEventHotKey` |
+//! | Linux Wayland | **不能用** — compositor 擋掉 XGrabKey,改走 [`portal_hotkey`] |
+//!
+//! XWayland(Wayland session 跑 X11 程式)仍要走 portal — `XDG_SESSION_TYPE` 是
+//! `wayland`,Mori 啟動時偵測到會自動切 portal path。
 //!
 //! 跟 portal 路徑共用同一份 [`HotkeyConfig`],callback 也 emit 同樣的 Tauri
 //! event(`PORTAL_HOTKEY_PRESSED` / `PORTAL_HOTKEY_RELEASED` 等),所以
@@ -13,20 +20,29 @@ use anyhow::{Context as _, Result};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-use crate::hotkey_config::{HotkeyAction, HotkeyConfig};
-use crate::portal_hotkey::{
-    AGENT_SLOT_EVENT, PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_PRESSED, PORTAL_HOTKEY_RELEASED,
-    PORTAL_PICKER_EVENT, PROFILE_SLOT_EVENT,
+use crate::hotkey_config::{
+    HotkeyAction, HotkeyConfig, AGENT_SLOT_EVENT, PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_PRESSED,
+    PORTAL_HOTKEY_RELEASED, PORTAL_PICKER_EVENT, PROFILE_SLOT_EVENT,
 };
 
-/// 偵測是否走 X11 path:`XDG_SESSION_TYPE=x11`。
+/// Linux session 是否為 X11(`XDG_SESSION_TYPE=x11`)。
+///
 /// XWayland(`XDG_SESSION_TYPE=wayland` 但 GDK_BACKEND=x11)仍要走 portal,
 /// 因為 Wayland compositor 不會把 XGrabKey 的全域 key 送給 XWayland client。
+///
+/// 非 Linux 平台一律回 `false`(它們沒有 XDG_SESSION_TYPE 概念,但會走 direct
+/// path — main.rs 用 `cfg(not(target_os = "linux"))` 直接 call [`register`])。
+#[cfg(target_os = "linux")]
 pub fn is_x11_session() -> bool {
     matches!(
         std::env::var("XDG_SESSION_TYPE").as_deref(),
         Ok("x11") | Ok("X11"),
     )
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_x11_session() -> bool {
+    false
 }
 
 /// 註冊所有 23 個全域快捷鍵。每筆 grab 失敗單獨 log warn 不中斷其他 binding —
