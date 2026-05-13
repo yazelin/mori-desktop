@@ -23,19 +23,26 @@ use tauri_plugin_global_shortcut::Shortcut;
 // Windows RegisterHotKey / macOS Carbon / Wayland portal),listener 都認同樣的
 // event 字串。
 
+// 下面 5 個常數只在 portal_hotkey 路徑(Linux Wayland)用得到 — Windows /
+// macOS / Linux X11 都不走 portal,加 cfg gate 避免 dead-code warning。
 /// Portal session 註冊 toggle chord 的穩定 ID(`Activated` signal 回傳這個)。
+#[cfg(target_os = "linux")]
 pub const TOGGLE_SHORTCUT_ID: &str = "toggle";
 
 /// Portal session 註冊 cancel chord 的穩定 ID。
+#[cfg(target_os = "linux")]
 pub const CANCEL_SHORTCUT_ID: &str = "cancel";
 
 /// Portal session 註冊 picker chord 的穩定 ID。
+#[cfg(target_os = "linux")]
 pub const PICKER_SHORTCUT_ID: &str = "picker";
 
 /// VoiceInput slot shortcuts(Alt+0~9 → slot-0 … slot-9)的 portal id prefix。
+#[cfg(target_os = "linux")]
 pub const SLOT_ID_PREFIX: &str = "slot-";
 
 /// Agent slot shortcuts(Ctrl+Alt+0~9 → agent-slot-0 … agent-slot-9)的 portal id prefix。
+#[cfg(target_os = "linux")]
 pub const AGENT_SLOT_ID_PREFIX: &str = "agent-slot-";
 
 /// Toggle chord 按下事件。Toggle 模式下 main.rs 用它跑 toggle;Hold 模式下用它
@@ -125,6 +132,9 @@ pub enum HotkeyAction {
     AgentSlot(u8),
 }
 
+// portal_id() / description() 只給 portal_hotkey 路徑(Linux Wayland)用 —
+// 加 cfg gate 避免 dead-code warning 在非 Linux 平台。
+#[cfg(target_os = "linux")]
 impl HotkeyAction {
     /// Portal session 註冊用的穩定 ID。對應 `portal_hotkey.rs` 已 ship 的常數,
     /// 不能改(改了使用者 portal 權限會 reset)。
@@ -171,6 +181,7 @@ impl HotkeyBinding {
     }
 
     /// 轉成 portal 的 `preferred_trigger` 字串(`CTRL+ALT+space` 格式)。
+    #[cfg(target_os = "linux")]
     pub fn to_portal_trigger(&self) -> String {
         to_portal_trigger(&self.key)
     }
@@ -268,6 +279,7 @@ impl HotkeyConfig {
 }
 
 /// `Ctrl+Alt+P` → `CTRL+ALT+p`(portal trigger 格式,XKB keysym 名稱)。
+#[cfg(target_os = "linux")]
 fn to_portal_trigger(key: &str) -> String {
     let tokens: Vec<&str> = key.split('+').map(|t| t.trim()).collect();
     let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
@@ -286,6 +298,7 @@ fn to_portal_trigger(key: &str) -> String {
 
 /// 單獨的 key token → X11 keysym name(空白 → `space`、Escape → `Escape`、p → `p` 等)。
 /// 對齊 keysymdef.h 慣例;不在 lookup table 的走 best-effort(原樣保留)。
+/// 跨平台都用 — `normalize_for_compare` 做 hotkey 衝突檢測時需要它,所以不 cfg-gate。
 fn key_to_keysym(key: &str) -> String {
     let upper = key.to_uppercase();
     // 單字母 A-Z → 小寫
@@ -377,6 +390,7 @@ mod tests {
         assert_eq!(bindings.len(), 23); // toggle + cancel + picker + 10 voice + 10 agent
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn portal_trigger_format_matches_existing() {
         assert_eq!(to_portal_trigger("Ctrl+Alt+Space"), "CTRL+ALT+space");

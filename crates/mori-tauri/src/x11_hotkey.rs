@@ -32,17 +32,15 @@ use crate::hotkey_config::{
 ///
 /// 非 Linux 平台一律回 `false`(它們沒有 XDG_SESSION_TYPE 概念,但會走 direct
 /// path — main.rs 用 `cfg(not(target_os = "linux"))` 直接 call [`register`])。
+// `is_x11_session` 只在 Linux build 有意義 — main.rs 的 tauri command
+// wrapper(#[cfg(not(target_os = "linux"))] 走 false)不需要這層,所以拿掉
+// 非 Linux 版本避免 dead-code warning。
 #[cfg(target_os = "linux")]
 pub fn is_x11_session() -> bool {
     matches!(
         std::env::var("XDG_SESSION_TYPE").as_deref(),
         Ok("x11") | Ok("X11"),
     )
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn is_x11_session() -> bool {
-    false
 }
 
 /// 註冊所有 23 個全域快捷鍵。每筆 grab 失敗單獨 log warn 不中斷其他 binding —
