@@ -1,115 +1,115 @@
-//! 本機 Whisper(whisper.cpp via whisper-rs)— 100% 離線 STT。
+//! 本機 Whisper STT — shell-out 到 whisper.cpp 官方 `whisper-server` HTTP 子程序。
 //!
-//! 解決 5A-1 ~ 5A-3 之後 Mori 還是綁 Groq 的最後一塊。配上 Ollama 或
-//! Claude CLI 後就能完全 Groq-free,語音輸入也照常用。
+//! ## 為什麼是 shell-out 不是 in-process FFI
+//!
+//! Phase 5C 第一版用 `whisper-rs`(Rust binding 包 whisper.cpp C++ source),
+//! cargo build 時自己 cmake + bindgen 編進 mori 執行檔。優點是延遲低,缺點:
+//!
+//! 1. **跨平台脆**:`whisper-rs-sys` 0.13 在 Windows MSVC bindgen 算錯
+//!    `whisper_full_params` struct size,Windows build 直接斷。
+//! 2. **build 依賴重**:Linux 也要 `cmake` + `libclang-dev`,新 contributor
+//!    要先裝一輪 toolchain。
+//! 3. **不能用 GPU 加速版本**:user 想跑 CUDA / Metal / Vulkan whisper.cpp
+//!    要 fork Mori 改 dep,沒人做。
+//!
+//! shell-out 全解:user 自己下載 whisper.cpp release binary(每平台 / 每 GPU
+//! 變體都有 pre-built),放 `~/.mori/bin/whisper-server[.exe]` 或寫 config
+//! 絕對路徑。Mori spawn 它、HTTP POST WAV、收 JSON 文字。
+//!
+//! Trade-off:Mori 啟動時 lazy spawn(第一次按熱鍵才起),~500ms warm-up
+//! cost 放在第一次錄音前。之後常駐,跟 in-process 同速。
 //!
 //! ## 模型檔
+//!
 //! 走 ggml `.bin` 格式,從 huggingface 抓:
 //!   <https://huggingface.co/ggerganov/whisper.cpp/tree/main>
 //!
-//! 中文場景大小取捨(Acer Intel CPU 實測):
-//! | 模型 | 檔案大小 | 中文準度 | CPU 速度(real-time 比) |
-//! |---|---|---|---|
-//! | base   | 142MB | 普通,常分不清同音字 | ~3x realtime |
-//! | small  | 466MB | 不錯,日常對話足夠 | ~1x realtime |
-//! | medium | 1.5GB | 好,專有名詞少出錯 | ~0.5x realtime |
+//! 中文場景建議 small.bin(466MB);CPU 慢可以用 base(142MB)。
 //!
-//! 5C 預設 `~/.mori/models/ggml-small.bin`(中文夠用、檔案不過大、CPU 撐得住),
-//! user 想換更大的就在 config 改 `providers.whisper-local.model_path`。
+//! ## 預設 binary 來源
 //!
-//! ## 為什麼吃 WAV bytes 而不直接收 PCM
-//! 為了跟 Groq 路徑共用 `TranscriptionProvider` trait — 兩邊都收 WAV bytes,
-//! main.rs 不必知道走哪條路。WAV decode 在 CPU 上 < 50ms,一次性成本可
-//! 忽略;真正花時間的是 whisper inference。
+//! whisper.cpp Release:<https://github.com/ggml-org/whisper.cpp/releases>
+//! 解壓後把 `whisper-server`(Linux)或 `whisper-server.exe`(Windows)
+//! 放到 `~/.mori/bin/` 即可。
 
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use async_trait::async_trait;
-use parking_lot_compat::Mutex;
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use tokio::sync::Mutex;
 
 use super::transcribe::TranscriptionProvider;
 
-/// whisper.cpp 推理需要 16kHz、單聲道、f32 PCM
-const TARGET_SAMPLE_RATE: u32 = 16_000;
+const HEALTHCHECK_TIMEOUT_SECS: u64 = 30;
+const INFERENCE_TIMEOUT_SECS: u64 = 120;
 
-/// LocalWhisperProvider 內部需要可變 state(whisper-rs 的 state object 不是
-/// `Sync`),用 Mutex 包起來,讓 `transcribe()` 在不同 task 間 serialize。
-/// 在 CPU 上做 whisper 推理本來就 CPU-bound,平行也吃同一顆 CPU,序列
-/// 化反而簡化生命週期。
+/// 公開 API:跟 v1(in-process)同名同方法,呼叫端不用改。
 pub struct LocalWhisperProvider {
-    /// 把 WhisperContext 包在 Arc 裡,便於 .clone() 不重新讀檔。
-    ctx: Arc<WhisperContext>,
-    /// 模型檔路徑(供 IPC / log 顯示用)
-    model_path: PathBuf,
-    /// "zh" / "en" / "auto"。Some("auto") 會讓 whisper-rs 設 detect-mode。
-    language: Option<String>,
-    /// 推理 thread 數。預設 = available_parallelism()。
-    n_threads: i32,
-    /// state 不是 Sync,要 mutex 串起來。
-    state: Arc<Mutex<whisper_rs::WhisperState>>,
+    /// subprocess + HTTP 細節抽到內部物件。Arc 讓 transcribe() 不必 take
+    /// ownership;同時 Drop 在最後一份 Arc 釋放時觸發,清理子程序。
+    server: Arc<WhisperServer>,
 }
 
 impl LocalWhisperProvider {
     pub const NAME: &'static str = "whisper-local";
 
-    /// 從 config 蓋出 provider — 路徑由 `providers.whisper-local.model_path`
-    /// 指定,沒設就用 [`default_model_path`]。
+    /// 從 `~/.mori/config.json` 蓋出 provider。
     pub fn from_config() -> Result<Self> {
-        let model_path = mori_config_path()
+        let cfg = mori_config_path();
+        let model_path = cfg
             .as_deref()
             .and_then(|p| super::groq::read_json_pointer(p, "/providers/whisper-local/model_path"))
             .map(PathBuf::from)
             .unwrap_or_else(default_model_path);
-        let language = mori_config_path()
+        let language = cfg
             .as_deref()
             .and_then(|p| super::groq::read_json_pointer(p, "/providers/whisper-local/language"));
+        let server_binary = cfg
+            .as_deref()
+            .and_then(|p| super::groq::read_json_pointer(p, "/providers/whisper-local/server_binary"))
+            .map(PathBuf::from)
+            .unwrap_or_else(default_server_binary);
 
-        Self::new(&model_path, language)
+        Self::new(&model_path, language, &server_binary)
     }
 
-    pub fn new(model_path: &Path, language: Option<String>) -> Result<Self> {
+    pub fn new(model_path: &Path, language: Option<String>, server_binary: &Path) -> Result<Self> {
         if !model_path.exists() {
             bail!(
                 "whisper model not found at {}\n\nDownload one from \
                  https://huggingface.co/ggerganov/whisper.cpp/tree/main and put it there.\n\
-                 Recommended for Chinese: ggml-small.bin (466MB) — `wget -O {} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`",
-                model_path.display(),
+                 Recommended for Chinese: ggml-small.bin (466MB).",
                 model_path.display(),
             );
         }
+        // 不檢查 server_binary 存在性 — 它可能是 "whisper-server" 純 binary 名,
+        // 透過 OS PATH 解析,Command::new() 才能驗。錯誤訊息留到 ensure_started()
+        // 第一次 spawn 失敗時,給更精準的 hint。
 
-        let path_str = model_path
-            .to_str()
-            .ok_or_else(|| anyhow!("model path not valid UTF-8: {}", model_path.display()))?;
-        let ctx = WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
-            .with_context(|| format!("load whisper model from {}", model_path.display()))?;
-        let state = ctx
-            .create_state()
-            .context("create whisper state")?;
-
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| n.get() as i32)
-            .unwrap_or(4);
-
-        Ok(Self {
-            ctx: Arc::new(ctx),
+        let server = WhisperServer {
+            binary: server_binary.to_path_buf(),
             model_path: model_path.to_path_buf(),
             language,
-            n_threads,
-            state: Arc::new(Mutex::new(state)),
+            state: Mutex::new(None),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(INFERENCE_TIMEOUT_SECS))
+                .build()
+                .context("build reqwest client for whisper-server")?,
+        };
+        Ok(Self {
+            server: Arc::new(server),
         })
     }
 
     pub fn model_path(&self) -> &Path {
-        &self.model_path
+        &self.server.model_path
     }
 
     pub fn language(&self) -> Option<&str> {
-        self.language.as_deref()
+        self.server.language.as_deref()
     }
 }
 
@@ -120,90 +120,239 @@ impl TranscriptionProvider for LocalWhisperProvider {
     }
 
     async fn transcribe(&self, audio: Vec<u8>) -> Result<String> {
-        // whisper.cpp inference 是純 CPU、阻塞、長時間(可能秒級到分鐘級),
-        // 不能在 tokio reactor thread 上跑,要 spawn_blocking。
-        let ctx = self.ctx.clone();
-        let state = self.state.clone();
-        let language = self.language.clone();
-        let n_threads = self.n_threads;
-        let model_path = self.model_path.clone();
-
-        tokio::task::spawn_blocking(move || -> Result<String> {
-            tracing::debug!(
-                bytes = audio.len(),
-                model = %model_path.display(),
-                threads = n_threads,
-                "whisper-local transcribe request",
-            );
-
-            // 1. WAV → f32 PCM mono 16kHz
-            let samples = decode_wav_to_mono16k(&audio)?;
-            tracing::debug!(
-                input_samples = samples.len(),
-                duration_secs = samples.len() as f32 / TARGET_SAMPLE_RATE as f32,
-                "wav decoded + resampled",
-            );
-
-            // 2. 跑 whisper inference
-            let mut state = state.lock();
-            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-            params.set_n_threads(n_threads);
-            params.set_print_special(false);
-            params.set_print_progress(false);
-            params.set_print_realtime(false);
-            params.set_print_timestamps(false);
-
-            // Language:沒設或設 "auto" 都讓 whisper 自偵測;明確設值則照給。
-            let lang_str = language.as_deref().unwrap_or("auto");
-            params.set_language(Some(lang_str));
-
-            // 對 AI 助手講話的 prompt(跟 GroqProvider 一致),減少 "Thank you"
-            // 那類 caption hallucination。whisper-rs 0.14 的 set_initial_prompt
-            // 直接吃 &str。
-            params.set_initial_prompt(
-                "以下是使用者直接對 AI 助手 Mori 說的話,繁體中文。\
-                 常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫、\
-                 記住、提醒、行事曆、會議。",
-            );
-
-            state
-                .full(params, &samples)
-                .context("whisper full inference")?;
-
-            // 3. 收 segments 拼成最終字串
-            let n_segments = state.full_n_segments().context("read n_segments")?;
-            let mut text = String::new();
-            for i in 0..n_segments {
-                let seg = state
-                    .full_get_segment_text(i)
-                    .context("read segment text")?;
-                text.push_str(&seg);
-            }
-            // whisper 偶爾會加開頭空白,trim 掉
-            let text = text.trim().to_string();
-
-            // 防呆:整段都是空字串(可能因為環境噪音 + initial prompt 沒鎮住)
-            if text.is_empty() {
-                tracing::warn!("whisper-local returned empty transcription — mic may be muted");
-            }
-
-            // 釋放 _ctx,不然 compiler 警告未使用。但實際上 WhisperState 持有
-            // 的指標來自 ctx,Arc 確保它活著。
-            let _ = ctx;
-            Ok(text)
-        })
-        .await
-        .context("whisper-local: tokio join")?
+        self.server.transcribe(audio).await
     }
 }
 
-/// `~/.mori/models/ggml-small.bin` — 5C 預設模型路徑。
+// ─── 內部:subprocess + HTTP ────────────────────────────────────────────
+
+struct WhisperServer {
+    binary: PathBuf,
+    model_path: PathBuf,
+    /// `Some("zh")` / `Some("auto")` / `None`(送 inference 時走 server 預設,
+    /// 通常是 auto detect)。
+    language: Option<String>,
+    /// 序列化「啟動」這件事:check + spawn + health-check 整段在 tokio mutex
+    /// 裡。鎖住期間最多 ~500ms(warm-up),之後每次 transcribe lock 拿到就
+    /// 直接看到 Some(alive) 立刻釋放。
+    state: Mutex<Option<RunningServer>>,
+    http: reqwest::Client,
+}
+
+struct RunningServer {
+    child: Child,
+    port: u16,
+}
+
+impl Drop for RunningServer {
+    fn drop(&mut self) {
+        // 最佳努力 — kill 是非阻塞,送 SIGKILL(Linux)/ TerminateProcess(Win)。
+        // 不 wait(可能跑在 tokio thread,blocking wait 會卡 runtime)。OS reap。
+        let _ = self.child.kill();
+        tracing::debug!(port = self.port, pid = self.child.id(), "whisper-server killed on drop");
+    }
+}
+
+impl WhisperServer {
+    /// 確保子程序在跑;不在就 spawn 然後 health-check 等它 ready。
+    /// 回傳目前綁的 port。
+    async fn ensure_started(&self) -> Result<u16> {
+        let mut state = self.state.lock().await;
+
+        // Already-running fast path
+        if let Some(running) = state.as_mut() {
+            match running.child.try_wait() {
+                Ok(None) => return Ok(running.port), // alive
+                Ok(Some(status)) => {
+                    tracing::warn!(?status, "whisper-server exited; respawning");
+                    *state = None;
+                }
+                Err(e) => {
+                    tracing::warn!(?e, "whisper-server try_wait error; respawning");
+                    *state = None;
+                }
+            }
+        }
+
+        let port = pick_free_port().context("pick free localhost port for whisper-server")?;
+        let lang = self.language.as_deref().unwrap_or("auto");
+        let model_str = self
+            .model_path
+            .to_str()
+            .ok_or_else(|| anyhow!("model path not valid UTF-8: {}", self.model_path.display()))?;
+
+        let mut cmd = Command::new(&self.binary);
+        cmd.args([
+            "--model",
+            model_str,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--inference-path",
+            "/inference",
+            "--language",
+            lang,
+        ]);
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+        let child = cmd.spawn().with_context(|| {
+            format!(
+                "spawn whisper-server from {} — 確認檔案存在 + 可執行。\n\
+                 下載: https://github.com/ggml-org/whisper.cpp/releases\n\
+                 解壓後放到 ~/.mori/bin/whisper-server{} 或在 config 寫絕對路徑\n\
+                 (~/.mori/config.json → providers.whisper-local.server_binary)。",
+                self.binary.display(),
+                if cfg!(windows) { ".exe" } else { "" },
+            )
+        })?;
+
+        tracing::info!(
+            binary = %self.binary.display(),
+            model = %self.model_path.display(),
+            port,
+            language = lang,
+            "spawned whisper-server",
+        );
+
+        let running = RunningServer { child, port };
+        *state = Some(running);
+
+        // 釋放 lock 之前先 health-check;成功才放 port 回去。失敗就把 state 清掉,
+        // 下次 ensure_started 再試一次。
+        let healthcheck = self.wait_for_ready(port).await;
+        if let Err(e) = healthcheck {
+            *state = None; // RunningServer Drop kills the child
+            return Err(e);
+        }
+
+        Ok(port)
+    }
+
+    async fn wait_for_ready(&self, port: u16) -> Result<()> {
+        // whisper-server 載入模型期間 HTTP 連得上但 /inference 還沒 ready;
+        // 我們 poll 根 URL,有任何 200/404 都算 "已 listen"。GET / 在
+        // whisper.cpp server 是 index.html(load 完返 200)— 200 = 真 ready。
+        let deadline = std::time::Instant::now() + Duration::from_secs(HEALTHCHECK_TIMEOUT_SECS);
+        let url = format!("http://127.0.0.1:{port}/");
+        let mut attempts = 0u32;
+        loop {
+            attempts += 1;
+            match self
+                .http
+                .get(&url)
+                .timeout(Duration::from_millis(500))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::debug!(port, attempts, "whisper-server ready");
+                    return Ok(());
+                }
+                _ => {
+                    if std::time::Instant::now() >= deadline {
+                        bail!(
+                            "whisper-server did not become ready within {}s — \
+                             模型載入過慢或 binary 異常退出。檢查 ~/.mori/models/ 模型檔",
+                            HEALTHCHECK_TIMEOUT_SECS,
+                        );
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        }
+    }
+
+    async fn transcribe(&self, audio: Vec<u8>) -> Result<String> {
+        let port = self.ensure_started().await?;
+        let url = format!("http://127.0.0.1:{port}/inference");
+
+        tracing::debug!(bytes = audio.len(), port, "whisper-server inference request");
+
+        let part = reqwest::multipart::Part::bytes(audio)
+            .file_name("audio.wav")
+            .mime_str("audio/wav")
+            .context("build multipart audio part")?;
+        let mut form = reqwest::multipart::Form::new().part("file", part);
+        // 加 initial prompt 鎮住 caption hallucination(跟 v1 in-process 路徑同字串)。
+        form = form.text(
+            "prompt",
+            "以下是使用者直接對 AI 助手 Mori 說的話,繁體中文。\
+             常見用語:程式、軟體、檔案、影片、電腦、滑鼠、伺服器、資料庫、\
+             記住、提醒、行事曆、會議。",
+        );
+        // response_format 預設 json,顯式宣告省得未來 server 改預設。
+        form = form.text("response_format", "json");
+        // language 經由啟動 CLI flag 已設,這裡冗餘傳一次(server 接受 per-request override)。
+        if let Some(lang) = &self.language {
+            form = form.text("language", lang.clone());
+        }
+
+        let resp = self
+            .http
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .context("POST /inference to whisper-server")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("whisper-server returned {}: {}", status, body);
+        }
+
+        // whisper.cpp server 回 `{"text": "..."}`(json) 或純文字(text format)。
+        // 我們上面要求 json,直接 parse。
+        let json: serde_json::Value = resp.json().await.context("parse whisper-server JSON")?;
+        let text = json
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("whisper-server JSON has no `text` field: {json}"))?
+            .trim()
+            .to_string();
+
+        if text.is_empty() {
+            tracing::warn!("whisper-server returned empty transcription — mic may be muted");
+        }
+
+        Ok(text)
+    }
+}
+
+// ─── 預設 / helpers ────────────────────────────────────────────────────
+
+/// `~/.mori/models/ggml-small.bin` — 預設模型路徑。
 pub fn default_model_path() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
     home.join(".mori").join("models").join("ggml-small.bin")
+}
+
+/// 預設 whisper-server binary 位置:`~/.mori/bin/whisper-server[.exe]`。
+///
+/// 若不存在,Command::new 會嘗試從 PATH 解(fallback)。user 想把 binary 放
+/// 其他位置就在 config `providers.whisper-local.server_binary` 寫絕對路徑。
+pub fn default_server_binary() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let exe_name = if cfg!(windows) {
+        "whisper-server.exe"
+    } else {
+        "whisper-server"
+    };
+    let in_mori_bin = home.join(".mori").join("bin").join(exe_name);
+    if in_mori_bin.exists() {
+        in_mori_bin
+    } else {
+        // 不存在就只給 binary 名,讓 OS PATH 解析(user 把 whisper-server 裝到
+        // /usr/local/bin / C:\Program Files\... 也能用)。
+        PathBuf::from(exe_name)
+    }
 }
 
 fn mori_config_path() -> Option<PathBuf> {
@@ -213,155 +362,46 @@ fn mori_config_path() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h).join(".mori").join("config.json"))
 }
 
-/// 解 WAV bytes 成 mono 16kHz f32 samples。
-///
-/// 步驟:
-/// 1. 用 hound 讀 WAV header + samples
-/// 2. i16/i32/f32 統一轉 f32 [-1.0, 1.0]
-/// 3. 多聲道 → mean-mix down to mono
-/// 4. sample rate ≠ 16000 → 用 rubato 重採樣(高品質 sinc)
-fn decode_wav_to_mono16k(wav: &[u8]) -> Result<Vec<f32>> {
-    let cursor = std::io::Cursor::new(wav);
-    let mut reader = hound::WavReader::new(cursor).context("open WAV from bytes")?;
-    let spec = reader.spec();
-
-    // Step 1+2:samples → f32
-    let mut interleaved: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Int => {
-            // 依 bits_per_sample 正規化到 [-1, 1]
-            let max = (1u64 << (spec.bits_per_sample - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| s.map(|v| v as f32 / max))
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .context("read int samples")?
-        }
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("read float samples")?,
-    };
-
-    // Step 3:多聲道 → mono(平均)
-    let channels = spec.channels as usize;
-    if channels > 1 {
-        interleaved = interleaved
-            .chunks(channels)
-            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-            .collect();
-    }
-
-    // Step 4:resample(若需要)
-    if spec.sample_rate == TARGET_SAMPLE_RATE {
-        return Ok(interleaved);
-    }
-    resample_to_target(&interleaved, spec.sample_rate, TARGET_SAMPLE_RATE)
-}
-
-fn resample_to_target(input: &[f32], from_hz: u32, to_hz: u32) -> Result<Vec<f32>> {
-    let params = SincInterpolationParameters {
-        sinc_len: 256,
-        f_cutoff: 0.95,
-        interpolation: SincInterpolationType::Linear,
-        oversampling_factor: 256,
-        window: WindowFunction::BlackmanHarris2,
-    };
-    let ratio = to_hz as f64 / from_hz as f64;
-    // chunk_size 給整段一次處理 — 我們的音訊是有限長度(< 30s 通常),
-    // 一次性 resampler 比 streaming 簡單,品質一樣。
-    let mut resampler = SincFixedIn::<f32>::new(
-        ratio,
-        2.0,
-        params,
-        input.len(),
-        1, // mono
-    )
-    .context("build sinc resampler")?;
-
-    let chunk = vec![input.to_vec()];
-    let out = resampler
-        .process(&chunk, None)
-        .context("sinc resample")?;
-    Ok(out.into_iter().next().unwrap_or_default())
+/// 拿一個 OS 認可的閒置 port — bind :0 讓 kernel 配,讀完立刻釋放。
+/// 有 TOCTOU 風險(可能 0.1ms 內被別人搶走),實務上幾乎不會踩到。
+fn pick_free_port() -> Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").context("bind 127.0.0.1:0")?;
+    let port = listener.local_addr().context("read assigned port")?.port();
+    drop(listener);
+    Ok(port)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 寫一段 1 秒 440Hz sine,sample_rate 可指定 — 用來測 decode + resample 路徑。
-    fn synth_wav_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
-        let spec = hound::WavSpec {
-            channels,
-            sample_rate,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-        let mut buf: Vec<u8> = Vec::new();
-        {
-            let mut writer = hound::WavWriter::new(std::io::Cursor::new(&mut buf), spec).unwrap();
-            let n = sample_rate as usize;
-            for i in 0..n {
-                let t = i as f32 / sample_rate as f32;
-                let s = (t * 440.0 * std::f32::consts::TAU).sin();
-                let v = (s * i16::MAX as f32 * 0.3) as i16;
-                for _ in 0..channels {
-                    writer.write_sample(v).unwrap();
-                }
-            }
-            writer.finalize().unwrap();
-        }
-        buf
-    }
-
-    #[test]
-    fn decode_16k_mono_pass_through() {
-        let wav = synth_wav_bytes(16_000, 1);
-        let samples = decode_wav_to_mono16k(&wav).unwrap();
-        assert_eq!(samples.len(), 16_000, "1s @ 16kHz mono → 16000 samples");
-    }
-
-    #[test]
-    fn decode_48k_mono_resamples() {
-        let wav = synth_wav_bytes(48_000, 1);
-        let samples = decode_wav_to_mono16k(&wav).unwrap();
-        // rubato sinc 重採樣會留 short head/tail 寬容,16k ± a few hundred 都算對
-        let diff = (samples.len() as i64 - 16_000).abs();
-        assert!(
-            diff < 1000,
-            "48k → 16k 應產生 ~16000 samples,實際 {} (差 {})",
-            samples.len(),
-            diff
-        );
-    }
-
-    #[test]
-    fn decode_48k_stereo_mixes_to_mono_then_resamples() {
-        let wav = synth_wav_bytes(48_000, 2);
-        let samples = decode_wav_to_mono16k(&wav).unwrap();
-        let diff = (samples.len() as i64 - 16_000).abs();
-        assert!(
-            diff < 1000,
-            "48k stereo → 16k mono 應產生 ~16000 samples,實際 {}",
-            samples.len()
-        );
-    }
-
     #[test]
     fn default_model_path_in_mori_dir() {
         let path = default_model_path();
+        let s = path.to_string_lossy();
         assert!(
-            path.to_string_lossy().contains(".mori/models/"),
-            "default 路徑該指向 ~/.mori/models/, 實際:{}",
-            path.display()
+            s.contains(".mori") && s.contains("models"),
+            "default 路徑該指向 ~/.mori/models/, 實際:{s}",
         );
         assert!(path.file_name().unwrap().to_string_lossy().ends_with(".bin"));
     }
 
     #[test]
+    fn default_server_binary_platform_correct() {
+        let p = default_server_binary();
+        let s = p.to_string_lossy();
+        if cfg!(windows) {
+            assert!(s.ends_with("whisper-server.exe"), "Windows binary 該帶 .exe: {s}");
+        } else {
+            assert!(s.ends_with("whisper-server"), "Unix binary 不該帶副檔名: {s}");
+        }
+    }
+
+    #[test]
     fn provider_construction_fails_when_model_missing() {
         let nonexistent = PathBuf::from("/tmp/this-does-not-exist-mori-test.bin");
-        let result = LocalWhisperProvider::new(&nonexistent, None);
+        let bin = PathBuf::from("whisper-server");
+        let result = LocalWhisperProvider::new(&nonexistent, None, &bin);
         let err = match result {
             Ok(_) => panic!("expected Err for nonexistent model file"),
             Err(e) => e,
@@ -372,27 +412,10 @@ mod tests {
             "should include download instructions: {msg}"
         );
     }
-}
 
-// 用一個 alias 避免直接 depend on parking_lot — mori-core 用 std::sync::Mutex
-// 也夠,但 std Mutex 在 lock 時要 unwrap PoisonError,囉嗦。為了不引入新 dep,
-// 這裡用 std Mutex 配 .lock().expect() 也行,但既然我們已經透過 transitive
-// (whisper-rs / rubato 不依賴 parking_lot)沒 parking_lot,我們就乖乖用 std。
-// 把 alias 拉一個 module 好維護:換成 parking_lot 只動一個檔案。
-mod parking_lot_compat {
-    use std::sync::{Mutex as StdMutex, MutexGuard};
-
-    pub struct Mutex<T>(StdMutex<T>);
-
-    impl<T> Mutex<T> {
-        pub fn new(t: T) -> Self {
-            Self(StdMutex::new(t))
-        }
-
-        pub fn lock(&self) -> MutexGuard<'_, T> {
-            // poison 表示前一個 holder panic 過 — 對我們的 cases(whisper
-            // 推理)幾乎不可能。直接 expect 簡化呼叫端。
-            self.0.lock().expect("whisper state mutex poisoned")
-        }
+    #[test]
+    fn pick_free_port_returns_nonzero() {
+        let p = pick_free_port().unwrap();
+        assert!(p > 1024, "kernel 該配 ephemeral port (>1024), 實際:{p}");
     }
 }

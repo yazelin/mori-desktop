@@ -357,9 +357,13 @@ impl GroqProvider {
                         //   wget -O ~/.mori/models/ggml-small.bin \
                         //     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
                         // 中文場景建議 small(466MB);CPU 慢可以用 base(142MB)。
-                        // Windows: whisper-local 還沒接(whisper-rs-sys 0.13 Windows
-                        // bindgen issue),Windows user 用 "groq" cloud STT 即可。
                         "model_path": default_whisper_model_path_config_string(),
+                        // v2:Mori 不再 in-process compile whisper.cpp,改 spawn
+                        // 官方 `whisper-server` 子程序。下載 pre-built binary:
+                        //   https://github.com/ggml-org/whisper.cpp/releases
+                        // 解壓 whisper-server[.exe] 到 ~/.mori/bin/。
+                        // 也可改絕對路徑指向 GPU 加速版本(CUDA / Metal / Vulkan)。
+                        "server_binary": default_whisper_server_binary_config_string(),
                         // null / "auto" = whisper 自偵測;也可寫 "zh" / "en" 等。
                         "language": "zh"
                     }
@@ -426,28 +430,18 @@ impl GroqProvider {
     }
 }
 
-/// 給 config stub 的 whisper-local 預設 model_path。Linux 直接走
-/// whisper_local::default_model_path();非 Linux 用同樣的 ~/.mori/models/
-/// 路徑字串(只是 stub,Windows 上 whisper-local provider 本身會 bail)。
+/// 給 config stub 的 whisper-local 預設值 helpers。v2 之後 whisper_local
+/// 模組跨平台,直接複用它的 default 函式。
 fn default_whisper_model_path_config_string() -> String {
-    #[cfg(target_os = "linux")]
-    {
-        super::whisper_local::default_model_path()
-            .to_string_lossy()
-            .into_owned()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_default();
-        std::path::PathBuf::from(home)
-            .join(".mori")
-            .join("models")
-            .join("ggml-small.bin")
-            .to_string_lossy()
-            .into_owned()
-    }
+    super::whisper_local::default_model_path()
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_whisper_server_binary_config_string() -> String {
+    super::whisper_local::default_server_binary()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn home_dir() -> Option<std::path::PathBuf> {

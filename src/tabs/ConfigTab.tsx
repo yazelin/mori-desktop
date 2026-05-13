@@ -732,9 +732,11 @@ function ConfigTab() {
               name="whisper-local"
               cfg={cfg.providers?.["whisper-local"]}
               fields={[
-                { key: "model_path", label: "model_path", hint: "/home/.../ggml-small.bin" },
-                { key: "language", label: "language", hint: "zh / en / ..." },
+                { key: "model_path", label: "model_path", hint: "~/.mori/models/ggml-small.bin(去 Deps 頁一鍵下載)" },
+                { key: "server_binary", label: "server_binary", hint: "~/.mori/bin/whisper-server[.exe](去 Deps 頁一鍵下載,或填絕對路徑指向 GPU 版本)" },
+                { key: "language", label: "language", hint: "zh / en / auto(留空 = auto detect)" },
               ]}
+              hint="v2:Mori 自己不編 whisper.cpp,改 spawn 官方 whisper-server 子程序。模型 + 引擎兩件事都可以從 Deps 頁一鍵裝完,不用手動改 config。"
               onPatch={(patch) =>
                 applyPatch((c) => {
                   const p = ensureSubObj(c, "providers");

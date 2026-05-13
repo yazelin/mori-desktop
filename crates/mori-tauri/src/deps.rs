@@ -140,7 +140,7 @@ pub fn registry() -> Vec<DepSpec> {
         DepSpec {
             id: "whisper-model",
             name: "whisper-local model (ggml-small.bin)",
-            description: "離線 STT 模型(466MB 中文版)",
+            description: "離線 STT 模型(466MB 中文版)。同檔 Linux / Windows 通用。",
             unlocks: "stt_provider=whisper-local 走 100% 離線 STT,不用 Groq 雲端",
             size_hint: Some("~466MB"),
             needs_sudo: false,
@@ -151,6 +151,34 @@ pub fn registry() -> Vec<DepSpec> {
                 script: "mkdir -p \"$HOME/.mori/models\" && \
                          wget -O \"$HOME/.mori/models/ggml-small.bin\" \
                          https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+            },
+        },
+        DepSpec {
+            id: "whisper-server",
+            name: "whisper-server (whisper.cpp 引擎)",
+            description: "本機 STT 推理引擎 — whisper.cpp 官方 pre-built HTTP server。\
+                          Mori 啟動時 lazy spawn,送 WAV 到 localhost。\
+                          Linux 自動下載 + 解壓 + 放到 ~/.mori/bin/;Windows 給手動步驟。",
+            unlocks: "stt_provider=whisper-local 能真的 spawn 起來跑(沒這個就只有 .bin 沒人讀)",
+            size_hint: Some("~5-10MB(僅 CPU 版,GPU 版可手動換)"),
+            needs_sudo: false,
+            check: CheckSpec::File {
+                path_template: "$HOME/.mori/bin/whisper-server",
+            },
+            install: InstallSpec::Shell {
+                // 從 whisper.cpp GitHub release 抓 Linux x86_64 build,解壓出
+                // whisper-server。版本固定 pin 一個近期 stable;升級換 tag 即可。
+                // whisper.cpp 官方在 release 提供 ubuntu-22-x64.zip / ubuntu-22-x64.tar.xz,
+                // 內含 whisper-server + 共享 lib。
+                script: "mkdir -p \"$HOME/.mori/bin\" && \
+                         cd /tmp && \
+                         curl -L -o whisper-cpp-bin.zip \
+                           https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip && \
+                         (unzip -o whisper-cpp-bin.zip -d whisper-cpp-bin || tar -xJf whisper-cpp-bin.zip -C whisper-cpp-bin) && \
+                         find whisper-cpp-bin -name 'whisper-server' -type f -executable -exec cp {} \"$HOME/.mori/bin/whisper-server\" \\; && \
+                         chmod +x \"$HOME/.mori/bin/whisper-server\" && \
+                         rm -rf /tmp/whisper-cpp-bin /tmp/whisper-cpp-bin.zip && \
+                         echo \"whisper-server installed to $HOME/.mori/bin/whisper-server\"",
             },
         },
         DepSpec {
@@ -301,6 +329,8 @@ pub struct InstallResult {
 }
 
 fn expand_home(p: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| "~".into());
     p.replace("$HOME", &home)
 }

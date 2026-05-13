@@ -48,8 +48,9 @@ jobs:
           # 才不會互踩。
           key: release
 
-      # ── Ubuntu 系統 deps(同 check.yml,但這裡是要 build 出 bundle) ───
-      - name: Install Linux Tauri + whisper.cpp build deps
+      # ── Ubuntu 系統 deps(同 check.yml) ─────────────────────────────────
+      # v2:whisper-rs / whisper-rs-sys 已移除,不再需要 cmake / libclang-dev。
+      - name: Install Linux Tauri deps
         if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
@@ -58,9 +59,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf \
-            cmake \
-            libclang-dev
+            patchelf
 
       # ── Node / frontend ─────────────────────────────────────────────────
       - name: Setup Node

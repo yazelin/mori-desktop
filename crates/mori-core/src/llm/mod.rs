@@ -23,9 +23,8 @@ pub mod groq;
 pub mod ollama;
 pub(crate) mod openai_compat;
 pub mod transcribe;
-// whisper-rs-sys 0.13 在 Windows bindgen 產出 struct size 跟 wrapper.h 不符,
-// 跨平台修要等 upstream。Windows 暫時只能走 Groq cloud STT / OpenAI Whisper API。
-#[cfg(target_os = "linux")]
+// v2:從 in-process FFI 改成 shell-out 到 whisper.cpp `whisper-server` HTTP
+// 子程序,跨平台統一架構。詳見 whisper_local.rs doc。
 pub mod whisper_local;
 
 // ─── Provider factory ───────────────────────────────────────────────
