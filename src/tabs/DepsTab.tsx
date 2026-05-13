@@ -11,7 +11,14 @@ type CheckSpec =
   | { kind: "File"; path_template: string };
 type InstallSpec =
   | { kind: "Shell"; script: string }
-  | { kind: "Manual"; commands: string[] };
+  | { kind: "Manual"; commands: string[] }
+  | {
+      kind: "Download";
+      url: string;
+      dest_dir: string;
+      extract_members: string[];
+      make_executable: boolean;
+    };
 
 type DepStatus = {
   id: string;
@@ -48,6 +55,14 @@ function commandPreview(install: InstallSpec): string {
       return install.script;
     case "Manual":
       return install.commands.join("\n");
+    case "Download":
+      return [
+        `# Mori 會自動下載 + 解壓到 ${install.dest_dir}`,
+        `curl -L -o /tmp/dep.zip "${install.url}"`,
+        install.extract_members.length === 0
+          ? `unzip /tmp/dep.zip -d ${install.dest_dir}`
+          : `unzip /tmp/dep.zip ${install.extract_members.join(" ")} -d ${install.dest_dir}`,
+      ].join("\n");
   }
 }
 

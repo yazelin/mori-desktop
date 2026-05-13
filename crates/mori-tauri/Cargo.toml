@@ -47,6 +47,12 @@ parking_lot = "0.12"
 # Async stream utilities — needed to consume ashpd's GlobalShortcuts signal stream.
 futures-util = "0.3"
 
+# Deps 頁的 InstallSpec::Download(跨平台原生下載 + 解壓,不依賴 sh)需要:
+# - reqwest blocking client(run_install 在 spawn_blocking 內,不 async)
+# - zip:Windows / Linux 都用 .zip 格式抓 whisper.cpp release binary
+reqwest = { workspace = true, features = ["blocking"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 # Linux-only deps:
 # - ashpd: xdg-desktop-portal client for the global-shortcut hotkey
 #   (Wayland blocks the X11-style keyboard grab tauri-plugin uses).

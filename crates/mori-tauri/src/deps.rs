@@ -90,10 +90,27 @@ pub enum CheckSpec {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind")]
 pub enum InstallSpec {
-    /// 用 sh -c 包(可含 pipe / redirect / curl | sh 等需要 shell 的)
+    /// 用 sh -c 包(可含 pipe / redirect / curl | sh 等需要 shell 的)。
+    /// 注意:Windows 沒 sh,要跨平台 install 走 `Download` variant。
     Shell { script: &'static str },
-    /// 給 user 在 terminal 自己跑(needs_sudo / 多步)
+    /// 給 user 在 terminal 自己跑(needs_sudo / 多步)。
+    /// UI 顯示指令清單給 user copy + 自己貼到 terminal 跑。
     Manual { commands: &'static [&'static str] },
+    /// 跨平台原生下載 + 解壓(不依賴 sh / curl / unzip)。
+    /// reqwest blocking 拉 archive → zip crate 解壓 → 把指定 member(或全部)
+    /// 複製到 `$HOME/.mori/bin/` 等目標。Linux + Windows 都 work。
+    Download {
+        /// archive URL(目前只支援 .zip,後續可加 tar.xz 等)
+        url: &'static str,
+        /// 解壓目標資料夾(支援 `$HOME` 展開,跨平台同樣語法)
+        dest_dir: &'static str,
+        /// 從 archive 抽出哪些檔名(basename match,大小寫敏感)。
+        /// 空 array → 全部抽。匹配的檔案(以及它們的相依 .dll / .so)
+        /// 一起放進 dest_dir。
+        extract_members: &'static [&'static str],
+        /// 是否要對抽出來的 binary chmod +x(Unix only,Windows ignored)
+        make_executable: bool,
+    },
 }
 
 /// mori-desktop 在意的所有 optional deps。
@@ -262,17 +279,16 @@ pub fn registry() -> Vec<DepSpec> {
                          echo \"whisper-server installed to $HOME/.mori/bin/whisper-server\"",
             },
             install_overrides: &[
-                ("windows", InstallSpec::Manual {
-                    commands: &[
-                        "# 1. 從 whisper.cpp release 頁下載對應 zip:",
-                        "#    https://github.com/ggml-org/whisper.cpp/releases/latest",
-                        "#    CPU 版:whisper-bin-x64.zip",
-                        "#    NVIDIA GPU:whisper-cublas-cuda12-bin-x64.zip(更快)",
-                        "# 2. 解壓後找到 whisper-server.exe + 旁邊的 .dll(ggml.dll / whisper.dll 等)",
-                        "# 3. PowerShell 跑:",
-                        "mkdir -Force $env:USERPROFILE\\.mori\\bin | Out-Null",
-                        "# 4. 把整套(.exe + .dll)複製到 $env:USERPROFILE\\.mori\\bin\\",
-                    ],
+                ("windows", InstallSpec::Download {
+                    // 直接拉 latest release 的 CPU 版 zip。
+                    // 想換 GPU 加速版本(CUDA / CLBlast),user 在 config 改
+                    // server_binary 絕對路徑指向另一份 binary。
+                    url: "https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip",
+                    dest_dir: "$HOME/.mori/bin",
+                    // 空 list = 解壓 zip 裡所有檔案(whisper-server.exe + ggml.dll
+                    // + whisper.dll 等同 zip 內的相依 lib 全要)。
+                    extract_members: &[],
+                    make_executable: false, // Windows .exe 不需要 +x
                 }),
             ],
         },
@@ -406,21 +422,31 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
 pub fn run_install(spec: &DepSpec) -> Result<InstallResult> {
     // 走 effective_install — 平台特定 override 優先(像 Windows 的 ollama
     // 用 Manual variant),沒有再 fallback 預設(Linux 走 Shell 那條)。
-    let (cmd, args) = match spec.effective_install() {
-        InstallSpec::Shell { script } => (
-            "sh".to_string(),
-            vec!["-c".to_string(), script.to_string()],
-        ),
+    match spec.effective_install() {
+        InstallSpec::Shell { script } => {
+            tracing::info!(dep = spec.id, "shell install start");
+            run_shell(script)
+        }
         InstallSpec::Manual { .. } => {
             anyhow::bail!("Manual install — UI should show commands to user, not call run_install");
         }
-    };
+        InstallSpec::Download {
+            url,
+            dest_dir,
+            extract_members,
+            make_executable,
+        } => {
+            tracing::info!(dep = spec.id, %url, dest_dir, "download install start");
+            run_download(url, dest_dir, extract_members, *make_executable)
+        }
+    }
+}
 
-    tracing::info!(dep = spec.id, cmd = %cmd, "install start");
-    let output = Command::new(&cmd)
-        .args(&args)
+fn run_shell(script: &str) -> Result<InstallResult> {
+    let output = Command::new("sh")
+        .args(["-c", script])
         .output()
-        .map_err(|e| anyhow::anyhow!("spawn {cmd}: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("spawn sh: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -436,6 +462,108 @@ pub fn run_install(spec: &DepSpec) -> Result<InstallResult> {
         success: output.status.success(),
         exit_code: output.status.code(),
         output: combined,
+    })
+}
+
+/// 跨平台:reqwest blocking 抓 archive → zip crate 解壓 → 把 `extract_members`
+/// 對應檔案(或全部)複製到 `dest_dir`。
+///
+/// 不用 sh / curl / unzip,純 Rust。Windows / Linux 都跑。
+fn run_download(
+    url: &str,
+    dest_dir: &str,
+    extract_members: &[&str],
+    make_executable: bool,
+) -> Result<InstallResult> {
+    let mut log = String::new();
+    let dest = expand_home(dest_dir);
+    let dest_path = std::path::PathBuf::from(&dest);
+    std::fs::create_dir_all(&dest_path)
+        .map_err(|e| anyhow::anyhow!("create dest dir {dest}: {e}"))?;
+    log.push_str(&format!("==> dest: {dest}\n"));
+
+    // 1. 下載
+    log.push_str(&format!("==> downloading {url}\n"));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| anyhow::anyhow!("build reqwest client: {e}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|e| anyhow::anyhow!("GET {url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Ok(InstallResult {
+            success: false,
+            exit_code: None,
+            output: format!("{log}HTTP {} — download failed", resp.status()),
+        });
+    }
+    let bytes = resp
+        .bytes()
+        .map_err(|e| anyhow::anyhow!("read response body: {e}"))?;
+    log.push_str(&format!("==> got {} bytes\n", bytes.len()));
+
+    // 2. 解壓(目前只支援 .zip)
+    let cursor = std::io::Cursor::new(bytes.as_ref());
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| anyhow::anyhow!("open zip archive: {e}"))?;
+
+    let mut extracted = 0usize;
+    let want_all = extract_members.is_empty();
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| anyhow::anyhow!("zip entry {i}: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let basename = std::path::Path::new(&name)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+
+        // 過濾:want_all 或 basename 在 extract_members 內
+        let want = want_all || extract_members.iter().any(|m| *m == basename);
+        if !want {
+            continue;
+        }
+
+        // 攤平 path,只取 basename — 不複製 archive 內部資料夾結構
+        let out_path = dest_path.join(basename);
+        let mut out_file = std::fs::File::create(&out_path)
+            .map_err(|e| anyhow::anyhow!("create {}: {e}", out_path.display()))?;
+        std::io::copy(&mut entry, &mut out_file)
+            .map_err(|e| anyhow::anyhow!("write {}: {e}", out_path.display()))?;
+        log.push_str(&format!("==> extracted {basename}\n"));
+        extracted += 1;
+
+        // Unix:對 executable 加 +x bit。Windows ignore(.exe 自帶可執行屬性)。
+        #[cfg(unix)]
+        if make_executable {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(0o755));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = make_executable;
+        }
+    }
+
+    if extracted == 0 {
+        return Ok(InstallResult {
+            success: false,
+            exit_code: None,
+            output: format!("{log}no files extracted (extract_members={extract_members:?})"),
+        });
+    }
+
+    log.push_str(&format!("==> done, {extracted} file(s) extracted to {dest}\n"));
+    Ok(InstallResult {
+        success: true,
+        exit_code: None,
+        output: log,
     })
 }
 
