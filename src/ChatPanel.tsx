@@ -9,6 +9,7 @@
 //   點 ⚙️ 開 status modal 顯示 build SHA / provider / clipboard 等
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 // 5A-3b: ChatPanel 接的 system message payload(fallback chain 觸發時 backend 推)
 type FallbackSystemMessage = {
@@ -89,6 +90,7 @@ const MODE_LABEL: Record<Mode, { Icon: ComponentType<SVGProps<SVGSVGElement>>; l
 };
 
 function ChatPanel() {
+  const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [mode, setMode] = useState<Mode>("agent");
   const [conv, setConv] = useState<ChatTurn[]>([]);
@@ -224,7 +226,7 @@ function ChatPanel() {
           <button
             className="mori-icon-btn"
             onClick={toggleSleep}
-            title={mode === "background" ? "醒醒(回對話模式)" : "進休眠(關麥克風)"}
+            title={mode === "background" ? t("chat_panel.wake_title") : t("chat_panel.sleep_title")}
           >
             {mode === "background" ? <IconSun width={16} height={16} /> : <IconSleep width={16} height={16} />}
           </button>
@@ -232,14 +234,14 @@ function ChatPanel() {
             className="mori-icon-btn"
             onClick={onReset}
             disabled={conv.length === 0}
-            title="清掉本次對話歷史(長期記憶不動)"
+            title={t("chat_panel.clear_title")}
           >
             <IconRefresh width={16} height={16} />
           </button>
           <button
             className="mori-icon-btn"
             onClick={() => setShowStatus(true)}
-            title="顯示系統狀態"
+            title={t("chat_panel.status_title")}
           >
             <IconConfig width={16} height={16} />
           </button>
@@ -252,7 +254,7 @@ function ChatPanel() {
           <div className="mori-chat-empty">
             <p>
               <span className="mori-empty-icon"><IconWave width={18} height={18} /></span>
-              {" "}跟 Mori 說話 — 按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 開始錄音,或下面直接打字。
+              {" "}{t("chat_panel.greeting_hint")}
             </p>
           </div>
         )}
@@ -267,13 +269,13 @@ function ChatPanel() {
               <IconWarning width={12} height={12} /> {sm.context === "agent" ? "Agent" : "VoiceInput"} fallback
             </span>
             <p>
-              <code>{sm.failed_provider}</code> 失敗,自動改用 <code>{sm.next_provider}</code> 重試 — <span className="dim">{sm.reason}</span>
+              <code>{sm.failed_provider}</code>{t("chat_panel.fallback_msg_part_a")}<code>{sm.next_provider}</code>{t("chat_panel.fallback_msg_part_b")}<span className="dim">{sm.reason}</span>
             </p>
           </div>
         ))}
         {phase.kind === "error" && (
           <div className="mori-chat-error">
-            <span className="label"><IconWarning width={13} height={13} /> 錯誤</span>
+            <span className="label"><IconWarning width={13} height={13} /> {t("chat_panel.error_label")}</span>
             <p>{phase.message}</p>
           </div>
         )}
@@ -283,22 +285,22 @@ function ChatPanel() {
       {recording && (
         <div className="mori-chat-progress recording">
           <span className="dot pulse" />
-          <span className="text">錄音中 {recElapsed}s</span>
+          <span className="text">{t("chat_panel.recording")} {recElapsed}s</span>
           <LevelMeter level={audioLevel} compact />
-          <span className="hint"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd> 取消</span>
+          <span className="hint"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd> {t("chat_panel.cancel_hint")}</span>
         </div>
       )}
       {phase.kind === "transcribing" && (
         <div className="mori-chat-progress thinking">
           <span className="dot spin" />
-          <span className="text">轉錄中…</span>
+          <span className="text">{t("chat_panel.transcribing")}</span>
         </div>
       )}
       {phase.kind === "responding" && (
         <div className="mori-chat-progress thinking">
           <span className="dot spin" />
-          <span className="text">Mori 思考中…</span>
-          <span className="hint"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd> 中斷</span>
+          <span className="text">{t("chat_panel.thinking")}</span>
+          <span className="hint"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd> {t("chat_panel.interrupt_hint")}</span>
         </div>
       )}
 
@@ -310,10 +312,10 @@ function ChatPanel() {
           disabled={pipelineBusy || mode === "background"}
           title={
             mode === "background"
-              ? "Mori 在休眠,按上方的太陽按鈕喚醒"
+              ? t("chat_panel.sleeping_rec_title")
               : recording
-              ? "停止錄音"
-              : "開始錄音(等同 Ctrl+Alt+Space)"
+              ? t("chat_panel.stop_rec_title")
+              : t("chat_panel.start_rec_title")
           }
         >
           {recording ? <IconStop width={16} height={16} /> : <IconMic width={16} height={16} />}
@@ -322,8 +324,8 @@ function ChatPanel() {
           className="mori-chat-textarea"
           placeholder={
             mode === "background"
-              ? "Mori 休眠中..."
-              : "輸入訊息或貼文章 / Ctrl+Enter 送出"
+              ? t("chat_panel.sleeping_input_placeholder")
+              : t("chat_panel.type_placeholder")
           }
           value={textInput}
           onChange={(e) => setTextInput(e.target.value)}
@@ -341,7 +343,7 @@ function ChatPanel() {
           onClick={onSubmit}
           disabled={pipelineBusy || !textInput.trim()}
         >
-          送出
+          {t("chat_panel.send_button")}
         </button>
       </div>
 
@@ -351,9 +353,9 @@ function ChatPanel() {
           <div className="mori-modal mori-status-modal" onClick={(e) => e.stopPropagation()}>
             <div className="mori-modal-header">
               <div className="mori-modal-title">
-                <span className="mori-modal-stem">系統狀態</span>
+                <span className="mori-modal-stem">{t("chat_panel.status_modal_title")}</span>
               </div>
-              <button className="mori-btn ghost" onClick={() => setShowStatus(false)} title="關閉">
+              <button className="mori-btn ghost" onClick={() => setShowStatus(false)} title={t("chat_panel.close_title")}>
                 <IconClose width={14} height={14} />
               </button>
             </div>
@@ -377,11 +379,12 @@ function ChatPanel() {
 }
 
 function ChatBubble({ turn }: { turn: ChatTurn }) {
+  const { t } = useTranslation();
   return (
     <div className={`mori-bubble ${turn.role}`}>
-      <span className="role-label">{turn.role === "user" ? "你" : "Mori"}</span>
+      <span className="role-label">{turn.role === "user" ? t("chat_panel.role_user") : "Mori"}</span>
       <div className="bubble-body">
-        <p>{turn.content || <span className="empty">(空)</span>}</p>
+        <p>{turn.content || <span className="empty">{t("chat_panel.role_empty")}</span>}</p>
         {turn.tools_called.length > 0 && (
           <div className="bubble-tools">
             {turn.tools_called.map((t, i) => (
@@ -424,18 +427,19 @@ function StatusRows({
   convLength: number;
   sessionType: string;
 }) {
+  const { t } = useTranslation();
   // Mori 偵測到的 session type → 對應的 hotkey path,讓使用者報 bug 時
   // 一眼看出走的是哪條(plugin / portal),不用翻 log。
   const sessionPath = (() => {
     switch (sessionType) {
       case "x11":
-        return "x11 · tauri-plugin-global-shortcut (XGrabKey)";
+        return t("chat_panel.session_path_x11");
       case "wayland":
-        return "wayland · xdg-desktop-portal GlobalShortcuts";
+        return t("chat_panel.session_path_wayland");
       case "linux-other":
-        return "linux (tty / 未設) · 全域熱鍵失效,UI 按鈕仍可用";
+        return t("chat_panel.session_path_linux_other");
       case "non-linux":
-        return "non-linux · tauri-plugin-global-shortcut";
+        return t("chat_panel.session_path_other");
       default:
         return sessionType || "...";
     }
@@ -453,7 +457,7 @@ function StatusRows({
         label="build"
         value={buildInfo ? `${buildInfo.sha}${buildInfo.dirty ? "*" : ""} · ${buildInfo.build_time}` : "..."}
       />
-      <Row label="session" value={sessionPath} title="Mori 偵測到的 OS session,決定走哪條全域熱鍵 path" />
+      <Row label="session" value={sessionPath} title={t("chat_panel.session_path_title")} />
       <Row
         label="chat"
         value={
@@ -461,11 +465,11 @@ function StatusRows({
             ? `${chatProvider.name} · ${chatProvider.model}${
                 chatProvider.name === "ollama"
                   ? warmup === "ready"
-                    ? " · 就緒"
+                    ? t("chat_panel.warmup_ready")
                     : warmup === "loading"
-                    ? " · 載入中"
+                    ? t("chat_panel.warmup_loading")
                     : warmup === "failed"
-                    ? " · 失敗"
+                    ? t("chat_panel.warmup_failed")
                     : ""
                   : hasKey === true
                   ? " · ready"
@@ -489,12 +493,12 @@ function StatusRows({
       <Row label="history" value={`${convLength} msgs`} />
       <Row
         label="clipboard"
-        value={lastContext?.clipboard ? `${lastContext.clipboard.length} 字` : "—"}
+        value={lastContext?.clipboard ? `${lastContext.clipboard.length} ${t("chat_panel.chars_suffix")}` : "—"}
         title={lastContext?.clipboard ?? undefined}
       />
       <Row
         label="selection"
-        value={lastContext?.selected_text ? `${lastContext.selected_text.length} 字` : "—"}
+        value={lastContext?.selected_text ? `${lastContext.selected_text.length} ${t("chat_panel.chars_suffix")}` : "—"}
         title={lastContext?.selected_text ?? undefined}
       />
     </div>

@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { availableMonitors, cursorPosition, getCurrentWindow, LogicalPosition, LogicalSize, primaryMonitor } from "@tauri-apps/api/window";
+import { useTranslation } from "react-i18next";
 import { IconVoiceMic, IconTree } from "./icons";
 
 type ProfileEntry = { stem: string; display: string };
@@ -63,6 +64,7 @@ async function centerOnActiveMonitor() {
 }
 
 function Picker() {
+  const { t } = useTranslation();
   const [voice, setVoice] = useState<ProfileEntry[]>([]);
   const [agent, setAgent] = useState<ProfileEntry[]>([]);
   const [section, setSection] = useState<Section>("voice");
@@ -253,7 +255,7 @@ function Picker() {
 
         <div className="mori-picker-carousel-body">
           {list.length === 0 ? (
-            <div className="mori-picker-empty">（這個目錄沒有 profile）</div>
+            <div className="mori-picker-empty">{t("picker.empty")}</div>
           ) : (
             <>
               <div className="mori-picker-row prev" onClick={() => {
@@ -269,7 +271,7 @@ function Picker() {
                 className="mori-picker-row cur"
                 onClick={confirm}
                 onDoubleClick={confirm}
-                title="Enter / 點擊確認"
+                title={t("picker.confirm_title")}
               >
                 {cur && <>
                   <span className="mori-picker-cursor">▸</span>
@@ -294,8 +296,8 @@ function Picker() {
         </div>
 
         <div className="mori-picker-footer">
-          <kbd>↑↓</kbd> 選 &nbsp; <kbd>Tab</kbd> 切組 &nbsp;
-          <kbd>Enter</kbd> 確認 &nbsp; <kbd>Esc</kbd> 取消
+          <kbd>↑↓</kbd> {t("picker.key_select")} &nbsp; <kbd>Tab</kbd> {t("picker.key_switch_section")} &nbsp;
+          <kbd>Enter</kbd> {t("picker.key_confirm")} &nbsp; <kbd>Esc</kbd> {t("picker.key_cancel")}
         </div>
       </div>
     </div>
