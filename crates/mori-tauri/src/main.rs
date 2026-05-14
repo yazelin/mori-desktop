@@ -4,6 +4,8 @@
 mod action_skills;
 mod context_provider;
 mod deps;
+mod annuli_commands;
+mod annuli_config;
 mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
@@ -87,8 +89,12 @@ pub struct AppState {
     /// 若無,transcribe 階段會回 Error。
     pub groq_api_key: Mutex<Option<String>>,
     /// 長期記憶 store。Phase 1C 是 LocalMarkdownMemoryStore;
-    /// phase 7+ 換成 SyncedMemoryStore 不重寫上層程式碼。
-    pub memory: Arc<LocalMarkdownMemoryStore>,
+    /// Wave 4 加 AnnuliMemoryStore(走 HTTP),配 ~/.mori/config.json annuli.enabled
+    /// 切換。trait object 不寫死 impl。
+    pub memory: Arc<dyn mori_core::memory::MemoryStore>,
+    /// Wave 4:如果 annuli.enabled,持有 HTTP client 給對話事件 fire-and-forget +
+    /// Ctrl+Alt+Z hotkey 觸發 /sleep。None 表示沒接 annuli。
+    pub annuli: Option<Arc<mori_core::annuli::AnnuliClient>>,
     /// Working memory:本次 session 的對話歷史(user / assistant 訊息對)。
     /// 重啟 app 就清空。長期記憶寫進 memory 那邊。
     pub conversation: Mutex<Vec<ChatMessage>>,
@@ -1668,7 +1674,7 @@ async fn run_agent_pipeline(
     };
 
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
-        let memory_index = memory.read_index_as_context().unwrap_or_default();
+        let memory_index = memory.read_index_as_context().await.unwrap_or_default();
         // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_read=true 才生效）
         let body_expanded = mori_core::agent_profile::preprocess_file_includes(
             &agent_profile.body,
@@ -1862,6 +1868,37 @@ async fn run_agent_pipeline(
                 while conv.len() > max_msgs {
                     conv.remove(0);
                 }
+            }
+
+            // Wave 4 step 8:fire-and-forget POST /events 到 annuli vault。
+            // 兩條 event(user + assistant)非阻塞 — 失敗只 log,不擋 UI。
+            if let Some(client) = state.annuli.clone() {
+                let user_text = transcript.clone();
+                let assistant_text = response.clone();
+                let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
+                let source = format!("mori-desktop@{}", hostname);
+                tokio::spawn(async move {
+                    if let Err(e) = client
+                        .append_event(
+                            "chat",
+                            &source,
+                            serde_json::json!({ "role": "user", "text": user_text }),
+                        )
+                        .await
+                    {
+                        tracing::warn!(error = %e, "annuli POST /events (user) failed");
+                    }
+                    if let Err(e) = client
+                        .append_event(
+                            "chat",
+                            &source,
+                            serde_json::json!({ "role": "assistant", "text": assistant_text }),
+                        )
+                        .await
+                    {
+                        tracing::warn!(error = %e, "annuli POST /events (assistant) failed");
+                    }
+                });
             }
 
             state.set_phase(
@@ -2643,14 +2680,37 @@ fn main() {
         }
     };
 
-    // 建立長期記憶 store。第一次跑會在 ~/.mori/memory/ 建空索引。
-    let memory_root = LocalMarkdownMemoryStore::default_root()
-        .expect("could not determine ~/.mori/memory path");
-    let memory = Arc::new(
-        LocalMarkdownMemoryStore::new(memory_root.clone())
-            .expect("failed to initialize memory store"),
-    );
-    tracing::info!(path = %memory_root.display(), "memory store ready");
+    // 建立長期記憶 store + (可選)annuli HTTP client。Wave 4:
+    // ~/.mori/config.json 有 `annuli.enabled=true` 且 endpoint / spirit / user_id
+    // 都齊 → 用 AnnuliMemoryStore(走 HTTP),同時 state.annuli 也持有 client 給
+    // 對話事件 fire-and-forget + hotkey 觸發 /sleep 用。否則 fallback LocalMarkdown。
+    let (memory, annuli_client): (Arc<dyn mori_core::memory::MemoryStore>, Option<Arc<mori_core::annuli::AnnuliClient>>) = {
+        let annuli_cfg = config_path
+            .as_deref()
+            .map(annuli_config::AnnuliConfig::load)
+            .unwrap_or_default();
+        if annuli_cfg.is_ready() {
+            tracing::info!(
+                endpoint = %annuli_cfg.endpoint,
+                spirit = %annuli_cfg.spirit_name,
+                user_id = %annuli_cfg.user_id,
+                "annuli memory store enabled — 透過 HTTP 跟 vault 互動",
+            );
+            let client = Arc::new(
+                mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
+                    .expect("failed to build annuli client(check config.json annuli.endpoint)"),
+            );
+            let store = Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
+            (store, Some(client))
+        } else {
+            let memory_root = LocalMarkdownMemoryStore::default_root()
+                .expect("could not determine ~/.mori/memory path");
+            let store = LocalMarkdownMemoryStore::new(memory_root.clone())
+                .expect("failed to initialize memory store");
+            tracing::info!(path = %memory_root.display(), "local markdown memory store ready");
+            (Arc::new(store), None)
+        }
+    };
 
     // 5F-1: 確保 ~/.mori/voice_input/ 存在並有預設檔案
     mori_core::voice_input_profile::ensure_voice_input_dir_initialized();
@@ -2661,6 +2721,7 @@ fn main() {
         recorder: Mutex::new(None),
         groq_api_key: Mutex::new(None),
         memory,
+        annuli: annuli_client,
         conversation: Mutex::new(Vec::new()),
         mode: Mutex::new(Mode::Agent),
         ollama_warmup: Mutex::new(None),
@@ -2735,6 +2796,11 @@ fn main() {
             memory_read,
             memory_write,
             memory_delete,
+            annuli_commands::annuli_status,
+            annuli_commands::annuli_get_soul,
+            annuli_commands::annuli_list_memory,
+            annuli_commands::annuli_list_events_today,
+            annuli_commands::annuli_trigger_sleep,
             memory_search,
             skills_list,
             deps_list,
@@ -3281,6 +3347,22 @@ fn main() {
                         tracing::error!("picker window not found by label 'picker'");
                     }
                 }
+            });
+
+            // Wave 4 step 7:Ctrl+Alt+Z sleep hotkey → POST /rings/new fire-and-forget
+            let state_for_sleep = state_for_setup.clone();
+            app.listen(hotkey_config::MORI_SLEEP_EVENT, move |_event| {
+                tracing::info!("sleep hotkey fired");
+                let Some(client) = state_for_sleep.annuli.clone() else {
+                    tracing::warn!("sleep hotkey fired but annuli not configured (config.json annuli.enabled=false)");
+                    return;
+                };
+                tokio::spawn(async move {
+                    match client.trigger_sleep().await {
+                        Ok(ring_path) => tracing::info!(%ring_path, "ring written via /sleep"),
+                        Err(e) => tracing::warn!(error = %e, "annuli POST /rings/new failed"),
+                    }
+                });
             });
 
             // 5F-2: Alt+0~9 VoiceInput profile 切換

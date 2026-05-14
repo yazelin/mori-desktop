@@ -16,7 +16,7 @@ use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter};
 
 use crate::hotkey_config::{
-    HotkeyConfig, AGENT_SLOT_EVENT, AGENT_SLOT_ID_PREFIX, CANCEL_SHORTCUT_ID, PICKER_SHORTCUT_ID,
+    HotkeyConfig, AGENT_SLOT_EVENT, AGENT_SLOT_ID_PREFIX, CANCEL_SHORTCUT_ID, MORI_SLEEP_EVENT, PICKER_SHORTCUT_ID, SLEEP_SHORTCUT_ID,
     PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_PRESSED, PORTAL_HOTKEY_RELEASED, PORTAL_PICKER_EVENT,
     PROFILE_SLOT_EVENT, SLOT_ID_PREFIX, TOGGLE_SHORTCUT_ID,
 };
@@ -156,6 +156,10 @@ pub async fn run(app: AppHandle, config: HotkeyConfig) -> Result<()> {
                 } else if id == PICKER_SHORTCUT_ID {
                     if let Err(e) = app.emit(PORTAL_PICKER_EVENT, ()) {
                         tracing::warn!(?e, "failed to emit portal-picker-fired event");
+                    }
+                } else if id == SLEEP_SHORTCUT_ID {
+                    if let Err(e) = app.emit(MORI_SLEEP_EVENT, ()) {
+                        tracing::warn!(?e, "failed to emit mori-sleep event");
                     }
                 } else if let Some(slot_str) = id.strip_prefix(AGENT_SLOT_ID_PREFIX) {
                     // 注意：要先 check AGENT_SLOT_ID_PREFIX，因為它以 "slot-" 結尾，

@@ -97,3 +97,7 @@ windows = { version = "0.58", features = [
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+# Wave 4 annuli_config tests 用 NamedTempFile 寫測試用 config.json
+tempfile = "3"

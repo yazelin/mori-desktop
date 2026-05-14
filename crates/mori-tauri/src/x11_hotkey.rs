@@ -21,8 +21,8 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::hotkey_config::{
-    HotkeyAction, HotkeyConfig, AGENT_SLOT_EVENT, PORTAL_CANCEL_EVENT, PORTAL_HOTKEY_PRESSED,
-    PORTAL_HOTKEY_RELEASED, PORTAL_PICKER_EVENT, PROFILE_SLOT_EVENT,
+    HotkeyAction, HotkeyConfig, AGENT_SLOT_EVENT, MORI_SLEEP_EVENT, PORTAL_CANCEL_EVENT,
+    PORTAL_HOTKEY_PRESSED, PORTAL_HOTKEY_RELEASED, PORTAL_PICKER_EVENT, PROFILE_SLOT_EVENT,
 };
 
 /// Linux session 是否為 X11(`XDG_SESSION_TYPE=x11`)。
@@ -118,6 +118,7 @@ fn dispatch(app: &AppHandle, action: &HotkeyAction) {
         HotkeyAction::Toggle => unreachable!("toggle action handled by dispatch_toggle"),
         HotkeyAction::Cancel => app.emit(PORTAL_CANCEL_EVENT, ()),
         HotkeyAction::Picker => app.emit(PORTAL_PICKER_EVENT, ()),
+        HotkeyAction::Sleep => app.emit(MORI_SLEEP_EVENT, ()),
         HotkeyAction::VoiceSlot(n) => app.emit(PROFILE_SLOT_EVENT, *n),
         HotkeyAction::AgentSlot(n) => app.emit(AGENT_SLOT_EVENT, *n),
     };

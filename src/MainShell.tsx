@@ -15,15 +15,16 @@ import ChatPanel from "./ChatPanel";
 import ProfilesTab from "./tabs/ProfilesTab";
 import ConfigTab from "./tabs/ConfigTab";
 import MemoryTab from "./tabs/MemoryTab";
+import AnnuliTab from "./tabs/AnnuliTab";
 import SkillsTab from "./tabs/SkillsTab";
 import DepsTab from "./tabs/DepsTab";
 import {
-  IconChat, IconProfiles, IconConfig, IconMemory, IconSkills, IconDeps,
+  IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
   IconSun, IconMoon,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
 
-type TabId = "chat" | "profiles" | "config" | "memory" | "skills" | "deps";
+type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps";
 
 type TabDef = {
   id: TabId;
@@ -37,6 +38,7 @@ const TABS: TabDef[] = [
   { id: "profiles", Icon: IconProfiles, label: "Profiles", sub: "Voice / Agent" },
   { id: "config",   Icon: IconConfig,   label: "Config",   sub: "config.json" },
   { id: "memory",   Icon: IconMemory,   label: "Memory",   sub: "~/.mori/memory" },
+  { id: "annuli",   Icon: IconAnnuli,   label: "Annuli",   sub: "vault 反思引擎" },
   { id: "skills",   Icon: IconSkills,   label: "Skills",   sub: "Built-in / Shell" },
   { id: "deps",     Icon: IconDeps,     label: "Deps",     sub: "Optional tools" },
 ];
@@ -111,6 +113,7 @@ function MainShell() {
         {tab === "profiles" && <ProfilesTab />}
         {tab === "config" && <ConfigTab />}
         {tab === "memory" && <MemoryTab />}
+        {tab === "annuli" && <AnnuliTab />}
         {tab === "skills" && <SkillsTab />}
         {tab === "deps" && <DepsTab />}
       </main>

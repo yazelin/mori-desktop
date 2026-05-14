@@ -79,14 +79,28 @@ impl Skill for ForgetMemorySkill {
             });
         }
 
-        self.memory
-            .delete(&id)
-            .await
-            .context("memory store delete")?;
-
-        Ok(SkillOutput {
-            user_message: format!("好,把 `{id}` 的記憶忘掉了"),
-            data: Some(serde_json::json!({ "id": id, "deleted": true })),
-        })
+        // Wave 4:AnnuliMemoryStore.delete 預設 Err(走 curator review)。LocalMarkdown
+        // 仍直接 delete。catch error 做 graceful toast 訊息,**不**讓 skill call 算失敗。
+        match self.memory.delete(&id).await {
+            Ok(()) => Ok(SkillOutput {
+                user_message: format!("好,把 `{id}` 的記憶忘掉了"),
+                data: Some(serde_json::json!({ "id": id, "deleted": true })),
+            }),
+            Err(e) => {
+                // 偵測 AnnuliMemoryStore 的 "use curator review" 訊息,給 user-friendly hint
+                let msg = e.to_string();
+                if msg.contains("curator review") || msg.contains("curator") {
+                    Ok(SkillOutput {
+                        user_message: format!(
+                            "我不能直接刪 `{id}`。vault 設計上是 append-only — 真的要忘\
+                             掉的話請走 `/sleep` 後跑 curator dry-run + yaml approve + apply 流程。"
+                        ),
+                        data: Some(serde_json::json!({ "id": id, "deferred_to_curator": true })),
+                    })
+                } else {
+                    Err(e).context("memory store delete")
+                }
+            }
+        }
     }
 }

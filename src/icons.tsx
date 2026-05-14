@@ -64,6 +64,18 @@ export function IconMemory(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 🌳 Annuli — 樹(年輪),vault 反思
+export function IconAnnuli(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      {/* 3 圈年輪 */}
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="6.5" />
+      <circle cx="12" cy="12" r="10" />
+    </svg>
+  );
+}
+
 // 🛠️ Skills — 板手(工具)
 export function IconSkills(props: SVGProps<SVGSVGElement>) {
   return (

@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
+pub mod annuli;
 pub mod markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +126,25 @@ pub trait MemoryStore: Send + Sync {
             if types.iter().any(|t| t == &mem.memory_type) {
                 out.push(mem);
             }
+        }
+        Ok(out)
+    }
+
+    /// 格式化 index 為 LLM context block(給 agent system prompt 注入用)。
+    /// 預設 impl 走 `read_index()`,各 store 可 override(例 LocalMarkdown 有更快
+    /// 的 inline 版本)。
+    async fn read_index_as_context(&self) -> Result<String> {
+        let entries = self.read_index().await?;
+        if entries.is_empty() {
+            return Ok(String::new());
+        }
+        let mut out = String::new();
+        out.push_str("# 長期記憶索引(若需細節,呼叫 recall_memory(id))\n\n");
+        for entry in &entries {
+            out.push_str(&format!(
+                "- id=`{}` 「{}」 — {}\n",
+                entry.id, entry.name, entry.description
+            ));
         }
         Ok(out)
     }
