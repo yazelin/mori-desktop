@@ -104,6 +104,13 @@ export default function AnnuliTab() {
 
   useEffect(() => {
     refresh();
+    // Wave 4 step 11:30s 自動刷新 status / events 數,給 background polling 感
+    const id = setInterval(() => {
+      // 只 refresh status / events,不重 fetch SOUL / sections(那兩個基本不變)
+      invoke<AnnuliStatus>("annuli_status").then(setStatus).catch(() => {});
+      invoke<AnnuliEvent[]>("annuli_list_events_today").then(setEvents).catch(() => {});
+    }, 30_000);
+    return () => clearInterval(id);
   }, [refresh]);
 
   const triggerSleep = async () => {
