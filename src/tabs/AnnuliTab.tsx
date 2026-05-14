@@ -16,6 +16,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { IconRefresh, IconConfig } from "../icons";
 
 function gotoConfig() {
@@ -67,6 +68,7 @@ function previewData(json: string, max = 80): string {
 }
 
 export default function AnnuliTab() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<AnnuliStatus | null>(null);
   const [soul, setSoul] = useState<string | null>(null);
   const [sections, setSections] = useState<MemorySection[]>([]);
@@ -147,23 +149,20 @@ export default function AnnuliTab() {
   };
 
   if (!status) {
-    return <div className="mori-tab mori-annuli-loading">載入 Annuli 狀態中…</div>;
+    return <div className="mori-tab mori-annuli-loading">{t("annuli_tab.loading_status")}</div>;
   }
 
   if (!status.configured) {
     return (
       <div className="mori-tab">
-        <h1 className="mori-tab-title">Annuli</h1>
-        <p className="mori-tab-hint">
-          Annuli 整合<strong>還沒接</strong> — 走本機 <code>~/.mori/memory/</code> fallback。
-          接上 annuli HTTP service 後,Mori 就會把 SOUL / MEMORY / events / rings 都讀寫到 vault。
-        </p>
+        <h1 className="mori-tab-title">{t("annuli_tab.title_unconfigured")}</h1>
+        <p className="mori-tab-hint">{t("annuli_tab.unconfigured_hint")}</p>
         <div className="mori-annuli-sleep-row">
           <button className="mori-btn primary" onClick={gotoConfig}>
-            <IconConfig /> 去 Config 設定 Annuli
+            <IconConfig /> {t("annuli_tab.go_config")}
           </button>
         </div>
-        <p className="mori-tab-hint">參考 schema:</p>
+        <p className="mori-tab-hint">{t("annuli_tab.schema_hint")}</p>
         <pre className="mori-annuli-pre">
 {`{
   "annuli": {
@@ -185,11 +184,11 @@ export default function AnnuliTab() {
       <div className="mori-annuli-header">
         <h1 className="mori-tab-title">Annuli — {status.spirit ?? "(unknown spirit)"}</h1>
         <div className="mori-annuli-header-actions">
-          <button className="mori-btn" onClick={gotoConfig} title="編輯 annuli 設定">
-            <IconConfig /> 設定
+          <button className="mori-btn" onClick={gotoConfig} title={t("annuli_tab.configure_button")}>
+            <IconConfig /> {t("annuli_tab.configure_button")}
           </button>
-          <button className="mori-btn" onClick={refresh} disabled={loading} title="重新整理">
-            <IconRefresh /> {loading ? "載入中…" : "重新整理"}
+          <button className="mori-btn" onClick={refresh} disabled={loading} title={t("annuli_tab.refresh_button")}>
+            <IconRefresh /> {loading ? t("annuli_tab.refreshing_button") : t("annuli_tab.refresh_button")}
           </button>
         </div>
       </div>
@@ -197,14 +196,14 @@ export default function AnnuliTab() {
       {/* Status row */}
       <div className={`mori-annuli-status ${status.reachable ? "ok" : "bad"}`}>
         <div className="mori-annuli-status-main">
-          {status.reachable ? "🟢 connected" : "🔴 unreachable"} · endpoint: <code>{status.endpoint}</code> · spirit: <code>{status.spirit}</code> · user_id: <code>{status.user_id}</code>
+          {status.reachable ? t("annuli_tab.status_connected") : t("annuli_tab.status_unreachable")} · endpoint: <code>{status.endpoint}</code> · spirit: <code>{status.spirit}</code> · user_id: <code>{status.user_id}</code>
         </div>
         <div className="mori-annuli-status-sub">
-          X-Soul-Token: {status.soul_token_configured ? "✅ 設好(可 PUT /soul)" : "⚠️ 沒設(PUT /soul 一律 403)"}
+          X-Soul-Token: {status.soul_token_configured ? t("annuli_tab.soul_token_set") : t("annuli_tab.soul_token_unset")}
         </div>
         {status.error && (
           <div className="mori-annuli-status-err">
-            錯誤:{status.error}
+            {t("annuli_tab.error_prefix")}{status.error}
           </div>
         )}
       </div>
@@ -216,7 +215,7 @@ export default function AnnuliTab() {
           onClick={triggerSleep}
           disabled={sleepBusy || !status.reachable}
         >
-          {sleepBusy ? "🌙 reflecting…(LLM 寫 ring 中)" : "🌙 /sleep — 寫一輪反思年輪"}
+          {sleepBusy ? t("annuli_tab.sleep_busy") : t("annuli_tab.sleep_button")}
         </button>
         {sleepResult && (
           <div className="mori-annuli-sleep-result">
@@ -227,17 +226,17 @@ export default function AnnuliTab() {
 
       {/* SOUL.md */}
       <section className="mori-annuli-section">
-        <h2 className="mori-annuli-section-title">SOUL.md</h2>
+        <h2 className="mori-annuli-section-title">{t("annuli_tab.soul_section")}</h2>
         <pre className="mori-annuli-pre mori-annuli-soul">
-          {soul ?? "(載入中)"}
+          {soul ?? t("annuli_tab.soul_loading")}
         </pre>
       </section>
 
       {/* MEMORY § sections */}
       <section className="mori-annuli-section">
-        <h2 className="mori-annuli-section-title">MEMORY.md sections ({sections.length})</h2>
+        <h2 className="mori-annuli-section-title">{t("annuli_tab.memory_section")} ({sections.length})</h2>
         {sections.length === 0 ? (
-          <p className="mori-annuli-empty">(沒有 § sections 或讀取失敗)</p>
+          <p className="mori-annuli-empty">{t("annuli_tab.memory_empty")}</p>
         ) : (
           <ul className="mori-annuli-list">
             {sections.map((s) => (
@@ -261,9 +260,9 @@ export default function AnnuliTab() {
 
       {/* Today's events */}
       <section className="mori-annuli-section">
-        <h2 className="mori-annuli-section-title">今日 events ({events.length})</h2>
+        <h2 className="mori-annuli-section-title">{t("annuli_tab.events_section")} ({events.length})</h2>
         {events.length === 0 ? (
-          <p className="mori-annuli-empty">(今天還沒事件,或對話沒接 annuli)</p>
+          <p className="mori-annuli-empty">{t("annuli_tab.events_empty")}</p>
         ) : (
           <ul className="mori-annuli-events">
             {events.map((e, i) => (

@@ -12,6 +12,7 @@
 
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import ChatPanel from "./ChatPanel";
 import ProfilesTab from "./tabs/ProfilesTab";
 import ConfigTab from "./tabs/ConfigTab";
@@ -32,21 +33,22 @@ type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "
 type TabDef = {
   id: TabId;
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
-  label: string;
-  sub: string;
+  /** i18n key suffix:`sidebar.<key>` 對應 label,`sidebar.<key>_sub` 對應副標 */
+  key: string;
 };
 
 const TABS: TabDef[] = [
-  { id: "chat",     Icon: IconChat,     label: "Chat",     sub: "Talk to Mori" },
-  { id: "profiles", Icon: IconProfiles, label: "Profiles", sub: "Voice / Agent" },
-  { id: "config",   Icon: IconConfig,   label: "Config",   sub: "config.json" },
-  { id: "memory",   Icon: IconMemory,   label: "Memory",   sub: "~/.mori/memory" },
-  { id: "annuli",   Icon: IconAnnuli,   label: "Annuli",   sub: "Vault reflection" },
-  { id: "skills",   Icon: IconSkills,   label: "Skills",   sub: "Built-in / Shell" },
-  { id: "deps",     Icon: IconDeps,     label: "Deps",     sub: "Optional tools" },
+  { id: "chat",     Icon: IconChat,     key: "chat" },
+  { id: "profiles", Icon: IconProfiles, key: "profiles" },
+  { id: "config",   Icon: IconConfig,   key: "config" },
+  { id: "memory",   Icon: IconMemory,   key: "memory" },
+  { id: "annuli",   Icon: IconAnnuli,   key: "annuli" },
+  { id: "skills",   Icon: IconSkills,   key: "skills" },
+  { id: "deps",     Icon: IconDeps,     key: "deps" },
 ];
 
 function MainShell() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<TabId>("chat");
   // 跨 tab 導航:接到 "mori-nav" event 時切 tab,如果帶 subTab 就傳給子 tab 套用
   const [pendingSubTab, setPendingSubTab] = useState<string | null>(null);
@@ -94,20 +96,24 @@ function MainShell() {
           <span className="mori-sidebar-brand-name">Mori</span>
         </div>
         <nav className="mori-sidebar-nav">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`mori-sidebar-item ${tab === t.id ? "active" : ""}`}
-              onClick={() => setTab(t.id)}
-              title={t.sub}
-            >
-              <span className="mori-sidebar-item-icon"><t.Icon /></span>
-              <span className="mori-sidebar-item-text">
-                <span className="mori-sidebar-item-label">{t.label}</span>
-                <span className="mori-sidebar-item-sub">{t.sub}</span>
-              </span>
-            </button>
-          ))}
+          {TABS.map((tab_def) => {
+            const label = t(`sidebar.${tab_def.key}`);
+            const sub = t(`sidebar.${tab_def.key}_sub`);
+            return (
+              <button
+                key={tab_def.id}
+                className={`mori-sidebar-item ${tab === tab_def.id ? "active" : ""}`}
+                onClick={() => setTab(tab_def.id)}
+                title={sub}
+              >
+                <span className="mori-sidebar-item-icon"><tab_def.Icon /></span>
+                <span className="mori-sidebar-item-text">
+                  <span className="mori-sidebar-item-label">{label}</span>
+                  <span className="mori-sidebar-item-sub">{sub}</span>
+                </span>
+              </button>
+            );
+          })}
         </nav>
         <button
           className="mori-sidebar-theme-toggle"
