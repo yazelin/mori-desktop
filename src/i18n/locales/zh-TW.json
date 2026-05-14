@@ -191,6 +191,8 @@
     "env_detected": "偵測到環境變數 GROQ_API_KEY,不用再貼 key,直接「存起來」就好",
     "env_placeholder": "(空 = 用環境變數的 key;貼新的會覆蓋)",
     "optional_when_env": "(可選)",
+    "audio_mute": "關掉氛圍音(目前播)",
+    "audio_unmute": "打開氛圍音(目前靜音)",
     "api_key_label": "貼上 API key",
     "where_get_key": "去拿 key",
     "show_key": "顯示",

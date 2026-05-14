@@ -191,6 +191,8 @@
     "env_detected": "Detected GROQ_API_KEY in environment — you don't need to paste a key. Just hit Save.",
     "env_placeholder": "(blank = use env var; type new to override)",
     "optional_when_env": "(optional)",
+    "audio_mute": "Mute ambient (currently playing)",
+    "audio_unmute": "Unmute ambient (currently silent)",
     "api_key_label": "Paste your API key",
     "where_get_key": "Get a key",
     "show_key": "Show",

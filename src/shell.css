@@ -1972,6 +1972,48 @@
   color: rgba(220, 240, 220, 0.95);
   font-weight: 400;
 }
+/* 儀式 modal 強制 light text(因背景永遠深森色,不跟著系統 light/dark theme) */
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-modal,
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-intro,
+.mori-quickstart-backdrop.mode-ritual .mori-ritual-narrative,
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-field label,
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-provider-card {
+  color: rgba(230, 240, 225, 0.92);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-ritual-narrative.whisper {
+  color: rgba(180, 210, 185, 0.78);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-help-link {
+  color: rgba(170, 220, 180, 0.75);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-field-hint,
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-optional-tag {
+  color: rgba(180, 210, 185, 0.62);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-provider-card {
+  background: rgba(20, 50, 35, 0.4);
+  border-color: rgba(168, 197, 162, 0.25);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-provider-card.active {
+  background: rgba(106, 143, 114, 0.35);
+  border-color: rgba(168, 197, 162, 0.55);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-provider-card .provider-hint {
+  color: rgba(180, 210, 185, 0.7);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-input {
+  background: rgba(8, 18, 14, 0.6);
+  border-color: rgba(168, 197, 162, 0.3);
+  color: rgba(230, 240, 225, 0.92);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-input::placeholder {
+  color: rgba(180, 210, 185, 0.45);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-env-banner {
+  background: rgba(106, 143, 114, 0.18);
+  border-color: rgba(168, 197, 162, 0.35);
+  color: rgba(200, 230, 200, 0.95);
+}
 .mori-quickstart-header {
   display: flex;
   align-items: center;

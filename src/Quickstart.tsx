@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { IconClose, IconGlobe } from "./icons";
 import { setLocale, nextLocale } from "./i18n";
+import { ritualAudio } from "./ritualAudio";
 
 type Provider = "groq" | "openai_compat";
 type Mode = "direct" | "ritual";
@@ -66,6 +67,18 @@ export function Quickstart({ onDone }: QuickstartProps) {
   useEffect(() => {
     invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
   }, []);
+
+  // 儀式模式 → 開 ambient pad,切走 / 關 modal 時停
+  // mute toggle 也存進 state(預設不靜音)
+  const [audioMuted, setAudioMuted] = useState(false);
+  useEffect(() => {
+    if (mode === "ritual" && !audioMuted) {
+      ritualAudio.startAmbient();
+    } else {
+      ritualAudio.stopAmbient();
+    }
+    return () => { ritualAudio.stopAmbient(); };
+  }, [mode, audioMuted]);
   // 儀式模式:當前步驟 0..4
   const [ritualStep, setRitualStep] = useState(0);
 
@@ -185,6 +198,16 @@ export function Quickstart({ onDone }: QuickstartProps) {
               {i18n.language === "zh-TW" ? "EN" : "繁中"}
             </span>
           </button>
+          {mode === "ritual" && (
+            <button
+              className="mori-btn ghost"
+              onClick={() => setAudioMuted(!audioMuted)}
+              title={audioMuted ? t("quickstart.audio_unmute") : t("quickstart.audio_mute")}
+              style={{ fontSize: 14 }}
+            >
+              {audioMuted ? "🔇" : "🔈"}
+            </button>
+          )}
           <button className="mori-btn ghost" onClick={doSkip} title={t("quickstart.skip_title")}>
             <IconClose width={14} height={14} />
           </button>
