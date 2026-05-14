@@ -1,193 +1,41 @@
-// 儀式氛圍音 — 先試播 `/audio/ritual-ambient.mp3`(user 自己放音檔),
-// 沒檔案就 fallback Web Audio API 合成的 ambient pad。
+// 儀式氛圍音 — 極簡版。
 //
-// 為什麼分兩段:
-// - 真的音樂(user 從 Pixabay / Mixkit / FreeSound 下載放進 public/audio/)
-//   音質、層次、情緒都遠勝合成
-// - 沒音檔時 fallback synth,至少有東西(雖然 user 反映像白噪音)
+// 只播一條音檔 `/audio/ritual-ambient.mp3`,loop。
+// 沒有合成 fallback,沒有隨機選 track,沒有 fade-out。
+// 故意這樣做:多東西會疊播 / 失控,user 已經被搞煩。
 //
-// 簡單音檔 fallback 流程:
-//   1. Vite 把 public/audio/ritual-ambient.mp3 serve 在 /audio/ 路徑
-//   2. 進 ritual mode → HTMLAudioElement load + play
-//   3. error / not-found → 退到 synth
-//
-// 找 CC0 / royalty-free 音樂:
-//   - https://pixabay.com/music/search/ambient/ (CC0, 不需署名)
-//   - https://mixkit.co/free-stock-music/mood/peaceful/
-//   - https://freemusicarchive.org/genre/Ambient/
+// 想換音檔:把新檔覆蓋 public/audio/ritual-ambient.mp3。
 
 class RitualAudio {
-  private ctx: AudioContext | null = null;
-  private ambientNodes: AudioNode[] = [];
-  private masterGain: GainNode | null = null;
+  private audioEl: HTMLAudioElement | null = null;
   private muted: boolean = false;
 
-  // 音檔模式
-  private audioEl: HTMLAudioElement | null = null;
-  private usingFile: boolean = false;
-
-  private ensureContext(): AudioContext {
-    if (!this.ctx) {
-      const AC = window.AudioContext || (window as any).webkitAudioContext;
-      this.ctx = new AC();
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.muted ? 0 : 0.35;
-      this.masterGain.connect(this.ctx.destination);
-    }
-    if (this.ctx.state === "suspended") this.ctx.resume();
-    return this.ctx;
-  }
-
-  /** 先試音檔,沒就 synth fallback。多條音檔時隨機選一條(每次開儀式氣氛換)。 */
   startAmbient(): void {
-    // pending starting → skip
-    if (this.starting) return;
-    // 已經有東西在播(音檔或 synth)→ 不重新啟,避免疊
-    if (this.usingFile || this.ambientNodes.length > 0) return;
-    // 不過為了清舊 session 的 leftover state(例如舊 synth nodes 沒 disconnect 乾淨),
-    // 進來先強制 stop 一次,確保乾淨
-    this.forceStopImmediate();
-    this.starting = true;
-    this.tryStartFile();
-  }
-
-  /** 不 fade,馬上 stop 一切 — 給 startAmbient 進來清舊 state 用 */
-  private forceStopImmediate(): void {
-    if (this.audioEl) {
-      try { this.audioEl.pause(); this.audioEl.src = ""; } catch {}
-      this.audioEl = null;
-    }
-    this.usingFile = false;
-    for (const n of this.ambientNodes) {
-      try {
-        if ("stop" in n && typeof (n as any).stop === "function") (n as any).stop();
-      } catch {}
-      try { n.disconnect(); } catch {}
-    }
-    this.ambientNodes = [];
-  }
-
-  private starting: boolean = false;
-
-  private pickTrackUrl(): string {
-    // public/audio/ 內的 bundle 音檔 — 加新檔案進這個 list 就會被隨機抽到
-    const tracks = [
-      "/audio/ritual-ambient.mp3",
-      "/audio/ritual-ambient-2.mp3",
-      "/audio/ritual-ambient-3.mp3",
-    ];
-    return tracks[Math.floor(Math.random() * tracks.length)];
-  }
-
-  private tryStartFile(): void {
-    // 同步先把 element 占位,再走 async play() — 避免 effect 雙跑時 race 起兩條
-    const el = new Audio(this.pickTrackUrl());
+    // 已經在播 → skip
+    if (this.audioEl) return;
+    const el = new Audio("/audio/ritual-ambient.mp3");
     el.loop = true;
     el.volume = this.muted ? 0 : 0.4;
-    el.preload = "auto";
     this.audioEl = el;
-    this.usingFile = true;
-
-    const fallback = () => {
-      // 已經切到 synth 或被 stop 過 → 不再 fallback
-      if (!this.usingFile && this.ambientNodes.length > 0) return;
-      console.info("[ritualAudio] audio file failed, fallback to synth pad");
+    el.play().catch((e) => {
+      console.warn("[ritualAudio] play failed:", e);
       this.audioEl = null;
-      this.usingFile = false;
-      this.starting = false;
-      this.startSynth();
-    };
-    el.addEventListener("error", fallback, { once: true });
-    el.addEventListener("stalled", fallback, { once: true });
-
-    el.play()
-      .then(() => {
-        this.starting = false;
-        console.info("[ritualAudio] playing", el.src);
-      })
-      .catch((e) => {
-        console.info("[ritualAudio] audio file play failed, fallback to synth:", e);
-        fallback();
-      });
-  }
-
-  private startSynth(): void {
-    const ctx = this.ensureContext();
-    const out = this.masterGain!;
-
-    const freqs = [196.0, 293.66, 220.0]; // G3 / D4 / A3
-    const detunes = [0, 7, -5];
-
-    for (let i = 0; i < freqs.length; i++) {
-      const osc = ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = freqs[i];
-      osc.detune.value = detunes[i];
-
-      const g = ctx.createGain();
-      g.gain.value = 0.0;
-      g.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 1.5);
-
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = 0.15 + i * 0.03;
-      const lfoGain = ctx.createGain();
-      lfoGain.gain.value = 3.0;
-      lfo.connect(lfoGain);
-      lfoGain.connect(osc.detune);
-
-      osc.connect(g);
-      g.connect(out);
-
-      osc.start();
-      lfo.start();
-
-      this.ambientNodes.push(osc, lfo, g, lfoGain);
-    }
+    });
   }
 
   stopAmbient(): void {
-    this.starting = false;
-    // 停音檔
-    if (this.audioEl) {
-      try {
-        this.audioEl.pause();
-        this.audioEl.src = "";
-      } catch {}
-      this.audioEl = null;
-    }
-    this.usingFile = false;
-
-    // 停 synth
-    if (!this.ctx || this.ambientNodes.length === 0) return;
-    const now = this.ctx.currentTime;
-    for (const n of this.ambientNodes) {
-      if (n instanceof GainNode) {
-        n.gain.cancelScheduledValues(now);
-        n.gain.setValueAtTime(n.gain.value, now);
-        n.gain.linearRampToValueAtTime(0, now + 1.0);
-      }
-    }
-    const nodes = this.ambientNodes;
-    this.ambientNodes = [];
-    setTimeout(() => {
-      for (const n of nodes) {
-        try {
-          if ("stop" in n && typeof (n as any).stop === "function") (n as any).stop();
-        } catch {}
-        try { n.disconnect(); } catch {}
-      }
-    }, 1200);
+    if (!this.audioEl) return;
+    try {
+      this.audioEl.pause();
+      this.audioEl.src = "";
+    } catch {}
+    this.audioEl = null;
   }
 
   setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.audioEl) {
       this.audioEl.volume = muted ? 0 : 0.4;
-    }
-    if (this.masterGain && this.ctx) {
-      const now = this.ctx.currentTime;
-      this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.linearRampToValueAtTime(muted ? 0 : 0.35, now + 0.2);
     }
   }
 
@@ -197,3 +45,10 @@ class RitualAudio {
 }
 
 export const ritualAudio = new RitualAudio();
+
+// Vite HMR:module 重 load 時把舊 singleton 完全停掉,避免疊播
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    try { ritualAudio.stopAmbient(); } catch {}
+  });
+}
