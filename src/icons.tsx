@@ -88,24 +88,21 @@ export function IconAnnuli(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// 🔮 Skills — 水晶球(魔導師 / 占星術)。
-// 中央圓球(crystal orb)+ 上端小高光弧 + 下方月牙托 + 兩側小 sparkle,
-// 整體傳達「魔幻 / 預言 / 招式由水晶導引」— 精靈氣質。
+// 🪄 Skills — 法杖(magic wand)。
+// 斜立的法杖,杖尖在右上爆出 4-point 星光(skill 從這裡釋放);
+// 法杖周圍飄 2 顆小 sparkle dust = 魔法殘留塵。完全不會被看成人形。
 export function IconSkills(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
-      {/* 水晶球 */}
-      <circle cx="12" cy="10" r="6" />
-      {/* 球內高光(左上小弧,顯示玻璃感) */}
-      <path d="M9 7 a3 3 0 0 1 2.5 -1.5" />
-      {/* 月牙托底(球底下的弧形支撐) */}
-      <path d="M6 16 a6 6 0 0 0 12 0" />
-      {/* 托盤底線 */}
-      <path d="M9 20 L15 20" />
-      {/* 左下小 sparkle */}
-      <path d="M3 17 v2 M2 18 h2" />
-      {/* 右上小 sparkle */}
-      <path d="M20 3 v2 M19 4 h2" />
+      {/* 法杖本體(從左下斜向右上) */}
+      <path d="M4 20 L15 9" />
+      {/* 杖尖星光(4-point sparkle 在右上) */}
+      <path d="M16 4 V12" />
+      <path d="M12 8 H20" />
+      {/* 第二顆魔法塵(右下) */}
+      <path d="M19 15 v2 M18 16 h2" />
+      {/* 第三顆魔法塵(左上) */}
+      <path d="M7 5 v1.5 M6.25 5.75 h1.5" />
     </svg>
   );
 }
