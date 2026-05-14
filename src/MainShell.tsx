@@ -116,33 +116,35 @@ function MainShell() {
             );
           })}
         </nav>
-        <button
-          className="mori-sidebar-theme-toggle"
-          onClick={() => {
-            const next = nextLocale(i18n.language);
-            setLocale(next).catch((e) => console.error("[i18n] toggle failed", e));
-          }}
-          title={i18n.language === "zh-TW" ? "Switch to English" : "切到繁體中文"}
-        >
-          <span className="mori-sidebar-item-icon">
-            <IconGlobe />
-          </span>
-          <span className="mori-sidebar-theme-label">
-            {i18n.language === "zh-TW" ? "EN" : "繁中"}
-          </span>
-        </button>
-        <button
-          className="mori-sidebar-theme-toggle"
-          onClick={handleToggle}
-          title={themeBase === "dark" ? "切到亮色" : "切到深色"}
-        >
-          <span className="mori-sidebar-item-icon">
-            {themeBase === "dark" ? <IconSun /> : <IconMoon />}
-          </span>
-          <span className="mori-sidebar-theme-label">
-            {themeBase === "dark" ? "Light" : "Dark"}
-          </span>
-        </button>
+        <div className="mori-sidebar-toggles">
+          <button
+            className="mori-sidebar-theme-toggle compact"
+            onClick={() => {
+              const next = nextLocale(i18n.language);
+              setLocale(next).catch((e) => console.error("[i18n] toggle failed", e));
+            }}
+            title={i18n.language === "zh-TW" ? "Switch to English" : "切到繁體中文"}
+          >
+            <span className="mori-sidebar-item-icon">
+              <IconGlobe />
+            </span>
+            <span className="mori-sidebar-theme-label">
+              {i18n.language === "zh-TW" ? "EN" : "繁中"}
+            </span>
+          </button>
+          <button
+            className="mori-sidebar-theme-toggle compact"
+            onClick={handleToggle}
+            title={themeBase === "dark" ? "切到亮色" : "切到深色"}
+          >
+            <span className="mori-sidebar-item-icon">
+              {themeBase === "dark" ? <IconSun /> : <IconMoon />}
+            </span>
+            <span className="mori-sidebar-theme-label">
+              {themeBase === "dark" ? "Light" : "Dark"}
+            </span>
+          </button>
+        </div>
       </aside>
 
       <main className="mori-main">

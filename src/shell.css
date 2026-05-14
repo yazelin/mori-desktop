@@ -164,6 +164,22 @@
 }
 
 /* brand-3: theme toggle 放 sidebar 底部 */
+/* container 包兩個 toggle button(語言 + theme),flex row 並排 */
+.mori-sidebar-toggles {
+  margin-top: auto;
+  display: flex;
+  gap: 6px;
+}
+.mori-sidebar-toggles .mori-sidebar-theme-toggle.compact {
+  flex: 1;
+  margin-top: 0;
+  padding: 8px 6px;
+  gap: 6px;
+  min-width: 0; /* 讓 flex 子元素能縮 */
+}
+.mori-sidebar-toggles .mori-sidebar-theme-toggle.compact .mori-sidebar-theme-label {
+  font-size: 10.5px;
+}
 .mori-sidebar-theme-toggle {
   margin-top: auto;
   display: flex;

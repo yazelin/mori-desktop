@@ -103,8 +103,9 @@ function FormRow({
 /** ⓘ icon + hover/focus 後出 popover 顯示 hint。把長 hint 從 inline 文字
  *  改成 on-demand 提示,大幅減少 Config tab 垂直密度。 */
 function HintTooltip({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   return (
-    <span className="mori-hint" tabIndex={0} aria-label="說明">
+    <span className="mori-hint" tabIndex={0} aria-label={t("config_tab.rows.help_aria")}>
       <span className="mori-hint-icon">ⓘ</span>
       <span className="mori-hint-popover">{children}</span>
     </span>
@@ -221,7 +222,7 @@ function KvTable({
           <button className="mori-btn small ghost" onClick={() => remove(i)} title={t("config_tab.rows.remove_button_title")}>✕</button>
         </div>
       ))}
-      <button className="mori-btn small" onClick={add}>+ 新增</button>
+      <button className="mori-btn small" onClick={add}>{t("config_tab.rows.add_button")}</button>
     </div>
   );
 }
@@ -388,10 +389,10 @@ function CharacterPicker() {
       await invoke("character_set_active", { stem });
       setActive(stem);
       await emit("character-changed");
-      setMsg(`已切換到 ${stem}`);
+      setMsg(t("config_tab.rows.char_switch_ok", { stem }));
       setTimeout(() => setMsg(null), 2000);
     } catch (e: any) {
-      setMsg(`切換失敗:${e}`);
+      setMsg(t("config_tab.rows.char_switch_fail", { e: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -405,10 +406,10 @@ function CharacterPicker() {
         stem: active,
       });
       await emit("character-changed");
-      setMsg(`升級完成:${up} 張升 4×4,${sk} 已是 1024×1024 略過`);
+      setMsg(t("config_tab.rows.char_upgrade_ok", { up, sk }));
       setTimeout(() => setMsg(null), 4000);
     } catch (e: any) {
-      setMsg(`升級失敗:${e}`);
+      setMsg(t("config_tab.rows.char_upgrade_fail", { e: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -435,7 +436,7 @@ function CharacterPicker() {
       >
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button className="mori-btn" onClick={onUpgrade} disabled={busy}>
-            升級此 pack 為 4×4 placeholder
+            {t("config_tab.rows.upgrade_pack_button")}
           </button>
           {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
         </div>
@@ -649,14 +650,14 @@ function ConfigTab({
             title={t("config_tab.sections.quick_provider")}
             hint={t("config_tab.sections.quick_provider_hint")}
           >
-            <FormRow label="provider" hint="主對話 / agent 用的 LLM">
+            <FormRow label="provider" hint={t("config_tab.rows.hint_quick_provider")}>
               <Select
                 value={getStr(cfg, "provider", "groq")}
                 onChange={(v) => applyPatch((c) => setStrOrUndef(c, "provider", v))}
                 options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
               />
             </FormRow>
-            <FormRow label="stt_provider" hint="Whisper STT(語音轉文字)">
+            <FormRow label="stt_provider" hint={t("config_tab.rows.hint_quick_stt")}>
               <Select
                 value={getStr(cfg, "stt_provider", "groq")}
                 onChange={(v) => applyPatch((c) => setStrOrUndef(c, "stt_provider", v))}
@@ -708,7 +709,7 @@ function ConfigTab({
                 { key: "model", label: "model", hint: "gemini-3.1-flash-lite-preview" },
                 { key: "api_base", label: "api_base", hint: "https://generativelanguage.googleapis.com/v1beta/openai/" },
               ]}
-              hint="API key 在上方 API Keys 區填 GEMINI_API_KEY,或設 $GEMINI_API_KEY 環境變數(env 優先)。model / api_base 留空就用預設值。"
+              hint={t("config_tab.rows.hint_llm_gemini_key")}
               onPatch={(patch) =>
                 applyPatch((c) => {
                   const p = ensureSubObj(c, "providers");
@@ -771,7 +772,7 @@ function ConfigTab({
                 { key: "server_binary", label: "server_binary", hint: "~/.mori/bin/whisper-server[.exe](去 Deps 頁一鍵下載,或填絕對路徑指向 GPU 版本)" },
                 { key: "language", label: "language", hint: "zh / en / auto(留空 = auto detect)" },
               ]}
-              hint="v2:Mori 自己不編 whisper.cpp,改 spawn 官方 whisper-server 子程序。模型 + 引擎兩件事都可以從 Deps 頁一鍵裝完,不用手動改 config。"
+              hint={t("config_tab.rows.hint_llm_whisper_server")}
               onPatch={(patch) =>
                 applyPatch((c) => {
                   const p = ensureSubObj(c, "providers");
@@ -786,7 +787,7 @@ function ConfigTab({
             title={t("config_tab.sections.llm_routing")}
             hint={t("config_tab.sections.llm_routing_hint")}
           >
-            <FormRow label="agent" hint="agent loop 用哪個 provider(預設 = provider)">
+            <FormRow label="agent" hint={t("config_tab.rows.hint_llm_routing_agent")}>
               <Select
                 value={cfg.routing?.agent ?? ""}
                 allowEmpty
@@ -805,7 +806,7 @@ function ConfigTab({
                 options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
               />
             </FormRow>
-            <FormRow label="skills" hint="skill_name → provider(空 = 用 agent / provider)">
+            <FormRow label="skills" hint={t("config_tab.rows.hint_llm_routing_skills")}>
               <KvTable
                 rows={routingSkillsRows}
                 setRows={setRoutingSkills}
@@ -822,7 +823,7 @@ function ConfigTab({
             title={t("config_tab.sections.voice_input")}
             hint={t("config_tab.sections.voice_input_hint")}
           >
-            <FormRow label="cleanup_level" hint="smart=LLM+程式 / minimal=只程式 / none=raw 直貼">
+            <FormRow label="cleanup_level" hint={t("config_tab.rows.hint_voice_cleanup")}>
               <Select
                 value={cfg.voice_input?.cleanup_level ?? "smart"}
                 onChange={(v) =>
@@ -840,7 +841,7 @@ function ConfigTab({
             </FormRow>
             <FormRow
               label="inject_memory_types"
-              hint="cleanup LLM 注入哪些 memory type 當校正詞庫(profile 沒設時的全域 default)"
+              hint={t("config_tab.rows.hint_voice_inject")}
             >
               <ConfigMemoryTypeChips
                 value={Array.isArray(cfg.voice_input?.inject_memory_types)
@@ -868,7 +869,7 @@ function ConfigTab({
             title={t("config_tab.sections.appearance_locale")}
             hint={t("config_tab.sections.appearance_locale_hint")}
           >
-            <FormRow label="locale" hint="zh-TW / en。改完立即生效,同時寫進 config.json — 重啟也記得。">
+            <FormRow label="locale" hint={t("config_tab.rows.hint_locale")}>
               <Select
                 value={getStr(cfg, "locale", "zh-TW")}
                 onChange={(v) => {
@@ -890,7 +891,7 @@ function ConfigTab({
           >
             <FormRow
               label="animated"
-              hint="動態 Mori — sprite 跑 4×4 sheet animation;關掉只顯示 frame 1 靜止"
+              hint={t("config_tab.rows.hint_floating_animated")}
             >
               <input
                 type="checkbox"
@@ -905,7 +906,7 @@ function ConfigTab({
             </FormRow>
             <FormRow
               label="wander"
-              hint="讓 Mori 在桌面隨機走動(實驗性,需 animated ON;多螢幕只在 Mori 目前所在那台走)"
+              hint={t("config_tab.rows.hint_floating_wander")}
             >
               <input
                 type="checkbox"
@@ -931,7 +932,7 @@ function ConfigTab({
           >
             <FormRow
               label="toggle_mode"
-              hint="toggle:按一下開錄、再按一下停錄。hold:按住開錄、放開停錄(像 push-to-talk)。"
+              hint={t("config_tab.rows.hint_hotkey_toggle_mode")}
             >
               <Select
                 value={getStr(cfg.hotkeys, "toggle_mode", "toggle")}
@@ -967,7 +968,7 @@ function ConfigTab({
           >
             <FormRow
               label="toggle"
-              hint="主錄音 chord。預設 Ctrl+Alt+Space。"
+              hint={t("config_tab.rows.hint_hotkey_recording")}
             >
               <input
                 type="text"
@@ -985,7 +986,7 @@ function ConfigTab({
             </FormRow>
             <FormRow
               label="cancel"
-              hint="錄音中按這個丟掉音檔(不送 STT)。Transcribing / Responding 時 abort pipeline。"
+              hint={t("config_tab.rows.hint_hotkey_cancel")}
             >
               <input
                 type="text"
@@ -1003,7 +1004,7 @@ function ConfigTab({
             </FormRow>
             <FormRow
               label="picker"
-              hint="開 profile picker overlay(方向鍵選 voice / agent profile)。"
+              hint={t("config_tab.rows.hint_hotkey_picker")}
             >
               <input
                 type="text"
@@ -1041,7 +1042,7 @@ function ConfigTab({
           >
             <FormRow
               label="x11 shape"
-              hint="floating window OS-level 形狀。改完 save 即時套用(XShape clip 重新計算 + 套上)。"
+              hint={t("config_tab.rows.hint_x11_shape")}
             >
               <Select
                 value={cfg.floating?.x11_shape ?? "circle"}
@@ -1060,7 +1061,7 @@ function ConfigTab({
             </FormRow>
             <FormRow
               label="x11 shape radius"
-              hint="圓角矩形的角弧(px),只在 x11_shape = rounded 時用。1 ~ 80。"
+              hint={t("config_tab.rows.hint_x11_radius")}
             >
               <input
                 type="number"
@@ -1078,7 +1079,7 @@ function ConfigTab({
             </FormRow>
             <FormRow
               label="x11 backplate"
-              hint="floating window 內部底圖。logo 模式可放自己 PNG 在 ~/.mori/floating/backplate-{dark,light}.png 取代預設 Mori logo,即時生效。"
+              hint={t("config_tab.rows.hint_x11_backplate")}
             >
               <Select
                 value={cfg.floating?.x11_backplate ?? "plain"}
@@ -1103,7 +1104,7 @@ function ConfigTab({
             title={t("config_tab.sections.annuli_connection")}
             hint={t("config_tab.sections.annuli_connection_hint")}
           >
-            <FormRow label="enabled" hint="不打勾就走 LocalMarkdown fallback(舊行為)">
+            <FormRow label="enabled" hint={t("config_tab.rows.hint_annuli_enabled")}>
               <input
                 type="checkbox"
                 checked={cfg.annuli?.enabled ?? false}
@@ -1115,7 +1116,7 @@ function ConfigTab({
                 }
               />
             </FormRow>
-            <FormRow label="endpoint" hint="annuli HTTP base URL,**沒** trailing slash。本機通常 http://localhost:5000;正式機 https://ching-tech.ddns.net/jinn 之類。">
+            <FormRow label="endpoint" hint={t("config_tab.rows.hint_annuli_endpoint")}>
               <input
                 type="text"
                 className="mori-input"
@@ -1129,7 +1130,7 @@ function ConfigTab({
                 }
               />
             </FormRow>
-            <FormRow label="spirit_name" hint="vault spirit 名,本機通常 mori,正式機 jinn。錯了會打到別人的 vault。">
+            <FormRow label="spirit_name" hint={t("config_tab.rows.hint_annuli_spirit")}>
               <input
                 type="text"
                 className="mori-input"
@@ -1143,7 +1144,7 @@ function ConfigTab({
                 }
               />
             </FormRow>
-            <FormRow label="user_id" hint="跨機器穩定的使用者識別字串(annuli 用來區隔 events / memory 擁有者)。空字串時啟動會嘗試讀 vault 的 identity/user_id。">
+            <FormRow label="user_id" hint={t("config_tab.rows.hint_annuli_user_id")}>
               <input
                 type="text"
                 className="mori-input"
@@ -1157,7 +1158,7 @@ function ConfigTab({
                 }
               />
             </FormRow>
-            <FormRow label="soul_token" hint="PUT /soul 跟 POST /memory/section 需要這個 X-Soul-Token。空字串 → mori-desktop 就**不能**改 SOUL / MEMORY(read-only)。值要跟 annuli server 啟動時的 ANNULI_SOUL_TOKEN env 一致。">
+            <FormRow label="soul_token" hint={t("config_tab.rows.hint_annuli_soul_token")}>
               <input
                 type="password"
                 className="mori-input"
@@ -1171,7 +1172,7 @@ function ConfigTab({
                 }
               />
             </FormRow>
-            <FormRow label="timeout_secs" hint="HTTP request timeout,預設 10 秒。/sleep 比較久可以設高一點。">
+            <FormRow label="timeout_secs" hint={t("config_tab.rows.hint_annuli_timeout")}>
               <input
                 type="number"
                 className="mori-input"
