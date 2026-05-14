@@ -149,6 +149,17 @@ export function IconGlobe(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// ❓ Help — 圓圈內問號(打開 Quickstart 引導)
+export function IconHelp(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9 a3 3 0 0 1 5.83 1 c0 2 -3 3 -3 3" />
+      <path d="M12 17 h.01" />
+    </svg>
+  );
+}
+
 // ─── brand-3 batch 2: inline action icons(取代 chat / dep / skill emoji)──────
 
 // ✕ Close

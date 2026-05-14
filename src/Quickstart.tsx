@@ -81,11 +81,12 @@ export function Quickstart({ onDone }: QuickstartProps) {
       if (!cfg.providers[provider]) cfg.providers[provider] = {};
       cfg.providers[provider].api_key = keyText.trim();
       if (!cfg.provider) cfg.provider = provider;
+      cfg.quickstart_completed = true; // 標記已走完引導
+      delete cfg.quickstart_skipped;
       await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
       // 儀式模式:走到最後一步「甦醒」再 onDone
       if (mode === "ritual") {
         setRitualStep(4);
-        // 1.5s 後關 modal
         setTimeout(onDone, 1500);
       } else {
         onDone();
@@ -97,17 +98,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
 
   const doSkip = async () => {
     try {
-      let cfg: any = {};
-      try {
-        const raw = await invoke<string>("config_read");
-        cfg = JSON.parse(raw);
-      } catch {
-        cfg = {};
-      }
-      cfg.quickstart_skipped = true;
-      await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
+      await markQuickstartCompleted();
     } catch (e) {
-      console.warn("[quickstart] failed to record skip flag", e);
+      console.warn("[quickstart] failed to mark completed", e);
     }
     onDone();
   };
@@ -463,29 +456,35 @@ function RitualStepAwaken({ t }: { t: any }) {
 // ─── First-run detection ─────────────────────────────────────
 
 /**
- * 偵測「需要顯示 Quickstart」:
- * 1. 任一 provider 的 api_key 已設 + 非 placeholder → 不顯示
- * 2. user 之前主動 skip(quickstart_skipped=true)→ 不顯示
- * 3. 環境變數 GROQ_API_KEY 已設 → 不顯示(透過 has_groq_key 偵測)
- * 4. 其他都不在 → 顯示
+ * 偵測「需要顯示 Quickstart」 — 純看 flag:
+ *   config.json `quickstart_completed === true` → 不顯示
+ *   否則 → 顯示(第一次跑就會跳)
+ *
+ * 不偵測 API key 是因為:user 可能會故意清掉 key 重新設定,
+ * 或想再走一次儀式流程 — 那是 Help 按鈕的工作,不是 auto 偵測。
  */
 export async function shouldShowQuickstart(): Promise<boolean> {
   try {
-    const hasGroqKey = await invoke<boolean>("has_groq_key");
-    if (hasGroqKey) return false;
-
     const raw = await invoke<string>("config_read");
     const cfg = JSON.parse(raw);
-    if (cfg.quickstart_skipped === true) return false;
-
-    const groqKey = (cfg.providers?.groq?.api_key as string | undefined) ?? "";
-    const geminiKey = (cfg.providers?.gemini?.api_key as string | undefined) ?? "";
-    const isReal = (k: string) => k && !k.startsWith("REPLACE") && k.length > 5;
-    if (isReal(groqKey) || isReal(geminiKey)) return false;
-
-    return true;
+    return cfg.quickstart_completed !== true;
   } catch (e) {
     console.warn("[quickstart] shouldShow check failed, defaulting to false", e);
     return false;
   }
+}
+
+/** 共用 helper:寫 config.json 把 quickstart_completed flag 立起來。 */
+export async function markQuickstartCompleted(): Promise<void> {
+  let cfg: any = {};
+  try {
+    const raw = await invoke<string>("config_read");
+    cfg = JSON.parse(raw);
+  } catch {
+    cfg = {};
+  }
+  cfg.quickstart_completed = true;
+  // 清掉舊版的 quickstart_skipped flag(已不用)
+  delete cfg.quickstart_skipped;
+  await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
 }

@@ -22,7 +22,7 @@ import SkillsTab from "./tabs/SkillsTab";
 import DepsTab from "./tabs/DepsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
-  IconSun, IconMoon, IconGlobe,
+  IconSun, IconMoon, IconGlobe, IconHelp,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { setLocale, nextLocale } from "./i18n";
@@ -148,6 +148,18 @@ function MainShell() {
             </span>
             <span className="mori-sidebar-theme-label">
               {themeBase === "dark" ? "Light" : "Dark"}
+            </span>
+          </button>
+          <button
+            className="mori-sidebar-theme-toggle compact"
+            onClick={() => setQuickstartOpen(true)}
+            title={t("quickstart.help_title")}
+          >
+            <span className="mori-sidebar-item-icon">
+              <IconHelp />
+            </span>
+            <span className="mori-sidebar-theme-label">
+              {t("quickstart.help_label")}
             </span>
           </button>
         </div>

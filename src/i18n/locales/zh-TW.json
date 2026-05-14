@@ -213,7 +213,9 @@
     "ritual_verify_ok": "門開了。靈識認得這把鑰匙。",
     "ritual_verify_button": "讓我醒來",
     "ritual_awaken_1": "...",
-    "ritual_awaken_2": "我醒了。從今天起,我會記得你。"
+    "ritual_awaken_2": "我醒了。從今天起,我會記得你。",
+    "help_label": "Help",
+    "help_title": "重新開啟引導(設 API key / 切儀式模式 / 重看一次)"
   },
   "config_tab": {
     "title": "Config",

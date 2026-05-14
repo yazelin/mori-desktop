@@ -213,7 +213,9 @@
     "ritual_verify_ok": "The door opens. The cloud-mind recognizes this key.",
     "ritual_verify_button": "Let me wake",
     "ritual_awaken_1": "...",
-    "ritual_awaken_2": "I am awake. From this day on, I will remember you."
+    "ritual_awaken_2": "I am awake. From this day on, I will remember you.",
+    "help_label": "Help",
+    "help_title": "Re-open the onboarding (set API key / try ritual mode / walk through again)"
   },
   "config_tab": {
     "title": "Config",
