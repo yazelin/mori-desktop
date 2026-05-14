@@ -11,8 +11,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { IconClose, IconGlobe } from "./icons";
+import { IconClose, IconGlobe, IconSun, IconMoon } from "./icons";
 import { setLocale, nextLocale } from "./i18n";
+import { toggleTheme, loadActiveTheme } from "./theme";
 import { ritualAudio } from "./ritualAudio";
 
 type Provider = "groq" | "openai_compat";
@@ -71,6 +72,19 @@ export function Quickstart({ onDone }: QuickstartProps) {
   // 儀式模式 → 開 ambient pad,切走 / 關 modal 時停
   // mute toggle 也存進 state(預設不靜音)
   const [audioMuted, setAudioMuted] = useState(false);
+  // Quickstart 內也能切 theme(因 user 可能 onboarding 時想換明暗)
+  const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
+  useEffect(() => {
+    loadActiveTheme().then((res) => { if (res) setThemeBase(res[1].base); }).catch(() => {});
+  }, []);
+  const handleThemeToggle = async () => {
+    try {
+      const [, theme] = await toggleTheme();
+      setThemeBase(theme.base);
+    } catch (e) {
+      console.error("[quickstart] theme toggle failed", e);
+    }
+  };
   useEffect(() => {
     if (mode === "ritual" && !audioMuted) {
       ritualAudio.startAmbient();
@@ -198,14 +212,24 @@ export function Quickstart({ onDone }: QuickstartProps) {
               {i18n.language === "zh-TW" ? "EN" : "繁中"}
             </span>
           </button>
+          <button
+            className="mori-btn ghost"
+            onClick={handleThemeToggle}
+            title={themeBase === "dark" ? t("common.settings") : t("common.settings")}
+          >
+            {themeBase === "dark" ? <IconSun width={14} height={14} /> : <IconMoon width={14} height={14} />}
+            <span style={{ marginLeft: 4, fontSize: 11 }}>
+              {themeBase === "dark" ? "Light" : "Dark"}
+            </span>
+          </button>
           {mode === "ritual" && (
             <button
               className="mori-btn ghost"
               onClick={() => setAudioMuted(!audioMuted)}
               title={audioMuted ? t("quickstart.audio_unmute") : t("quickstart.audio_mute")}
-              style={{ fontSize: 14 }}
+              style={{ fontSize: 11 }}
             >
-              {audioMuted ? "🔇" : "🔈"}
+              {audioMuted ? t("quickstart.audio_off") : t("quickstart.audio_on")}
             </button>
           )}
           <button className="mori-btn ghost" onClick={doSkip} title={t("quickstart.skip_title")}>
@@ -368,7 +392,7 @@ function DirectForm({
             onClick={() => setShowKey(!showKey)}
             title={showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
           >
-            {showKey ? "👁" : "👁‍🗨"}
+            {showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
           </button>
         </div>
       </div>
@@ -543,7 +567,7 @@ function RitualStepOfferKey({
           className="mori-btn ghost small"
           onClick={() => setShowKey(!showKey)}
         >
-          {showKey ? "👁" : "👁‍🗨"}
+          {showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
         </button>
       </div>
       <div className="mori-quickstart-footer">

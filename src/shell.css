@@ -2014,6 +2014,40 @@
   border-color: rgba(168, 197, 162, 0.35);
   color: rgba(200, 230, 200, 0.95);
 }
+/* 所有 button(ghost / primary / default)在儀式深背景上都要亮色字 */
+.mori-quickstart-backdrop.mode-ritual .mori-btn,
+.mori-quickstart-backdrop.mode-ritual .mori-btn.ghost {
+  color: rgba(220, 240, 220, 0.92);
+  border-color: rgba(168, 197, 162, 0.35);
+  background: rgba(20, 50, 35, 0.4);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-btn:hover:not(:disabled) {
+  background: rgba(106, 143, 114, 0.35);
+  border-color: rgba(168, 197, 162, 0.6);
+  color: rgba(230, 245, 230, 1);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-btn.primary {
+  background: rgba(106, 143, 114, 0.55);
+  border-color: rgba(168, 197, 162, 0.7);
+  color: rgba(240, 250, 240, 1);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-btn.primary:hover:not(:disabled) {
+  background: rgba(126, 163, 134, 0.7);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-btn:disabled {
+  opacity: 0.4;
+}
+/* mode toggle buttons */
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-mode-btn {
+  color: rgba(180, 210, 185, 0.7);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-mode-btn.active {
+  background: rgba(106, 143, 114, 0.55);
+  color: rgba(240, 250, 240, 1);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-mode-toggle {
+  border-color: rgba(168, 197, 162, 0.35);
+}
 .mori-quickstart-header {
   display: flex;
   align-items: center;
