@@ -88,8 +88,9 @@ pub struct AppState {
     /// 若無,transcribe 階段會回 Error。
     pub groq_api_key: Mutex<Option<String>>,
     /// 長期記憶 store。Phase 1C 是 LocalMarkdownMemoryStore;
-    /// phase 7+ 換成 SyncedMemoryStore 不重寫上層程式碼。
-    pub memory: Arc<LocalMarkdownMemoryStore>,
+    /// Wave 4 加 AnnuliMemoryStore(走 HTTP),配 ~/.mori/config.json annuli.enabled
+    /// 切換。trait object 不寫死 impl。
+    pub memory: Arc<dyn mori_core::memory::MemoryStore>,
     /// Working memory:本次 session 的對話歷史(user / assistant 訊息對)。
     /// 重啟 app 就清空。長期記憶寫進 memory 那邊。
     pub conversation: Mutex<Vec<ChatMessage>>,
@@ -1669,7 +1670,7 @@ async fn run_agent_pipeline(
     };
 
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
-        let memory_index = memory.read_index_as_context().unwrap_or_default();
+        let memory_index = memory.read_index_as_context().await.unwrap_or_default();
         // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_read=true 才生效）
         let body_expanded = mori_core::agent_profile::preprocess_file_includes(
             &agent_profile.body,
@@ -2644,14 +2645,33 @@ fn main() {
         }
     };
 
-    // 建立長期記憶 store。第一次跑會在 ~/.mori/memory/ 建空索引。
-    let memory_root = LocalMarkdownMemoryStore::default_root()
-        .expect("could not determine ~/.mori/memory path");
-    let memory = Arc::new(
-        LocalMarkdownMemoryStore::new(memory_root.clone())
-            .expect("failed to initialize memory store"),
-    );
-    tracing::info!(path = %memory_root.display(), "memory store ready");
+    // 建立長期記憶 store。Wave 4 加 AnnuliMemoryStore 選項:
+    // ~/.mori/config.json 有 `annuli.enabled=true` 且 endpoint / spirit / user_id
+    // 都齊 → 用 AnnuliMemoryStore(走 HTTP);否則 fallback LocalMarkdownMemoryStore。
+    let memory: Arc<dyn mori_core::memory::MemoryStore> = {
+        let annuli_cfg = config_path
+            .as_deref()
+            .map(annuli_config::AnnuliConfig::load)
+            .unwrap_or_default();
+        if annuli_cfg.is_ready() {
+            tracing::info!(
+                endpoint = %annuli_cfg.endpoint,
+                spirit = %annuli_cfg.spirit_name,
+                user_id = %annuli_cfg.user_id,
+                "annuli memory store enabled — 透過 HTTP 跟 vault 互動",
+            );
+            let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
+                .expect("failed to build annuli client(check config.json annuli.endpoint)");
+            Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(Arc::new(client)))
+        } else {
+            let memory_root = LocalMarkdownMemoryStore::default_root()
+                .expect("could not determine ~/.mori/memory path");
+            let store = LocalMarkdownMemoryStore::new(memory_root.clone())
+                .expect("failed to initialize memory store");
+            tracing::info!(path = %memory_root.display(), "local markdown memory store ready");
+            Arc::new(store)
+        }
+    };
 
     // 5F-1: 確保 ~/.mori/voice_input/ 存在並有預設檔案
     mori_core::voice_input_profile::ensure_voice_input_dir_initialized();

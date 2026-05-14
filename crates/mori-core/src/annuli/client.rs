@@ -75,6 +75,22 @@ struct EventListResponse {
     events: Vec<EventRecord>,
 }
 
+/// One MEMORY.md `## § <header>` section.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemorySection {
+    pub header: String,
+    pub index: u32,
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryListResponse {
+    sections: Vec<MemorySection>,
+    #[allow(dead_code)]
+    count: u32,
+}
+
 #[derive(Debug, Deserialize)]
 struct EventAppendResponse {
     ok: bool,
@@ -278,6 +294,20 @@ impl AnnuliClient {
         let resp = self.check_status("/curator/dry-run", resp).await?;
         let ok: OkResponse = resp.json().await.map_err(|e| AnnuliError::Parse(e.to_string()))?;
         ok.report_path.ok_or_else(|| AnnuliError::Parse("missing report_path".into()))
+    }
+
+    /// `GET /spirits/<x>/memory[?include_body=true]` — list MEMORY.md § sections.
+    pub async fn list_memory_sections(&self, include_body: bool) -> Result<Vec<MemorySection>, AnnuliError> {
+        let url = if include_body {
+            format!("{}?include_body=true", self.url("/memory"))
+        } else {
+            self.url("/memory")
+        };
+        let req = self.auth_request(self.http.get(&url));
+        let resp = req.send().await?;
+        let resp = self.check_status("/memory", resp).await?;
+        let r: MemoryListResponse = resp.json().await.map_err(|e| AnnuliError::Parse(e.to_string()))?;
+        Ok(r.sections)
     }
 
     /// `POST /spirits/<x>/memory/section` — append user-explicit MEMORY § (Wave 4 endpoint).

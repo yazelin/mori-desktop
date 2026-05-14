@@ -29,4 +29,4 @@
 
 pub mod client;
 
-pub use client::{AnnuliClient, AnnuliClientConfig, AnnuliError, EventRecord, HealthResponse};
+pub use client::{AnnuliClient, AnnuliClientConfig, AnnuliError, EventRecord, HealthResponse, MemorySection};
