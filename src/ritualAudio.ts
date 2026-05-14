@@ -50,28 +50,15 @@ class RitualAudio {
     el.crossOrigin = "anonymous"; // 給 Web Audio analyser 用
     window.__moriRitualAudio = el;
 
-    el.play()
-      .then(() => {
-        this.setupAudioGraph(el);
-      })
-      .catch((e) => {
-        console.warn("[ritualAudio] play failed:", e);
-        if (window.__moriRitualAudio === el) window.__moriRitualAudio = null;
-      });
-  }
-
-  private setupAudioGraph(el: HTMLAudioElement): void {
+    // **先**建 audio graph 再 play,避免播放中途 createMediaElementSource
+    // reroute 訊號讓音檔從 0 重播(user 反映的 1 秒後重播 bug)
     try {
-      // 一個 audio element 只能 createMediaElementSource 一次。
-      // HMR / restart 時新元素 → 新 graph。舊的會被 stopAmbient 拆掉。
       this.audioCtx = new AudioContext();
       this.source = this.audioCtx.createMediaElementSource(el);
       this.gainNode = this.audioCtx.createGain();
       this.gainNode.gain.value = window.__moriRitualMuted ? 0 : VOLUME;
       this.analyser = this.audioCtx.createAnalyser();
-      // fftSize 256 → 128 bins,~172 Hz per bin。
-      // 前 32 bins 覆蓋 0~5.5kHz(音樂能量主要範圍),visualizer 只取這段,
-      // 避免高頻 bins(右半邊)永遠 0 害 bars 不跳。
+      // fftSize 256 → 128 bins,~172 Hz per bin。前 32 bins 覆蓋音樂能量區
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.5;
       this.source.connect(this.gainNode);
@@ -80,6 +67,11 @@ class RitualAudio {
     } catch (e) {
       console.warn("[ritualAudio] graph setup failed (analyser disabled):", e);
     }
+
+    el.play().catch((e) => {
+      console.warn("[ritualAudio] play failed:", e);
+      if (window.__moriRitualAudio === el) window.__moriRitualAudio = null;
+    });
   }
 
   stopAmbient(): void {
