@@ -43,23 +43,33 @@ export function IconProfiles(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// ⚙️ Config — 齒輪(簡化版,小尺寸不會糊)
+// ⚙️ Config — 齒輪。Lucide 風格,有齒形輪廓不是太陽光芒。
+// 6 個 chunky 齒突繞著中心圓,每個齒包進 outer ring 一起連成完整外形。
 export function IconConfig(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
+      <path d="M12.22 2 h-.44 a2 2 0 0 0 -2 2 v.18 a2 2 0 0 1 -1 1.73 l-.43 .25 a2 2 0 0 1 -2 0 l-.15 -.08 a2 2 0 0 0 -2.73 .73 l-.22 .38 a2 2 0 0 0 .73 2.73 l.15 .1 a2 2 0 0 1 1 1.72 v.51 a2 2 0 0 1 -1 1.74 l-.15 .09 a2 2 0 0 0 -.73 2.73 l.22 .38 a2 2 0 0 0 2.73 .73 l.15 -.08 a2 2 0 0 1 2 0 l.43 .25 a2 2 0 0 1 1 1.73 V20 a2 2 0 0 0 2 2 h.44 a2 2 0 0 0 2 -2 v-.18 a2 2 0 0 1 1 -1.73 l.43 -.25 a2 2 0 0 1 2 0 l.15 .08 a2 2 0 0 0 2.73 -.73 l.22 -.39 a2 2 0 0 0 -.73 -2.73 l-.15 -.08 a2 2 0 0 1 -1 -1.74 v-.5 a2 2 0 0 1 1 -1.74 l.15 -.09 a2 2 0 0 0 .73 -2.73 l-.22 -.38 a2 2 0 0 0 -2.73 -.73 l-.15 .08 a2 2 0 0 1 -2 0 l-.43 -.25 a2 2 0 0 1 -1 -1.73 V4 a2 2 0 0 0 -2 -2 z" />
       <circle cx="12" cy="12" r="3" />
-      <path d="M12 2 v3 M12 19 v3 M2 12 h3 M19 12 h3 M4.9 4.9 l2.1 2.1 M17 17 l2.1 2.1 M4.9 19.1 l2.1 -2.1 M17 7 l2.1 -2.1" />
     </svg>
   );
 }
 
-// 📓 Memory — 開的書本
+// 📓 Memory — 螺旋筆記本(左側裝訂環 + 右側橫線書寫)。原本書本太像對話框。
+// 4 個裝訂環點清楚標示「這是 notebook」,內頁橫線視為書寫條目。
 export function IconMemory(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
-      <path d="M4 5.5 A2.5 2.5 0 0 1 6.5 3 H20 v15 H6.5 A2.5 2.5 0 0 0 4 20.5 z" />
-      <path d="M4 20.5 A2.5 2.5 0 0 1 6.5 18 H20" />
-      <path d="M8 7 h8 M8 11 h8" />
+      {/* 筆記本邊框 */}
+      <rect x="5" y="3" width="15" height="18" rx="1.5" />
+      {/* 左側裝訂環(4 個小圓) */}
+      <circle cx="7.5" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
+      <circle cx="7.5" cy="10" r="0.7" fill="currentColor" stroke="none" />
+      <circle cx="7.5" cy="13.5" r="0.7" fill="currentColor" stroke="none" />
+      <circle cx="7.5" cy="17" r="0.7" fill="currentColor" stroke="none" />
+      {/* 內頁書寫橫線 */}
+      <path d="M10.5 7 h7" />
+      <path d="M10.5 11 h7" />
+      <path d="M10.5 15 h5" />
     </svg>
   );
 }
@@ -76,12 +86,23 @@ export function IconAnnuli(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// 🛠️ Skills — 板手(工具)
+// 🏹 Skills — 弓箭(森林精靈的招式)。
+// 弓:垂直 C 形(開口向左,弓背朝右側鼓出);
+// 弦:連接弓兩端的直線(垂直);
+// 箭:水平往右射出,弦中央往右拉,左端有尾羽、右端有箭頭。
 export function IconSkills(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
-      <path d="M14.7 6.3 a4.5 4.5 0 0 0 5.79 5.79 L14.5 18.08 a2.12 2.12 0 0 1 -3 -3 l5.99 -5.99 a4.5 4.5 0 0 0 -2.79 -2.79 z" />
-      <path d="M14 10 l-9 9" />
+      {/* 弓背(右側弧線往外鼓) */}
+      <path d="M14 4 a12 12 0 0 1 0 16" />
+      {/* 弦 */}
+      <path d="M14 4 L14 20" />
+      {/* 箭桿(尾羽到弓 → 弓中央到箭頭超出弓外) */}
+      <path d="M3 12 L21 12" />
+      {/* 箭頭(Λ 朝右) */}
+      <path d="M17 9 L21 12 L17 15" />
+      {/* 尾羽(V 朝左) */}
+      <path d="M5 10 L3 12 L5 14" />
     </svg>
   );
 }
