@@ -140,6 +140,21 @@ impl AnnuliClient {
         Ok(Self { config, http })
     }
 
+    /// 給 UI / log 顯示用的 endpoint(read-only,不含 token)。
+    pub fn endpoint_for_display(&self) -> String {
+        self.config.endpoint.clone()
+    }
+
+    /// 給 UI 顯示用 spirit name(只是 getter,避免 React 端要另外傳)。
+    pub fn spirit_name(&self) -> &str {
+        &self.config.spirit_name
+    }
+
+    /// 給 UI 顯示 / 對話 source 用 user_id。
+    pub fn user_id(&self) -> &str {
+        &self.config.user_id
+    }
+
     /// `<endpoint>/spirits/<spirit>/<rel>`。
     fn url(&self, rel: &str) -> String {
         format!("{}/spirits/{}{}", self.config.endpoint, self.config.spirit_name, rel)

@@ -4,6 +4,7 @@
 mod action_skills;
 mod context_provider;
 mod deps;
+mod annuli_commands;
 mod annuli_config;
 mod hotkey_config;
 #[cfg(target_os = "linux")]
@@ -2795,6 +2796,11 @@ fn main() {
             memory_read,
             memory_write,
             memory_delete,
+            annuli_commands::annuli_status,
+            annuli_commands::annuli_get_soul,
+            annuli_commands::annuli_list_memory,
+            annuli_commands::annuli_list_events_today,
+            annuli_commands::annuli_trigger_sleep,
             memory_search,
             skills_list,
             deps_list,
