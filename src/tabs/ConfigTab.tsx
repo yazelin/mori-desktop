@@ -187,8 +187,19 @@ function KvTable({
   //
   // 改用 internal state:KvTable 保有「正在編輯的」rows(含空白草稿),
   // 父層只收到非空 key 的 rows 寫進 cfg。第一次掛載從 props 初始化;之後
-  // 不再 sync from prop(父層 cfg 改也不會把使用者打到一半的草稿沖掉)。
+  // 只在 localRows 仍空時 sync from prop(處理 config 異步載入慢於 mount
+  // 的 race) — user 開始編輯後不沖掉草稿。
   const [localRows, setLocalRows] = useState<Array<{ k: string; v: string }>>(rows);
+  // Fix v0.3.2 follow-up: ConfigTab 第一次點進「快速設定」時 raw 還在 config_read
+  // async 載入, apiKeysRows 是空陣列 → KvTable mount 把 [] 鎖進 localRows;
+  // 之後 config 載完 rows 變非空 KvTable 不會 sync,user 看到空白以為沒設定。
+  // 切走 sub-tab 再切回來 KvTable remount 才拿到。修:rows 從空變非空時 sync。
+  useEffect(() => {
+    if (localRows.length === 0 && rows.length > 0) {
+      setLocalRows(rows);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
   const update = (i: number, field: "k" | "v", value: string) => {
     const next = [...localRows];
     next[i] = { ...next[i], [field]: value };
