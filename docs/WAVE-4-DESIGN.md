@@ -1,9 +1,13 @@
 # Wave 4 設計 — mori-desktop ↔ annuli HTTP 接線
 
-> **狀態**:draft,Q1-Q5 待 yazelin review。
+> **狀態**:Q1-Q5 已鎖定(2026-05-14 yazelin 套全部建議),實作中。
 > **上游**:`yazelin/annuli docs/WAVE-3-DESIGN.md`(完成 + merge `c9179eb`,提供 HTTP API)
 > **branch**:`feat/annuli-http-client`(從 main 切出)
-> **預估**:1-2 週(若 Q1-Q5 全照建議走),含 UI 跟 e2e。
+> **預估**:1-2 週,含 UI 跟 e2e。
+
+## Multi-spirit 提醒
+
+annuli 程式碼支援多 spirit。**本機 dev 是 Mori,正式機是 Jinn**(內容生產 / FB 社群),兩 vault 完全獨立。Wave 4 接的是本機 mori spirit;`spirit_name` 是 config first-class param,不寫死 `"mori"`。
 
 ## Wave 4 目標(三句話)
 
@@ -37,7 +41,9 @@ GET    /health
 
 vault 路徑客戶端不關心(annuli 內部管),mori-desktop 只走 HTTP。
 
-## 開工前要決定的設計題
+## 設計決定(Q1-Q5,2026-05-14 yazelin 套全部建議)
+
+> **狀態**:freeze。下面每題保留討論脈絡 + 標 **DECISION** 行,寫實作時對照。
 
 ### Q1 mori-desktop 既有 `MemoryStore` trait 怎麼對應 annuli vault?
 
@@ -61,7 +67,7 @@ annuli vault MEMORY.md 的單位是 `## § <header>` section,**不是 per-Memory
 - (b) **加 `kind` 欄位在 section header**:`## § 2026-05-14 — preference: 喜歡冷咖啡`,parser 解 header 拿 type
 - (c) **完全放棄 MemoryType 對應**:`AnnuliMemoryStore` 不支援 `memory_type` 細分,只認 generic section;`list_by_types` 直接回 [](VoiceDict 5E-3 那條 break — 要 fallback)
 
-**建議**:(a) + fallback。`AnnuliMemoryStore.list_by_types(voice_dict)` 走 `read_index` + filter by header convention(例 `## § voice_dict: <X>`),沒匹配回 []。Wave 5+ 加 vault metadata 解這條更完整。
+**DECISION (2026-05-14,套建議)**:(a) + fallback。`AnnuliMemoryStore.list_by_types(voice_dict)` 走 `read_index` + filter by header convention(例 `## § voice_dict: <X>`),沒匹配回 []。Wave 5+ 加 vault metadata 解這條更完整。
 
 ### Q2 `MemoryStore.write` 該寫去哪?
 
@@ -77,7 +83,7 @@ annuli vault model:
 - (b) **加新 annuli API**:`POST /spirits/<x>/memory/sections`(在 annuli 加 endpoint 直接 append `## § <header>` 到 MEMORY.md)。違反「digest only writes MEMORY」純粹性但 UX 即時
 - (c) **混合**:既寫 event(audit trail)又寫直接 § section(立即可見)。實際 2 處寫,維護壓力
 
-**建議**:(b) — 加新 annuli endpoint `POST /spirits/<x>/memory/section`,body `{ header, body }`,直接 append § 到 MEMORY.md。標明這是「user-explicit memory write」path,跟 digest 是平行兩條 writer。invariant 不變:LLM 還是不能直接 PUT MEMORY,只能 POST 給專門 endpoint,而**這 endpoint 要 X-Soul-Token**(跟 PUT /soul 一樣等級)。
+**DECISION (2026-05-14,套建議)**:(b) — 加新 annuli endpoint `POST /spirits/<x>/memory/section`,body `{ header, body }`,直接 append § 到 MEMORY.md。標明這是「user-explicit memory write」path,跟 digest 是平行兩條 writer。invariant 不變:LLM 還是不能直接 PUT MEMORY,只能 POST 給專門 endpoint,而**這 endpoint 要 X-Soul-Token**(跟 PUT /soul 一樣等級)。
 
 ### Q3 `MemoryStore.delete` 怎麼做?
 
@@ -89,7 +95,7 @@ annuli vault 沒「直接 delete」,只有 curator dry-run + user approve + appl
 - (b) **暫不實作 delete**:`AnnuliMemoryStore.delete(id) -> Err("use curator review")`,mori-desktop ForgetMemorySkill 改成顯示 toast「刪除需透過 Annuli curator,請 /sleep 之後 review」
 - (c) **危險:直接刪**:在 annuli 加 `DELETE /spirits/<x>/memory/section?header=`,bypass curator。違反 archive-not-delete invariant
 
-**建議**:(b) — 短期 forbidden,長期 (a)。Wave 4 範圍內 ForgetMemorySkill 改 toast,Wave 5+ 才加 UI flow。
+**DECISION (2026-05-14,套建議)**:(b) — 短期 forbidden,長期 (a)。Wave 4 範圍內 ForgetMemorySkill 改 toast,Wave 5+ 才加 UI flow。
 
 ### Q4 `AnnuliTab.tsx` UI 範圍?
 
@@ -107,7 +113,7 @@ Wave 4 vs Wave 5+ 切分:
   - curator review/approve UI(取代 vim 改 yaml)
   - 跨 spirit 切換(scribe / herald 加入後)
 
-**建議**:照 Wave 4 MVP 範圍。
+**DECISION (2026-05-14,套建議)**:照 Wave 4 MVP 範圍。
 
 ### Q5 hotkey 整合?
 
@@ -117,23 +123,26 @@ Wave 3 design 提到 `Ctrl+Alt+Z` 觸發 `/sleep`(`POST /rings/new`)。
 - mori-desktop 既有 hotkey(`Ctrl+Alt+Space` voice input)是 global hotkey,Linux X11 / Windows / Wayland 各有實作
 - Wave 4 加 `Ctrl+Alt+Z` 也走同一條 hotkey infra(`crates/mori-tauri/src/hotkey.rs` 或對應檔)
 
-**建議**:Wave 4 加 `Ctrl+Alt+Z`,沿用既有 hotkey 模組。Wave 5+ 可考慮 user 自訂(現在沒這 infra)。
+**DECISION (2026-05-14,套建議)**:Wave 4 加 `Ctrl+Alt+Z`,沿用既有 hotkey 模組。Wave 5+ 可考慮 user 自訂(現在沒這 infra)。
 
-## 預計實作順序(待 Q1-Q5 鎖定)
+## 預計實作順序(Q1-Q5 已鎖定)
 
-| Step | 範圍 | 驗證 |
-|---|---|---|
-| 1 | 本 design doc freeze + Q1-Q5 鎖定 | yazelin review |
-| 2 | `crates/mori-core/src/llm/annuli_client.rs` — reqwest HTTP client wrap | unit test with wiremock mock server |
-| 3 | `~/.mori/config.json` schema 加 `annuli.{endpoint, spirit_name, soul_token, user_id, basic_auth}` | smoke test |
-| 4 | `crates/mori-core/src/memory/annuli.rs` — `AnnuliMemoryStore` impl `MemoryStore` trait(按 Q1 mapping) | unit test |
-| 5 | (若 Q2 選 b)annuli 那邊加 `POST /spirits/<x>/memory/section` endpoint + X-Soul-Token guard | annuli pytest |
-| 6 | `crates/mori-tauri/src/main.rs` 啟動時根據 config 選 `LocalMarkdownMemoryStore` vs `AnnuliMemoryStore` | smoke run |
-| 7 | `crates/mori-tauri/src/hotkey.rs` 加 `Ctrl+Alt+Z` → `POST /rings/new` | 手測 |
-| 8 | 對話事件流向:`agent.rs` 對話完成後 `POST /events`(可選 fire-and-forget 不阻塞) | 手測 + e2e |
-| 9 | `src/tabs/AnnuliTab.tsx` MVP UI(SOUL / MEMORY / events / rings 唯讀 + /rings/new 按鈕) | 手測 |
-| 10 | status bar:`/health` polling + 今日 events 數 + 待 review curator reports 數 | 手測 |
-| 11 | e2e:annuli + mori-desktop 整套跑通,實測 /sleep 寫 ring、對話寫 event、reload 還在 | manual |
+| Step | 範圍 | 驗證 | repo |
+|---|---|---|---|
+| 1 | ✅ 本 design doc freeze + Q1-Q5 鎖定 | yazelin review | mori-desktop |
+| 2 | ✅ `crates/mori-core/src/annuli/client.rs` — reqwest HTTP client wrap | 13 unit test | mori-desktop |
+| 3 | annuli 加 `POST /spirits/<x>/memory/section` endpoint + X-Soul-Token guard(Q2 (b))| annuli pytest | **annuli** |
+| 4 | `~/.mori/config.json` schema 加 `annuli.{endpoint, spirit_name, soul_token, user_id, basic_auth}` | 載入 round-trip | mori-tauri |
+| 5 | `crates/mori-core/src/memory/annuli.rs` — `AnnuliMemoryStore` impl `MemoryStore` trait(Q1 (a)+ fallback) | unit test | mori-desktop |
+| 6 | `crates/mori-tauri/src/main.rs` 啟動時根據 config 選 store | smoke run | mori-tauri |
+| 7 | `crates/mori-tauri/src/hotkey.rs` 加 `Ctrl+Alt+Z` → `POST /rings/new`(Q5)| 手測 | mori-tauri |
+| 8 | `agent.rs` 對話完成後 fire-and-forget `POST /events` | 手測 + e2e | mori-core |
+| 9 | ForgetMemorySkill 改 toast「請走 curator review」(Q3 (b))| 手測 | mori-core |
+| 10 | `src/tabs/AnnuliTab.tsx` MVP UI(Q4 — 唯讀 + /rings/new)| 手測 | mori-tauri/src/ |
+| 11 | status bar:`/health` polling + 事件 / curator 數 | 手測 | mori-tauri/src/ |
+| 12 | e2e:annuli + mori-desktop 整套跑通 | manual | both |
+
+順序變動:原 step 5(annuli endpoint)前移到 step 3,因為它是 AnnuliMemoryStore.write 的 blocker(沒 endpoint 就沒法 impl write)。
 
 ## 驗證策略
 
