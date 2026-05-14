@@ -2,6 +2,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { availableMonitors, getCurrentWindow, LogicalPosition, primaryMonitor } from "@tauri-apps/api/window";
+import { useTranslation } from "react-i18next";
 
 type SkillCallSummary = {
   name: string;
@@ -130,15 +131,7 @@ function visualFor(
   }
 }
 
-const VISUAL_LABEL: Record<Visual, string> = {
-  walking: "散步中",
-  sleeping: "休眠中",
-  idle: "在這",
-  recording: "聽中",
-  thinking: "想中",
-  done: "完成",
-  error: "出錯",
-};
+// Visual labels 走 i18n t("floating.label_<visual>") — see useVisualLabel hook below
 
 // 5P-3: Sprite 從 character pack 來,manifest + 各 state PNG data URL 從 IPC 拉。
 // 不再 hardcode public/floating/ path,讓 user 能換角色 pack。
@@ -199,6 +192,8 @@ async function applyX11Backplate(mode: string) {
 }
 
 function FloatingMori() {
+  const { t } = useTranslation();
+  const visualLabel = (v: Visual) => t(`floating.label_${v}`);
   const [mode, setMode] = useState<Mode>("agent");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [transient, setTransient] = useState<Visual | null>(null);
@@ -707,7 +702,7 @@ function FloatingMori() {
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
       onDoubleClick={onDoubleClick}
-      title={`Mori — ${VISUAL_LABEL[visual]}\n拖曳:移動 / 雙擊:切顯示主視窗`}
+      title={`Mori — ${visualLabel(visual)}\n${t("floating.title_hint")}`}
     >
       {/* 5J: sprite-area — 永遠固定在 widget 左上 160×160,讓 sprite 不會
           因為 window 變寬 / 變高而跑位置。bubble / chip 浮在這之外。 */}
@@ -732,7 +727,7 @@ function FloatingMori() {
             loop_durations_ms 從 manifest 拿,placeholder 階段 16 格全是同一張看似不閃。 */}
         <div
           className={`mori-sprite mori-sprite-${visual}${visual === "walking" && walkFacingLeft ? " walk-left" : ""}`}
-          title={VISUAL_LABEL[visual]}
+          title={visualLabel(visual)}
         >
           <div
             className="mori-sprite-frame"

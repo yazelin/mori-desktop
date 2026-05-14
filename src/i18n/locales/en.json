@@ -167,6 +167,16 @@
     "warmup_failed": " · failed",
     "chars_suffix": "chars"
   },
+  "floating": {
+    "label_walking": "Walking",
+    "label_sleeping": "Sleeping",
+    "label_idle": "Here",
+    "label_recording": "Listening",
+    "label_thinking": "Thinking",
+    "label_done": "Done",
+    "label_error": "Error",
+    "title_hint": "Drag: move / Double-click: toggle main window"
+  },
   "config_tab": {
     "title": "Config",
     "savebar_hint": "~/.mori/config.json · changes apply next hotkey press, no restart needed",

@@ -167,6 +167,16 @@
     "warmup_failed": " · 失敗",
     "chars_suffix": "字"
   },
+  "floating": {
+    "label_walking": "散步中",
+    "label_sleeping": "休眠中",
+    "label_idle": "在這",
+    "label_recording": "聽中",
+    "label_thinking": "想中",
+    "label_done": "完成",
+    "label_error": "出錯",
+    "title_hint": "拖曳:移動 / 雙擊:切顯示主視窗"
+  },
   "config_tab": {
     "title": "Config",
     "savebar_hint": "~/.mori/config.json · 改完不用重啟,下次熱鍵讀新值",
