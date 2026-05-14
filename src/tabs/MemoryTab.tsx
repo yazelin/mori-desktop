@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import { IconMemory, IconClose, IconRefresh } from "../icons";
 import { Select } from "../Select";
 
@@ -65,6 +66,7 @@ function MemoryEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [detail, setDetail] = useState<MemoryDetail | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
@@ -117,7 +119,7 @@ function MemoryEditor({
   };
 
   const remove = async () => {
-    if (!confirm(`刪除 memory「${name || id}」? 不可復原。`)) return;
+    if (!confirm(t("memory_tab.confirm_delete", { name: name || id }))) return;
     try {
       await invoke("memory_delete", { id });
       onSaved();
@@ -135,21 +137,21 @@ function MemoryEditor({
             <span className="mori-modal-kind"><IconMemory width={12} height={12} /> Memory</span>
             <span className="mori-modal-stem">{id}.md</span>
           </div>
-          <button className="mori-btn ghost" onClick={onClose} title="關閉"><IconClose width={14} height={14} /></button>
+          <button className="mori-btn ghost" onClick={onClose} title={t("memory_tab.close_title")}><IconClose width={14} height={14} /></button>
         </div>
         <div className="mori-modal-body">
           {loading ? (
-            <div className="mori-modal-loading">讀取中…</div>
+            <div className="mori-modal-loading">{t("memory_tab.reading")}</div>
           ) : (
             <div className="mori-memory-form">
-              <FormRow label="name" hint="LLM 看到的標題">
+              <FormRow label="name" hint={t("memory_tab.label_name_hint")}>
                 <input
                   className="mori-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
               </FormRow>
-              <FormRow label="description" hint="一句話描述">
+              <FormRow label="description" hint={t("memory_tab.label_desc_hint")}>
                 <input
                   className="mori-input"
                   value={description}
@@ -160,11 +162,11 @@ function MemoryEditor({
                 <Select
                   value={memoryType}
                   onChange={setMemoryType}
-                  options={TYPE_OPTIONS.map((t) => ({ value: t, label: t }))}
+                  options={TYPE_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
                 />
               </FormRow>
               {detail && (
-                <FormRow label="timestamps" hint="自動維護(寫入時更新 last_used)">
+                <FormRow label="timestamps" hint={t("memory_tab.label_timestamps_hint")}>
                   <div className="mori-memory-timestamps">
                     <span>created: {detail.created}</span>
                     <span>last_used: {detail.last_used}</span>
@@ -177,20 +179,20 @@ function MemoryEditor({
                 spellCheck={false}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                placeholder="記憶內容 — markdown 支援。建議用簡潔的條列 / 重點而非長篇大論。"
+                placeholder={t("memory_tab.body_placeholder")}
               />
             </div>
           )}
         </div>
         <div className="mori-modal-footer">
           {!isNew && (
-            <button className="mori-btn danger" onClick={remove}>刪除</button>
+            <button className="mori-btn danger" onClick={remove}>{t("memory_tab.delete_button")}</button>
           )}
           <div className="mori-modal-footer-right">
-            {status.kind === "saving" && <span className="mori-save-status saving">儲存中…</span>}
-            {status.kind === "ok" && <span className="mori-save-status ok">✓ 已儲存</span>}
+            {status.kind === "saving" && <span className="mori-save-status saving">{t("memory_tab.saving")}</span>}
+            {status.kind === "ok" && <span className="mori-save-status ok">{t("memory_tab.saved")}</span>}
             {status.kind === "err" && <span className="mori-save-status err">✗ {status.message}</span>}
-            <button className="mori-btn primary" onClick={save}>儲存</button>
+            <button className="mori-btn primary" onClick={save}>{t("common.save")}</button>
           </div>
         </div>
       </div>
@@ -199,6 +201,7 @@ function MemoryEditor({
 }
 
 function MemoryTab() {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [hits, setHits] = useState<MemoryEntry[] | null>(null); // null = 沒在搜尋
   const [searching, setSearching] = useState(false);
@@ -245,12 +248,12 @@ function MemoryTab() {
   }, [filter]);
 
   const createNew = () => {
-    const id = prompt("新 memory id(英數 / _ / -,例 user_lang_preference):");
+    const id = prompt(t("memory_tab.new_id_prompt"));
     if (!id) return;
     const trimmed = id.trim();
     if (!trimmed) return;
     if (!/^[A-Za-z0-9_\-.]+$/.test(trimmed)) {
-      alert("id 只接受英數 / _ / - / .");
+      alert(t("memory_tab.invalid_id"));
       return;
     }
     setEditing({ id: trimmed, isNew: true });
@@ -262,34 +265,30 @@ function MemoryTab() {
   return (
     <div className="mori-tab mori-tab-memory">
       <h2 className="mori-tab-title">Memory</h2>
-      <p className="mori-tab-hint">
-        瀏覽 / 編輯 ~/.mori/memory/ 長期記憶。Mori 自己會用 remember /
-        recall_memory / forget_memory / edit_memory skill 維護;你也可以直接編。
-        改完即時生效(下一次熱鍵就讀新內容)。
-      </p>
+      <p className="mori-tab-hint">{t("memory_tab.hint")}</p>
 
       {error && <div className="mori-config-error">{error}</div>}
 
       <div className="mori-memory-toolbar">
         <input
           className="mori-input"
-          placeholder="搜尋 name / description / body (全文,300ms debounce)"
+          placeholder={t("memory_tab.search_placeholder")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <button className="mori-btn primary" onClick={createNew}>+ 新增記憶</button>
-        <button className="mori-btn" onClick={reload} title="重新整理"><IconRefresh width={13} height={13} /></button>
+        <button className="mori-btn primary" onClick={createNew}>{t("memory_tab.new_button")}</button>
+        <button className="mori-btn" onClick={reload} title={t("memory_tab.refresh_title")}><IconRefresh width={13} height={13} /></button>
         <span className="mori-memory-count">
-          {searching ? "搜尋中…" : `${filtered.length} / ${entries.length}`}
+          {searching ? t("memory_tab.searching") : `${filtered.length} / ${entries.length}`}
         </span>
       </div>
 
       {loading ? (
-        <div className="mori-tab-placeholder"><p>讀取中…</p></div>
+        <div className="mori-tab-placeholder"><p>{t("memory_tab.loading")}</p></div>
       ) : entries.length === 0 ? (
         <div className="mori-tab-placeholder">
-          <p>目前沒有任何 memory。</p>
-          <p>跟 Mori 對話時請他「記住...」會自動寫,或按上面「+ 新增記憶」手動加。</p>
+          <p>{t("memory_tab.empty_title")}</p>
+          <p>{t("memory_tab.empty_hint")}</p>
         </div>
       ) : (
         <div className="mori-memory-list">
@@ -300,13 +299,13 @@ function MemoryTab() {
                 <span className={`mori-memory-type type-${m.memory_type}`}>{m.memory_type}</span>
               </div>
               <div className="mori-memory-row-sub">
-                <span className="mori-memory-desc">{m.description || <em>(無描述)</em>}</span>
+                <span className="mori-memory-desc">{m.description || <em>{t("memory_tab.no_description")}</em>}</span>
                 <span className="mori-memory-id">{m.id}</span>
               </div>
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="mori-tab-placeholder"><p>沒有符合篩選的 memory</p></div>
+            <div className="mori-tab-placeholder"><p>{t("memory_tab.no_match")}</p></div>
           )}
         </div>
       )}
