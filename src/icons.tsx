@@ -54,22 +54,24 @@ export function IconConfig(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// 📓 Memory — 螺旋筆記本(左側裝訂環 + 右側橫線書寫)。原本書本太像對話框。
-// 4 個裝訂環點清楚標示「這是 notebook」,內頁橫線視為書寫條目。
+// 📓 Memory — 螺旋筆記本 + 精靈閃光。左側裝訂環 + 內頁橫線書寫,
+// 右上角內疊一個小 sparkle ✨(在書本範圍內,不破壞置中構圖)。
 export function IconMemory(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
-      {/* 筆記本邊框 */}
+      {/* 筆記本邊框(置中)*/}
       <rect x="5" y="3" width="15" height="18" rx="1.5" />
       {/* 左側裝訂環(4 個小圓) */}
       <circle cx="7.5" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
       <circle cx="7.5" cy="10" r="0.7" fill="currentColor" stroke="none" />
       <circle cx="7.5" cy="13.5" r="0.7" fill="currentColor" stroke="none" />
       <circle cx="7.5" cy="17" r="0.7" fill="currentColor" stroke="none" />
-      {/* 內頁書寫橫線 */}
-      <path d="M10.5 7 h7" />
+      {/* 內頁書寫橫線(第一條讓位給右上 sparkle) */}
+      <path d="M10.5 7 h4" />
       <path d="M10.5 11 h7" />
       <path d="M10.5 15 h5" />
+      {/* 精靈 sparkle(疊在右上角,在 notebook 範圍內) */}
+      <path d="M17.5 5 v3 M16 6.5 h3" />
     </svg>
   );
 }
@@ -86,23 +88,24 @@ export function IconAnnuli(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// 🏹 Skills — 弓箭(森林精靈的招式)。
-// 弓:垂直 C 形(開口向左,弓背朝右側鼓出);
-// 弦:連接弓兩端的直線(垂直);
-// 箭:水平往右射出,弦中央往右拉,左端有尾羽、右端有箭頭。
+// 🔮 Skills — 水晶球(魔導師 / 占星術)。
+// 中央圓球(crystal orb)+ 上端小高光弧 + 下方月牙托 + 兩側小 sparkle,
+// 整體傳達「魔幻 / 預言 / 招式由水晶導引」— 精靈氣質。
 export function IconSkills(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
-      {/* 弓背(右側弧線往外鼓) */}
-      <path d="M14 4 a12 12 0 0 1 0 16" />
-      {/* 弦 */}
-      <path d="M14 4 L14 20" />
-      {/* 箭桿(尾羽到弓 → 弓中央到箭頭超出弓外) */}
-      <path d="M3 12 L21 12" />
-      {/* 箭頭(Λ 朝右) */}
-      <path d="M17 9 L21 12 L17 15" />
-      {/* 尾羽(V 朝左) */}
-      <path d="M5 10 L3 12 L5 14" />
+      {/* 水晶球 */}
+      <circle cx="12" cy="10" r="6" />
+      {/* 球內高光(左上小弧,顯示玻璃感) */}
+      <path d="M9 7 a3 3 0 0 1 2.5 -1.5" />
+      {/* 月牙托底(球底下的弧形支撐) */}
+      <path d="M6 16 a6 6 0 0 0 12 0" />
+      {/* 托盤底線 */}
+      <path d="M9 20 L15 20" />
+      {/* 左下小 sparkle */}
+      <path d="M3 17 v2 M2 18 h2" />
+      {/* 右上小 sparkle */}
+      <path d="M20 3 v2 M19 4 h2" />
     </svg>
   );
 }
