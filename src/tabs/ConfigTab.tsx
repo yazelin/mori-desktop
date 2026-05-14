@@ -857,6 +857,25 @@ function ConfigTab({
 
           {/* ── Appearance ─────────────────────────────── */}
           {subTab === "appearance" && <>
+          <Section
+            title="介面語言 / UI language"
+            hint="切換 UI 顯示語言。Proper noun(SOUL.md / MEMORY.md / API key 名稱)永遠原文。"
+          >
+            <FormRow label="locale" hint="zh-TW / en。改完立即生效,同時寫進 config.json — 重啟也記得。">
+              <Select
+                value={getStr(cfg, "locale", "zh-TW")}
+                onChange={(v) => {
+                  applyPatch((c) => setStrOrUndef(c, "locale", v));
+                  // 立即切 i18next(不用等 save 才看到)
+                  import("../i18n").then((m) => m.setLocale(v as "zh-TW" | "en")).catch(() => {});
+                }}
+                options={[
+                  { value: "zh-TW", label: "繁體中文 (zh-TW)" },
+                  { value: "en", label: "English (en)" },
+                ]}
+              />
+            </FormRow>
+          </Section>
           <ThemeSection />
           <Section
             title="Floating Mori"

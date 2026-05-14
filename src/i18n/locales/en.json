@@ -1,0 +1,73 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "revert": "Revert",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "settings": "Settings",
+    "ok_saved": "✓ Saved"
+  },
+  "sidebar": {
+    "chat": "Chat",
+    "chat_sub": "Talk to Mori",
+    "profiles": "Profiles",
+    "profiles_sub": "Voice / Agent",
+    "config": "Config",
+    "config_sub": "config.json",
+    "memory": "Memory",
+    "memory_sub": "~/.mori/memory",
+    "annuli": "Annuli",
+    "annuli_sub": "Vault reflection",
+    "skills": "Skills",
+    "skills_sub": "Built-in / Shell",
+    "deps": "Deps",
+    "deps_sub": "Optional tools"
+  },
+  "annuli_tab": {
+    "title_unconfigured": "Annuli",
+    "unconfigured_hint": "Annuli integration **is not wired up** — falling back to local ~/.mori/memory/. Once an annuli HTTP service is connected, Mori reads / writes SOUL / MEMORY / events / rings through the vault.",
+    "go_config": "Configure Annuli in Config",
+    "schema_hint": "Schema reference:",
+    "loading_status": "Loading Annuli status…",
+    "configure_button": "Settings",
+    "refresh_button": "Refresh",
+    "refreshing_button": "Loading…",
+    "status_connected": "🟢 connected",
+    "status_unreachable": "🔴 unreachable",
+    "soul_token_set": "✅ configured (PUT /soul allowed)",
+    "soul_token_unset": "⚠️ not set (PUT /soul will 403)",
+    "error_prefix": "Error: ",
+    "sleep_button": "🌙 /sleep — write a reflection ring",
+    "sleep_busy": "🌙 reflecting…(LLM writing ring)",
+    "sleep_ok_prefix": "✅ ring written: ",
+    "soul_section": "SOUL.md",
+    "soul_loading": "(loading)",
+    "memory_section": "MEMORY.md sections",
+    "memory_empty": "(no § sections or read failed)",
+    "events_section": "Events today",
+    "events_empty": "(no events yet today, or chat is not wired to annuli)"
+  },
+  "config_tab": {
+    "title": "Config",
+    "savebar_hint": "~/.mori/config.json · changes apply next hotkey press, no restart needed",
+    "subtabs": {
+      "quick": "Quick setup",
+      "llm": "LLM / Provider",
+      "voice": "Voice input",
+      "appearance": "Appearance",
+      "hotkey": "Hotkey",
+      "x11": "X11 only",
+      "annuli": "Annuli",
+      "corrections": "Corrections",
+      "raw": "Raw JSON"
+    },
+    "appearance": {
+      "locale": "UI language",
+      "locale_hint": "Switch UI display language. Proper nouns (SOUL.md / MEMORY.md / API key names) always stay in original form."
+    }
+  }
+}

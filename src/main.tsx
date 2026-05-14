@@ -7,6 +7,9 @@ import FloatingMori from "./FloatingMori";
 import ChatBubble from "./ChatBubble";
 import Picker from "./Picker";
 import { subscribeTheme } from "./theme";
+// A i18n:第一個 import 就讓 i18next init(zh-TW + en),之後 syncLocaleFromConfig
+// 才用 ~/.mori/config.json 的 `locale` 欄位覆寫(避免啟動白屏等 IPC)。
+import { syncLocaleFromConfig } from "./i18n";
 import "./styles.css";
 import "./shell.css";
 import "./chat-panel.css";
@@ -20,6 +23,10 @@ const root = document.getElementById("root")!;
 // brand-3: 每個 window 都 subscribe 主 theme(load 一次 + listen "theme-changed"),
 // 任一視窗切 theme 後其他 window 收到 event 一起更新。
 subscribeTheme();
+
+// A i18n:啟動後 async 從 config.json 讀 locale 覆寫 navigator-based 預設。
+// 失敗 swallow(已經 init 過,有 fallback)。
+syncLocaleFromConfig().catch(() => {});
 
 // X11 透明 fallback class — 詢問 Rust 後端 session type,X11 加 class 觸發
 // CSS 的 opaque 背景 + 美術背板。每個 window mount 都跑一次,reload 後也

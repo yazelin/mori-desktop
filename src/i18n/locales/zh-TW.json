@@ -1,0 +1,73 @@
+{
+  "common": {
+    "save": "儲存",
+    "cancel": "取消",
+    "revert": "還原",
+    "refresh": "重新整理",
+    "loading": "載入中…",
+    "delete": "刪除",
+    "edit": "編輯",
+    "close": "關閉",
+    "settings": "設定",
+    "ok_saved": "✓ 已儲存"
+  },
+  "sidebar": {
+    "chat": "Chat",
+    "chat_sub": "跟 Mori 對話",
+    "profiles": "Profiles",
+    "profiles_sub": "語音 / Agent",
+    "config": "Config",
+    "config_sub": "config.json",
+    "memory": "Memory",
+    "memory_sub": "~/.mori/memory",
+    "annuli": "Annuli",
+    "annuli_sub": "vault 反思",
+    "skills": "Skills",
+    "skills_sub": "內建 / Shell",
+    "deps": "Deps",
+    "deps_sub": "選用工具"
+  },
+  "annuli_tab": {
+    "title_unconfigured": "Annuli",
+    "unconfigured_hint": "Annuli 整合**還沒接** — 走本機 ~/.mori/memory/ fallback。接上 annuli HTTP service 後,Mori 就會把 SOUL / MEMORY / events / rings 都讀寫到 vault。",
+    "go_config": "去 Config 設定 Annuli",
+    "schema_hint": "參考 schema:",
+    "loading_status": "載入 Annuli 狀態中…",
+    "configure_button": "設定",
+    "refresh_button": "重新整理",
+    "refreshing_button": "載入中…",
+    "status_connected": "🟢 connected",
+    "status_unreachable": "🔴 unreachable",
+    "soul_token_set": "✅ 設好(可 PUT /soul)",
+    "soul_token_unset": "⚠️ 沒設(PUT /soul 一律 403)",
+    "error_prefix": "錯誤:",
+    "sleep_button": "🌙 /sleep — 寫一輪反思年輪",
+    "sleep_busy": "🌙 reflecting…(LLM 寫 ring 中)",
+    "sleep_ok_prefix": "✅ ring 寫好:",
+    "soul_section": "SOUL.md",
+    "soul_loading": "(載入中)",
+    "memory_section": "MEMORY.md sections",
+    "memory_empty": "(沒有 § sections 或讀取失敗)",
+    "events_section": "今日 events",
+    "events_empty": "(今天還沒事件,或對話沒接 annuli)"
+  },
+  "config_tab": {
+    "title": "Config",
+    "savebar_hint": "~/.mori/config.json · 改完不用重啟,下次熱鍵讀新值",
+    "subtabs": {
+      "quick": "快速設定",
+      "llm": "LLM / Provider",
+      "voice": "語音輸入",
+      "appearance": "外觀",
+      "hotkey": "熱鍵",
+      "x11": "X11 only",
+      "annuli": "Annuli",
+      "corrections": "校正詞表",
+      "raw": "Raw JSON"
+    },
+    "appearance": {
+      "locale": "介面語言",
+      "locale_hint": "切換 UI 顯示語言。Proper noun(SOUL.md / MEMORY.md / API key 名稱)永遠原文。"
+    }
+  }
+}
