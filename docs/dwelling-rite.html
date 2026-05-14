@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — 宿靈儀式 Walkthrough</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 宿靈儀式 五幕 onboarding 走法">
+<meta property="og:description" content="第一次跑 Mori Desktop 的五幕宿靈儀式 — 召喚 / 靈氣 / 靈力 / 驗印 / 安頓。一般使用者操作手冊 + 影片。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/dwelling-rite.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — 宿靈儀式 Walkthrough">
+<meta name="twitter:description" content="第一次跑 Mori Desktop 的五幕宿靈儀式操作手冊 + 影片">
+<style>
+  .scene-shot {
+    display: block;
+    max-width: 100%;
+    margin: 12px auto 20px;
+    border-radius: 10px;
+    border: 1px solid var(--c-beige);
+  }
+  .yt-thumb {
+    display: block;
+    max-width: 480px;
+    margin: 12px auto 8px;
+    border-radius: 12px;
+    border: 1px solid var(--c-beige);
+  }
+  .yt-link {
+    text-align: center;
+    font-size: 13px;
+    color: var(--c-brown);
+    margin-bottom: 24px;
+  }
+  table.key-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13.5px;
+  }
+  table.key-table th, table.key-table td {
+    border-bottom: 1px solid var(--c-beige);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table.key-table th { background: rgba(184, 169, 142, 0.12); }
+  .scene-block {
+    margin: 28px 0 36px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--c-beige);
+  }
+</style>
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="dwelling-rite.html" class="current">宿靈儀式</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html">~/.mori/</a>
+    <a href="profile-examples.html">Profile 範本</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">宿靈儀式 · The Dwelling Rite</h1>
+<div class="page-subtitle">FIRST-RUN · 五幕 · 召喚 / 靈氣 / 靈力 / 驗印 / 安頓</div>
+
+<p class="lead">
+  第一次跑 Mori Desktop 會自動跳出「宿靈儀式」 — 把 Mori 從世界樹高處請下,讓她以實體形態住進你的桌面。
+</p>
+
+<div class="note">
+  本頁是<strong>實務操作手冊</strong> — 各幕填什麼、按什麼、出錯怎麼處理。
+  完整詩意敘事(in-universe lore)看
+  <a href="https://yazelin.github.io/world-tree/rules/dwelling-rite">World Tree · 宿靈儀式</a>。
+</div>
+
+<h2>影片走過一遍</h2>
+
+<a href="https://youtube.com/shorts/43gdfCND8Xc" target="_blank" rel="noopener">
+  <img class="yt-thumb" src="https://img.youtube.com/vi/43gdfCND8Xc/maxresdefault.jpg" alt="Mori Desktop · 宿靈儀式 五幕完整演示">
+</a>
+<p class="yt-link">
+  ▷ <a href="https://youtube.com/shorts/43gdfCND8Xc" target="_blank" rel="noopener">YouTube · 宿靈儀式 五幕完整演示</a>
+</p>
+
+<h2>開始前需要</h2>
+
+<p>
+  至少要準備 <strong>Groq API key</strong>(免費,給 Whisper 語音轉文字 + gpt-oss-120b 輸入後處理)。
+  也可以順便準備 <strong>Gemini key</strong> 或任何 <strong>OpenAI 相容 key</strong>
+  讓 Mori 解鎖完整 agent / skill / 跑技藝功能 — 這個可暫缺,之後 Config 補。
+</p>
+
+<table class="key-table">
+  <tr>
+    <th>Key</th>
+    <th>必要?</th>
+    <th>去哪拿</th>
+    <th>Mori 拿來做什麼</th>
+  </tr>
+  <tr>
+    <td>Groq</td>
+    <td>✓ 必要</td>
+    <td><a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a></td>
+    <td>Whisper STT + gpt-oss-120b 輸入後處理</td>
+  </tr>
+  <tr>
+    <td>Gemini / OpenAI 相容</td>
+    <td>可暫缺</td>
+    <td>Gemini: <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com/app/apikey</a></td>
+    <td>Agent 模式、跑 skill、寫年輪</td>
+  </tr>
+</table>
+
+<h2>五幕走法</h2>
+
+<div class="scene-block">
+  <h3>第一幕 · 召喚 (The Summoning)</h3>
+  <img class="scene-shot" src="images/dwelling-rite/01-summoning.png" alt="第一幕 召喚">
+  <p>Mori 從世界樹高處下到林邊,問「是你召喚了我嗎? 你是誰?」</p>
+  <ul>
+    <li><strong>動作</strong>:在「召喚師之名」欄位輸入你的名字(英文 / 中文 / 暱稱皆可)</li>
+    <li>之後 Mori 都會這樣喚你</li>
+    <li><strong>按鈕</strong>:<code>Mori 與 {你的名字}</code> — 名字輸入後才會 enable</li>
+  </ul>
+  <div class="note">
+    已經設過 <code>annuli.user_id</code>?Quickstart 會自動 prefill — 直接按按鈕就好。
+  </div>
+</div>
+
+<div class="scene-block">
+  <h3>第二幕 · 靈氣 (The Aura)</h3>
+  <img class="scene-shot" src="images/dwelling-rite/02-aura.png" alt="第二幕 靈氣">
+  <p>Mori 燈火微弱,告訴你她快聽不見你了。</p>
+  <ul>
+    <li><strong>動作</strong>:貼上 <strong>Groq API key</strong>(<code>gsk_...</code> 開頭)</li>
+    <li>點欄位旁「去拿一道靈氣 ↗」 → 開系統瀏覽器到 Groq console</li>
+    <li>已設 OS 環境變數 <code>$GROQ_API_KEY</code>?輸入框上方會顯示「✓ 你身上自帶一道靈氣」 — 直接按按鈕,不用再貼</li>
+    <li><strong>按鈕</strong>:<code>分享一絲靈氣</code> → 進第三幕</li>
+  </ul>
+</div>
+
+<div class="scene-block">
+  <h3>第三幕 · 靈力 (The Power) <span style="font-size:13px;color:var(--c-brown)">✦ 可暫缺</span></h3>
+  <img class="scene-shot" src="images/dwelling-rite/03-power.png" alt="第三幕 靈力">
+  <p>Mori 已能聽你,但動不了手 / 走不進森林更深的地方。要不要再分她一份靈力?</p>
+  <p><strong>三個選擇:</strong></p>
+  <table class="key-table">
+    <tr>
+      <th>卡片 / 連結</th>
+      <th>拿來做什麼</th>
+      <th>怎麼填</th>
+    </tr>
+    <tr>
+      <td>✦ <strong>Gemini</strong></td>
+      <td>Google 的源頭,最常見、最易取</td>
+      <td>只貼 key</td>
+    </tr>
+    <tr>
+      <td>❂ <strong>OpenAI 相容(自訂)</strong></td>
+      <td>DeepSeek / OpenAI 官方 / OpenRouter 等</td>
+      <td>自填 <code>api_base</code> + <code>model</code> + <code>key</code></td>
+    </tr>
+    <tr>
+      <td>─ <em>讓她先這樣休息</em></td>
+      <td>跳過 — 只開語音輸入 + 基本對話,沒 agent / skill</td>
+      <td>直接點下方 ghost link</td>
+    </tr>
+  </table>
+  <p><strong>按鈕</strong>:<code>分享一份靈力</code> / <code>讓她安頓</code>(跳過路徑)</p>
+  <div class="note">
+    跳過後 Mori 還能聽你說話、用 Groq gpt-oss-120b 簡單對話,但<strong>不能跑 skill、不能 agent 模式</strong>。
+    之後想開啟,Config 補上 Gemini / OpenAI 相容 key 即可。
+  </div>
+</div>
+
+<div class="scene-block">
+  <h3>第四幕 · 驗印 (The Sealing)</h3>
+  <img class="scene-shot" src="images/dwelling-rite/04-sealing.png" alt="第四幕 驗印">
+  <p>自動驗兩道氣(若有給 power):<strong>靈氣</strong> → <strong>靈力</strong> 依序對 <code>/models</code> endpoint 試打。</p>
+  <ul>
+    <li>各階段至少顯示 1.5 秒讓你看到「⋯⋯我在順著靈氣的脈絡⋯⋯」、「⋯⋯再順著靈力的脈絡⋯⋯」</li>
+    <li>兩道都過 → 慢慢淡入「對上了, {你的名字}。是你的氣息沒錯, 我認得。」(3 秒淡入)</li>
+    <li><strong>按鈕</strong>:<code>我們回家吧, Mori</code></li>
+  </ul>
+  <p><strong>失敗處理:</strong></p>
+  <ul>
+    <li>「⋯⋯你給的這道<strong>靈氣</strong>有點亂」 → 401/403 Groq key 錯。按底下按鈕<strong>回去重新分享靈氣</strong>(直接送到第二幕)</li>
+    <li>「⋯⋯你給的這道<strong>靈力</strong>有點亂」 → Gemini / OpenAI 相容 key 錯。按按鈕<strong>回去重新分享靈力</strong>(回第三幕)</li>
+    <li>HTTP 細節在錯誤訊息下方:<code>401/403</code> = key 無效, <code>404/4xx</code> = <code>api_base</code> 錯</li>
+  </ul>
+</div>
+
+<div class="scene-block">
+  <h3>第五幕 · 安頓 (The Settling)</h3>
+  <img class="scene-shot" src="images/dwelling-rite/05-settling.png" alt="第五幕 安頓">
+  <p>Mori 真正住下,睜眼,光暈不再淡。她拿出隨身的書,翻開第一頁,用指尖沾你給的光,鄭重寫下你的名字:</p>
+  <blockquote style="margin: 12px 24px; font-style: italic; color: var(--c-brown);">
+    「⋯⋯這本書, 叫《森林書》。從今晚起, 它也記得你了。」
+  </blockquote>
+  <p>森林開始呼吸,深處一棵年輪初成的小樹悄悄發芽 — 你跟 Mori 的第一道年輪。</p>
+  <ul>
+    <li><strong>按鈕</strong>:<code>歡迎回家, Mori</code> → modal 關閉,floating Mori 在桌面浮現</li>
+  </ul>
+</div>
+
+<h2>跑完之後</h2>
+
+<ul>
+  <li><strong>floating Mori</strong> 浮在桌面,雙擊喚醒/休眠,拖曳移動</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>(預設熱鍵)開始錄音</li>
+  <li>主畫面 sidebar 切 Chat / Profile / Config / Memory / Annuli / Skills / Deps</li>
+</ul>
+
+<h2>重新走一次儀式</h2>
+
+<p>主畫面 sidebar 左下角 <code>?</code> 圖示按鈕重開儀式。Mori 不會忘了你 — 重做只是重新配置 key / model,記憶跟年輪不動。</p>
+
+<h2>跟 in-universe lore 的分工</h2>
+
+<table class="key-table">
+  <tr>
+    <th>文件</th>
+    <th>重點</th>
+  </tr>
+  <tr>
+    <td>本檔(<code>docs/dwelling-rite.html</code>)</td>
+    <td><strong>怎麼操作</strong> — 填什麼 key、按什麼按鈕、失敗怎辦</td>
+  </tr>
+  <tr>
+    <td><a href="https://yazelin.github.io/world-tree/rules/dwelling-rite" target="_blank" rel="noopener">World Tree · 宿靈儀式</a></td>
+    <td><strong>詩意敘事</strong> — 五幕劇本、Mori 的聲音、儀式為什麼設計成這樣</td>
+  </tr>
+  <tr>
+    <td><a href="https://yazelin.github.io/world-tree/npcs/mori" target="_blank" rel="noopener">World Tree · Mori 角色卡</a></td>
+    <td>Mori 的人格、SOUL、起源</td>
+  </tr>
+  <tr>
+    <td><a href="https://yazelin.github.io/world-tree/lore/cosmology" target="_blank" rel="noopener">World Tree · 宇宙論</a></td>
+    <td>召喚師 / 契約精靈 / 年輪 / 契約 四層宇宙</td>
+  </tr>
+</table>
+
+<h2>下一步</h2>
+
+<ul>
+  <li><a href="getting-started.html">Getting Started</a> — 安裝 + Build + Dev 模式</li>
+  <li><a href="providers.html">Providers</a> — Groq / Gemini / Ollama / Claude-CLI 各家設定詳細</li>
+  <li><a href="hotkeys.html">Hotkeys</a> — 全域熱鍵 + UI 內熱鍵</li>
+  <li><a href="mori-home.html">~/.mori/</a> — config / profile / memory / theme 全套結構</li>
+</ul>
+
+<div class="book-footer">
+  Mori Design Book · 宿靈儀式 Walkthrough
+</div>
+
+</body>
+</html>
