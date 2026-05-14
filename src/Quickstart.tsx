@@ -69,9 +69,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
     invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
   }, []);
 
-  // 儀式模式 → 開 ambient pad,切走 / 關 modal 時停
-  // mute toggle 也存進 state(預設不靜音)
-  const [audioMuted, setAudioMuted] = useState(false);
+  // 儀式模式 → 開 ambient pad,切走 / 關 modal 時停。
+  // 預設靜音(user 自己 toggle 開)— 避免 user 在挑 / 試新音樂時被合成 pad 干擾。
+  const [audioMuted, setAudioMuted] = useState(true);
   // Quickstart 內也能切 theme(因 user 可能 onboarding 時想換明暗)
   const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
   useEffect(() => {
