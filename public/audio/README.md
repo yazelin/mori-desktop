@@ -2,6 +2,12 @@
 
 Quickstart 的「召喚儀式」模式會嘗試播 `ritual-ambient.mp3`。沒檔案 → fallback Web Audio API 合成的 ambient pad(會像白噪音)。
 
+## 目前 bundled 的音檔
+
+`ritual-ambient.mp3` — "Film" by **Leberch** ([Pixabay 作者頁](https://pixabay.com/users/leberch-42823964/))
+
+授權:Pixabay Content License。商業 / 個人 / 開源 都可用,**不需署名**(但這裡仍註記表示尊重)。可改:user 把同名檔丟進來會覆蓋。
+
 ## 找一條音檔
 
 放 `public/audio/ritual-ambient.mp3`,Vite 會 serve 在 `/audio/ritual-ambient.mp3`。建議:
