@@ -11,6 +11,7 @@
 
 pub mod agent;
 pub mod agent_profile;
+pub mod annuli;
 pub mod context;
 pub mod llm;
 pub mod memory;
