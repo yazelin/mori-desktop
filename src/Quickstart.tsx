@@ -11,7 +11,8 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { IconClose } from "./icons";
+import { IconClose, IconGlobe } from "./icons";
+import { setLocale, nextLocale } from "./i18n";
 
 type Provider = "groq" | "openai_compat";
 type Mode = "direct" | "ritual";
@@ -48,8 +49,8 @@ interface QuickstartProps {
 }
 
 export function Quickstart({ onDone }: QuickstartProps) {
-  const { t } = useTranslation();
-  const [mode, setMode] = useState<Mode>("direct");
+  const { t, i18n } = useTranslation();
+  const [mode, setMode] = useState<Mode>("ritual");
   const [provider, setProvider] = useState<Provider>("groq");
   const [keyText, setKeyText] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -59,6 +60,12 @@ export function Quickstart({ onDone }: QuickstartProps) {
   const [model, setModel] = useState(PROVIDER_INFO.openai_compat.defaultModel ?? "");
   // 選 openai_compat 為 LLM 時的可選「Groq key 給 STT」欄位
   const [sttKeyText, setSttKeyText] = useState("");
+  // 偵測 GROQ_API_KEY env var 是否已設(後端 startup 會讀進 state.groq_api_key)
+  // 若 true → user 不用再貼 key,只要 Save 就能用環境變數的
+  const [envGroqDetected, setEnvGroqDetected] = useState(false);
+  useEffect(() => {
+    invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
+  }, []);
   // 儀式模式:當前步驟 0..4
   const [ritualStep, setRitualStep] = useState(0);
 
@@ -69,7 +76,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
 
   const info = PROVIDER_INFO[provider];
   const canVerify = keyText.trim().length > 5 && verify.kind !== "verifying";
-  const canSave = verify.kind === "ok";
+  // 環境變數已偵測 + 選 groq → 不用驗證 / 貼 key 也能存
+  const envOnlyMode = envGroqDetected && provider === "groq" && keyText.trim() === "";
+  const canSave = envOnlyMode || verify.kind === "ok";
 
   const doVerify = async () => {
     setVerify({ kind: "verifying" });
@@ -97,7 +106,12 @@ export function Quickstart({ onDone }: QuickstartProps) {
       if (provider === "groq") {
         // Groq:單純 key,base 走預設(groq.com)
         if (!cfg.providers.groq) cfg.providers.groq = {};
-        cfg.providers.groq.api_key = keyText.trim();
+        // 若 user 沒貼 key 但 env 偵測到 → 不寫 api_key,讓後端 discover_api_key
+        // 從 GROQ_API_KEY env 拿;若有貼就 overrides env(user 明確意圖)
+        const k = keyText.trim();
+        if (k) {
+          cfg.providers.groq.api_key = k;
+        }
         cfg.provider = "groq";
         cfg.stt_provider = "groq";
       } else {
@@ -158,6 +172,19 @@ export function Quickstart({ onDone }: QuickstartProps) {
               title={t("quickstart.mode_ritual_hint")}
             >{t("quickstart.mode_ritual")}</button>
           </div>
+          <button
+            className="mori-btn ghost"
+            onClick={() => {
+              const next = nextLocale(i18n.language);
+              setLocale(next).catch((e) => console.error("[i18n] toggle failed", e));
+            }}
+            title={i18n.language === "zh-TW" ? "Switch to English" : "切到繁體中文"}
+          >
+            <IconGlobe width={14} height={14} />
+            <span style={{ marginLeft: 4, fontSize: 11 }}>
+              {i18n.language === "zh-TW" ? "EN" : "繁中"}
+            </span>
+          </button>
           <button className="mori-btn ghost" onClick={doSkip} title={t("quickstart.skip_title")}>
             <IconClose width={14} height={14} />
           </button>
@@ -176,6 +203,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             apiBase={apiBase} setApiBase={setApiBase}
             model={model} setModel={setModel}
             sttKeyText={sttKeyText} setSttKeyText={setSttKeyText}
+            envGroqDetected={envGroqDetected}
           />
         ) : (
           <RitualFlow
@@ -191,6 +219,8 @@ export function Quickstart({ onDone }: QuickstartProps) {
             apiBase={apiBase} setApiBase={setApiBase}
             model={model} setModel={setModel}
             sttKeyText={sttKeyText} setSttKeyText={setSttKeyText}
+            envGroqDetected={envGroqDetected}
+            onSwitchToDirect={() => setMode("direct")}
           />
         )}
       </div>
@@ -222,16 +252,23 @@ interface FormProps {
   setModel: (s: string) => void;
   sttKeyText: string;
   setSttKeyText: (s: string) => void;
+  envGroqDetected: boolean;
 }
 
 function DirectForm({
   t, provider, setProvider, keyText, setKeyText, showKey, setShowKey,
   info, verify, setVerify, canVerify, canSave, doVerify, doSave, doSkip,
-  apiBase, setApiBase, model, setModel, sttKeyText, setSttKeyText,
+  apiBase, setApiBase, model, setModel, sttKeyText, setSttKeyText, envGroqDetected,
 }: FormProps) {
   return (
     <>
       <p className="mori-quickstart-intro">{t("quickstart.intro")}</p>
+
+      {envGroqDetected && provider === "groq" && (
+        <div className="mori-quickstart-env-banner">
+          ✓ {t("quickstart.env_detected")}
+        </div>
+      )}
 
       <div className="mori-quickstart-field">
         <label>{t("quickstart.choose_provider")}</label>
@@ -283,6 +320,9 @@ function DirectForm({
       <div className="mori-quickstart-field">
         <label>
           {t("quickstart.api_key_label")}
+          {envGroqDetected && provider === "groq" && (
+            <span className="mori-quickstart-optional-tag">{t("quickstart.optional_when_env")}</span>
+          )}
           <a href={info.helpUrl} target="_blank" rel="noopener noreferrer" className="mori-quickstart-help-link">
             {t("quickstart.where_get_key")} ↗
           </a>
@@ -291,7 +331,7 @@ function DirectForm({
           <input
             type={showKey ? "text" : "password"}
             className="mori-input"
-            placeholder={info.placeholder}
+            placeholder={envGroqDetected && provider === "groq" ? t("quickstart.env_placeholder") : info.placeholder}
             value={keyText}
             onChange={(e) => {
               setKeyText(e.target.value);
@@ -345,6 +385,7 @@ function DirectForm({
 interface RitualProps extends FormProps {
   step: number;
   setStep: (s: number) => void;
+  onSwitchToDirect: () => void;
 }
 
 function RitualFlow(props: RitualProps) {
@@ -363,7 +404,7 @@ function RitualFlow(props: RitualProps) {
         ))}
       </div>
 
-      {step === 0 && <RitualStepEnter t={t} onNext={() => setStep(1)} onSkip={props.doSkip} />}
+      {step === 0 && <RitualStepEnter t={t} onNext={() => setStep(1)} onSkip={props.doSkip} onSwitchToDirect={props.onSwitchToDirect} />}
       {step === 1 && (
         <RitualStepLantern
           t={t}
@@ -397,7 +438,9 @@ function RitualFlow(props: RitualProps) {
   );
 }
 
-function RitualStepEnter({ t, onNext, onSkip }: { t: any; onNext: () => void; onSkip: () => void }) {
+function RitualStepEnter({ t, onNext, onSkip, onSwitchToDirect }: {
+  t: any; onNext: () => void; onSkip: () => void; onSwitchToDirect: () => void;
+}) {
   return (
     <div className="mori-quickstart-ritual-step">
       <p className="mori-ritual-narrative">{t("quickstart.ritual_enter_1")}</p>
@@ -405,6 +448,7 @@ function RitualStepEnter({ t, onNext, onSkip }: { t: any; onNext: () => void; on
       <p className="mori-ritual-narrative whisper">{t("quickstart.ritual_enter_3")}</p>
       <div className="mori-quickstart-footer">
         <button className="mori-btn ghost" onClick={onSkip}>{t("quickstart.ritual_dismiss")}</button>
+        <button className="mori-btn ghost" onClick={onSwitchToDirect}>{t("quickstart.ritual_switch_direct")}</button>
         <button className="mori-btn primary" onClick={onNext}>{t("quickstart.ritual_enter_button")}</button>
       </div>
     </div>
