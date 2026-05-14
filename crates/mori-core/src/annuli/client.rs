@@ -280,6 +280,19 @@ impl AnnuliClient {
         ok.report_path.ok_or_else(|| AnnuliError::Parse("missing report_path".into()))
     }
 
+    /// `POST /spirits/<x>/memory/section` — append user-explicit MEMORY § (Wave 4 endpoint).
+    ///
+    /// Requires `soul_token` in config(server 端 `soul_token_guard` 擋)。
+    pub async fn append_memory_section(&self, header: &str, body: &str) -> Result<(), AnnuliError> {
+        let url = self.url("/memory/section");
+        let body_json = serde_json::json!({ "header": header, "body": body });
+        let mut req = self.auth_request(self.http.post(&url).json(&body_json));
+        req = self.with_soul_token(req)?;
+        let resp = req.send().await?;
+        let _ = self.check_status("/memory/section", resp).await?;
+        Ok(())
+    }
+
     /// `POST /spirits/<x>/curator/apply` — returns applied count.
     pub async fn curator_apply(&self, report_path: &str) -> Result<u32, AnnuliError> {
         let url = self.url("/curator/apply");

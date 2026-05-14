@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
+pub mod annuli;
 pub mod markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

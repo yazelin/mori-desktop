@@ -4,6 +4,7 @@
 mod action_skills;
 mod context_provider;
 mod deps;
+mod annuli_config;
 mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
