@@ -1889,9 +1889,40 @@
   backdrop-filter: blur(4px);
 }
 .mori-quickstart-backdrop.mode-ritual {
-  /* 儀式模式更深沉 */
-  background: rgba(4, 10, 8, 0.88);
-  backdrop-filter: blur(8px);
+  /* 儀式模式深沉 + 森林 radial gradient,中央透出微光 */
+  background:
+    radial-gradient(ellipse at center, rgba(20, 50, 35, 0.55) 0%, rgba(4, 12, 8, 0.96) 70%);
+  backdrop-filter: blur(12px);
+}
+/* 儀式背景的螢火 / 星塵粒子 — 4 個發光點各自漂浮 */
+.mori-quickstart-backdrop.mode-ritual::before,
+.mori-quickstart-backdrop.mode-ritual::after {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(180, 230, 195, 0.7);
+  box-shadow: 0 0 8px 2px rgba(170, 230, 185, 0.5);
+  animation: ritual-firefly 6s ease-in-out infinite;
+  pointer-events: none;
+}
+.mori-quickstart-backdrop.mode-ritual::before {
+  top: 18%;
+  left: 12%;
+  animation-delay: 0s;
+}
+.mori-quickstart-backdrop.mode-ritual::after {
+  bottom: 22%;
+  right: 14%;
+  animation-delay: 3s;
+  background: rgba(214, 230, 161, 0.6);
+}
+@keyframes ritual-firefly {
+  0%, 100% { opacity: 0.3; transform: translateY(0) translateX(0); }
+  25% { opacity: 0.9; transform: translateY(-20px) translateX(15px); }
+  50% { opacity: 0.5; transform: translateY(-30px) translateX(-10px); }
+  75% { opacity: 0.85; transform: translateY(-15px) translateX(20px); }
 }
 .mori-quickstart-modal {
   width: min(540px, 92vw);
@@ -1903,6 +1934,43 @@
   padding: 24px 28px;
   color: var(--c-text);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  position: relative;
+  z-index: 1;
+}
+/* 儀式模式 modal 更大 + 不同視覺 */
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-modal {
+  width: min(680px, 94vw);
+  max-height: 94vh;
+  padding: 36px 44px;
+  background:
+    linear-gradient(180deg, rgba(20, 38, 30, 0.96) 0%, rgba(12, 24, 18, 0.98) 100%);
+  border: 1px solid rgba(168, 197, 162, 0.25);
+  box-shadow: 0 20px 64px rgba(0, 0, 0, 0.6),
+              inset 0 0 60px rgba(168, 197, 162, 0.06);
+}
+/* 儀式 header 加邊飾 */
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-header {
+  border-bottom: 1px dashed rgba(168, 197, 162, 0.25);
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+  position: relative;
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-header::after {
+  content: "❋";
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(168, 197, 162, 0.6);
+  background: linear-gradient(180deg, rgba(20, 38, 30, 0.96) 0%, rgba(12, 24, 18, 0.98) 100%);
+  padding: 0 8px;
+  font-size: 14px;
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-header h2 {
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: rgba(220, 240, 220, 0.95);
+  font-weight: 400;
 }
 .mori-quickstart-header {
   display: flex;
