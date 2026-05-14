@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import { IconRefresh } from "../icons";
 
 type SkillInfo = {
@@ -19,19 +20,24 @@ type SkillInfo = {
   caveat: string | null;
 };
 
-function platformLabel(platforms: string[]): { text: string; cls: string } | null {
-  // 全平台支援就不標(預設假設,標反而 noise)
-  const allOSes = ["linux", "windows", "macos"];
-  const isAll = allOSes.every((os) => platforms.includes(os));
-  if (isAll) return null;
-  if (platforms.length === 1) {
-    const os = platforms[0];
-    return { text: `限 ${os}`, cls: `platform-${os}` };
-  }
-  return { text: platforms.join(" / "), cls: "platform-mixed" };
+function usePlatformLabel() {
+  const { t } = useTranslation();
+  return (platforms: string[]): { text: string; cls: string } | null => {
+    // 全平台支援就不標(預設假設,標反而 noise)
+    const allOSes = ["linux", "windows", "macos"];
+    const isAll = allOSes.every((os) => platforms.includes(os));
+    if (isAll) return null;
+    if (platforms.length === 1) {
+      const os = platforms[0];
+      return { text: `${t("skills_tab.platform_limited")} ${os}`, cls: `platform-${os}` };
+    }
+    return { text: platforms.join(" / "), cls: "platform-mixed" };
+  };
 }
 
 function SkillCard({ skill }: { skill: SkillInfo }) {
+  const { t } = useTranslation();
+  const platformLabel = usePlatformLabel();
   const [expanded, setExpanded] = useState(false);
   const props = skill.parameters?.properties ?? {};
   const required: string[] = Array.isArray(skill.parameters?.required) ? skill.parameters.required : [];
@@ -61,13 +67,13 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
       </div>
       {skill.caveat && (
         <div className="mori-skill-caveat-detail">
-          ⚠️ <span className="label">當前平台注意:</span> {skill.caveat}
+          ⚠️ <span className="label">{t("skills_tab.caveat_label")}</span> {skill.caveat}
         </div>
       )}
       {expanded && (
         <div className="mori-skill-card-body">
           {paramKeys.length === 0 ? (
-            <div className="mori-shell-skills-empty small">沒有參數</div>
+            <div className="mori-shell-skills-empty small">{t("skills_tab.no_params")}</div>
           ) : (
             <table className="mori-skill-params">
               <thead>
@@ -86,7 +92,7 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
                       <td className="param-name">{k}</td>
                       <td className="param-type">{p.type ?? "?"}</td>
                       <td className="param-required">{required.includes(k) ? "✓" : ""}</td>
-                      <td className="param-desc">{p.description ?? <em>(no description)</em>}</td>
+                      <td className="param-desc">{p.description ?? <em>{t("skills_tab.no_description")}</em>}</td>
                     </tr>
                   );
                 })}
@@ -100,6 +106,7 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
 }
 
 function SkillsTab() {
+  const { t } = useTranslation();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,12 +135,8 @@ function SkillsTab() {
 
   return (
     <div className="mori-tab mori-tab-skills">
-      <h2 className="mori-tab-title">Skills</h2>
-      <p className="mori-tab-hint">
-        當前 active agent profile 啟用的 skills。Built-in(translate / polish /
-        記憶 skill / 動作 skill 等)+ shell_skill(profile frontmatter
-        定義的自訂 CLI 包裝)。改 profile 後按重新整理按鈕。
-      </p>
+      <h2 className="mori-tab-title">{t("skills_tab.title")}</h2>
+      <p className="mori-tab-hint">{t("skills_tab.hint")}</p>
 
       {error && <div className="mori-config-error">{error}</div>}
 
@@ -141,22 +144,22 @@ function SkillsTab() {
         <button
           className={`mori-view-tab ${filter === "all" ? "active" : ""}`}
           onClick={() => setFilter("all")}
-        >全部 ({skills.length})</button>
+        >{t("skills_tab.filter_all")} ({skills.length})</button>
         <button
           className={`mori-view-tab ${filter === "builtin" ? "active" : ""}`}
           onClick={() => setFilter("builtin")}
-        >Built-in ({counts.builtin})</button>
+        >{t("skills_tab.filter_builtin")} ({counts.builtin})</button>
         <button
           className={`mori-view-tab ${filter === "shell" ? "active" : ""}`}
           onClick={() => setFilter("shell")}
-        >Shell ({counts.shell})</button>
-        <button className="mori-btn" onClick={reload} title="重新讀取"><IconRefresh width={13} height={13} /></button>
+        >{t("skills_tab.filter_shell")} ({counts.shell})</button>
+        <button className="mori-btn" onClick={reload} title={t("skills_tab.refresh_title")}><IconRefresh width={13} height={13} /></button>
       </div>
 
       {loading ? (
-        <div className="mori-tab-placeholder"><p>讀取中…</p></div>
+        <div className="mori-tab-placeholder"><p>{t("skills_tab.loading")}</p></div>
       ) : filtered.length === 0 ? (
-        <div className="mori-tab-placeholder"><p>沒有 skill 符合篩選</p></div>
+        <div className="mori-tab-placeholder"><p>{t("skills_tab.no_match")}</p></div>
       ) : (
         <div className="mori-skill-list">
           {filtered.map((s) => <SkillCard key={s.name} skill={s} />)}

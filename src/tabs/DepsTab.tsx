@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import { IconRefresh, IconClipboard } from "../icons";
 
 type CheckSpec =
@@ -49,24 +50,29 @@ type InstallResult = {
   output: string;
 };
 
-function commandPreview(install: InstallSpec): string {
-  switch (install.kind) {
-    case "Shell":
-      return install.script;
-    case "Manual":
-      return install.commands.join("\n");
-    case "Download":
-      return [
-        `# Mori 會自動下載 + 解壓到 ${install.dest_dir}`,
-        `curl -L -o /tmp/dep.zip "${install.url}"`,
-        install.extract_members.length === 0
-          ? `unzip /tmp/dep.zip -d ${install.dest_dir}`
-          : `unzip /tmp/dep.zip ${install.extract_members.join(" ")} -d ${install.dest_dir}`,
-      ].join("\n");
-  }
+function useCommandPreview() {
+  const { t } = useTranslation();
+  return (install: InstallSpec): string => {
+    switch (install.kind) {
+      case "Shell":
+        return install.script;
+      case "Manual":
+        return install.commands.join("\n");
+      case "Download":
+        return [
+          `${t("deps_tab.comment_auto_extract")} ${install.dest_dir}`,
+          `curl -L -o /tmp/dep.zip "${install.url}"`,
+          install.extract_members.length === 0
+            ? `unzip /tmp/dep.zip -d ${install.dest_dir}`
+            : `unzip /tmp/dep.zip ${install.extract_members.join(" ")} -d ${install.dest_dir}`,
+        ].join("\n");
+    }
+  };
 }
 
 function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
+  const { t } = useTranslation();
+  const commandPreview = useCommandPreview();
   const [installing, setInstalling] = useState(false);
   const [result, setResult] = useState<InstallResult | null>(null);
   const cmdPreview = commandPreview(dep.install);
@@ -113,7 +119,7 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
               className="mori-dep-caveat"
               title={dep.install_caveat}
             >
-              ⚠️ 注意
+              {t("deps_tab.caveat_badge")}
             </span>
           )}
         </div>
@@ -122,7 +128,7 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
             <span className="mori-dep-status-detail">{dep.status.detail}</span>
           ) : manual ? (
             <button className="mori-btn" onClick={() => setShowCommand(!showCommand)}>
-              {showCommand ? "收起" : "顯示安裝指令"}
+              {showCommand ? t("deps_tab.hide_command") : t("deps_tab.show_command")}
             </button>
           ) : (
             <button
@@ -130,36 +136,36 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
               onClick={install}
               disabled={installing}
             >
-              {installing ? "安裝中…" : "安裝"}
+              {installing ? t("deps_tab.installing_button") : t("deps_tab.install_button")}
             </button>
           )}
         </div>
       </div>
       <div className="mori-dep-desc">{dep.description}</div>
       <div className="mori-dep-unlocks">
-        <span className="label">解鎖:</span> {dep.unlocks}
+        <span className="label">{t("deps_tab.unlocks_label")}</span> {dep.unlocks}
       </div>
       {dep.install_caveat && (
         <div className="mori-dep-caveat-detail">
-          ⚠️ <span className="label">當前平台注意:</span> {dep.install_caveat}
+          ⚠️ <span className="label">{t("deps_tab.platform_note_label")}</span> {dep.install_caveat}
         </div>
       )}
       {!dep.status.installed && showCommand && (
         <div className="mori-dep-cmd">
           <div className="mori-dep-cmd-head">
-            <span className="label">{manual ? "請複製指令在 terminal 跑(需 sudo)" : "將執行的指令"}</span>
-            <button className="mori-btn small ghost" onClick={copyCmd}><IconClipboard width={12} height={12} /> 複製</button>
+            <span className="label">{manual ? t("deps_tab.manual_label") : t("deps_tab.auto_label")}</span>
+            <button className="mori-btn small ghost" onClick={copyCmd}><IconClipboard width={12} height={12} /> {t("deps_tab.copy_button")}</button>
           </div>
           <pre>{cmdPreview}</pre>
           {manual && (
-            <button className="mori-btn small" onClick={onRefresh}>裝完後按這 重新檢測</button>
+            <button className="mori-btn small" onClick={onRefresh}>{t("deps_tab.recheck_after_manual")}</button>
           )}
         </div>
       )}
       {result && (
         <div className={`mori-dep-result ${result.success ? "ok" : "err"}`}>
           <div className="mori-dep-result-head">
-            <span>{result.success ? "✓ 安裝成功" : "✗ 失敗"}</span>
+            <span>{result.success ? t("deps_tab.install_ok") : t("deps_tab.install_fail")}</span>
             {result.exit_code != null && (
               <span className="exit-code">exit={result.exit_code}</span>
             )}
@@ -172,6 +178,7 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
 }
 
 function DepsTab() {
+  const { t } = useTranslation();
   const [deps, setDeps] = useState<DepInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -195,22 +202,18 @@ function DepsTab() {
 
   return (
     <div className="mori-tab mori-tab-deps">
-      <h2 className="mori-tab-title">Dependencies</h2>
-      <p className="mori-tab-hint">
-        Optional 工具 / 模型。裝了某個就解鎖對應 feature。需 sudo 的(系統套件)
-        會顯示指令給你在 terminal 自己跑,其他(pip / wget / curl install.sh)
-        mori 可代執行。
-      </p>
+      <h2 className="mori-tab-title">{t("deps_tab.title")}</h2>
+      <p className="mori-tab-hint">{t("deps_tab.hint")}</p>
 
       {error && <div className="mori-config-error">{error}</div>}
 
       <div className="mori-deps-toolbar">
-        <span className="mori-memory-count">{installedCount} / {deps.length} 已裝</span>
-        <button className="mori-btn" onClick={reload}><IconRefresh width={13} height={13} /> 重新檢測</button>
+        <span className="mori-memory-count">{installedCount} / {deps.length} {t("deps_tab.installed_count_suffix")}</span>
+        <button className="mori-btn" onClick={reload}><IconRefresh width={13} height={13} /> {t("deps_tab.refresh_button")}</button>
       </div>
 
       {loading ? (
-        <div className="mori-tab-placeholder"><p>檢測中…</p></div>
+        <div className="mori-tab-placeholder"><p>{t("deps_tab.detecting")}</p></div>
       ) : (
         <div className="mori-deps-list">
           {deps.map((d) => (
