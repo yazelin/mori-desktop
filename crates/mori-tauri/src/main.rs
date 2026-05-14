@@ -487,20 +487,31 @@ async fn verify_llm_key(
         other => return Err(format!("不支援的 provider:{other}(只有 groq / openai_compat)")),
     };
 
+    let url = format!("{base}/models");
     let resp = client
-        .get(format!("{base}/models"))
+        .get(&url)
         .bearer_auth(&key)
         .send()
         .await
-        .map_err(|e| format!("連 {provider} ({base}) 失敗:{e}"))?;
+        .map_err(|e| format!("連 {provider} ({url}) 失敗:{e}"))?;
 
-    match resp.status().as_u16() {
+    let status = resp.status();
+    match status.as_u16() {
         200 => Ok(format!("{provider} API key 驗證 OK")),
         401 | 403 => Err(format!(
             "API key 無效({}) — 重新檢查 key 完整不完整,或對應 console 重產生",
-            resp.status()
+            status
         )),
-        code => Err(format!("API 回 HTTP {code} — 稍後再試,或檢查 api_base 拼字")),
+        code => {
+            // 把 response body 截前 200 字接回 error,user 看得到 server 怎麼說
+            let body = resp.text().await.unwrap_or_default();
+            let snippet: String = body.chars().take(200).collect();
+            Err(format!(
+                "API 回 HTTP {code} — 檢查 api_base 是否正確。\n\
+                 試的 URL:{url}\n\
+                 server 回:{snippet}"
+            ))
+        }
     }
 }
 

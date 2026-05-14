@@ -2336,6 +2336,11 @@
 }
 .mori-quickstart-verify-msg.err {
   color: var(--c-danger-text);
+  white-space: pre-line;  /* 多行 error message(URL + server response)正常斷行 */
+  text-align: left;
+  font-size: 11.5px;
+  line-height: 1.5;
+  max-width: 100%;
 }
 .mori-quickstart-env-banner {
   margin-bottom: 16px;

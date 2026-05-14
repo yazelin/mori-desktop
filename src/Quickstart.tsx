@@ -86,13 +86,15 @@ export function Quickstart({ onDone }: QuickstartProps) {
     invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
   }, []);
 
-  // Pre-fill 既有 config(user 透過 Help 重進引導時不用全部從頭設)
+  // Pre-fill 既有 config(user 透過 Help 重進引導時不用全部從頭設)。
+  // 擋住 modal render 到 pre-fill 跑完,避免 user 已連按到第三頁但 IPC 還在傳、
+  // key field 先空再填上的閃爍。
+  const [prefillReady, setPrefillReady] = useState(false);
   useEffect(() => {
     (async () => {
       try {
         const raw = await invoke<string>("config_read");
         const cfg = JSON.parse(raw);
-        // 判斷 user 之前哪條 path:groq 或 openai_compat
         const groqKey = cfg.providers?.groq?.api_key as string | undefined;
         const compatBase = cfg.providers?.openai_compat?.api_base as string | undefined;
         const compatKey = cfg.providers?.openai_compat?.api_key as string | undefined;
@@ -103,7 +105,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
           if (compatBase) setApiBase(compatBase);
           if (compatModel) setModel(compatModel);
           setKeyText(compatKey!);
-          if (real(groqKey)) setSttKeyText(groqKey!); // STT 額外 key
+          if (real(groqKey)) setSttKeyText(groqKey!);
           setVerify({ kind: "ok", msg: "已從現有設定載入(可直接存或重驗)" });
         } else if (real(groqKey)) {
           setProvider("groq");
@@ -113,6 +115,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
       } catch {
         /* config 還沒存過 — 維持 default 空值 */
       }
+      setPrefillReady(true);
     })();
   }, []);
 
@@ -234,6 +237,12 @@ export function Quickstart({ onDone }: QuickstartProps) {
     }
     onDone();
   };
+
+  // 擋住 modal 到 pre-fill IPC 完成 — 避免 user 連按快過 IPC,key field
+  // 先空再填上的閃爍。loading state 短(<300ms),user 幾乎感受不到延遲。
+  if (!prefillReady) {
+    return <div className={`mori-quickstart-backdrop mode-${mode}`} />;
+  }
 
   return (
     <div className={`mori-quickstart-backdrop mode-${mode}`}>
