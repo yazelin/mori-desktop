@@ -18,7 +18,7 @@
 | **Wave 1** | 三 repo Annuli → annuli sweep + 實作追蹤系統建立 | 半天 | ✅ done(URL sweep + IMPLEMENTATION-PLAN 都 commit;mori-journal 待 yazelin 手動建) |
 | **Wave 2** | annuli 內部畫線(src/core/ + src/creator/)— 機械式搬位置 + 17 step physical migration | 半天-1 天 | ✅ done 2026-05-14(annuli@0e6cec1,PR #1 squash merge,engine.py 2489 → 71 行 shim,admin.py 1674 → 全砍) |
 | **Wave 3** | annuli core 邏輯重組:events / digest / rings / curator 4 module + vault 路徑遷移 + X-Soul-Token auth | 1-2 週 | ✅ done 2026-05-14(annuli@c9179eb,PR #2 squash merge,12 step + 97 test 全綠,events JSONL .md + trigram FTS,do_sleep 不動 SOUL/MEMORY,curator yaml dry-run/apply 不 delete,migrate vault 一鍵搬,SOUL.md PUT 403 without X-Soul-Token) |
-| **Wave 4** | mori-desktop 接 annuli HTTP API + 主視窗 Annuli tab | 1 週 | ⏳ |
+| **Wave 4** | mori-desktop 接 annuli HTTP API + 主視窗 Annuli tab | 1 週 | ✅ done 2026-05-14(mori-desktop@17460fd,PR #26 squash merge,12 step + 199 unit + 6 Rust e2e + 5 invariant curl 驗證,AnnuliClient/AnnuliConfig/AnnuliMemoryStore/AnnuliTab + Ctrl+Alt+Z hotkey + fire-events;SOUL/MEMORY byte-exact invariant runtime verified) |
 | **Wave 5** | annuli-creator 物理拆 repo(條件成熟時) | 半天 | ⏳ 後期 |
 
 ---
@@ -184,24 +184,36 @@ rings / curator。路徑改 `~/mori-universe/spirits/<name>/`。
 ### 目標
 mori-desktop 從現在的「自己管短期記憶」改成「**透過 annuli HTTP API 跟 vault 互動**」。
 
-### 步驟
+### 步驟(✅ 全完成 2026-05-14,mori-desktop@17460fd,PR #26 squash merge,12 step)
 
-- [ ] `crates/mori-core/src/llm/annuli_client.rs` 新 module:
-  - [ ] HTTP client wrap reqwest
-  - [ ] `get_soul()` / `get_memory()` / `post_event()` / `post_ring()` / `post_curator_dry_run()`
-- [ ] `crates/mori-core/src/memory/annuli_memory_store.rs`:
-  - [ ] 實作 `MemoryStore` trait wrap annuli_client
-  - [ ] fallback 到 `LocalMarkdownMemoryStore`(annuli 沒跑時)
-- [ ] `crates/mori-tauri/src/main.rs` 加 annuli endpoint config(`~/.mori/config.json` `annuli.endpoint`)
-- [ ] `src/tabs/AnnuliTab.tsx` 新增:
-  - [ ] 看 persona(從 GET /soul)
-  - [ ] 看 events(from GET /events,FTS5 search)
-  - [ ] 看 rings(從 GET /rings)
-  - [ ] 看 curator report(從 GET /curator/reports)+ approve / reject 按鈕
-- [ ] 對話事件 → POST events(取代既有 LocalMarkdownMemoryStore write)
-- [ ] 熱鍵 `Ctrl+Alt+Z` 觸發 /sleep(POST /rings/new)
-- [ ] Status indicator:annuli 是否跑著 / 最近事件數 / 待 review curator report 數
-- [ ] e2e test:mori-desktop + 本機 annuli 跑 + Groq STT,確認對話事件落到 vault
+- [x] design freeze:[docs/WAVE-4-DESIGN.md](../WAVE-4-DESIGN.md) Q1-Q5 鎖定
+- [x] `crates/mori-core/src/annuli/client.rs`:
+  - [x] HTTP client wrap reqwest(async tokio)
+  - [x] `get_soul / put_soul`(X-Soul-Token guard)/ `append_event` / `list_events_by_date / search_events / list_events_by_kind` / `trigger_sleep` / `curator_dry_run / curator_apply` / `bootstrap` / `health` / `list_memory_sections / append_memory_section`(對應 Wave 3 + Wave 4 prep PRs)
+- [x] `crates/mori-core/src/memory/annuli.rs`:
+  - [x] `AnnuliMemoryStore` impl `MemoryStore` trait(Q1 (a):MemoryIndexEntry ← § section,header convention parse type)
+  - [x] **delete 走 curator review**(Q3 (b):Err("use curator review"),ForgetSkill toast 顯示給 user)
+  - [x] fallback:`AppState.annuli=None` 時繼續用 `LocalMarkdownMemoryStore`(config.annuli.enabled=false 即可)
+- [x] `crates/mori-tauri/src/annuli_config.rs` + `main.rs` 啟動 config-driven:`~/.mori/config.json` `annuli.{endpoint, spirit_name, user_id, soul_token, basic_auth}` 子樹
+- [x] `src/tabs/AnnuliTab.tsx` MVP(Q4 範圍 — 唯讀 + /sleep)
+  - [x] SOUL.md 顯示(GET /soul)
+  - [x] 看 MEMORY § sections(GET /memory + include_body)
+  - [x] 今日 events 列表(GET /events?date=today)
+  - [x] /rings/new 按鈕(POST,顯示 ring path)
+  - [x] status row(/health + endpoint / spirit / user_id / token configured)
+  - [x] 30s auto-refresh status + events
+  - [ ] curator review/approve UI — **Wave 5+**(Q3 短期 vim yaml 改)
+- [x] 對話事件 fire-and-forget → `POST /events`(`agent.rs` chat 完成 hook,tokio::spawn 失敗 only log)
+- [x] 熱鍵 `Ctrl+Alt+Z` → `MORI_SLEEP_EVENT` → `POST /rings/new`(沿用既有 hotkey infra,X11 + portal 兩條路徑都接)
+- [x] Status indicator(annuli reachable / events 數):AnnuliTab status row 已含,30s polling
+- [x] e2e test:[docs/WAVE-4-E2E.md](../WAVE-4-E2E.md) 8 section 手測 checklist + Rust integration test(`tests/integration_annuli.rs` 6 個 #[ignore] test 對真實 annuli HTTP)+ curl 驗 5 個 invariants
+
+### 實際踩到的挑戰
+- AnnuliMemoryStore.delete 跟 LocalMarkdown 語意不同(append-only)→ ForgetSkill 必須 catch error 改 toast,不該讓 LLM 看到失敗重試
+- `MemoryStore.read_index_as_context()` 原是 LocalMarkdown inherent method,改 trait default impl 才能在 `Arc<dyn>` 上 call
+- AppState.memory 從 `Arc<LocalMarkdownMemoryStore>` 改 `Arc<dyn MemoryStore>`(trait object 配 async-trait)
+- hotkey 加新 binding 後 `defaults_resolve_without_conflict` test 從 23 → 24 — 對齊就好
+- HotkeyAction::Sleep 沿用既有 event-emit infra,避免在 hotkey 處直接知道 AnnuliClient(decouple)
 
 ---
 
@@ -256,7 +268,7 @@ Mori 的成長路上,每一步都該被記得 — 不是只在 git log,而是進
 ---
 
 **Last updated**: 2026-05-14  
-**Status**: Wave 1 + 2 + 3 done(annuli@c9179eb merged)。下一步 Wave 4(mori-desktop ↔ annuli HTTP 接線,本 repo 開新 branch)  
+**Status**: Wave 1 + 2 + 3 + 4 done(annuli@c9179eb + mori-desktop@17460fd merged)。下一步 Wave 5(annuli-creator 拆 repo,**條件成熟才動** — 目前條件未到)  
 **Related**:
 - `docs/design/annuli-memory.md` — 架構決策
 - `docs/architecture.md` — 三宇宙位置
