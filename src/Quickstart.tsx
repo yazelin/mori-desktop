@@ -13,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { IconClose } from "./icons";
 
-type Provider = "groq" | "gemini";
+type Provider = "groq" | "openai_compat";
 type Mode = "direct" | "ritual";
 
 type VerifyState =
@@ -22,16 +22,24 @@ type VerifyState =
   | { kind: "ok"; msg: string }
   | { kind: "err"; msg: string };
 
-const PROVIDER_INFO: Record<Provider, { label: string; helpUrl: string; placeholder: string }> = {
+const PROVIDER_INFO: Record<Provider, {
+  label: string;
+  helpUrl: string;
+  placeholder: string;
+  defaultBase?: string;
+  defaultModel?: string;
+}> = {
   groq: {
     label: "Groq",
     helpUrl: "https://console.groq.com/keys",
     placeholder: "gsk_...",
   },
-  gemini: {
-    label: "Google Gemini",
+  openai_compat: {
+    label: "OpenAI-相容",
     helpUrl: "https://aistudio.google.com/app/apikey",
-    placeholder: "AIzaSy...",
+    placeholder: "sk-... / AIzaSy... / gsk_...",
+    defaultBase: "https://generativelanguage.googleapis.com/v1beta/openai",
+    defaultModel: "gemini-2.5-flash",
   },
 };
 
@@ -46,6 +54,11 @@ export function Quickstart({ onDone }: QuickstartProps) {
   const [keyText, setKeyText] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
+  // OpenAI-相容專用:api_base + model(預設 Gemini OpenAI endpoint)
+  const [apiBase, setApiBase] = useState(PROVIDER_INFO.openai_compat.defaultBase ?? "");
+  const [model, setModel] = useState(PROVIDER_INFO.openai_compat.defaultModel ?? "");
+  // 選 openai_compat 為 LLM 時的可選「Groq key 給 STT」欄位
+  const [sttKeyText, setSttKeyText] = useState("");
   // 儀式模式:當前步驟 0..4
   const [ritualStep, setRitualStep] = useState(0);
 
@@ -61,7 +74,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
   const doVerify = async () => {
     setVerify({ kind: "verifying" });
     try {
-      const msg = await invoke<string>("verify_llm_key", { provider, key: keyText.trim() });
+      const args: any = { provider, key: keyText.trim() };
+      if (provider === "openai_compat") args.apiBase = apiBase.trim();
+      const msg = await invoke<string>("verify_llm_key", args);
       setVerify({ kind: "ok", msg });
     } catch (e: any) {
       setVerify({ kind: "err", msg: String(e) });
@@ -78,10 +93,31 @@ export function Quickstart({ onDone }: QuickstartProps) {
         cfg = {};
       }
       if (!cfg.providers) cfg.providers = {};
-      if (!cfg.providers[provider]) cfg.providers[provider] = {};
-      cfg.providers[provider].api_key = keyText.trim();
-      if (!cfg.provider) cfg.provider = provider;
-      cfg.quickstart_completed = true; // 標記已走完引導
+
+      if (provider === "groq") {
+        // Groq:單純 key,base 走預設(groq.com)
+        if (!cfg.providers.groq) cfg.providers.groq = {};
+        cfg.providers.groq.api_key = keyText.trim();
+        cfg.provider = "groq";
+        cfg.stt_provider = "groq";
+      } else {
+        // openai_compat:寫進 providers.openai_compat,含 api_base + api_key + model
+        if (!cfg.providers.openai_compat) cfg.providers.openai_compat = {};
+        cfg.providers.openai_compat.api_base = apiBase.trim();
+        cfg.providers.openai_compat.api_key = keyText.trim();
+        if (model.trim()) cfg.providers.openai_compat.model = model.trim();
+        cfg.provider = "openai_compat";
+        // STT:user 有貼 Groq key 走 groq,沒貼走本機 Whisper
+        const sttKey = sttKeyText.trim();
+        if (sttKey) {
+          if (!cfg.providers.groq) cfg.providers.groq = {};
+          cfg.providers.groq.api_key = sttKey;
+          cfg.stt_provider = "groq";
+        } else {
+          cfg.stt_provider = "whisper-local";
+        }
+      }
+      cfg.quickstart_completed = true;
       delete cfg.quickstart_skipped;
       await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
       // 儀式模式:走到最後一步「甦醒」再 onDone
@@ -137,6 +173,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
             verify={verify} setVerify={setVerify}
             canVerify={canVerify} canSave={canSave}
             doVerify={doVerify} doSave={doSave} doSkip={doSkip}
+            apiBase={apiBase} setApiBase={setApiBase}
+            model={model} setModel={setModel}
+            sttKeyText={sttKeyText} setSttKeyText={setSttKeyText}
           />
         ) : (
           <RitualFlow
@@ -149,6 +188,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
             verify={verify} setVerify={setVerify}
             canVerify={canVerify} canSave={canSave}
             doVerify={doVerify} doSave={doSave} doSkip={doSkip}
+            apiBase={apiBase} setApiBase={setApiBase}
+            model={model} setModel={setModel}
+            sttKeyText={sttKeyText} setSttKeyText={setSttKeyText}
           />
         )}
       </div>
@@ -174,11 +216,18 @@ interface FormProps {
   doVerify: () => void;
   doSave: () => void;
   doSkip: () => void;
+  apiBase: string;
+  setApiBase: (s: string) => void;
+  model: string;
+  setModel: (s: string) => void;
+  sttKeyText: string;
+  setSttKeyText: (s: string) => void;
 }
 
 function DirectForm({
   t, provider, setProvider, keyText, setKeyText, showKey, setShowKey,
   info, verify, setVerify, canVerify, canSave, doVerify, doSave, doSkip,
+  apiBase, setApiBase, model, setModel, sttKeyText, setSttKeyText,
 }: FormProps) {
   return (
     <>
@@ -201,6 +250,35 @@ function DirectForm({
           ))}
         </div>
       </div>
+
+      {provider === "openai_compat" && (
+        <>
+          <div className="mori-quickstart-field">
+            <label>{t("quickstart.api_base_label")}</label>
+            <input
+              type="text"
+              className="mori-input"
+              placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+              value={apiBase}
+              onChange={(e) => {
+                setApiBase(e.target.value);
+                if (verify.kind !== "idle") setVerify({ kind: "idle" });
+              }}
+            />
+            <p className="mori-quickstart-field-hint">{t("quickstart.api_base_hint")}</p>
+          </div>
+          <div className="mori-quickstart-field">
+            <label>{t("quickstart.model_label")}</label>
+            <input
+              type="text"
+              className="mori-input"
+              placeholder="gemini-2.5-flash / gpt-4o / deepseek-chat"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            />
+          </div>
+        </>
+      )}
 
       <div className="mori-quickstart-field">
         <label>
@@ -231,6 +309,20 @@ function DirectForm({
           </button>
         </div>
       </div>
+
+      {provider === "openai_compat" && (
+        <div className="mori-quickstart-field">
+          <label>{t("quickstart.stt_key_label")}</label>
+          <input
+            type="password"
+            className="mori-input"
+            placeholder="gsk_... (留空 = 走本機 Whisper)"
+            value={sttKeyText}
+            onChange={(e) => setSttKeyText(e.target.value)}
+          />
+          <p className="mori-quickstart-field-hint">{t("quickstart.stt_key_hint")}</p>
+        </div>
+      )}
 
       <div className="mori-quickstart-verify-row">
         <button className="mori-btn" onClick={doVerify} disabled={!canVerify}>
