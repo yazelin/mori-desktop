@@ -1948,12 +1948,35 @@
   box-shadow: 0 20px 64px rgba(0, 0, 0, 0.6),
               inset 0 0 60px rgba(168, 197, 162, 0.06);
 }
-/* 儀式 header 加邊飾 */
+/* 儀式 header 不加 dashed border(改用下方 equalizer 條取代) */
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-header {
-  border-bottom: 1px dashed rgba(168, 197, 162, 0.25);
-  padding-bottom: 14px;
-  margin-bottom: 20px;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
   position: relative;
+}
+
+/* 寬版 equalizer 取代 dashed border line — 32 條 vertical bar 橫貫整 modal */
+.mori-quickstart-header-eq {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  width: 100%;
+  height: 12px;
+  margin-bottom: 18px;
+}
+.mori-quickstart-header-eq .eq-wide-bar {
+  flex: 1;
+  background: rgba(168, 197, 162, 0.4);
+  border-radius: 1px;
+  transform: scaleY(0.08);
+  transform-origin: center;
+  transition: transform 60ms linear;
+  will-change: transform;
+}
+/* light theme 對應較深的綠 */
+[data-theme-base="light"] .mori-quickstart-header-eq .eq-wide-bar {
+  background: rgba(106, 143, 114, 0.5);
 }
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-header h2 {
   font-size: 22px;
@@ -2350,6 +2373,10 @@
   gap: 6px;
   justify-content: center;
   margin-bottom: 24px;
+}
+.mori-quickstart-ritual-progress.bottom {
+  margin-top: 16px;
+  margin-bottom: 0;
 }
 .mori-quickstart-ritual-progress .step-dot {
   width: 8px;

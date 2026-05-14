@@ -8,7 +8,7 @@
 // 對應 world-tree lore/the-forest.md:「取名是儀式,不是命名變數。」
 // 對應 ONBOARDING.md:「每個走入森林的人,遲早會遇見一個願意為他停下來的精靈。」
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { IconClose, IconGlobe, IconSun, IconMoon, IconEqualizer } from "./icons";
@@ -236,6 +236,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
           </button>
         </div>
 
+        {/* 儀式模式:header 下方音樂 visualizer(真讀 freq data,靜音時扁平) */}
+        {mode === "ritual" && <AudioVisualizer muted={audioMuted} />}
+
         {mode === "direct" ? (
           <DirectForm
             t={t}
@@ -270,6 +273,49 @@ export function Quickstart({ onDone }: QuickstartProps) {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── 音樂 visualizer ────────────────────────────────────────
+
+function AudioVisualizer({ muted }: { muted: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (muted) {
+      // 靜音 → 全部 bar 壓平像 dashed line
+      const c = containerRef.current;
+      if (c) c.querySelectorAll<HTMLElement>(".eq-wide-bar").forEach((b) => {
+        b.style.transform = "scaleY(0.08)";
+      });
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const analyser = ritualAudio.getAnalyser();
+      const c = containerRef.current;
+      if (analyser && c) {
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        const bars = c.querySelectorAll<HTMLElement>(".eq-wide-bar");
+        bars.forEach((bar, i) => {
+          const v = data[i] || 0;
+          // scale 0.08 ~ 0.7,音量越大條越高,但天花板控住不誇張
+          const scale = 0.08 + (v / 255) * 0.62;
+          bar.style.transform = `scaleY(${scale})`;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [muted]);
+
+  return (
+    <div ref={containerRef} className="mori-quickstart-header-eq">
+      {Array.from({ length: 32 }).map((_, i) => (
+        <span key={i} className="eq-wide-bar" />
+      ))}
     </div>
   );
 }
@@ -441,15 +487,6 @@ function RitualFlow(props: RitualProps) {
 
   return (
     <div className="mori-quickstart-ritual">
-      <div className="mori-quickstart-ritual-progress">
-        {Array.from({ length: total }).map((_, i) => (
-          <span
-            key={i}
-            className={`step-dot ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}
-          />
-        ))}
-      </div>
-
       {step === 0 && <RitualStepEnter t={t} onNext={() => setStep(1)} onSkip={props.doSkip} onSwitchToDirect={props.onSwitchToDirect} />}
       {step === 1 && (
         <RitualStepLantern
@@ -480,6 +517,16 @@ function RitualFlow(props: RitualProps) {
         />
       )}
       {step === 4 && <RitualStepAwaken t={t} />}
+
+      {/* step dots 改放底部 — header 已經有 visualizer 不再需要進度跟它打架 */}
+      <div className="mori-quickstart-ritual-progress bottom">
+        {Array.from({ length: total }).map((_, i) => (
+          <span
+            key={i}
+            className={`step-dot ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}
+          />
+        ))}
+      </div>
     </div>
   );
 }
