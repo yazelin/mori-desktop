@@ -16,7 +16,8 @@ class RitualAudio {
       const AC = window.AudioContext || (window as any).webkitAudioContext;
       this.ctx = new AC();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.muted ? 0 : 0.18;
+      // 音量拉高(0.18 → 0.35)— 原本太小,加上低頻被喇叭過濾,user 完全聽不到
+      this.masterGain.gain.value = this.muted ? 0 : 0.35;
       this.masterGain.connect(this.ctx.destination);
     }
     // 如果被 browser 暫停了(idle 太久),resume
@@ -24,14 +25,15 @@ class RitualAudio {
     return this.ctx;
   }
 
-  /** 開始 ambient pad — 3 個低頻 sine 重疊 + 緩 LFO,持續播放 */
+  /** 開始 ambient pad — 3 個 sine 重疊 + 緩 LFO,持續播放 */
   startAmbient(): void {
     if (this.ambientNodes.length > 0) return; // already playing
     const ctx = this.ensureContext();
     const out = this.masterGain!;
 
-    // 3 個低音 sine 疊,輕微失諧讓聲音有 movement
-    const freqs = [49.0, 73.42, 110.0]; // G1 / D2 / A2
+    // 3 個音疊在 audible range(原本 G1=49Hz 太低,筆電喇叭播不出)
+    // 改成 G3 / D4 / A3 — 中低音 pad,溫的、不刺,user 聽得到
+    const freqs = [196.0, 293.66, 220.0]; // G3 / D4 / A3
     const detunes = [0, 7, -5]; // cents
 
     for (let i = 0; i < freqs.length; i++) {
@@ -42,8 +44,8 @@ class RitualAudio {
 
       const g = ctx.createGain();
       g.gain.value = 0.0;
-      // 緩 fade-in 1.5s
-      g.gain.linearRampToValueAtTime(0.6 / freqs.length, ctx.currentTime + 1.5);
+      // 緩 fade-in 1.5s — 各 voice gain 0.25(原 0.2 太輕)
+      g.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 1.5);
 
       // LFO vibrato 0.15Hz 微調 detune,讓 pad 不死板
       const lfo = ctx.createOscillator();
@@ -93,7 +95,7 @@ class RitualAudio {
     if (this.masterGain) {
       const now = this.ctx!.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.linearRampToValueAtTime(muted ? 0 : 0.18, now + 0.2);
+      this.masterGain.gain.linearRampToValueAtTime(muted ? 0 : 0.35, now + 0.2);
     }
   }
 
