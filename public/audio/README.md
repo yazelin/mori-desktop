@@ -1,14 +1,18 @@
 # Ritual ambient audio
 
-Quickstart 的「召喚儀式」模式會嘗試播 `ritual-ambient.mp3`。沒檔案 → fallback Web Audio API 合成的 ambient pad(會像白噪音)。
+Quickstart 的「召喚儀式」模式會從這個資料夾隨機抽一條音檔播。
 
 ## 目前 bundled 的音檔
 
-只一條:`ritual-ambient.mp3` — "Film" by **Leberch** ([Pixabay 作者頁](https://pixabay.com/users/leberch-42823964/))
+3 條,全部 by **Leberch** ([Pixabay 作者頁](https://pixabay.com/users/leberch-42823964/))。Pixabay Content License,商業 / 個人 / 開源都可用,**不需署名**(這裡仍註記表示尊重)。檔名保留 Pixabay 原始 ID,可回溯到原連結。
 
-Pixabay Content License,商業 / 個人 / 開源都可用,**不需署名**(這裡仍註記表示尊重)。
+- `leberch-film-517381.mp3`
+- `leberch-ambient-517427.mp3`
+- `leberch-soft-soft-music-522730.mp3`
 
-想換音檔:同名 mp3 蓋過去即可。
+加 / 換音檔:
+1. 丟原始檔名 mp3 進這個資料夾(保留作者 + Pixabay ID 識別)
+2. 改 `src/ritualAudio.ts` 的 `TRACKS` 陣列加路徑
 
 ## 找一條音檔
 
