@@ -43,8 +43,7 @@ pub struct AnnuliEvent {
 
 fn client(state: &AppState) -> Result<Arc<AnnuliClient>, String> {
     state
-        .annuli
-        .clone()
+        .annuli_handle()
         .ok_or_else(|| "annuli 沒接(config.json `annuli.enabled` 沒設或缺欄位)".to_string())
 }
 
@@ -60,7 +59,7 @@ fn ev_to_ts(e: &EventRecord) -> AnnuliEvent {
 
 #[tauri::command]
 pub async fn annuli_status(state: tauri::State<'_, Arc<AppState>>) -> Result<AnnuliStatus, String> {
-    let Some(client) = state.annuli.clone() else {
+    let Some(client) = state.annuli_handle() else {
         return Ok(AnnuliStatus {
             configured: false,
             reachable: false,

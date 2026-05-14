@@ -92,10 +92,14 @@ pub struct AppState {
     /// 長期記憶 store。Phase 1C 是 LocalMarkdownMemoryStore;
     /// Wave 4 加 AnnuliMemoryStore(走 HTTP),配 ~/.mori/config.json annuli.enabled
     /// 切換。trait object 不寫死 impl。
-    pub memory: Arc<dyn mori_core::memory::MemoryStore>,
+    ///
+    /// **C:RwLock 包起來** — `annuli_reload` 改設定後不用整個 mori-desktop 重啟,
+    /// 直接 swap 新 Arc 進來。caller 用 `state.memory_handle()` 拿 snapshot Arc。
+    pub memory: parking_lot::RwLock<Arc<dyn mori_core::memory::MemoryStore>>,
     /// Wave 4:如果 annuli.enabled,持有 HTTP client 給對話事件 fire-and-forget +
     /// Ctrl+Alt+Z hotkey 觸發 /sleep。None 表示沒接 annuli。
-    pub annuli: Option<Arc<mori_core::annuli::AnnuliClient>>,
+    /// C:同 memory,RwLock 包起來支援 hot reload。
+    pub annuli: parking_lot::RwLock<Option<Arc<mori_core::annuli::AnnuliClient>>>,
     /// D-1: annuli 子 process supervisor。啟動時 spawn task 寫進去,持有 Child
     /// handle(kill_on_drop)。Some 之後就 own 那個 python process,app 退出時
     /// 子 process 跟著掛。`info` 給 status command 回報「我們有沒有 spawn / 為什麼」。
@@ -128,6 +132,17 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 拿 memory store 的 snapshot Arc。briefly 拿 read lock 再 clone 出來,
+    /// 釋放鎖再 await 就安全(`Arc<dyn>` 跨 await 是 Send + Sync)。
+    pub fn memory_handle(&self) -> Arc<dyn mori_core::memory::MemoryStore> {
+        self.memory.read().clone()
+    }
+
+    /// 拿 annuli client 的 snapshot(若有設且 enabled)。
+    pub fn annuli_handle(&self) -> Option<Arc<mori_core::annuli::AnnuliClient>> {
+        self.annuli.read().clone()
+    }
+
     fn set_phase(&self, app: &AppHandle, new_phase: Phase) {
         tracing::info!(?new_phase, "phase change");
         *self.phase.lock() = new_phase.clone();
@@ -723,7 +738,7 @@ fn memory_type_str(t: &mori_core::memory::MemoryType) -> String {
 
 #[tauri::command]
 async fn memory_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<MemoryEntry>, String> {
-    let memory = state.memory.clone();
+    let memory = state.memory_handle();
     let entries = memory.read_index().await.map_err(|e| format!("read_index: {e}"))?;
     Ok(entries
         .into_iter()
@@ -752,7 +767,7 @@ async fn memory_read(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Option<MemoryDetail>, String> {
-    let memory = state.memory.clone();
+    let memory = state.memory_handle();
     let m = memory.read(&id).await.map_err(|e| format!("read: {e}"))?;
     Ok(m.map(|m| MemoryDetail {
         id: m.id,
@@ -805,12 +820,12 @@ async fn memory_write(
         last_used: now,
         body: args.body,
     };
-    state.memory.write(memory_entry).await.map_err(|e| format!("write: {e}"))
+    state.memory_handle().write(memory_entry).await.map_err(|e| format!("write: {e}"))
 }
 
 #[tauri::command]
 async fn memory_delete(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.memory.delete(&id).await.map_err(|e| format!("delete: {e}"))
+    state.memory_handle().delete(&id).await.map_err(|e| format!("delete: {e}"))
 }
 
 /// 5L-5: 全文搜尋 memory(name / description / body 都搜)。
@@ -998,6 +1013,64 @@ fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String>
         .map_err(|e| format!("upgrade pack {stem}: {e:#}"))
 }
 
+/// C — annuli 熱重載 command。
+///
+/// 流程:
+/// 1. 重讀 `~/.mori/config.json` 的 `annuli` 子樹
+/// 2. 若 ready:重建 AnnuliClient + AnnuliMemoryStore;不 ready:重建 LocalMarkdownMemoryStore
+/// 3. 原子 swap 進 AppState.memory / AppState.annuli
+///
+/// 注意:
+/// - **不動 annuli_supervisor**(D-1 起的 python child process 還活著)。若 user
+///   改了 endpoint port / spirit_name 想 spawn 新 annuli,得手動 pkill + 重啟
+///   mori-desktop。MVP 範圍不做 supervisor 重新 evaluate。
+/// - skill_server / annuli_commands / agent pipeline 都走 state.memory_handle() /
+///   state.annuli_handle() 拿 snapshot,所以 swap 完下一次 invoke 自動拿到新 store。
+/// - 既有 in-flight 請求(例如 AnnuliMemoryStore 正在 POST /memory/section)持有
+///   舊 client 的 Arc,會跑完才 drop — 不會中斷。
+#[tauri::command]
+async fn annuli_reload(state: tauri::State<'_, Arc<AppState>>) -> Result<String, String> {
+    let config_path = mori_core::llm::groq::GroqProvider::bootstrap_mori_config()
+        .map_err(|e| format!("locate config.json: {e:#}"))?;
+    let annuli_cfg = annuli_config::AnnuliConfig::load(&config_path);
+
+    if annuli_cfg.is_ready() {
+        let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
+            .map_err(|e| format!("build annuli client: {e:#}"))?;
+        let client = Arc::new(client);
+        let store: Arc<dyn mori_core::memory::MemoryStore> = Arc::new(
+            mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()),
+        );
+        *state.memory.write() = store;
+        *state.annuli.write() = Some(client);
+        tracing::info!(
+            endpoint = %annuli_cfg.endpoint,
+            spirit = %annuli_cfg.spirit_name,
+            user_id = %annuli_cfg.user_id,
+            "annuli hot-reload → AnnuliMemoryStore"
+        );
+        Ok(format!(
+            "reloaded: annuli enabled @ {} (spirit={}, user_id={})",
+            annuli_cfg.endpoint, annuli_cfg.spirit_name, annuli_cfg.user_id
+        ))
+    } else {
+        let memory_root = mori_core::memory::markdown::LocalMarkdownMemoryStore::default_root()
+            .map_err(|e| format!("locate ~/.mori/memory: {e:#}"))?;
+        let store = mori_core::memory::markdown::LocalMarkdownMemoryStore::new(memory_root.clone())
+            .map_err(|e| format!("init LocalMarkdown store: {e:#}"))?;
+        *state.memory.write() = Arc::new(store);
+        *state.annuli.write() = None;
+        tracing::info!(
+            path = %memory_root.display(),
+            "annuli hot-reload → LocalMarkdownMemoryStore (annuli disabled)"
+        );
+        Ok(format!(
+            "reloaded: annuli disabled, fallback LocalMarkdown @ {}",
+            memory_root.display()
+        ))
+    }
+}
+
 #[tauri::command]
 async fn memory_search(
     state: tauri::State<'_, Arc<AppState>>,
@@ -1006,7 +1079,7 @@ async fn memory_search(
 ) -> Result<Vec<MemoryEntry>, String> {
     let limit = limit.unwrap_or(50);
     let hits = state
-        .memory
+        .memory_handle()
         .search(&query, limit)
         .await
         .map_err(|e| format!("search: {e}"))?;
@@ -1040,7 +1113,7 @@ struct SkillInfo {
 #[tauri::command]
 async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<SkillInfo>, String> {
     // 內容跟 skill_server::build_dynamic_registry 等價,直接呼叫(在 main 直接拼簡單版)
-    let memory = state.memory.clone();
+    let memory = state.memory_handle();
     let routing = mori_core::llm::Routing::build_from_config(None)
         .map_err(|e| format!("build routing: {e}"))?;
     let mut registry = SkillRegistry::new();
@@ -1630,7 +1703,7 @@ async fn run_agent_pipeline(
         },
     );
 
-    let memory = state.memory.clone();
+    let memory = state.memory_handle();
     let history_snapshot = state.conversation.lock().clone();
 
     // Phase 3A:抓現場 context(目前只有剪貼簿)。Provider 是 Tauri 平台特定。
@@ -1877,7 +1950,7 @@ async fn run_agent_pipeline(
 
             // Wave 4 step 8:fire-and-forget POST /events 到 annuli vault。
             // 兩條 event(user + assistant)非阻塞 — 失敗只 log,不擋 UI。
-            if let Some(client) = state.annuli.clone() {
+            if let Some(client) = state.annuli_handle() {
                 let user_text = transcript.clone();
                 let assistant_text = response.clone();
                 let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
@@ -2007,7 +2080,7 @@ async fn run_voice_input_pipeline(
         if types.is_empty() {
             String::new()
         } else {
-            match state.memory.list_by_types(&types).await {
+            match state.memory_handle().list_by_types(&types).await {
                 Ok(mems) => {
                     tracing::info!(
                         types = ?types,
@@ -2725,8 +2798,8 @@ fn main() {
         phase: Mutex::new(Phase::default()),
         recorder: Mutex::new(None),
         groq_api_key: Mutex::new(None),
-        memory,
-        annuli: annuli_client,
+        memory: parking_lot::RwLock::new(memory),
+        annuli: parking_lot::RwLock::new(annuli_client),
         annuli_supervisor: Mutex::new(None),
         conversation: Mutex::new(Vec::new()),
         mode: Mutex::new(Mode::Agent),
@@ -2807,6 +2880,7 @@ fn main() {
             annuli_commands::annuli_list_memory,
             annuli_commands::annuli_list_events_today,
             annuli_commands::annuli_trigger_sleep,
+            annuli_reload,
             memory_search,
             skills_list,
             deps_list,
@@ -3034,9 +3108,9 @@ fn main() {
             // (以及外部 AI agent 透過 Bash tool 呼叫的 mori CLI)能連回來
             // dispatch skill。失敗只 warn 不卡啟動 — Tauri UI 跟語音/chat
             // pipeline 沒這個 server 也能用。
-            let memory_for_server = state_for_setup.memory.clone();
+            let app_for_server = state_for_setup.clone();
             tauri::async_runtime::spawn(async move {
-                match crate::skill_server::start(memory_for_server).await {
+                match crate::skill_server::start(app_for_server).await {
                     Ok(info) => tracing::info!(
                         port = info.port,
                         "skill HTTP server started — Bash CLI proxy ready"
@@ -3375,7 +3449,7 @@ fn main() {
             let state_for_sleep = state_for_setup.clone();
             app.listen(hotkey_config::MORI_SLEEP_EVENT, move |_event| {
                 tracing::info!("sleep hotkey fired");
-                let Some(client) = state_for_sleep.annuli.clone() else {
+                let Some(client) = state_for_sleep.annuli_handle() else {
                     tracing::warn!("sleep hotkey fired but annuli not configured (config.json annuli.enabled=false)");
                     return;
                 };

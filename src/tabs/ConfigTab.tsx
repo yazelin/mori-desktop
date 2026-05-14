@@ -558,6 +558,14 @@ function ConfigTab({
     try {
       await invoke("config_write", { text: raw });
       setOrig(raw);
+      // C — annuli 熱重載:任何 config 存檔後都 invoke 一下,後端會比對 annuli
+      // 子樹有沒有變、要不要重建 client。失敗不擋存檔流程,只 console warn。
+      try {
+        const msg = await invoke<string>("annuli_reload");
+        console.info("[annuli] reload OK:", msg);
+      } catch (e) {
+        console.warn("[annuli] reload failed (config 還是有存):", e);
+      }
       setStatus({ kind: "ok" });
       setTimeout(() => setStatus({ kind: "idle" }), 2500);
     } catch (e: any) {

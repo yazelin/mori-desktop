@@ -35,7 +35,6 @@ use axum::{
     Json, Router,
 };
 use mori_core::context::Context as MoriContext;
-use mori_core::memory::MemoryStore;
 use mori_core::runtime::{generate_auth_token, RuntimeInfo};
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
@@ -46,10 +45,12 @@ use serde_json::{json, Value};
 #[derive(Clone)]
 pub struct SkillServerState {
     pub auth_token: Arc<str>,
-    pub memory: Arc<dyn MemoryStore>,
+    /// C:不直接持 Arc<dyn MemoryStore>(會被 hot-reload swap 後變 stale),
+    /// 持 Arc<AppState>,每次 handler 透過 `app.memory_handle()` 拿當下 snapshot。
+    pub app: Arc<crate::AppState>,
 }
 
-pub async fn start(memory: Arc<dyn MemoryStore>) -> Result<RuntimeInfo> {
+pub async fn start(app: Arc<crate::AppState>) -> Result<RuntimeInfo> {
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
         .await
         .context("bind 127.0.0.1:random")?;
@@ -71,7 +72,7 @@ pub async fn start(memory: Arc<dyn MemoryStore>) -> Result<RuntimeInfo> {
 
     let state = SkillServerState {
         auth_token: Arc::from(token.as_str()),
-        memory,
+        app,
     };
     let app = Router::new()
         .route("/skill/list", get(list_skills))
@@ -121,7 +122,7 @@ fn check_auth(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, St
 fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
     let routing = mori_core::llm::Routing::build_from_config(None)
         .context("build routing for skill_server dynamic registry")?;
-    let memory = state.memory.clone();
+    let memory = state.app.memory_handle();
     let mut registry = SkillRegistry::new();
 
     // Built-in 純 LLM skill
