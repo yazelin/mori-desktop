@@ -149,6 +149,9 @@ impl AppState {
         if let Err(e) = app.emit("phase-changed", &new_phase) {
             tracing::warn!(?e, "failed to emit phase-changed");
         }
+        // v0.3.1: floating.show_mode=recording 時,phase 切換要同步動 floating 顯示/隱藏。
+        // Toggle 跟 Hold 兩個 mode 都走這條,一次到位。
+        update_floating_visibility(app, &new_phase);
     }
 
     /// 切換模式。idempotent — 同模式不發 event、不留 log。
@@ -727,6 +730,10 @@ fn config_write(
             "hotkeys.toggle_mode hot-reloaded",
         );
     }
+    // v0.3.1: 熱套用 floating.show_mode — Config 改完立即動 floating 顯示/隱藏,
+    // 不用重啟。讀當前 phase 配 helper 內讀 show_mode 一次到位。
+    let current_phase = state.phase.lock().clone();
+    update_floating_visibility(&app, &current_phase);
     Ok(())
 }
 
@@ -739,7 +746,79 @@ fn floating_show(app: AppHandle) -> Result<(), String> {
         .get_webview_window("floating")
         .ok_or_else(|| "floating window not found".to_string())?;
     win.show().map_err(|e| format!("show floating: {e}"))?;
+    // v0.3.1 fix:GNOME Wayland mutter 會默默把 hide→show 後的 window 從 always_on_top
+    // layer 降下來。要 re-assert 一次它才認帳。沒這行 ritual 跑完 floating 會被
+    // 主視窗 / 其他 app 壓住。同樣 trick 在 tray show/hide handler 也用了。
+    let _ = win.set_always_on_top(true);
     Ok(())
+}
+
+// v0.3.1: floating 顯示時機 — 由 config.json `floating.show_mode` 控制。
+// 三個值:
+//   "always"    → 一直顯示(預設,跟 v0.3.0 行為一致)
+//   "recording" → 只有錄音中/處理中/Done 期間顯示, Idle/Error 隱藏
+//   "off"       → 一直隱藏
+
+/// 讀 floating.show_mode,缺欄位或解析失敗預設 "always"。
+fn read_floating_show_mode() -> String {
+    let path = mori_dir().join("config.json");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("floating")
+                .and_then(|f| f.get("show_mode"))
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "always".to_string())
+}
+
+/// 根據 show_mode + phase 決定 floating 應該顯示與否。
+/// "recording" 模式刻意把 Done 排除 — Done 會留住直到下一次互動才轉 Idle,
+/// 留著的話 Mori 看起來「永遠不消失」, 違背 user 的期待。
+/// 處理完成那瞬間(進入 Done)直接隱藏, 跟「動作完成後消失」最對齊。
+fn should_show_floating(show_mode: &str, phase: &Phase) -> bool {
+    match show_mode {
+        "off" => false,
+        "recording" => matches!(
+            phase,
+            Phase::Recording { .. } | Phase::Transcribing | Phase::Responding { .. }
+        ),
+        _ /* "always" 或未知值 */ => true,
+    }
+}
+
+/// 套用顯示/隱藏到 floating window。show 時順帶 re-assert always_on_top
+/// 防止 mutter 降層。
+fn apply_floating_visibility(app: &AppHandle, should_show: bool) {
+    if let Some(f) = app.get_webview_window("floating") {
+        if should_show {
+            let _ = f.show();
+            let _ = f.set_always_on_top(true);
+        } else {
+            let _ = f.hide();
+        }
+    }
+}
+
+/// 中央 helper:讀 config + 給定 phase, 決定 + 套用。
+/// 注意:宿靈儀式還沒完成時,floating 永遠隱藏(setup hook 那條 gate 仍有效)。
+fn update_floating_visibility(app: &AppHandle, phase: &Phase) {
+    // 宿靈儀式還沒完成 → 永遠隱藏,不論 show_mode 設什麼
+    let cfg_path = mori_dir().join("config.json");
+    let quickstart_done = std::fs::read_to_string(&cfg_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("quickstart_completed").and_then(|x| x.as_bool()))
+        .unwrap_or(false);
+    if !quickstart_done {
+        apply_floating_visibility(app, false);
+        return;
+    }
+    let show_mode = read_floating_show_mode();
+    let should = should_show_floating(&show_mode, phase);
+    apply_floating_visibility(app, should);
 }
 
 /// 開外部 URL 到系統預設瀏覽器。Tauri webview 不會處理 `<a target="_blank">`,
@@ -2801,6 +2880,16 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     prompt
 }
 
+/// v0.3.1: 把 tray floating toggle 的 label 重畫成當前 show_mode 對應文字。
+fn refresh_floating_toggle_label(item: &MenuItem<tauri::Wry>, show_mode: &str) {
+    let label = match show_mode {
+        "off" => "桌面 Mori:隱藏中(點此恢復)",
+        "recording" => "桌面 Mori:語音輸入時才顯示(點此一直顯示)",
+        _ /* always */ => "桌面 Mori:顯示中(點此隱藏)",
+    };
+    let _ = item.set_text(label);
+}
+
 /// 把 tray 三個 mode 選單上的 label 重畫,在當下 mode 那條前面打 ✓。
 fn refresh_mode_menu_labels(
     active: &MenuItem<tauri::Wry>,
@@ -3035,22 +3124,11 @@ fn main() {
                 tracing::warn!(error = %e, "character_pack::ensure_default failed");
             }
 
-            // 宿靈儀式還沒完成 → 隱藏 floating Mori,等召喚師按下「歡迎回家, Mori」才現身
-            // (Quickstart 的 doSave 完成後 invoke `floating_show`)
-            {
-                let cfg_path = mori_dir().join("config.json");
-                let quickstart_done = std::fs::read_to_string(&cfg_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                    .and_then(|v| v.get("quickstart_completed").and_then(|x| x.as_bool()))
-                    .unwrap_or(false);
-                if !quickstart_done {
-                    if let Some(f) = app.get_webview_window("floating") {
-                        let _ = f.hide();
-                        tracing::info!("floating Mori hidden — 等宿靈儀式完成才現身");
-                    }
-                }
-            }
+            // 啟動初始 floating visibility — update_floating_visibility 自己會看:
+            //   - quickstart_completed (儀式還沒完成 → 強制隱藏)
+            //   - floating.show_mode (always/recording/off)
+            // 起手 Phase 是 Idle,所以 "recording" 模式啟動時也會隱藏 (正確)。
+            update_floating_visibility(&app.handle(), &Phase::Idle);
 
             // 注意:**不要**在這裡 setup() 直接 call set_always_on_top —
             // AgentPulse 沒這樣做,他們依賴 conf.json 的 alwaysOnTop hint
@@ -3118,11 +3196,24 @@ fn main() {
                 &agent_refs,
             )?;
 
+            // v0.3.1: tray floating toggle — label 反映當前 show_mode
+            // (✓ 顯示中 / 語音輸入時 / 隱藏中);點一下依目前態切下一個 sane 值
+            let current_show_mode = read_floating_show_mode();
+            let floating_toggle_label = match current_show_mode.as_str() {
+                "off" => "桌面 Mori:隱藏中(點此恢復)",
+                "recording" => "桌面 Mori:語音輸入時才顯示(點此一直顯示)",
+                _ /* always */ => "桌面 Mori:顯示中(點此隱藏)",
+            };
+            let floating_toggle_item = MenuItem::with_id(
+                app, "floating_toggle", floating_toggle_label, true, None::<&str>,
+            )?;
+
             let menu = Menu::with_items(
                 app,
                 &[
                     &MenuItem::with_id(app, "show", "顯示 Mori", true, None::<&str>)?,
                     &MenuItem::with_id(app, "hide", "隱藏", true, None::<&str>)?,
+                    &floating_toggle_item,
                     &mode_active_item,
                     &mode_voice_input_item,
                     &mode_background_item,
@@ -3139,6 +3230,7 @@ fn main() {
                 mode_voice_input_item.clone(),
                 mode_background_item.clone(),
             );
+            let floating_toggle_item_for_handler = floating_toggle_item.clone();
             // 啟動時就把 ✓ 標到目前 mode 上
             refresh_mode_menu_labels(
                 &mode_items_for_handler.0,
@@ -3179,6 +3271,40 @@ fn main() {
                         if let Some(f) = app.get_webview_window("floating") {
                             let _ = f.set_always_on_top(true);
                         }
+                    }
+                    "floating_toggle" => {
+                        // v0.3.1: 二值切換(always ↔ off); recording 也視為「on」狀態
+                        // 切去 off。完整三選一在 Config tab 那邊。
+                        let cur = read_floating_show_mode();
+                        let next = if cur == "off" { "always" } else { "off" };
+                        // 寫回 config.json
+                        let path = mori_dir().join("config.json");
+                        let cfg: serde_json::Value = std::fs::read_to_string(&path)
+                            .ok()
+                            .and_then(|s| serde_json::from_str(&s).ok())
+                            .unwrap_or_else(|| serde_json::json!({}));
+                        let mut cfg = cfg;
+                        let floating = cfg
+                            .as_object_mut()
+                            .and_then(|m| {
+                                if !m.contains_key("floating") {
+                                    m.insert("floating".to_string(), serde_json::json!({}));
+                                }
+                                m.get_mut("floating")
+                            })
+                            .and_then(|v| v.as_object_mut());
+                        if let Some(f) = floating {
+                            f.insert("show_mode".to_string(), serde_json::json!(next));
+                        }
+                        if let Ok(text) = serde_json::to_string_pretty(&cfg) {
+                            let _ = std::fs::write(&path, text);
+                        }
+                        let _ = app.emit("config-changed", ());
+                        // 立即套用 + 更新 menu label
+                        let phase = state_for_tray.phase.lock().clone();
+                        update_floating_visibility(app, &phase);
+                        refresh_floating_toggle_label(&floating_toggle_item_for_handler, next);
+                        tracing::info!(prev = %cur, new = next, "tray toggle floating.show_mode");
                     }
                     "mode_active" => state_for_tray.set_mode(app, Mode::Agent),
                     "mode_voice_input" => state_for_tray.set_mode(app, Mode::VoiceInput),
