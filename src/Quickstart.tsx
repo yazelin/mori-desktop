@@ -291,6 +291,9 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
       return;
     }
     let raf = 0;
+    // 只用 analyser 前 1/4 bins(音樂能量範圍 0~5.5kHz),分散到 32 條 bar
+    // 用一個小的 hash 打亂分布,讓相鄰 bar 不會永遠相同
+    const ACTIVE_BINS = 32; // 取前 32 bins(覆蓋 0~5.5kHz 音樂主能量)
     const tick = () => {
       const analyser = ritualAudio.getAnalyser();
       const c = containerRef.current;
@@ -298,15 +301,9 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
         const bars = c.querySelectorAll<HTMLElement>(".eq-wide-bar");
-        const n = bars.length;
         bars.forEach((bar, i) => {
-          // 把 freq bin 從 bass→treble 線性排列重新打散:
-          // 偶數 i 取 low half,奇數 i 取 high half,交錯。避免左邊永遠 bass 重、
-          // 右邊永遠空,看起來像水波 left→right 而不是上下跳。
-          const half = Math.floor(data.length / 2);
-          const sourceBin = i % 2 === 0
-            ? Math.floor((i / 2) * (half / (n / 2)))
-            : Math.floor(half + ((i - 1) / 2) * (half / (n / 2)));
+          // 32 bars 對應 32 個 active bins,用 *17 mod 32 打散(coprime → unique)
+          const sourceBin = (i * 17) % ACTIVE_BINS;
           const v = data[sourceBin] || 0;
           const scale = 0.1 + (v / 255) * 0.85;
           bar.style.transform = `scaleY(${scale})`;

@@ -69,8 +69,11 @@ class RitualAudio {
       this.gainNode = this.audioCtx.createGain();
       this.gainNode.gain.value = window.__moriRitualMuted ? 0 : VOLUME;
       this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 64; // 32 frequency bins
-      this.analyser.smoothingTimeConstant = 0.6;
+      // fftSize 256 → 128 bins,~172 Hz per bin。
+      // 前 32 bins 覆蓋 0~5.5kHz(音樂能量主要範圍),visualizer 只取這段,
+      // 避免高頻 bins(右半邊)永遠 0 害 bars 不跳。
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.5;
       this.source.connect(this.gainNode);
       this.gainNode.connect(this.analyser);
       this.analyser.connect(this.audioCtx.destination);
