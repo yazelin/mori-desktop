@@ -25,6 +25,24 @@ type VerifyState =
   | { kind: "ok"; msg: string }
   | { kind: "err"; msg: string };
 
+// 延遲 stop:React 18 StrictMode 假 unmount 時 cleanup 會 fire,
+// 立刻 stop 害音樂從 0 重播。改成 schedule 200ms 後 stop,
+// 若 100ms 內又 mount(StrictMode 假 cycle)→ cancel,音樂不打斷
+let pendingStopTimer: number | null = null;
+function schedulePendingStop() {
+  if (pendingStopTimer != null) return;
+  pendingStopTimer = window.setTimeout(() => {
+    ritualAudio.stopAmbient();
+    pendingStopTimer = null;
+  }, 200);
+}
+function cancelPendingStop() {
+  if (pendingStopTimer != null) {
+    clearTimeout(pendingStopTimer);
+    pendingStopTimer = null;
+  }
+}
+
 const PROVIDER_INFO: Record<Provider, {
   label: string;
   helpUrl: string;
@@ -63,14 +81,46 @@ export function Quickstart({ onDone }: QuickstartProps) {
   // 選 openai_compat 為 LLM 時的可選「Groq key 給 STT」欄位
   const [sttKeyText, setSttKeyText] = useState("");
   // 偵測 GROQ_API_KEY env var 是否已設(後端 startup 會讀進 state.groq_api_key)
-  // 若 true → user 不用再貼 key,只要 Save 就能用環境變數的
   const [envGroqDetected, setEnvGroqDetected] = useState(false);
   useEffect(() => {
     invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
   }, []);
 
-  // 儀式模式 → 開 ambient(/audio/ritual-ambient.mp3),切走 / 關 modal 時停。
+  // Pre-fill 既有 config(user 透過 Help 重進引導時不用全部從頭設)
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await invoke<string>("config_read");
+        const cfg = JSON.parse(raw);
+        // 判斷 user 之前哪條 path:groq 或 openai_compat
+        const groqKey = cfg.providers?.groq?.api_key as string | undefined;
+        const compatBase = cfg.providers?.openai_compat?.api_base as string | undefined;
+        const compatKey = cfg.providers?.openai_compat?.api_key as string | undefined;
+        const compatModel = cfg.providers?.openai_compat?.model as string | undefined;
+        const real = (k?: string) => k && !k.startsWith("REPLACE") && k.length > 5;
+        if (cfg.provider === "openai_compat" && real(compatKey)) {
+          setProvider("openai_compat");
+          if (compatBase) setApiBase(compatBase);
+          if (compatModel) setModel(compatModel);
+          setKeyText(compatKey!);
+          if (real(groqKey)) setSttKeyText(groqKey!); // STT 額外 key
+          setVerify({ kind: "ok", msg: "已從現有設定載入(可直接存或重驗)" });
+        } else if (real(groqKey)) {
+          setProvider("groq");
+          setKeyText(groqKey!);
+          setVerify({ kind: "ok", msg: "已從現有設定載入(可直接存或重驗)" });
+        }
+      } catch {
+        /* config 還沒存過 — 維持 default 空值 */
+      }
+    })();
+  }, []);
+
+  // 儀式模式 → 開 ambient(/audio/ritual-ambient.mp3)。
   // 預設不靜音 — 有真音檔了,自動播給儀式感氛圍。user 不想聽自己 toggle 關。
+  // 不靠 cleanup 立刻 stop:React 18 StrictMode dev 會 mount→unmount→remount,
+  // 立刻 stop 會害音樂從 0 重播。改用 deferredStop:延 200ms,若 100ms 內又
+  // re-mount(StrictMode 假 unmount)就 cancel,音樂繼續播不重來。
   const [audioMuted, setAudioMuted] = useState(false);
   // Quickstart 內也能切 theme(因 user 可能 onboarding 時想換明暗)
   const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
@@ -86,12 +136,13 @@ export function Quickstart({ onDone }: QuickstartProps) {
     }
   };
   useEffect(() => {
+    cancelPendingStop();
     if (mode === "ritual" && !audioMuted) {
       ritualAudio.startAmbient();
     } else {
       ritualAudio.stopAmbient();
     }
-    return () => { ritualAudio.stopAmbient(); };
+    return () => { schedulePendingStop(); };
   }, [mode, audioMuted]);
   // 儀式模式:當前步驟 0..4
   const [ritualStep, setRitualStep] = useState(0);
