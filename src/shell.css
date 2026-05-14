@@ -1939,9 +1939,9 @@
 }
 /* 儀式模式 modal 更大 + 不同視覺 */
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-modal {
-  width: min(680px, 94vw);
+  width: min(760px, 95vw);
   max-height: 94vh;
-  padding: 36px 44px;
+  padding: 36px 48px;
   background:
     linear-gradient(180deg, rgba(20, 38, 30, 0.96) 0%, rgba(12, 24, 18, 0.98) 100%);
   border: 1px solid rgba(168, 197, 162, 0.25);
