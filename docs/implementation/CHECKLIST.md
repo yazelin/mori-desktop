@@ -17,7 +17,7 @@
 | **Wave 0** | 設計 freeze(architecture / design / refactoring docs) | 1 天 | ✅ done(commits f576109 / eac6188 / a17c52c / 3ce7bfa) |
 | **Wave 1** | 三 repo Annuli → annuli sweep + 實作追蹤系統建立 | 半天 | ✅ done(URL sweep + IMPLEMENTATION-PLAN 都 commit;mori-journal 待 yazelin 手動建) |
 | **Wave 2** | annuli 內部畫線(src/core/ + src/creator/)— 機械式搬位置 + 17 step physical migration | 半天-1 天 | ✅ done 2026-05-14(annuli@0e6cec1,PR #1 squash merge,engine.py 2489 → 71 行 shim,admin.py 1674 → 全砍) |
-| **Wave 3** | annuli core 邏輯重組:events / digest / rings / curator 4 module + 路徑遷移 | 1-2 週 | ⏳ |
+| **Wave 3** | annuli core 邏輯重組:events / digest / rings / curator 4 module + vault 路徑遷移 + X-Soul-Token auth | 1-2 週 | ✅ done 2026-05-14(annuli@c9179eb,PR #2 squash merge,12 step + 97 test 全綠,events JSONL .md + trigram FTS,do_sleep 不動 SOUL/MEMORY,curator yaml dry-run/apply 不 delete,migrate vault 一鍵搬,SOUL.md PUT 403 without X-Soul-Token) |
 | **Wave 4** | mori-desktop 接 annuli HTTP API + 主視窗 Annuli tab | 1 週 | ⏳ |
 | **Wave 5** | annuli-creator 物理拆 repo(條件成熟時) | 半天 | ⏳ 後期 |
 
@@ -150,27 +150,32 @@ rings / curator。路徑改 `~/mori-universe/spirits/<name>/`。
 
 ### 步驟
 
-- [ ] 設計 events SQLite schema(FTS5)+ migration script
-- [ ] 實作 `core/events.py`:
-  - [ ] `Event.append(spirit, kind, source, data)` API
-  - [ ] `Event.search_fts(spirit, query)` API
-  - [ ] `Event.list_by_date(spirit, date)` API
-- [ ] 實作 `core/digest.py`:
-  - [ ] LLM 摘要 today events → append `memories/MEMORY.md`
-  - [ ] 完整版存 `digests/<date>.md`
-- [ ] 重寫 `core/rings.py`:
-  - [ ] 取消 LLM 重生 persona
-  - [ ] 改成「append 一篇敘事 markdown 到 `rings/`,不動 SOUL 不動 MEMORY」
-- [ ] 新增 `core/curator.py`:
-  - [ ] rule-based pass(30 天 stale / 90 天 archive)
-  - [ ] LLM consolidation pass(找 prefix cluster + 建議 merge)
-  - [ ] 輸出 YAML 報告
-  - [ ] dry-run / apply 兩階段
-- [ ] 路徑從 `~/.annuli/users/<id>/` 全改 `~/mori-universe/spirits/<name>/`
-- [ ] 寫 `annuli migrate vault` 一鍵遷移腳本
-- [ ] 補 unit test(至少 events / digest / rings / curator 各 3 個 test)
-- [ ] HTTP API server 端實作(`POST /events` / `POST /rings/new` / `POST /curator/dry-run` 等)
-- [ ] 把 `PUT /soul` 從 API 完全移除(LLM 沒辦法寫 SOUL)
+### 步驟(✅ 全完成 2026-05-14,annuli@c9179eb,PR #2 squash merge,97 個 test 全綠)
+
+- [x] design freeze:Q1-Q5 設計鎖定見 [`annuli/docs/WAVE-3-DESIGN.md`](https://github.com/yazelin/annuli/blob/main/docs/WAVE-3-DESIGN.md)
+- [x] 實作 `core/config`:VAULT_DIR + 10 個 vault path helper
+- [x] 實作 `core/events.py`:
+  - [x] `events.append(spirit, user_id, kind, source, data, ts)` API
+  - [x] `events.search_fts(spirit, query, limit)` API(trigram tokenizer,中文 substring,需 ≥3 字)
+  - [x] `events.list_by_date / list_by_kind / rebuild_index`
+  - [x] **Q2 決定**:`events/<date>.md` 是 source-of-truth,`.index.db` 是 derived
+- [x] 實作 `core/digest.py`:
+  - [x] daily / weekly LLM 摘要,append `## § <date>` 到 `memories/MEMORY.md`(append-only invariant)
+  - [x] 完整版存 `digests/<date>_NNN.md`(NNN 同日多次跑遞增)
+- [x] 重寫 `core/rings.py`:
+  - [x] 新 `do_sleep(spirit, user_id, llm=None)` — append `rings/<date>_ring<N>.md`,**完全不動 SOUL/MEMORY**
+  - [x] 舊 `do_reflect` 加 DeprecationWarning(legacy 仍 work,Wave 5+ 砍)
+- [x] 新增 `core/curator.py`:
+  - [x] rule-based pass(90 天提案 prune)
+  - [x] LLM consolidation pass(N→1 umbrella)
+  - [x] 輸出 yaml report,`approved: true/false` 欄位
+  - [x] dry-run / apply 兩階段,**永遠 archive 不 delete**,`restore` 可還原
+- [x] `core/bootstrap.py`:`ensure_spirit_vault` 建子目錄 + placeholder,`identity/user_id` 跨機器 stable
+- [x] 路徑從 `~/.annuli/users/<id>/` 改 `~/mori-universe/spirits/<name>/`
+- [x] 寫 `annuli migrate vault --dry-run --apply` 腳本(`annuli.core.migrate` + main.py 子命令)
+- [x] 補 unit + integration test:events 14 / digest 10 / rings_wave3 11 / curator 14 / bootstrap 15 / migrate 13 / server_vault 17 / e2e 3 = **97 test**
+- [x] HTTP API server 端實作(`POST /events` / `POST /rings/new` / `POST /curator/{dry-run,apply}` / `POST /bootstrap` / `GET /health` 等 8 routes)
+- [x] **`PUT /soul` 加 `X-Soul-Token` middleware**:沒 token / 錯 token → 403,token 從 env `ANNULI_SOUL_TOKEN` 讀,LLM 拿不到
 
 ---
 
@@ -251,7 +256,7 @@ Mori 的成長路上,每一步都該被記得 — 不是只在 git log,而是進
 ---
 
 **Last updated**: 2026-05-14  
-**Status**: Wave 1 + 2 done(annuli@0e6cec1 merged)。下一步 Wave 3(`refactor/4-layer-reflection` branch)  
+**Status**: Wave 1 + 2 + 3 done(annuli@c9179eb merged)。下一步 Wave 4(mori-desktop ↔ annuli HTTP 接線,本 repo 開新 branch)  
 **Related**:
 - `docs/design/annuli-memory.md` — 架構決策
 - `docs/architecture.md` — 三宇宙位置
