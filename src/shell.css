@@ -1875,3 +1875,237 @@
   flex: 1;
   word-break: break-word;
 }
+
+/* ─── Quickstart onboarding modal ────────────────────────── */
+
+.mori-quickstart-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 14, 12, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+.mori-quickstart-backdrop.mode-ritual {
+  /* 儀式模式更深沉 */
+  background: rgba(4, 10, 8, 0.88);
+  backdrop-filter: blur(8px);
+}
+.mori-quickstart-modal {
+  width: min(540px, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--c-surface-bg);
+  border: 1px solid var(--c-border-strong);
+  border-radius: 12px;
+  padding: 24px 28px;
+  color: var(--c-text);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+.mori-quickstart-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.mori-quickstart-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--c-brand-text);
+}
+.mori-quickstart-mode-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.mori-quickstart-mode-btn {
+  background: transparent;
+  border: none;
+  color: var(--c-text-muted);
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.mori-quickstart-mode-btn.active {
+  background: var(--c-primary-bg);
+  color: var(--c-primary-text);
+}
+.mori-quickstart-intro {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-text-muted);
+}
+.mori-quickstart-field {
+  margin-bottom: 16px;
+}
+.mori-quickstart-field label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-text);
+  margin-bottom: 6px;
+}
+.mori-quickstart-help-link {
+  font-size: 11px;
+  color: var(--c-text-muted);
+  text-decoration: none;
+}
+.mori-quickstart-help-link:hover {
+  color: var(--c-brand-text);
+  text-decoration: underline;
+}
+.mori-quickstart-provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.mori-quickstart-provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--c-divider);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--c-text);
+  transition: border-color 100ms, background 100ms;
+}
+.mori-quickstart-provider-card:hover {
+  border-color: var(--c-border-strong);
+}
+.mori-quickstart-provider-card.active {
+  background: var(--c-active-bg);
+  border-color: var(--c-active-border);
+}
+.mori-quickstart-provider-card .provider-name {
+  font-weight: 500;
+  font-size: 14px;
+}
+.mori-quickstart-provider-card .provider-hint {
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+.mori-quickstart-key-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mori-quickstart-key-input-row .mori-input {
+  flex: 1;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+.mori-quickstart-verify-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.mori-quickstart-verify-row.centered {
+  justify-content: center;
+}
+.mori-quickstart-verify-msg {
+  font-size: 12px;
+}
+.mori-quickstart-verify-msg.ok {
+  color: var(--c-success-text);
+}
+.mori-quickstart-verify-msg.err {
+  color: var(--c-danger-text);
+}
+.mori-quickstart-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.mori-quickstart-footer .mori-btn:first-child {
+  margin-right: auto;
+}
+
+/* ─── Ritual mode ─────────────────────── */
+
+.mori-quickstart-ritual {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+.mori-quickstart-ritual-progress {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+.mori-quickstart-ritual-progress .step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-border);
+  transition: background 200ms, transform 200ms;
+}
+.mori-quickstart-ritual-progress .step-dot.done {
+  background: var(--c-text-muted);
+}
+.mori-quickstart-ritual-progress .step-dot.active {
+  background: var(--c-brand-text);
+  transform: scale(1.4);
+}
+.mori-quickstart-ritual-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: ritual-fade-in 0.5s ease;
+}
+.mori-quickstart-ritual-step.awaken {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+@keyframes ritual-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mori-ritual-narrative {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--c-text);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+.mori-ritual-narrative.whisper {
+  font-style: italic;
+  color: var(--c-text-muted);
+  font-size: 13.5px;
+}
+.mori-ritual-pulse {
+  font-size: 14px;
+  color: var(--c-brand-text);
+  animation: ritual-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ritual-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.mori-ritual-sparkle {
+  font-size: 48px;
+  color: var(--c-brand-text);
+  animation: ritual-sparkle 2s ease-in-out infinite;
+}
+@keyframes ritual-sparkle {
+  0%, 100% { opacity: 0.5; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.1); }
+}

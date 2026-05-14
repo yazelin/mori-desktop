@@ -26,6 +26,7 @@ import {
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { setLocale, nextLocale } from "./i18n";
+import { Quickstart, shouldShowQuickstart } from "./Quickstart";
 
 type NavPayload = { tab: TabId; subTab?: string };
 
@@ -53,6 +54,11 @@ function MainShell() {
   const [tab, setTab] = useState<TabId>("chat");
   // 跨 tab 導航:接到 "mori-nav" event 時切 tab,如果帶 subTab 就傳給子 tab 套用
   const [pendingSubTab, setPendingSubTab] = useState<string | null>(null);
+  // F:Quickstart onboarding。第一次跑無 API key 顯示 modal,過了就 hide。
+  const [quickstartOpen, setQuickstartOpen] = useState(false);
+  useEffect(() => {
+    shouldShowQuickstart().then((show) => setQuickstartOpen(show));
+  }, []);
   // brand-3: theme base 給 toggle button 判斷該秀 sun 還是 moon
   const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
 
@@ -161,6 +167,7 @@ function MainShell() {
         {tab === "skills" && <SkillsTab />}
         {tab === "deps" && <DepsTab />}
       </main>
+      {quickstartOpen && <Quickstart onDone={() => setQuickstartOpen(false)} />}
     </div>
   );
 }

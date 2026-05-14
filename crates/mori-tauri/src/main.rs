@@ -448,6 +448,57 @@ fn has_groq_key(state: tauri::State<Arc<AppState>>) -> bool {
     state.groq_api_key.lock().is_some()
 }
 
+/// F — Quickstart 用。驗證 user 給的 LLM API key 真的能連。
+/// 不打 chat completions(會花 credit + tokens),只 GET /models list,
+/// 200 = key 有效,401 = key 錯,其他 = 網路 / 其他問題。
+///
+/// `provider`:"groq" | "gemini"
+/// 回:Ok("provider name + 簡短 ok 描述") | Err("使用者看得懂的中文錯誤")
+#[tauri::command]
+async fn verify_llm_key(provider: String, key: String) -> Result<String, String> {
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err("API key 是空的".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("init http client: {e}"))?;
+    match provider.as_str() {
+        "groq" => {
+            let resp = client
+                .get("https://api.groq.com/openai/v1/models")
+                .bearer_auth(&key)
+                .send()
+                .await
+                .map_err(|e| format!("連 Groq API 失敗:{e}"))?;
+            match resp.status().as_u16() {
+                200 => Ok("Groq API key 驗證 OK".into()),
+                401 | 403 => Err("Groq API key 無效(401/403)— 重新檢查貼過來的 key 完整不完整,或去 console.groq.com/keys 重產生".into()),
+                code => Err(format!("Groq API 回 HTTP {code} — 不是 401 但也不是 200,可能對方暫時故障,稍後再試")),
+            }
+        }
+        "gemini" => {
+            // Google AI Studio:?key=X 形式而不是 bearer。
+            // Gemini key 是 alphanumeric + underscore + dash,URL-safe,不需 encode。
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+            );
+            let resp = client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("連 Gemini API 失敗:{e}"))?;
+            match resp.status().as_u16() {
+                200 => Ok("Gemini API key 驗證 OK".into()),
+                400 | 401 | 403 => Err("Gemini API key 無效 — 重新檢查貼過來的 key,或去 aistudio.google.com/app/apikey 重產生".into()),
+                code => Err(format!("Gemini API 回 HTTP {code} — 稍後再試")),
+            }
+        }
+        other => Err(format!("不支援的 provider:{other}(目前只有 groq / gemini)")),
+    }
+}
+
 /// 從 UI 觸發 toggle(等同熱鍵)。供測試或無熱鍵權限的環境用。
 #[tauri::command]
 fn toggle(app: AppHandle, state: tauri::State<Arc<AppState>>) {
@@ -2852,6 +2903,7 @@ fn main() {
             chat_provider_info,
             current_phase,
             has_groq_key,
+            verify_llm_key,
             toggle,
             reset_conversation,
             conversation_length,
