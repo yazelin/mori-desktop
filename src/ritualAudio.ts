@@ -40,9 +40,34 @@ class RitualAudio {
 
   /** 先試音檔,沒就 synth fallback。多條音檔時隨機選一條(每次開儀式氣氛換)。 */
   startAmbient(): void {
+    // pending starting → skip
+    if (this.starting) return;
+    // 已經有東西在播(音檔或 synth)→ 不重新啟,避免疊
     if (this.usingFile || this.ambientNodes.length > 0) return;
+    // 不過為了清舊 session 的 leftover state(例如舊 synth nodes 沒 disconnect 乾淨),
+    // 進來先強制 stop 一次,確保乾淨
+    this.forceStopImmediate();
+    this.starting = true;
     this.tryStartFile();
   }
+
+  /** 不 fade,馬上 stop 一切 — 給 startAmbient 進來清舊 state 用 */
+  private forceStopImmediate(): void {
+    if (this.audioEl) {
+      try { this.audioEl.pause(); this.audioEl.src = ""; } catch {}
+      this.audioEl = null;
+    }
+    this.usingFile = false;
+    for (const n of this.ambientNodes) {
+      try {
+        if ("stop" in n && typeof (n as any).stop === "function") (n as any).stop();
+      } catch {}
+      try { n.disconnect(); } catch {}
+    }
+    this.ambientNodes = [];
+  }
+
+  private starting: boolean = false;
 
   private pickTrackUrl(): string {
     // public/audio/ 內的 bundle 音檔 — 加新檔案進這個 list 就會被隨機抽到
@@ -55,16 +80,21 @@ class RitualAudio {
   }
 
   private tryStartFile(): void {
+    // 同步先把 element 占位,再走 async play() — 避免 effect 雙跑時 race 起兩條
     const el = new Audio(this.pickTrackUrl());
     el.loop = true;
     el.volume = this.muted ? 0 : 0.4;
     el.preload = "auto";
+    this.audioEl = el;
+    this.usingFile = true;
 
-    // 任一個 error event 都 fallback 到 synth
     const fallback = () => {
-      if (this.usingFile) return; // 已經切過了
-      console.info("[ritualAudio] no /audio/ritual-ambient.mp3, falling back to synth pad");
+      // 已經切到 synth 或被 stop 過 → 不再 fallback
+      if (!this.usingFile && this.ambientNodes.length > 0) return;
+      console.info("[ritualAudio] audio file failed, fallback to synth pad");
       this.audioEl = null;
+      this.usingFile = false;
+      this.starting = false;
       this.startSynth();
     };
     el.addEventListener("error", fallback, { once: true });
@@ -72,9 +102,8 @@ class RitualAudio {
 
     el.play()
       .then(() => {
-        this.audioEl = el;
-        this.usingFile = true;
-        console.info("[ritualAudio] playing /audio/ritual-ambient.mp3");
+        this.starting = false;
+        console.info("[ritualAudio] playing", el.src);
       })
       .catch((e) => {
         console.info("[ritualAudio] audio file play failed, fallback to synth:", e);
@@ -117,6 +146,7 @@ class RitualAudio {
   }
 
   stopAmbient(): void {
+    this.starting = false;
     // 停音檔
     if (this.audioEl) {
       try {
