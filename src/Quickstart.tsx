@@ -484,15 +484,26 @@ function RitualFlow(props: RitualProps) {
   const { t, step, setStep } = props;
   const total = 5;
   // 5 步:0=入林 1=點燈 2=獻鑰 3=驗印 4=甦醒
+  const dots = (
+    <div className="mori-quickstart-ritual-progress">
+      {Array.from({ length: total }).map((_, i) => (
+        <span
+          key={i}
+          className={`step-dot ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <div className="mori-quickstart-ritual">
-      {step === 0 && <RitualStepEnter t={t} onNext={() => setStep(1)} onSkip={props.doSkip} onSwitchToDirect={props.onSwitchToDirect} />}
+      {step === 0 && <RitualStepEnter t={t} onNext={() => setStep(1)} onSkip={props.doSkip} onSwitchToDirect={props.onSwitchToDirect} dots={dots} />}
       {step === 1 && (
         <RitualStepLantern
           t={t}
           provider={props.provider} setProvider={props.setProvider}
           onBack={() => setStep(0)} onNext={() => setStep(2)}
+          dots={dots}
         />
       )}
       {step === 2 && (
@@ -503,6 +514,7 @@ function RitualFlow(props: RitualProps) {
           showKey={props.showKey} setShowKey={props.setShowKey}
           setVerify={props.setVerify}
           onBack={() => setStep(1)} onNext={() => setStep(3)}
+          dots={dots}
         />
       )}
       {step === 3 && (
@@ -514,31 +526,23 @@ function RitualFlow(props: RitualProps) {
           doVerify={props.doVerify}
           doSave={props.doSave}
           onBack={() => setStep(2)}
+          dots={dots}
         />
       )}
       {step === 4 && <RitualStepAwaken t={t} />}
-
-      {/* step dots 改放底部 — header 已經有 visualizer 不再需要進度跟它打架 */}
-      <div className="mori-quickstart-ritual-progress bottom">
-        {Array.from({ length: total }).map((_, i) => (
-          <span
-            key={i}
-            className={`step-dot ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}
-          />
-        ))}
-      </div>
     </div>
   );
 }
 
-function RitualStepEnter({ t, onNext, onSkip, onSwitchToDirect }: {
-  t: any; onNext: () => void; onSkip: () => void; onSwitchToDirect: () => void;
+function RitualStepEnter({ t, onNext, onSkip, onSwitchToDirect, dots }: {
+  t: any; onNext: () => void; onSkip: () => void; onSwitchToDirect: () => void; dots?: React.ReactNode;
 }) {
   return (
     <div className="mori-quickstart-ritual-step">
       <p className="mori-ritual-narrative">{t("quickstart.ritual_enter_1")}</p>
       <p className="mori-ritual-narrative">{t("quickstart.ritual_enter_2")}</p>
       <p className="mori-ritual-narrative whisper">{t("quickstart.ritual_enter_3")}</p>
+      {dots}
       <div className="mori-quickstart-footer">
         <button className="mori-btn ghost" onClick={onSkip}>{t("quickstart.ritual_dismiss")}</button>
         <button className="mori-btn ghost" onClick={onSwitchToDirect}>{t("quickstart.ritual_switch_direct")}</button>
@@ -548,8 +552,8 @@ function RitualStepEnter({ t, onNext, onSkip, onSwitchToDirect }: {
   );
 }
 
-function RitualStepLantern({ t, provider, setProvider, onBack, onNext }: {
-  t: any; provider: Provider; setProvider: (p: Provider) => void; onBack: () => void; onNext: () => void;
+function RitualStepLantern({ t, provider, setProvider, onBack, onNext, dots }: {
+  t: any; provider: Provider; setProvider: (p: Provider) => void; onBack: () => void; onNext: () => void; dots?: React.ReactNode;
 }) {
   return (
     <div className="mori-quickstart-ritual-step">
@@ -569,6 +573,7 @@ function RitualStepLantern({ t, provider, setProvider, onBack, onNext }: {
           </button>
         ))}
       </div>
+      {dots}
       <div className="mori-quickstart-footer">
         <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
         <button className="mori-btn primary" onClick={onNext}>{t("quickstart.ritual_lantern_button")}</button>
@@ -578,7 +583,7 @@ function RitualStepLantern({ t, provider, setProvider, onBack, onNext }: {
 }
 
 function RitualStepOfferKey({
-  t, info, keyText, setKeyText, showKey, setShowKey, setVerify, onBack, onNext,
+  t, info, keyText, setKeyText, showKey, setShowKey, setVerify, onBack, onNext, dots,
 }: {
   t: any;
   info: typeof PROVIDER_INFO[Provider];
@@ -586,6 +591,7 @@ function RitualStepOfferKey({
   showKey: boolean; setShowKey: (b: boolean) => void;
   setVerify: (v: VerifyState) => void;
   onBack: () => void; onNext: () => void;
+  dots?: React.ReactNode;
 }) {
   return (
     <div className="mori-quickstart-ritual-step">
@@ -616,6 +622,7 @@ function RitualStepOfferKey({
           {showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
         </button>
       </div>
+      {dots}
       <div className="mori-quickstart-footer">
         <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
         <button
@@ -629,7 +636,7 @@ function RitualStepOfferKey({
 }
 
 function RitualStepVerify({
-  t, verify, canVerify, canSave, doVerify, doSave, onBack,
+  t, verify, canVerify, canSave, doVerify, doSave, onBack, dots,
 }: {
   t: any;
   verify: VerifyState;
@@ -638,6 +645,7 @@ function RitualStepVerify({
   doVerify: () => void;
   doSave: () => void;
   onBack: () => void;
+  dots?: React.ReactNode;
 }) {
   // 自動觸發一次 verify(進入這步就驗)
   useEffect(() => {
@@ -662,6 +670,7 @@ function RitualStepVerify({
           </>
         )}
       </div>
+      {dots}
       <div className="mori-quickstart-footer">
         <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
         <button className="mori-btn primary" onClick={doSave} disabled={!canSave}>

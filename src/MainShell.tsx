@@ -151,15 +151,12 @@ function MainShell() {
             </span>
           </button>
           <button
-            className="mori-sidebar-theme-toggle compact"
+            className="mori-sidebar-theme-toggle compact help-only"
             onClick={() => setQuickstartOpen(true)}
             title={t("quickstart.help_title")}
           >
             <span className="mori-sidebar-item-icon">
               <IconHelp />
-            </span>
-            <span className="mori-sidebar-theme-label">
-              {t("quickstart.help_label")}
             </span>
           </button>
         </div>

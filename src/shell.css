@@ -180,6 +180,11 @@
 .mori-sidebar-toggles .mori-sidebar-theme-toggle.compact .mori-sidebar-theme-label {
   font-size: 10.5px;
 }
+/* Help button 只 icon 不要 label,寬度自然窄 */
+.mori-sidebar-toggles .mori-sidebar-theme-toggle.help-only {
+  flex: 0 0 auto;
+  padding: 8px 8px;
+}
 .mori-sidebar-theme-toggle {
   margin-top: auto;
   display: flex;
@@ -2400,13 +2405,20 @@
   gap: 18px;
   animation: ritual-fade-in 0.5s ease;
 }
-/* narrative text 垂直置中 — 在第一個 <p> 之前留 auto margin 把後面推下去 */
+/* narrative cluster 垂直置中,dots + footer 一起靠底:
+   - 第一個 <p> 之前 auto margin 把 narrative 推下
+   - dots 之前再 auto margin 把 dots+footer 推到底
+   - footer 緊貼 dots 下方 */
 .mori-quickstart-ritual-step > p:first-of-type {
   margin-top: auto;
 }
-/* footer 靠底 — 在 footer 之前留 auto margin */
-.mori-quickstart-ritual-step > .mori-quickstart-footer {
+.mori-quickstart-ritual-step > .mori-quickstart-ritual-progress {
   margin-top: auto;
+  margin-bottom: 12px;
+}
+.mori-quickstart-ritual-step > .mori-quickstart-footer {
+  /* dots 已經 auto-margin-top,footer 就 stick 在 dots 下方,不再 auto */
+  margin-top: 0;
 }
 /* 但 awaken step 是完全置中 special case */
 .mori-quickstart-ritual-step.awaken {
