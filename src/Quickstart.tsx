@@ -298,10 +298,17 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
         const bars = c.querySelectorAll<HTMLElement>(".eq-wide-bar");
+        const n = bars.length;
         bars.forEach((bar, i) => {
-          const v = data[i] || 0;
-          // scale 0.08 ~ 0.7,音量越大條越高,但天花板控住不誇張
-          const scale = 0.08 + (v / 255) * 0.62;
+          // 把 freq bin 從 bass→treble 線性排列重新打散:
+          // 偶數 i 取 low half,奇數 i 取 high half,交錯。避免左邊永遠 bass 重、
+          // 右邊永遠空,看起來像水波 left→right 而不是上下跳。
+          const half = Math.floor(data.length / 2);
+          const sourceBin = i % 2 === 0
+            ? Math.floor((i / 2) * (half / (n / 2)))
+            : Math.floor(half + ((i - 1) / 2) * (half / (n / 2)));
+          const v = data[sourceBin] || 0;
+          const scale = 0.1 + (v / 255) * 0.85;
           bar.style.transform = `scaleY(${scale})`;
         });
       }

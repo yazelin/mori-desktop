@@ -1972,13 +1972,13 @@
 }
 .mori-quickstart-header-eq .eq-wide-bar {
   flex: 1;
-  /* 顯式 height + min-height,不靠 flex 自動拉 — span/div 都不會 collapse */
   height: 100%;
   min-height: 18px;
   background: rgba(168, 197, 162, 0.55);
   border-radius: 1px;
   transform: scaleY(0.1);
-  transform-origin: center;
+  /* origin: bottom → bars 從底線往上長,經典 equalizer 上下跳感 */
+  transform-origin: bottom;
   transition: transform 60ms linear;
   will-change: transform;
 }
