@@ -11,6 +11,8 @@ mori-desktop 是 **Mori 的「身體」** — Tauri 2 + Rust 桌面 AI 同伴 GU
 
 Mori 不是 chatbot — 是一個有 SOUL.md 跟連續記憶的擬人化「靈」。設計用詞偏詩意中文(年輪 / 反思 / 森林 / 唇與聲),代碼用詞跟普通 Rust / TS 一致。
 
+**本機 layout 慣例**:本 repo 在 `~/mori-universe/mori-desktop/`,4 個 Mori repo 的完整 local layout 見 [`world-tree/ARCHITECTURE.md` 「本機 layout 慣例」section](https://github.com/yazelin/world-tree/blob/main/ARCHITECTURE.md#本機-layout-慣例)。簡述:`~/mori-universe/{world-tree,mori-desktop,annuli}` + `~/mori-universe/spirits/<name>/`(spirit vault)。
+
 完整世界觀讀:
 - `docs/architecture.md` — 4 層宇宙模型
 - `docs/design/annuli-memory.md` — vault-backed 反思引擎設計
