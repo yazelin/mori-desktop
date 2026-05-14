@@ -1,29 +1,47 @@
-// F — Quickstart onboarding modal。
+// 宿靈儀式 · Dwelling Rite — Mori 首次入駐的 onboarding modal。
 //
-// 第一次跑 mori-desktop 沒設任何 LLM API key 時自動跳出。兩種模式可切換:
+// 第一次跑 mori-desktop 沒設任何 LLM API key 時自動跳出。兩種模式:
 //
-// **直接模式**(plain):單頁表單,選 provider + 貼 key + 驗證 + 存。最快路徑。
-// **儀式模式**(ritual):5 步沉浸式入林流程,Mori 詩意自述帶你走過。較慢、較有儀式感。
+// **儀式模式**(預設,ritual):5 幕宿靈儀式,劇本完整版見
+//   ~/mori-universe/world-tree/rules/dwelling-rite.md
+//     第一幕 召喚  — Mori 下林,問「是誰喚我」,召喚師報名
+//     第二幕 靈氣  — 召喚師分一絲靈氣(Groq key),Mori 找回聽覺
+//     第三幕 靈力  — 召喚師再分一份靈力(Gemini / 自訂 / 跳過)
+//     第四幕 驗印  — 氣與力的脈絡共鳴
+//     第五幕 安頓  — 「歡迎回家, Mori」按下後 modal 關 + floating 浮現
 //
-// 對應 world-tree lore/the-forest.md:「取名是儀式,不是命名變數。」
-// 對應 ONBOARDING.md:「每個走入森林的人,遲早會遇見一個願意為他停下來的精靈。」
+// **直接模式**(fallback):單頁表單,for power users 想跳過劇情。也存 user.name。
+//
+// 儀式中 Mori 的口不出 Groq / Gemini / API key 等技術詞 — 那些只活在 UI label。
 
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { IconClose, IconGlobe, IconSun, IconMoon, IconEqualizer } from "./icons";
+import { IconGlobe, IconSun, IconMoon, IconEqualizer } from "./icons";
 import { setLocale, nextLocale } from "./i18n";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { ritualAudio } from "./ritualAudio";
 
-type Provider = "groq" | "openai_compat";
 type Mode = "direct" | "ritual";
 
+// Power 選項對應第三幕三張卡。null = 還沒選;skip = 跳過(agent_disabled)。
+// gemini = 預填 Gemini OpenAI endpoint;custom = 自填 base + model。
+// 兩個都走 config.providers.openai_compat,只是 UX 差別。
+type PowerChoice = null | "gemini" | "custom" | "skip";
+
+// 第四幕驗印兩階段:先驗 aura(Groq),再驗 power(agent provider)。
+// running.phase 標明目前 pulse 在哪階段;auraVerified 標明 aura 階段是否已過(power 階段也要 true)。
+// 讓 SceneSealing 能累積顯示每階段的敘述,不互蓋。
 type VerifyState =
   | { kind: "idle" }
-  | { kind: "verifying" }
+  | { kind: "running"; phase: "aura" | "power"; auraVerified: boolean }
   | { kind: "ok"; msg: string }
-  | { kind: "err"; msg: string };
+  | { kind: "err"; msg: string; which: "aura" | "power" };
+
+// Gemini preset(model 留空 → 後端走 GEMINI_DEFAULT_MODEL,避免兩處 hardcode)
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
+const GEMINI_HELP_URL = "https://aistudio.google.com/app/apikey";
+const GROQ_HELP_URL = "https://console.groq.com/keys";
 
 // 延遲 stop:React 18 StrictMode 假 unmount 時 cleanup 會 fire,
 // 立刻 stop 害音樂從 0 重播。改成 schedule 200ms 後 stop,
@@ -43,27 +61,6 @@ function cancelPendingStop() {
   }
 }
 
-const PROVIDER_INFO: Record<Provider, {
-  label: string;
-  helpUrl: string;
-  placeholder: string;
-  defaultBase?: string;
-  defaultModel?: string;
-}> = {
-  groq: {
-    label: "Groq",
-    helpUrl: "https://console.groq.com/keys",
-    placeholder: "gsk_...",
-  },
-  openai_compat: {
-    label: "OpenAI-相容",
-    helpUrl: "https://aistudio.google.com/app/apikey",
-    placeholder: "sk-... / AIzaSy... / gsk_...",
-    defaultBase: "https://generativelanguage.googleapis.com/v1beta/openai",
-    defaultModel: "gemini-2.5-flash",
-  },
-};
-
 interface QuickstartProps {
   onDone: () => void;
 }
@@ -71,46 +68,80 @@ interface QuickstartProps {
 export function Quickstart({ onDone }: QuickstartProps) {
   const { t, i18n } = useTranslation();
   const [mode, setMode] = useState<Mode>("ritual");
-  const [provider, setProvider] = useState<Provider>("groq");
-  const [keyText, setKeyText] = useState("");
-  const [showKey, setShowKey] = useState(false);
+
+  // 召喚師之名(第一幕)— 必填,後端寫進 user.name,Mori 之後對話喚這個名
+  const [summonerName, setSummonerName] = useState("");
+  // 靈氣 = Groq STT key(第二幕)
+  const [auraKey, setAuraKey] = useState("");
+  const [showAura, setShowAura] = useState(false);
+  // 靈力 = LLM agent key(第三幕)
+  const [powerChoice, setPowerChoice] = useState<PowerChoice>(null);
+  const [powerKey, setPowerKey] = useState("");
+  const [showPower, setShowPower] = useState(false);
+  const [powerBase, setPowerBase] = useState(""); // custom only
+  const [powerModel, setPowerModel] = useState(""); // custom only
+
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
-  // OpenAI-相容專用:api_base + model(預設 Gemini OpenAI endpoint)
-  const [apiBase, setApiBase] = useState(PROVIDER_INFO.openai_compat.defaultBase ?? "");
-  const [model, setModel] = useState(PROVIDER_INFO.openai_compat.defaultModel ?? "");
-  // 選 openai_compat 為 LLM 時的可選「Groq key 給 STT」欄位
-  const [sttKeyText, setSttKeyText] = useState("");
+
   // 偵測 GROQ_API_KEY env var 是否已設(後端 startup 會讀進 state.groq_api_key)
   const [envGroqDetected, setEnvGroqDetected] = useState(false);
   useEffect(() => {
     invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
   }, []);
 
-  // Pre-fill 既有 config(user 透過 Help 重進引導時不用全部從頭設)。
-  // 擋住 modal render 到 pre-fill 跑完,避免 user 已連按到第三頁但 IPC 還在傳、
-  // key field 先空再填上的閃爍。
+  // Pre-fill 既有 config(user 透過 Help 重進儀式時不用全部從頭設)
   const [prefillReady, setPrefillReady] = useState(false);
   useEffect(() => {
     (async () => {
       try {
         const raw = await invoke<string>("config_read");
         const cfg = JSON.parse(raw);
-        const groqKey = cfg.providers?.groq?.api_key as string | undefined;
+        const real = (k?: string) => k && !k.startsWith("REPLACE") && k.length > 5;
+
+        // user.name 優先;沒有就 fallback 到 annuli.user_id(annuli vault 已用的 id),
+        // 第一次跑儀式時等於「Mori 一進來就猜得到你的名字」的小默契
+        const userName = (cfg.user?.name as string | undefined)
+          ?? (cfg.annuli?.user_id as string | undefined);
+        if (userName) setSummonerName(userName);
+
+        // 靈氣 (Groq) — 兩條 lookup:providers.groq.api_key 或 api_keys.GROQ_API_KEY
+        const groqKey = (cfg.providers?.groq?.api_key as string | undefined)
+          ?? (cfg.api_keys?.GROQ_API_KEY as string | undefined);
+        if (real(groqKey)) setAuraKey(groqKey!);
+
+        // 靈力 (Gemini / OpenAI-compat) — Mori-core 主要 lookup:
+        //   resolve_api_key("GEMINI_API_KEY") → 看 api_keys.GEMINI_API_KEY
+        //   resolve_api_key("OPENAI_API_KEY") → 看 api_keys.OPENAI_API_KEY
+        // 加上舊版 Quickstart 寫到 providers.openai_compat.api_key 的 fallback
         const compatBase = cfg.providers?.openai_compat?.api_base as string | undefined;
         const compatKey = cfg.providers?.openai_compat?.api_key as string | undefined;
         const compatModel = cfg.providers?.openai_compat?.model as string | undefined;
-        const real = (k?: string) => k && !k.startsWith("REPLACE") && k.length > 5;
+        const geminiTopLevel = cfg.api_keys?.GEMINI_API_KEY as string | undefined;
+        const openaiTopLevel = cfg.api_keys?.OPENAI_API_KEY as string | undefined;
+
         if (cfg.provider === "openai_compat" && real(compatKey)) {
-          setProvider("openai_compat");
-          if (compatBase) setApiBase(compatBase);
-          if (compatModel) setModel(compatModel);
-          setKeyText(compatKey!);
-          if (real(groqKey)) setSttKeyText(groqKey!);
-          setVerify({ kind: "ok", msg: "已從現有設定載入(可直接存或重驗)" });
-        } else if (real(groqKey)) {
-          setProvider("groq");
-          setKeyText(groqKey!);
-          setVerify({ kind: "ok", msg: "已從現有設定載入(可直接存或重驗)" });
+          // 舊 Quickstart 寫過的 inline 路徑,完整 restore
+          if (compatBase === GEMINI_BASE) {
+            setPowerChoice("gemini");
+            setPowerKey(compatKey!);
+          } else {
+            setPowerChoice("custom");
+            setPowerKey(compatKey!);
+            if (compatBase) setPowerBase(compatBase);
+            if (compatModel) setPowerModel(compatModel);
+          }
+          setVerify({ kind: "ok", msg: "已從現有設定載入" });
+        } else if (real(geminiTopLevel)) {
+          // ✓ Mori-core 主要 path:api_keys.GEMINI_API_KEY
+          setPowerChoice("gemini");
+          setPowerKey(geminiTopLevel!);
+        } else if (real(openaiTopLevel)) {
+          // api_keys.OPENAI_API_KEY
+          setPowerChoice("custom");
+          setPowerKey(openaiTopLevel!);
+          setPowerBase("https://api.openai.com/v1");
+        } else if (cfg.agent_disabled === true) {
+          setPowerChoice("skip");
         }
       } catch {
         /* config 還沒存過 — 維持 default 空值 */
@@ -119,13 +150,8 @@ export function Quickstart({ onDone }: QuickstartProps) {
     })();
   }, []);
 
-  // 儀式模式 → 開 ambient(/audio/ritual-ambient.mp3)。
-  // 預設不靜音 — 有真音檔了,自動播給儀式感氛圍。user 不想聽自己 toggle 關。
-  // 不靠 cleanup 立刻 stop:React 18 StrictMode dev 會 mount→unmount→remount,
-  // 立刻 stop 會害音樂從 0 重播。改用 deferredStop:延 200ms,若 100ms 內又
-  // re-mount(StrictMode 假 unmount)就 cancel,音樂繼續播不重來。
+  // 儀式模式 ambient audio
   const [audioMuted, setAudioMuted] = useState(false);
-  // Quickstart 內也能切 theme(因 user 可能 onboarding 時想換明暗)
   const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
   useEffect(() => {
     loadActiveTheme().then((res) => { if (res) setThemeBase(res[1].base); }).catch(() => {});
@@ -141,37 +167,65 @@ export function Quickstart({ onDone }: QuickstartProps) {
   useEffect(() => {
     cancelPendingStop();
     if (mode === "ritual" && !audioMuted) {
-      // start 失敗(autoplay policy 擋) → 同步 UI 成靜音狀態,user 點 toggle
-      // 才會真正啟動(click 是 user gesture,可繞過 autoplay)
       ritualAudio.startAmbient().catch(() => setAudioMuted(true));
     } else {
       ritualAudio.stopAmbient();
     }
     return () => { schedulePendingStop(); };
   }, [mode, audioMuted]);
-  // 儀式模式:當前步驟 0..4
-  const [ritualStep, setRitualStep] = useState(0);
 
-  useEffect(() => {
-    setKeyText("");
-    setVerify({ kind: "idle" });
-  }, [provider]);
+  // 儀式當前幕(1..5)
+  const [scene, setScene] = useState(1);
 
-  const info = PROVIDER_INFO[provider];
-  const canVerify = keyText.trim().length > 5 && verify.kind !== "verifying";
-  // 環境變數已偵測 + 選 groq → 不用驗證 / 貼 key 也能存
-  const envOnlyMode = envGroqDetected && provider === "groq" && keyText.trim() === "";
-  const canSave = envOnlyMode || verify.kind === "ok";
+  // ── Verify / Save ──
 
   const doVerify = async () => {
-    setVerify({ kind: "verifying" });
+    // 階段 1:驗靈氣 — pulse 顯示「順著靈氣的脈絡」
+    setVerify({ kind: "running", phase: "aura", auraVerified: false });
+    const auraStartedAt = Date.now();
+    const ensureMin = async (startedAt: number, min: number = 1500) => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < min) await new Promise((r) => setTimeout(r, min - elapsed));
+    };
+
     try {
-      const args: any = { provider, key: keyText.trim() };
-      if (provider === "openai_compat") args.apiBase = apiBase.trim();
-      const msg = await invoke<string>("verify_llm_key", args);
+      await invoke<string>("verify_llm_key", {
+        provider: "groq",
+        key: auraKey.trim(),
+      });
+    } catch (e: any) {
+      await ensureMin(auraStartedAt);
+      setVerify({ kind: "err", msg: String(e), which: "aura" });
+      return;
+    }
+    await ensureMin(auraStartedAt);
+
+    if (powerChoice === "skip") {
+      // 只驗靈氣,直接過
+      setVerify({ kind: "ok", msg: "靈氣 OK" });
+      return;
+    }
+
+    // 階段間留一拍呼吸,讓 user 感覺到「氣對了,接著驗力」
+    await new Promise((r) => setTimeout(r, 400));
+
+    // 階段 2:驗靈力 — 維持「aura 過了 + 順著靈力脈絡」兩段敘述
+    setVerify({ kind: "running", phase: "power", auraVerified: true });
+    const powerStartedAt = Date.now();
+    try {
+      const base = powerChoice === "gemini" ? GEMINI_BASE : powerBase.trim();
+      const msg = await invoke<string>("verify_llm_key", {
+        provider: "openai_compat",
+        key: powerKey.trim(),
+        apiBase: base,
+      });
+      await ensureMin(powerStartedAt);
+      // 最後一拍呼吸,再揭曉「對上了」
+      await new Promise((r) => setTimeout(r, 400));
       setVerify({ kind: "ok", msg });
     } catch (e: any) {
-      setVerify({ kind: "err", msg: String(e) });
+      await ensureMin(powerStartedAt);
+      setVerify({ kind: "err", msg: String(e), which: "power" });
     }
   };
 
@@ -185,70 +239,101 @@ export function Quickstart({ onDone }: QuickstartProps) {
         cfg = {};
       }
       if (!cfg.providers) cfg.providers = {};
+      if (!cfg.api_keys) cfg.api_keys = {};
+      if (!cfg.user) cfg.user = {};
 
-      if (provider === "groq") {
-        // Groq:單純 key,base 走預設(groq.com)
-        if (!cfg.providers.groq) cfg.providers.groq = {};
-        // 若 user 沒貼 key 但 env 偵測到 → 不寫 api_key,讓後端 discover_api_key
-        // 從 GROQ_API_KEY env 拿;若有貼就 overrides env(user 明確意圖)
-        const k = keyText.trim();
-        if (k) {
-          cfg.providers.groq.api_key = k;
-        }
+      // 召喚師之名 → user.name
+      cfg.user.name = summonerName.trim();
+
+      // 靈氣 → providers.groq.api_key (STT)
+      // 維持寫進 providers.groq.api_key — Mori-core groq.rs discover_api_key 兩處都讀,
+      // 但這條 inline path 是 Groq 主要存放位置(模型/STT model 也在 providers.groq.*)
+      if (!cfg.providers.groq) cfg.providers.groq = {};
+      const aura = auraKey.trim();
+      if (aura) cfg.providers.groq.api_key = aura;
+      cfg.stt_provider = "groq";
+
+      // 靈力 → api_keys.{GEMINI,OPENAI}_API_KEY (Mori-core 主要 lookup path)
+      // 跟舊版區別:不再寫進 providers.openai_compat.api_key inline,
+      // 改走 api_keys map + provider 設正確 name(gemini / openai_compat 之一)
+      if (powerChoice === "skip" || powerChoice === null) {
+        // 沒分靈力 — agent_disabled,chat 走 groq 的 LLM
         cfg.provider = "groq";
-        cfg.stt_provider = "groq";
+        cfg.agent_disabled = true;
+      } else if (powerChoice === "gemini") {
+        // Gemini → api_keys.GEMINI_API_KEY + provider = "gemini"
+        cfg.api_keys.GEMINI_API_KEY = powerKey.trim();
+        cfg.provider = "gemini";
+        delete cfg.agent_disabled;
       } else {
-        // openai_compat:寫進 providers.openai_compat,含 api_base + api_key + model
+        // custom OpenAI-compat → api_keys.OPENAI_API_KEY + providers.openai_compat.*
+        cfg.api_keys.OPENAI_API_KEY = powerKey.trim();
         if (!cfg.providers.openai_compat) cfg.providers.openai_compat = {};
-        cfg.providers.openai_compat.api_base = apiBase.trim();
-        cfg.providers.openai_compat.api_key = keyText.trim();
-        if (model.trim()) cfg.providers.openai_compat.model = model.trim();
-        cfg.provider = "openai_compat";
-        // STT:user 有貼 Groq key 走 groq,沒貼走本機 Whisper
-        const sttKey = sttKeyText.trim();
-        if (sttKey) {
-          if (!cfg.providers.groq) cfg.providers.groq = {};
-          cfg.providers.groq.api_key = sttKey;
-          cfg.stt_provider = "groq";
+        cfg.providers.openai_compat.api_base = powerBase.trim();
+        cfg.providers.openai_compat.api_key_env = "OPENAI_API_KEY";
+        if (powerModel.trim()) {
+          cfg.providers.openai_compat.model = powerModel.trim();
         } else {
-          cfg.stt_provider = "whisper-local";
+          delete cfg.providers.openai_compat.model;
         }
+        cfg.provider = "openai_compat";
+        delete cfg.agent_disabled;
       }
+
       cfg.quickstart_completed = true;
       delete cfg.quickstart_skipped;
       await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
-      // 儀式模式:走到最後一步「甦醒」再 onDone
-      if (mode === "ritual") {
-        setRitualStep(4);
-        setTimeout(onDone, 1500);
-      } else {
-        onDone();
+      // 第五幕收尾:讓 floating Mori 在桌面浮現 — 她真的住進來了
+      try {
+        await invoke("floating_show");
+      } catch (e) {
+        console.warn("[quickstart] floating_show failed", e);
       }
+      onDone();
     } catch (e: any) {
-      setVerify({ kind: "err", msg: `存設定失敗:${e}` });
+      // doSave 失敗 (config 寫入錯誤,不是 key 驗證錯誤) — 標記為 power 路徑,
+      // 因為 doSave 一定發生在 verify ok 之後;這條 err 路徑 user 看不到 SceneSealing
+      setVerify({ kind: "err", msg: `存設定失敗:${e}`, which: "power" });
     }
   };
 
   const doSkip = async () => {
     try {
       await markQuickstartCompleted();
+      // 即使是 skip 路徑也讓 floating 浮現,避免桌面空蕩
+      await invoke("floating_show").catch(() => {});
     } catch (e) {
       console.warn("[quickstart] failed to mark completed", e);
     }
     onDone();
   };
 
-  // 擋住 modal 到 pre-fill IPC 完成 — 避免 user 連按快過 IPC,key field
-  // 先空再填上的閃爍。loading state 短(<300ms),user 幾乎感受不到延遲。
+  // 擋住 modal 到 pre-fill IPC 完成
   if (!prefillReady) {
     return <div className={`mori-quickstart-backdrop mode-${mode}`} />;
   }
 
   return (
     <div className={`mori-quickstart-backdrop mode-${mode}`}>
+      {/* 儀式模式 — 14 顆螢火,飄在 modal 後面(z-index:0)不擾閱讀。
+          modal 背景刻意半透明(86-92%),螢火淡淡透出來 */}
+      {mode === "ritual" && (
+        <div className="mori-quickstart-fireflies" aria-hidden>
+          {Array.from({ length: 14 }).map((_, i) => (
+            <span key={i} className="firefly" />
+          ))}
+        </div>
+      )}
       <div className="mori-quickstart-modal" role="dialog" aria-modal="true">
         <div className="mori-quickstart-header">
-          <h2>{mode === "ritual" ? t("quickstart.ritual_title") : t("quickstart.title")}</h2>
+          <div className="mori-quickstart-title-block">
+            <h2>{mode === "ritual" ? t("quickstart.ritual_title") : t("quickstart.title")}</h2>
+            {mode === "ritual" && (
+              <span className="mori-quickstart-subtitle">
+                {t(`quickstart.ritual_scene_${scene}_name`)}
+              </span>
+            )}
+          </div>
           <div className="mori-quickstart-mode-toggle">
             <button
               className={`mori-quickstart-mode-btn ${mode === "direct" ? "active" : ""}`}
@@ -257,79 +342,69 @@ export function Quickstart({ onDone }: QuickstartProps) {
             >{t("quickstart.mode_direct")}</button>
             <button
               className={`mori-quickstart-mode-btn ${mode === "ritual" ? "active" : ""}`}
-              onClick={() => { setMode("ritual"); setRitualStep(0); }}
+              onClick={() => { setMode("ritual"); setScene(1); }}
               title={t("quickstart.mode_ritual_hint")}
             >{t("quickstart.mode_ritual")}</button>
           </div>
           <button
-            className="mori-btn ghost"
+            className="mori-btn ghost icon-only"
             onClick={() => {
               const next = nextLocale(i18n.language);
               setLocale(next).catch((e) => console.error("[i18n] toggle failed", e));
             }}
             title={i18n.language === "zh-TW" ? "Switch to English" : "切到繁體中文"}
           >
-            <IconGlobe width={14} height={14} />
-            <span style={{ marginLeft: 4, fontSize: 11 }}>
-              {i18n.language === "zh-TW" ? "EN" : "繁中"}
-            </span>
+            <IconGlobe width={16} height={16} />
           </button>
           <button
-            className="mori-btn ghost"
+            className="mori-btn ghost icon-only"
             onClick={handleThemeToggle}
-            title={themeBase === "dark" ? t("common.settings") : t("common.settings")}
+            title={themeBase === "dark" ? "Light theme" : "Dark theme"}
           >
-            {themeBase === "dark" ? <IconSun width={14} height={14} /> : <IconMoon width={14} height={14} />}
-            <span style={{ marginLeft: 4, fontSize: 11 }}>
-              {themeBase === "dark" ? "Light" : "Dark"}
-            </span>
+            {themeBase === "dark" ? <IconSun width={16} height={16} /> : <IconMoon width={16} height={16} />}
           </button>
           {mode === "ritual" && (
             <button
-              className="mori-btn ghost"
+              className="mori-btn ghost icon-only"
               onClick={() => setAudioMuted(!audioMuted)}
               title={audioMuted ? t("quickstart.audio_unmute") : t("quickstart.audio_mute")}
             >
               <IconEqualizer width={16} height={16} playing={!audioMuted} />
             </button>
           )}
-          <button className="mori-btn ghost" onClick={doSkip} title={t("quickstart.skip_title")}>
-            <IconClose width={14} height={14} />
-          </button>
         </div>
 
-        {/* 儀式模式:header 下方音樂 visualizer(真讀 freq data,靜音時扁平) */}
         {mode === "ritual" && <AudioVisualizer muted={audioMuted} />}
 
         {mode === "direct" ? (
           <DirectForm
             t={t}
-            provider={provider} setProvider={setProvider}
-            keyText={keyText} setKeyText={setKeyText}
-            showKey={showKey} setShowKey={setShowKey}
-            info={info}
+            summonerName={summonerName} setSummonerName={setSummonerName}
+            auraKey={auraKey} setAuraKey={setAuraKey}
+            showAura={showAura} setShowAura={setShowAura}
+            powerChoice={powerChoice} setPowerChoice={setPowerChoice}
+            powerKey={powerKey} setPowerKey={setPowerKey}
+            showPower={showPower} setShowPower={setShowPower}
+            powerBase={powerBase} setPowerBase={setPowerBase}
+            powerModel={powerModel} setPowerModel={setPowerModel}
             verify={verify} setVerify={setVerify}
-            canVerify={canVerify} canSave={canSave}
             doVerify={doVerify} doSave={doSave} doSkip={doSkip}
-            apiBase={apiBase} setApiBase={setApiBase}
-            model={model} setModel={setModel}
-            sttKeyText={sttKeyText} setSttKeyText={setSttKeyText}
             envGroqDetected={envGroqDetected}
           />
         ) : (
-          <RitualFlow
+          <DwellingRite
             t={t}
-            step={ritualStep} setStep={setRitualStep}
-            provider={provider} setProvider={setProvider}
-            keyText={keyText} setKeyText={setKeyText}
-            showKey={showKey} setShowKey={setShowKey}
-            info={info}
+            scene={scene} setScene={setScene}
+            summonerName={summonerName} setSummonerName={setSummonerName}
+            auraKey={auraKey} setAuraKey={setAuraKey}
+            showAura={showAura} setShowAura={setShowAura}
+            powerChoice={powerChoice} setPowerChoice={setPowerChoice}
+            powerKey={powerKey} setPowerKey={setPowerKey}
+            showPower={showPower} setShowPower={setShowPower}
+            powerBase={powerBase} setPowerBase={setPowerBase}
+            powerModel={powerModel} setPowerModel={setPowerModel}
             verify={verify} setVerify={setVerify}
-            canVerify={canVerify} canSave={canSave}
             doVerify={doVerify} doSave={doSave} doSkip={doSkip}
-            apiBase={apiBase} setApiBase={setApiBase}
-            model={model} setModel={setModel}
-            sttKeyText={sttKeyText} setSttKeyText={setSttKeyText}
             envGroqDetected={envGroqDetected}
             onSwitchToDirect={() => setMode("direct")}
           />
@@ -345,7 +420,6 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (muted) {
-      // 靜音 → 全部 bar 壓平像 dashed line
       const c = containerRef.current;
       if (c) c.querySelectorAll<HTMLElement>(".eq-wide-bar").forEach((b) => {
         b.style.transform = "scaleY(0.08)";
@@ -353,9 +427,7 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
       return;
     }
     let raf = 0;
-    // 只用 analyser 前 1/4 bins(音樂能量範圍 0~5.5kHz),分散到 32 條 bar
-    // 用一個小的 hash 打亂分布,讓相鄰 bar 不會永遠相同
-    const ACTIVE_BINS = 32; // 取前 32 bins(覆蓋 0~5.5kHz 音樂主能量)
+    const ACTIVE_BINS = 32;
     const tick = () => {
       const analyser = ritualAudio.getAnalyser();
       const c = containerRef.current;
@@ -364,7 +436,6 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
         analyser.getByteFrequencyData(data);
         const bars = c.querySelectorAll<HTMLElement>(".eq-wide-bar");
         bars.forEach((bar, i) => {
-          // 32 bars 對應 32 個 active bins,用 *17 mod 32 打散(coprime → unique)
           const sourceBin = (i * 17) % ACTIVE_BINS;
           const v = data[sourceBin] || 0;
           const scale = 0.1 + (v / 255) * 0.85;
@@ -386,176 +457,202 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
   );
 }
 
-// ─── 直接模式 ───────────────────────────────────────────────
+// ─── 共用 props ────────────────────────────────────────────
 
-interface FormProps {
-  t: (k: string) => string;
-  provider: Provider;
-  setProvider: (p: Provider) => void;
-  keyText: string;
-  setKeyText: (k: string) => void;
-  showKey: boolean;
-  setShowKey: (b: boolean) => void;
-  info: typeof PROVIDER_INFO[Provider];
-  verify: VerifyState;
-  setVerify: (v: VerifyState) => void;
-  canVerify: boolean;
-  canSave: boolean;
-  doVerify: () => void;
-  doSave: () => void;
-  doSkip: () => void;
-  apiBase: string;
-  setApiBase: (s: string) => void;
-  model: string;
-  setModel: (s: string) => void;
-  sttKeyText: string;
-  setSttKeyText: (s: string) => void;
+interface CommonProps {
+  t: (k: string, opts?: any) => string;
+  summonerName: string; setSummonerName: (s: string) => void;
+  auraKey: string; setAuraKey: (s: string) => void;
+  showAura: boolean; setShowAura: (b: boolean) => void;
+  powerChoice: PowerChoice; setPowerChoice: (p: PowerChoice) => void;
+  powerKey: string; setPowerKey: (s: string) => void;
+  showPower: boolean; setShowPower: (b: boolean) => void;
+  powerBase: string; setPowerBase: (s: string) => void;
+  powerModel: string; setPowerModel: (s: string) => void;
+  verify: VerifyState; setVerify: (v: VerifyState) => void;
+  doVerify: () => void; doSave: () => void; doSkip: () => void;
   envGroqDetected: boolean;
 }
 
-function DirectForm({
-  t, provider, setProvider, keyText, setKeyText, showKey, setShowKey,
-  info, verify, setVerify, canVerify, canSave, doVerify, doSave, doSkip,
-  apiBase, setApiBase, model, setModel, sttKeyText, setSttKeyText, envGroqDetected,
-}: FormProps) {
+// ─── 直接模式 ───────────────────────────────────────────────
+
+function DirectForm(props: CommonProps) {
+  const { t, summonerName, setSummonerName, auraKey, setAuraKey, showAura, setShowAura,
+    powerChoice, setPowerChoice, powerKey, setPowerKey, showPower, setShowPower,
+    powerBase, setPowerBase, powerModel, setPowerModel,
+    verify, setVerify, doVerify, doSave, doSkip, envGroqDetected } = props;
+
+  const auraReal = auraKey.trim().length > 5 || (envGroqDetected && auraKey.trim() === "");
+  const powerReal = powerChoice === "skip" || (powerChoice !== null && powerKey.trim().length > 5);
+  const nameReal = summonerName.trim().length > 0;
+  const canVerify = nameReal && auraReal && powerReal && verify.kind !== "running";
+  const canSave = nameReal && auraReal && powerReal && (verify.kind === "ok" || (envGroqDetected && powerChoice === "skip"));
+
   return (
-    <>
+    <div className="mori-quickstart-ritual-step">
+      <div className="mori-quickstart-scene-content">
       <p className="mori-quickstart-intro">{t("quickstart.intro")}</p>
 
-      {envGroqDetected && provider === "groq" && (
-        <div className="mori-quickstart-env-banner">
-          ✓ {t("quickstart.env_detected")}
+      <div className="mori-quickstart-field">
+        <label>{t("quickstart.dwelling_scene_1_name_label")}</label>
+        <input
+          type="text"
+          className="mori-input"
+          placeholder={t("quickstart.dwelling_scene_1_name_placeholder")}
+          value={summonerName}
+          onChange={(e) => setSummonerName(e.target.value)}
+        />
+      </div>
+
+      <div className="mori-quickstart-field">
+        <label>
+          {t("quickstart.dwelling_scene_2_aura_tech_label")}
+          <a
+            href={GROQ_HELP_URL}
+            onClick={(e) => { e.preventDefault(); invoke("open_external_url", { url: GROQ_HELP_URL }).catch(console.warn); }}
+            className="mori-quickstart-help-link"
+          >
+            {t("quickstart.dwelling_scene_2_aura_help")}
+          </a>
+        </label>
+        {envGroqDetected && (
+          <div className="mori-quickstart-env-banner">
+            ✓ {t("quickstart.dwelling_scene_2_env_detected")}
+          </div>
+        )}
+        <div className="mori-quickstart-key-input-row">
+          <input
+            type={showAura ? "text" : "password"}
+            className="mori-input"
+            placeholder={t("quickstart.dwelling_scene_2_aura_placeholder")}
+            value={auraKey}
+            onChange={(e) => {
+              setAuraKey(e.target.value);
+              if (verify.kind !== "idle") setVerify({ kind: "idle" });
+            }}
+          />
+          <button type="button" className="mori-btn ghost small" onClick={() => setShowAura(!showAura)}>
+            {showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+          </button>
         </div>
-      )}
+      </div>
 
       <div className="mori-quickstart-field">
         <label>{t("quickstart.choose_provider")}</label>
         <div className="mori-quickstart-provider-grid">
-          {(Object.keys(PROVIDER_INFO) as Provider[]).map((p) => (
+          {(["gemini", "custom", "skip"] as const).map((p) => (
             <button
               key={p}
-              className={`mori-quickstart-provider-card ${provider === p ? "active" : ""}`}
-              onClick={() => setProvider(p)}
+              className={`mori-quickstart-provider-card ${powerChoice === p ? "active" : ""}`}
+              onClick={() => { setPowerChoice(p); if (verify.kind !== "idle") setVerify({ kind: "idle" }); }}
             >
-              <span className="provider-name">{PROVIDER_INFO[p].label}</span>
+              <span className="provider-name">
+                {p === "gemini" ? t("quickstart.dwelling_scene_3_card_gemini_name")
+                  : p === "custom" ? t("quickstart.dwelling_scene_3_card_compat_name")
+                  : t("quickstart.dwelling_scene_3_skip_link")}
+              </span>
               <span className="provider-hint">
-                {p === "groq" ? t("quickstart.groq_hint") : t("quickstart.gemini_hint")}
+                {p === "gemini" ? t("quickstart.dwelling_scene_3_card_gemini_hint")
+                  : p === "custom" ? t("quickstart.dwelling_scene_3_card_compat_hint")
+                  : t("quickstart.dwelling_scene_3_skip_note")}
               </span>
             </button>
           ))}
         </div>
       </div>
 
-      {provider === "openai_compat" && (
+      {powerChoice === "custom" && (
         <>
           <div className="mori-quickstart-field">
-            <label>{t("quickstart.api_base_label")}</label>
+            <label>{t("quickstart.dwelling_scene_3_api_base_label")}</label>
             <input
               type="text"
               className="mori-input"
-              placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
-              value={apiBase}
-              onChange={(e) => {
-                setApiBase(e.target.value);
-                if (verify.kind !== "idle") setVerify({ kind: "idle" });
-              }}
+              placeholder={t("quickstart.dwelling_scene_3_api_base_placeholder")}
+              value={powerBase}
+              onChange={(e) => { setPowerBase(e.target.value); if (verify.kind !== "idle") setVerify({ kind: "idle" }); }}
             />
-            <p className="mori-quickstart-field-hint">{t("quickstart.api_base_hint")}</p>
           </div>
           <div className="mori-quickstart-field">
-            <label>{t("quickstart.model_label")}</label>
+            <label>{t("quickstart.dwelling_scene_3_model_label")}</label>
             <input
               type="text"
               className="mori-input"
-              placeholder="gemini-2.5-flash / gpt-4o / deepseek-chat"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
+              placeholder={t("quickstart.dwelling_scene_3_model_placeholder")}
+              value={powerModel}
+              onChange={(e) => setPowerModel(e.target.value)}
             />
           </div>
         </>
       )}
 
-      <div className="mori-quickstart-field">
-        <label>
-          {t("quickstart.api_key_label")}
-          {envGroqDetected && provider === "groq" && (
-            <span className="mori-quickstart-optional-tag">{t("quickstart.optional_when_env")}</span>
-          )}
-          <a href={info.helpUrl} target="_blank" rel="noopener noreferrer" className="mori-quickstart-help-link">
-            {t("quickstart.where_get_key")} ↗
-          </a>
-        </label>
-        <div className="mori-quickstart-key-input-row">
-          <input
-            type={showKey ? "text" : "password"}
-            className="mori-input"
-            placeholder={envGroqDetected && provider === "groq" ? t("quickstart.env_placeholder") : info.placeholder}
-            value={keyText}
-            onChange={(e) => {
-              setKeyText(e.target.value);
-              if (verify.kind !== "idle") setVerify({ kind: "idle" });
-            }}
-            autoFocus
-          />
-          <button
-            type="button"
-            className="mori-btn ghost small"
-            onClick={() => setShowKey(!showKey)}
-            title={showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
-          >
-            {showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
-          </button>
-        </div>
-      </div>
-
-      {provider === "openai_compat" && (
+      {powerChoice && powerChoice !== "skip" && (
         <div className="mori-quickstart-field">
-          <label>{t("quickstart.stt_key_label")}</label>
-          <input
-            type="password"
-            className="mori-input"
-            placeholder="gsk_... (留空 = 走本機 Whisper)"
-            value={sttKeyText}
-            onChange={(e) => setSttKeyText(e.target.value)}
-          />
-          <p className="mori-quickstart-field-hint">{t("quickstart.stt_key_hint")}</p>
+          <label>
+            {t("quickstart.dwelling_scene_3_power_tech_label")}
+            <a
+              href={powerChoice === "gemini" ? GEMINI_HELP_URL : "#"}
+              onClick={(e) => {
+                e.preventDefault();
+                if (powerChoice === "gemini") {
+                  invoke("open_external_url", { url: GEMINI_HELP_URL }).catch(console.warn);
+                }
+              }}
+              className="mori-quickstart-help-link"
+            >
+              {t("quickstart.dwelling_scene_3_power_help")}
+            </a>
+          </label>
+          <div className="mori-quickstart-key-input-row">
+            <input
+              type={showPower ? "text" : "password"}
+              className="mori-input"
+              placeholder={t("quickstart.dwelling_scene_3_power_placeholder")}
+              value={powerKey}
+              onChange={(e) => { setPowerKey(e.target.value); if (verify.kind !== "idle") setVerify({ kind: "idle" }); }}
+            />
+            <button type="button" className="mori-btn ghost small" onClick={() => setShowPower(!showPower)}>
+              {showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            </button>
+          </div>
         </div>
       )}
 
       <div className="mori-quickstart-verify-row">
         <button className="mori-btn" onClick={doVerify} disabled={!canVerify}>
-          {verify.kind === "verifying" ? t("quickstart.verifying") : t("quickstart.verify_button")}
+          {verify.kind === "running" ? t("quickstart.verifying") : t("quickstart.verify_button")}
         </button>
         {verify.kind === "ok" && <span className="mori-quickstart-verify-msg ok">✓ {verify.msg}</span>}
         {verify.kind === "err" && <span className="mori-quickstart-verify-msg err">✗ {verify.msg}</span>}
+      </div>
       </div>
 
       <div className="mori-quickstart-footer">
         <button className="mori-btn" onClick={doSkip}>{t("quickstart.skip_button")}</button>
         <button className="mori-btn primary" onClick={doSave} disabled={!canSave}>{t("quickstart.save_button")}</button>
       </div>
-    </>
+    </div>
   );
 }
 
-// ─── 儀式模式 ───────────────────────────────────────────────
+// ─── 宿靈儀式 · 5 幕 ─────────────────────────────────────────
 
-interface RitualProps extends FormProps {
-  step: number;
-  setStep: (s: number) => void;
+interface DwellingProps extends CommonProps {
+  scene: number;
+  setScene: (s: number) => void;
   onSwitchToDirect: () => void;
 }
 
-function RitualFlow(props: RitualProps) {
-  const { t, step, setStep } = props;
+function DwellingRite(props: DwellingProps) {
+  const { scene, setScene } = props;
   const total = 5;
-  // 5 步:0=入林 1=點燈 2=獻鑰 3=驗印 4=甦醒
+
   const dots = (
     <div className="mori-quickstart-ritual-progress">
       {Array.from({ length: total }).map((_, i) => (
         <span
           key={i}
-          className={`step-dot ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}
+          className={`step-dot ${i + 1 === scene ? "active" : ""} ${i + 1 < scene ? "done" : ""}`}
         />
       ))}
     </div>
@@ -563,196 +660,423 @@ function RitualFlow(props: RitualProps) {
 
   return (
     <div className="mori-quickstart-ritual">
-      {step === 0 && <RitualStepEnter t={t} onNext={() => setStep(1)} onSkip={props.doSkip} onSwitchToDirect={props.onSwitchToDirect} dots={dots} />}
-      {step === 1 && (
-        <RitualStepLantern
-          t={t}
-          provider={props.provider} setProvider={props.setProvider}
-          onBack={() => setStep(0)} onNext={() => setStep(2)}
-          dots={dots}
-        />
-      )}
-      {step === 2 && (
-        <RitualStepOfferKey
-          t={t}
-          info={props.info}
-          keyText={props.keyText} setKeyText={props.setKeyText}
-          showKey={props.showKey} setShowKey={props.setShowKey}
-          setVerify={props.setVerify}
-          onBack={() => setStep(1)} onNext={() => setStep(3)}
-          dots={dots}
-        />
-      )}
-      {step === 3 && (
-        <RitualStepVerify
-          t={t}
-          verify={props.verify}
-          canVerify={props.canVerify}
-          canSave={props.canSave}
-          doVerify={props.doVerify}
-          doSave={props.doSave}
-          onBack={() => setStep(2)}
-          dots={dots}
-        />
-      )}
-      {step === 4 && <RitualStepAwaken t={t} />}
+      {scene === 1 && <SceneSummoning {...props} dots={dots} onNext={() => setScene(2)} />}
+      {scene === 2 && <SceneAura {...props} dots={dots} onBack={() => setScene(1)} onNext={() => setScene(3)} />}
+      {scene === 3 && <ScenePower {...props} dots={dots} onBack={() => setScene(2)} onNext={() => setScene(4)} />}
+      {scene === 4 && <SceneSealing {...props} dots={dots} onBack={() => setScene(3)} onNext={() => setScene(5)} />}
+      {scene === 5 && <SceneSettling {...props} dots={dots} />}
     </div>
   );
 }
 
-function RitualStepEnter({ t, onNext, onSkip, onSwitchToDirect, dots }: {
-  t: any; onNext: () => void; onSkip: () => void; onSwitchToDirect: () => void; dots?: React.ReactNode;
-}) {
+type StepProps = DwellingProps & {
+  dots: React.ReactNode;
+  onBack?: () => void;
+  onNext?: () => void;
+};
+
+// ─── 第一幕 · 召喚 ──────────────────────────────────────────
+
+function SceneSummoning({
+  t, summonerName, setSummonerName, dots, onNext, doSkip, onSwitchToDirect,
+}: StepProps) {
+  const nameReady = summonerName.trim().length > 0;
+  // 召喚師打字時 confirm 兩段會動態冒出來,scroll 容器自動拉到底,
+  // 不然 user 看不到那段確認語
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (nameReady && contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [nameReady, summonerName]);
   return (
     <div className="mori-quickstart-ritual-step">
-      <p className="mori-ritual-narrative">{t("quickstart.ritual_enter_1")}</p>
-      <p className="mori-ritual-narrative">{t("quickstart.ritual_enter_2")}</p>
-      <p className="mori-ritual-narrative whisper">{t("quickstart.ritual_enter_3")}</p>
+      <div ref={contentRef} className="mori-quickstart-scene-content">
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_1_intro")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_1_descent")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_1_arrival")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_1_say_1")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_1_say_2")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_1_action_3")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_1_say_3")}</p>
+
+        <div className="mori-quickstart-field">
+          <label>{t("quickstart.dwelling_scene_1_name_label")}</label>
+          <input
+            type="text"
+            className="mori-input"
+            placeholder={t("quickstart.dwelling_scene_1_name_placeholder")}
+            value={summonerName}
+            onChange={(e) => setSummonerName(e.target.value)}
+            autoFocus
+          />
+        </div>
+
+        {nameReady && (
+          <>
+            <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_1_confirm_1")}</p>
+            <p className="mori-ritual-narrative whisper">
+              {t("quickstart.dwelling_scene_1_confirm_2", { name: summonerName.trim() })}
+            </p>
+          </>
+        )}
+      </div>
+
       {dots}
       <div className="mori-quickstart-footer">
-        <button className="mori-btn ghost" onClick={onSkip}>{t("quickstart.ritual_dismiss")}</button>
+        <button className="mori-btn ghost" onClick={doSkip}>{t("quickstart.ritual_dismiss")}</button>
         <button className="mori-btn ghost" onClick={onSwitchToDirect}>{t("quickstart.ritual_switch_direct")}</button>
-        <button className="mori-btn primary" onClick={onNext}>{t("quickstart.ritual_enter_button")}</button>
+        <button className="mori-btn primary" onClick={onNext} disabled={!nameReady}>
+          {nameReady
+            ? t("quickstart.dwelling_scene_1_button", { name: summonerName.trim() })
+            : t("quickstart.dwelling_scene_1_name_label")}
+        </button>
       </div>
     </div>
   );
 }
 
-function RitualStepLantern({ t, provider, setProvider, onBack, onNext, dots }: {
-  t: any; provider: Provider; setProvider: (p: Provider) => void; onBack: () => void; onNext: () => void; dots?: React.ReactNode;
-}) {
+// ─── 第二幕 · 靈氣 ──────────────────────────────────────────
+
+function SceneAura({
+  t, summonerName, auraKey, setAuraKey, showAura, setShowAura,
+  setVerify, envGroqDetected, dots, onBack, onNext,
+}: StepProps) {
+  const auraReady = auraKey.trim().length > 5 || (envGroqDetected && auraKey.trim() === "");
+
   return (
     <div className="mori-quickstart-ritual-step">
-      <p className="mori-ritual-narrative">{t("quickstart.ritual_lantern_1")}</p>
-      <p className="mori-ritual-narrative whisper">{t("quickstart.ritual_lantern_2")}</p>
-      <div className="mori-quickstart-provider-grid">
-        {(Object.keys(PROVIDER_INFO) as Provider[]).map((p) => (
+      <div className="mori-quickstart-scene-content">
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_2_intro")}</p>
+        <p className="mori-ritual-narrative whisper">
+          {t("quickstart.dwelling_scene_2_say_1", { name: summonerName.trim() })}
+        </p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_2_intro_2")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_2_say_2")}</p>
+
+        <div className="mori-quickstart-field">
+          <label>
+            {t("quickstart.dwelling_scene_2_aura_tech_label")}
+            <a
+              href={GROQ_HELP_URL}
+              onClick={(e) => { e.preventDefault(); invoke("open_external_url", { url: GROQ_HELP_URL }).catch(console.warn); }}
+              className="mori-quickstart-help-link"
+            >
+              {t("quickstart.dwelling_scene_2_aura_help")} ↗
+            </a>
+          </label>
+          {envGroqDetected && (
+            <div className="mori-quickstart-env-banner">
+              ✓ {t("quickstart.dwelling_scene_2_env_detected")}
+            </div>
+          )}
+          <div className="mori-quickstart-key-input-row">
+            <input
+              type={showAura ? "text" : "password"}
+              className="mori-input"
+              placeholder={t("quickstart.dwelling_scene_2_aura_placeholder")}
+              value={auraKey}
+              onChange={(e) => {
+                setAuraKey(e.target.value);
+                setVerify({ kind: "idle" });
+              }}
+              autoFocus
+            />
+            <button type="button" className="mori-btn ghost small" onClick={() => setShowAura(!showAura)}>
+              {showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {dots}
+      <div className="mori-quickstart-footer">
+        <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
+        <button className="mori-btn primary" onClick={onNext} disabled={!auraReady}>
+          {t("quickstart.dwelling_scene_2_button")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 第三幕 · 靈力 ──────────────────────────────────────────
+
+function ScenePower({
+  t, summonerName, powerChoice, setPowerChoice,
+  powerKey, setPowerKey, showPower, setShowPower,
+  powerBase, setPowerBase, powerModel, setPowerModel,
+  setVerify, dots, onBack, onNext,
+}: StepProps) {
+  const keyReady =
+    powerChoice === "skip" ||
+    (powerChoice !== null && powerKey.trim().length > 5 &&
+      (powerChoice === "gemini" || powerBase.trim().length > 5));
+
+  return (
+    <div className="mori-quickstart-ritual-step">
+      <div className="mori-quickstart-scene-content">
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_3_intro_1")}</p>
+        <p className="mori-ritual-narrative whisper">
+          {t("quickstart.dwelling_scene_3_say_thanks", { name: summonerName.trim() })}
+        </p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_3_intro_2")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_3_say_1")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_3_intro_3")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_3_say_2")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_3_say_3")}</p>
+
+        <div className="mori-quickstart-provider-grid">
+        {(["gemini", "custom"] as const).map((p) => (
           <button
             key={p}
-            className={`mori-quickstart-provider-card ${provider === p ? "active" : ""}`}
-            onClick={() => setProvider(p)}
+            className={`mori-quickstart-provider-card ${powerChoice === p ? "active" : ""}`}
+            onClick={() => {
+              setPowerChoice(p);
+              setVerify({ kind: "idle" });
+            }}
           >
-            <span className="provider-name">{PROVIDER_INFO[p].label}</span>
+            <span className="provider-name">
+              {p === "gemini"
+                ? `✦ ${t("quickstart.dwelling_scene_3_card_gemini_name")}`
+                : `❂ ${t("quickstart.dwelling_scene_3_card_compat_name")}`}
+            </span>
             <span className="provider-hint">
-              {p === "groq" ? t("quickstart.groq_hint") : t("quickstart.gemini_hint")}
+              {p === "gemini"
+                ? t("quickstart.dwelling_scene_3_card_gemini_hint")
+                : t("quickstart.dwelling_scene_3_card_compat_hint")}
             </span>
           </button>
         ))}
       </div>
+
+      {powerChoice === "custom" && (
+        <>
+          <div className="mori-quickstart-field">
+            <label>{t("quickstart.dwelling_scene_3_api_base_label")}</label>
+            <input
+              type="text"
+              className="mori-input"
+              placeholder={t("quickstart.dwelling_scene_3_api_base_placeholder")}
+              value={powerBase}
+              onChange={(e) => {
+                setPowerBase(e.target.value);
+                setVerify({ kind: "idle" });
+              }}
+            />
+          </div>
+          <div className="mori-quickstart-field">
+            <label>{t("quickstart.dwelling_scene_3_model_label")}</label>
+            <input
+              type="text"
+              className="mori-input"
+              placeholder={t("quickstart.dwelling_scene_3_model_placeholder")}
+              value={powerModel}
+              onChange={(e) => setPowerModel(e.target.value)}
+            />
+          </div>
+        </>
+      )}
+
+      {powerChoice && powerChoice !== "skip" && (
+        <div className="mori-quickstart-field">
+          <label>
+            {t("quickstart.dwelling_scene_3_power_tech_label")}
+            <a
+              href={powerChoice === "gemini" ? GEMINI_HELP_URL : "#"}
+              onClick={(e) => {
+                e.preventDefault();
+                if (powerChoice === "gemini") {
+                  invoke("open_external_url", { url: GEMINI_HELP_URL }).catch(console.warn);
+                }
+              }}
+              className="mori-quickstart-help-link"
+            >
+              {t("quickstart.dwelling_scene_3_power_help")}
+            </a>
+          </label>
+          <div className="mori-quickstart-key-input-row">
+            <input
+              type={showPower ? "text" : "password"}
+              className="mori-input"
+              placeholder={t("quickstart.dwelling_scene_3_power_placeholder")}
+              value={powerKey}
+              onChange={(e) => {
+                setPowerKey(e.target.value);
+                setVerify({ kind: "idle" });
+              }}
+              autoFocus
+            />
+            <button type="button" className="mori-btn ghost small" onClick={() => setShowPower(!showPower)}>
+              {showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Skip link — 視覺上比兩張卡更低調 */}
+      <button
+        className="mori-quickstart-skip-link"
+        onClick={() => {
+          setPowerChoice("skip");
+          setVerify({ kind: "idle" });
+        }}
+      >
+        {powerChoice === "skip" ? "✓ " : "─ "}
+        {t("quickstart.dwelling_scene_3_skip_link")}
+        {" ─"}
+      </button>
+      {powerChoice === "skip" && (
+        <p className="mori-quickstart-skip-note">{t("quickstart.dwelling_scene_3_skip_note")}</p>
+      )}
+      </div>
+
       {dots}
       <div className="mori-quickstart-footer">
         <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
-        <button className="mori-btn primary" onClick={onNext}>{t("quickstart.ritual_lantern_button")}</button>
-      </div>
-    </div>
-  );
-}
-
-function RitualStepOfferKey({
-  t, info, keyText, setKeyText, showKey, setShowKey, setVerify, onBack, onNext, dots,
-}: {
-  t: any;
-  info: typeof PROVIDER_INFO[Provider];
-  keyText: string; setKeyText: (k: string) => void;
-  showKey: boolean; setShowKey: (b: boolean) => void;
-  setVerify: (v: VerifyState) => void;
-  onBack: () => void; onNext: () => void;
-  dots?: React.ReactNode;
-}) {
-  return (
-    <div className="mori-quickstart-ritual-step">
-      <p className="mori-ritual-narrative">{t("quickstart.ritual_offer_1")}</p>
-      <p className="mori-ritual-narrative whisper">
-        {t("quickstart.ritual_offer_2")}{" "}
-        <a href={info.helpUrl} target="_blank" rel="noopener noreferrer">
-          {t("quickstart.where_get_key")} ↗
-        </a>
-      </p>
-      <div className="mori-quickstart-key-input-row">
-        <input
-          type={showKey ? "text" : "password"}
-          className="mori-input"
-          placeholder={info.placeholder}
-          value={keyText}
-          onChange={(e) => {
-            setKeyText(e.target.value);
-            setVerify({ kind: "idle" });
-          }}
-          autoFocus
-        />
-        <button
-          type="button"
-          className="mori-btn ghost small"
-          onClick={() => setShowKey(!showKey)}
-        >
-          {showKey ? t("quickstart.hide_key") : t("quickstart.show_key")}
+        <button className="mori-btn primary" onClick={onNext} disabled={!keyReady}>
+          {powerChoice === "skip"
+            ? t("quickstart.dwelling_scene_3_button_skip")
+            : t("quickstart.dwelling_scene_3_button")}
         </button>
       </div>
-      {dots}
-      <div className="mori-quickstart-footer">
-        <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
-        <button
-          className="mori-btn primary"
-          onClick={onNext}
-          disabled={keyText.trim().length <= 5}
-        >{t("quickstart.ritual_offer_button")}</button>
-      </div>
     </div>
   );
 }
 
-function RitualStepVerify({
-  t, verify, canVerify, canSave, doVerify, doSave, onBack, dots,
-}: {
-  t: any;
-  verify: VerifyState;
-  canVerify: boolean;
-  canSave: boolean;
-  doVerify: () => void;
-  doSave: () => void;
-  onBack: () => void;
-  dots?: React.ReactNode;
-}) {
-  // 自動觸發一次 verify(進入這步就驗)
+// ─── 第四幕 · 驗印 ──────────────────────────────────────────
+
+function SceneSealing({
+  t, summonerName, verify, powerChoice, doVerify, setScene, dots, onBack, onNext,
+}: StepProps) {
+  // 進入這幕一定重驗 — 即使 prefill 把 verify 設成 ok,也要重跑一次儀式
+  // (key 可能已過期 / revoked,而且 user 應該看到「⋯⋯順著脈絡⋯⋯」這段)
   useEffect(() => {
-    if (verify.kind === "idle" && canVerify) doVerify();
+    doVerify();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 累積顯示:每階段是新一段,不蓋掉前一段。
+  // - 靈氣這段:running.phase==="aura" 或之後任何狀態 都顯示;phase==="aura" pulse
+  // - 靈力這段:auraVerified 或之後 顯示;phase==="power" pulse;skip 不顯示
+  // - 對上了:verify.kind==="ok"
+  // - err:依 which 顯示對應 phase 的失敗訊息(取代該 phase 的 pulse)
+  const showAura =
+    verify.kind === "running" ||
+    verify.kind === "ok" ||
+    (verify.kind === "err" && verify.which === "aura");
+  const auraPulsing = verify.kind === "running" && verify.phase === "aura";
+  const auraFailed = verify.kind === "err" && verify.which === "aura";
+
+  const showPower =
+    powerChoice !== "skip" &&
+    ((verify.kind === "running" && verify.auraVerified) ||
+      verify.kind === "ok" ||
+      (verify.kind === "err" && verify.which === "power"));
+  const powerPulsing = verify.kind === "running" && verify.phase === "power";
+  const powerFailed = verify.kind === "err" && verify.which === "power";
+
   return (
     <div className="mori-quickstart-ritual-step">
-      <p className="mori-ritual-narrative">{t("quickstart.ritual_verify_1")}</p>
-      <div className="mori-quickstart-verify-row centered">
-        {verify.kind === "verifying" && (
-          <span className="mori-ritual-pulse">✦ {t("quickstart.verifying")} ✦</span>
+      <div className="mori-quickstart-scene-content">
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_4_intro")}</p>
+
+        {/* 第一階段敘述:靈氣的脈絡 */}
+        {showAura && !auraFailed && (
+          <p className={`mori-ritual-narrative whisper ${auraPulsing ? "mori-ritual-feeling-pulse" : ""}`}>
+            {t("quickstart.dwelling_scene_4_feeling_aura")}
+          </p>
         )}
-        {verify.kind === "ok" && (
-          <span className="mori-quickstart-verify-msg ok">✓ {t("quickstart.ritual_verify_ok")}</span>
-        )}
-        {verify.kind === "err" && (
+        {auraFailed && (
           <>
-            <span className="mori-quickstart-verify-msg err">✗ {verify.msg}</span>
-            <button className="mori-btn" onClick={doVerify}>{t("quickstart.verify_button")}</button>
+            <p className="mori-ritual-narrative whisper">
+              {t("quickstart.dwelling_scene_4_no_match_aura")}
+            </p>
+            <p className="mori-quickstart-verify-error-detail">{verify.msg}</p>
           </>
         )}
+
+        {/* 第二階段敘述:靈力的脈絡 — 加 whisper-late 緩淡入 */}
+        {showPower && !powerFailed && (
+          <p className={`mori-ritual-narrative whisper whisper-late ${powerPulsing ? "mori-ritual-feeling-pulse" : ""}`}>
+            {t("quickstart.dwelling_scene_4_feeling_power")}
+          </p>
+        )}
+        {powerFailed && (
+          <>
+            <p className="mori-ritual-narrative whisper">
+              {t("quickstart.dwelling_scene_4_no_match_power")}
+            </p>
+            <p className="mori-quickstart-verify-error-detail">{verify.msg}</p>
+          </>
+        )}
+
+        {/* 最後揭曉:對上了 — 緩慢淡入 2.5s,儀式氣氛不破 */}
+        {verify.kind === "ok" && (
+          <p className="mori-ritual-narrative whisper whisper-final">
+            {t("quickstart.dwelling_scene_4_match", { name: summonerName.trim() })}
+          </p>
+        )}
       </div>
+
       {dots}
+      {/* err 時 footer 只顯示「回去重填」按鈕 — 同 key 再試必失敗,直接送回對應幕 */}
+      {verify.kind === "err" ? (
+        <div className="mori-quickstart-footer single">
+          <button
+            className="mori-btn primary"
+            onClick={() => setScene(verify.which === "aura" ? 2 : 3)}
+          >
+            {verify.which === "aura"
+              ? t("quickstart.dwelling_scene_4_err_back_aura")
+              : t("quickstart.dwelling_scene_4_err_back_power")}
+          </button>
+        </div>
+      ) : (
       <div className="mori-quickstart-footer">
         <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
-        <button className="mori-btn primary" onClick={doSave} disabled={!canSave}>
-          {t("quickstart.ritual_verify_button")}
+        <button className="mori-btn primary" onClick={onNext} disabled={verify.kind !== "ok"}>
+          {t("quickstart.dwelling_scene_4_button")}
         </button>
       </div>
+      )}
     </div>
   );
 }
 
-function RitualStepAwaken({ t }: { t: any }) {
+// ─── 第五幕 · 安頓 ──────────────────────────────────────────
+
+function SceneSettling({
+  t, summonerName, doSave,
+}: StepProps) {
   return (
-    <div className="mori-quickstart-ritual-step awaken">
-      <p className="mori-ritual-narrative whisper">{t("quickstart.ritual_awaken_1")}</p>
-      <p className="mori-ritual-narrative">{t("quickstart.ritual_awaken_2")}</p>
-      <div className="mori-ritual-sparkle">✦</div>
+    <div className="mori-quickstart-ritual-step settling">
+      <div className="mori-quickstart-scene-content">
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_5_silence")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_opening")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_revival")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_settle_1")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_5_settle_2")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_look")}</p>
+        <p className="mori-ritual-narrative whisper">
+          {t("quickstart.dwelling_scene_5_promise_1", { name: summonerName.trim() })}
+        </p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_5_promise_2")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_book_action")}</p>
+        <p className="mori-ritual-narrative whisper">{t("quickstart.dwelling_scene_5_book_name")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_world_alive")}</p>
+        <p className="mori-ritual-narrative">{t("quickstart.dwelling_scene_5_breathing")}</p>
+        <p className="mori-ritual-narrative aftermath">{t("quickstart.dwelling_scene_5_sprout")}</p>
+        <p className="mori-ritual-narrative whisper">
+          {t("quickstart.dwelling_scene_5_thanks", { name: summonerName.trim() })}
+        </p>
+      </div>
+
+      <div className="mori-quickstart-footer single">
+        <button className="mori-btn primary large" onClick={doSave}>
+          {t("quickstart.dwelling_scene_5_button")}
+        </button>
+      </div>
     </div>
   );
 }
@@ -760,12 +1084,9 @@ function RitualStepAwaken({ t }: { t: any }) {
 // ─── First-run detection ─────────────────────────────────────
 
 /**
- * 偵測「需要顯示 Quickstart」 — 純看 flag:
+ * 偵測「需要顯示宿靈儀式」 — 純看 flag:
  *   config.json `quickstart_completed === true` → 不顯示
  *   否則 → 顯示(第一次跑就會跳)
- *
- * 不偵測 API key 是因為:user 可能會故意清掉 key 重新設定,
- * 或想再走一次儀式流程 — 那是 Help 按鈕的工作,不是 auto 偵測。
  */
 export async function shouldShowQuickstart(): Promise<boolean> {
   try {
@@ -788,7 +1109,6 @@ export async function markQuickstartCompleted(): Promise<void> {
     cfg = {};
   }
   cfg.quickstart_completed = true;
-  // 清掉舊版的 quickstart_skipped flag(已不用)
   delete cfg.quickstart_skipped;
   await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
 }

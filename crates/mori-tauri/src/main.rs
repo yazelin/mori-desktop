@@ -730,6 +730,31 @@ fn config_write(
     Ok(())
 }
 
+/// 召喚師按下宿靈儀式第五幕「歡迎回家, Mori」後呼叫 — 讓 floating Mori 現身桌面。
+/// 在儀式完成前 floating 是隱藏的(setup hook 讀 quickstart_completed 決定),
+/// 這裡是真正讓她「住下」的那個瞬間。
+#[tauri::command]
+fn floating_show(app: AppHandle) -> Result<(), String> {
+    let win = app
+        .get_webview_window("floating")
+        .ok_or_else(|| "floating window not found".to_string())?;
+    win.show().map_err(|e| format!("show floating: {e}"))?;
+    Ok(())
+}
+
+/// 開外部 URL 到系統預設瀏覽器。Tauri webview 不會處理 `<a target="_blank">`,
+/// 前端有要打開外連(去拿 API key 等)就 invoke 這個。走 action_skills 同一份
+/// platform::open_url 實作,行為跨 Linux / Windows 一致。
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err(format!("only http(s) URLs allowed: {trimmed}"));
+    }
+    crate::action_skills::open_url_for_quickstart(trimmed)
+        .map_err(|e| format!("open url: {e}"))
+}
+
 #[tauri::command]
 fn corrections_read() -> Result<String, String> {
     let path = mori_dir().join("corrections.md");
@@ -1840,10 +1865,25 @@ async fn run_agent_pipeline(
             "calling agent"
         );
 
-        // 註冊 skills — 依 agent profile 的 enabled_skills 過濾
+        // 宿靈儀式第三幕跳過 → agent_disabled = true → chat-only,沒 skill / tool / agent loop。
+        // 對應「Mori 還沒分到靈力,動不了手」的狀態。從 config.json 直接讀,不另外做 struct。
+        let agent_disabled = {
+            let path = mori_dir().join("config.json");
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v.get("agent_disabled").and_then(|x| x.as_bool()))
+                .unwrap_or(false)
+        };
+        if agent_disabled {
+            tracing::info!("agent_disabled=true → chat-only(沒分靈力,Mori 不掛 skill)");
+        }
+
+        // 註冊 skills — 依 agent profile 的 enabled_skills 過濾;agent_disabled 時整盤跳過
         let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
         let mut registry = SkillRegistry::new();
         let allows = |name: &str| -> bool {
+            if agent_disabled { return false; }
             match &enabled_set {
                 Some(set) => set.contains(name),
                 None => true, // None = 全開
@@ -1877,12 +1917,15 @@ async fn run_agent_pipeline(
         if allows("fetch_url") {
             registry.register(Arc::new(mori_core::skill::FetchUrlSkill::new()));
         }
-        // set_mode 永遠註冊（「晚安」「醒醒」是核心功能，無法被 disable）
-        let mode_controller: Arc<dyn ModeController> = Arc::new(StateModeController {
-            state: state.clone(),
-            app: app.clone(),
-        });
-        registry.register(Arc::new(SetModeSkill::new(mode_controller)));
+        // set_mode 永遠註冊(「晚安」「醒醒」是核心功能,無法被 disable)
+        // — 但 agent_disabled 時整個 skill 系統都不掛,user 還可以用 UI 按鈕切 mode
+        if !agent_disabled {
+            let mode_controller: Arc<dyn ModeController> = Arc::new(StateModeController {
+                state: state.clone(),
+                app: app.clone(),
+            });
+            registry.register(Arc::new(SetModeSkill::new(mode_controller)));
+        }
         if allows("paste_selection_back") {
             let paste_controller: Arc<dyn PasteController> =
                 Arc::new(crate::selection::PlatformPasteController::new(app.clone()));
@@ -1913,10 +1956,13 @@ async fn run_agent_pipeline(
         }
 
         // 5H: profile 自訂的 shell skills — 不受 enabled_skills filter 影響。
-        // 寫進 shell_skills: 就是要用的（filter 只篩 built-in skill 子集）。
-        for def in &agent_profile.frontmatter.shell_skills {
-            tracing::info!(skill = %def.name, "registering shell_skill from profile");
-            registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
+        // 寫進 shell_skills: 就是要用的(filter 只篩 built-in skill 子集)。
+        // agent_disabled 時跳過 — Mori 沒分到靈力,動不了 shell。
+        if !agent_disabled {
+            for def in &agent_profile.frontmatter.shell_skills {
+                tracing::info!(skill = %def.name, "registering shell_skill from profile");
+                registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
+            }
         }
 
         let registry = Arc::new(registry);
@@ -2934,6 +2980,8 @@ fn main() {
             picker_switch_agent_profile,
             config_read,
             config_write,
+            floating_show,
+            open_external_url,
             corrections_read,
             corrections_write,
             profile_read,
@@ -2985,6 +3033,23 @@ fn main() {
             // manifest.json + 6 張 sprite PNG 從 binary 內嵌寫入,已存在不覆蓋。
             if let Err(e) = crate::character_pack::ensure_default() {
                 tracing::warn!(error = %e, "character_pack::ensure_default failed");
+            }
+
+            // 宿靈儀式還沒完成 → 隱藏 floating Mori,等召喚師按下「歡迎回家, Mori」才現身
+            // (Quickstart 的 doSave 完成後 invoke `floating_show`)
+            {
+                let cfg_path = mori_dir().join("config.json");
+                let quickstart_done = std::fs::read_to_string(&cfg_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .and_then(|v| v.get("quickstart_completed").and_then(|x| x.as_bool()))
+                    .unwrap_or(false);
+                if !quickstart_done {
+                    if let Some(f) = app.get_webview_window("floating") {
+                        let _ = f.hide();
+                        tracing::info!("floating Mori hidden — 等宿靈儀式完成才現身");
+                    }
+                }
             }
 
             // 注意:**不要**在這裡 setup() 直接 call set_always_on_top —

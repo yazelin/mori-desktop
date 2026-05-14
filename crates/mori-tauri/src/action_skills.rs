@@ -14,6 +14,13 @@ use mori_core::context::Context;
 use mori_core::skill::{Skill, SkillOutput};
 use serde_json::{json, Value};
 
+/// 給 Tauri command `open_external_url` 用 — wrapper over platform::open_url。
+/// 之前只有 skill 內部能用,Quickstart 等前端要開外連也得走這條,以免 webview
+/// 對 `<a target="_blank">` 不買單。
+pub fn open_url_for_quickstart(url: &str) -> anyhow::Result<()> {
+    platform::open_url(url)
+}
+
 // ─── Platform helpers ────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
