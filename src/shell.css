@@ -1961,10 +1961,10 @@
   bottom: -10px;
   left: 50%;
   transform: translateX(-50%);
-  color: rgba(168, 197, 162, 0.6);
-  background: linear-gradient(180deg, rgba(20, 38, 30, 0.96) 0%, rgba(12, 24, 18, 0.98) 100%);
+  color: rgba(168, 197, 162, 0.55);
   padding: 0 8px;
   font-size: 14px;
+  pointer-events: none;
 }
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-header h2 {
   font-size: 22px;
@@ -2072,7 +2072,6 @@
   border-bottom-color: rgba(106, 143, 114, 0.35);
 }
 [data-theme-base="light"] .mori-quickstart-backdrop.mode-ritual .mori-quickstart-header::after {
-  background: linear-gradient(180deg, rgba(248, 252, 245, 0.97) 0%, rgba(235, 245, 230, 0.99) 100%);
   color: rgba(80, 110, 90, 0.7);
 }
 [data-theme-base="light"] .mori-quickstart-backdrop.mode-ritual .mori-quickstart-header h2 {
