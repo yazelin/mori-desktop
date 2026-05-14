@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState, type SVGProps } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
 import {
@@ -72,9 +73,10 @@ function Section({
 }
 
 function StatusBadge({ status }: { status: SaveStatus }) {
+  const { t } = useTranslation();
   if (status.kind === "idle") return null;
-  if (status.kind === "saving") return <span className="mori-save-status saving">儲存中…</span>;
-  if (status.kind === "ok") return <span className="mori-save-status ok">✓ 已儲存</span>;
+  if (status.kind === "saving") return <span className="mori-save-status saving">{t("common.loading")}</span>;
+  if (status.kind === "ok") return <span className="mori-save-status ok">{t("common.ok_saved")}</span>;
   return <span className="mori-save-status err">✗ {status.message}</span>;
 }
 
@@ -449,6 +451,7 @@ function ConfigTab({
   pendingSubTab?: string | null;
   onSubTabApplied?: () => void;
 } = {}) {
+  const { t } = useTranslation();
   const [raw, setRaw] = useState<string>("");
   const [orig, setOrig] = useState<string>("");
   // 5R-followup-4: sub-tab IA。raw 也是其中一個 sub-tab(取代舊的
@@ -591,20 +594,20 @@ function ConfigTab({
   // 5R-followup-4: Sub-tab IA — 把 sections 按使用者心智模型分組,不再
   // 全部塞在一條 form 裡 scroll 累。X11 sub-tab 條件 render。
   const subTabs: SubTabSpec[] = [
-    { id: "quick", label: "Quick setup", Icon: IconHome },
-    { id: "llm", label: "LLM / Provider", Icon: IconCloud },
-    { id: "voice", label: "Voice input", Icon: IconVoiceMic },
-    { id: "appearance", label: "Appearance", Icon: IconTree },
-    { id: "hotkey", label: "Hotkey", Icon: IconKeyboard },
-    ...(isX11 ? [{ id: "x11" as SubTabId, label: "X11 only", Icon: IconKeyboard }] : []),
-    { id: "annuli" as SubTabId, label: "Annuli", Icon: IconAnnuli },
-    { id: "corrections" as SubTabId, label: "Corrections", Icon: IconClipboard },
-    { id: "raw", label: "Raw JSON", Icon: IconPencil },
+    { id: "quick", label: t("config_tab.subtabs.quick"), Icon: IconHome },
+    { id: "llm", label: t("config_tab.subtabs.llm"), Icon: IconCloud },
+    { id: "voice", label: t("config_tab.subtabs.voice"), Icon: IconVoiceMic },
+    { id: "appearance", label: t("config_tab.subtabs.appearance"), Icon: IconTree },
+    { id: "hotkey", label: t("config_tab.subtabs.hotkey"), Icon: IconKeyboard },
+    ...(isX11 ? [{ id: "x11" as SubTabId, label: t("config_tab.subtabs.x11"), Icon: IconKeyboard }] : []),
+    { id: "annuli" as SubTabId, label: t("config_tab.subtabs.annuli"), Icon: IconAnnuli },
+    { id: "corrections" as SubTabId, label: t("config_tab.subtabs.corrections"), Icon: IconClipboard },
+    { id: "raw", label: t("config_tab.subtabs.raw"), Icon: IconPencil },
   ];
 
   return (
     <div className="mori-tab mori-tab-config">
-      <h2 className="mori-tab-title">Config</h2>
+      <h2 className="mori-tab-title">{t("config_tab.title")}</h2>
 
       {error && <div className="mori-config-error">{error}</div>}
 
@@ -612,20 +615,20 @@ function ConfigTab({
           有獨立 save 在它自己 sub-tab。 */}
       <div className="mori-config-savebar">
         <span className="mori-config-savebar-hint">
-          ~/.mori/config.json · 改完不用重啟,下次熱鍵讀新值
+          {t("config_tab.savebar_hint")}
         </span>
         <StatusBadge status={status} />
         <button
           className="mori-btn"
           onClick={() => setRaw(orig)}
           disabled={!dirty}
-        >還原</button>
+        >{t("common.revert")}</button>
         <button
           className="mori-btn primary"
           onClick={saveConfig}
           disabled={!dirty || !!rawError}
-          title="存 config.json"
-        >儲存</button>
+          title="config.json"
+        >{t("common.save")}</button>
       </div>
 
       <div className="mori-config-layout">
