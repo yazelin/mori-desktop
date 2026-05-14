@@ -149,6 +149,19 @@ export function IconGlobe(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 🎚 Equalizer — 4 條 vertical bar,有 CSS animation 跳動(audio 播時),
+// 靜音時三條都縮短不跳。class .playing 控制動畫狀態。
+export function IconEqualizer({ playing = false, ...props }: SVGProps<SVGSVGElement> & { playing?: boolean }) {
+  return (
+    <svg {...base} {...props} className={`mori-icon-eq ${playing ? "playing" : ""}`}>
+      <rect x="4" y="10" width="2.5" height="4" rx="1" className="eq-bar eq-bar-1" />
+      <rect x="9" y="8" width="2.5" height="8" rx="1" className="eq-bar eq-bar-2" />
+      <rect x="14" y="6" width="2.5" height="12" rx="1" className="eq-bar eq-bar-3" />
+      <rect x="19" y="10" width="2.5" height="4" rx="1" className="eq-bar eq-bar-4" />
+    </svg>
+  );
+}
+
 // ❓ Help — 圓圈內問號(打開 Quickstart 引導)
 export function IconHelp(props: SVGProps<SVGSVGElement>) {
   return (

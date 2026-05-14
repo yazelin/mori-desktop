@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { IconClose, IconGlobe, IconSun, IconMoon } from "./icons";
+import { IconClose, IconGlobe, IconSun, IconMoon, IconEqualizer } from "./icons";
 import { setLocale, nextLocale } from "./i18n";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { ritualAudio } from "./ritualAudio";
@@ -227,9 +227,8 @@ export function Quickstart({ onDone }: QuickstartProps) {
               className="mori-btn ghost"
               onClick={() => setAudioMuted(!audioMuted)}
               title={audioMuted ? t("quickstart.audio_unmute") : t("quickstart.audio_mute")}
-              style={{ fontSize: 11 }}
             >
-              {audioMuted ? t("quickstart.audio_off") : t("quickstart.audio_on")}
+              <IconEqualizer width={16} height={16} playing={!audioMuted} />
             </button>
           )}
           <button className="mori-btn ghost" onClick={doSkip} title={t("quickstart.skip_title")}>
