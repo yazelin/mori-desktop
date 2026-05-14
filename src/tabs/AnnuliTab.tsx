@@ -15,7 +15,14 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { IconRefresh } from "../icons";
+import { emit } from "@tauri-apps/api/event";
+import { IconRefresh, IconConfig } from "../icons";
+
+function gotoConfig() {
+  emit("mori-nav", { tab: "config", subTab: "annuli" }).catch((e) =>
+    console.error("[annuli-tab] navigate failed", e),
+  );
+}
 
 type AnnuliStatus = {
   configured: boolean;
@@ -140,25 +147,24 @@ export default function AnnuliTab() {
   };
 
   if (!status) {
-    return <div style={{ padding: "1.5rem" }}>載入 Annuli 狀態中…</div>;
+    return <div className="mori-tab mori-annuli-loading">載入 Annuli 狀態中…</div>;
   }
 
   if (!status.configured) {
     return (
-      <div style={{ padding: "1.5rem", maxWidth: "60rem" }}>
-        <h1>Annuli</h1>
-        <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
-          Annuli 整合**沒接**(`~/.mori/config.json` 的 `annuli.enabled` 沒設或缺欄位)。
+      <div className="mori-tab">
+        <h1 className="mori-tab-title">Annuli</h1>
+        <p className="mori-tab-hint">
+          Annuli 整合<strong>還沒接</strong> — 走本機 <code>~/.mori/memory/</code> fallback。
+          接上 annuli HTTP service 後,Mori 就會把 SOUL / MEMORY / events / rings 都讀寫到 vault。
         </p>
-        <pre
-          style={{
-            background: "var(--surface-alt, #1a1a2e)",
-            padding: "1rem",
-            borderRadius: "0.5rem",
-            overflow: "auto",
-            fontSize: "0.85rem",
-          }}
-        >
+        <div className="mori-annuli-sleep-row">
+          <button className="mori-btn primary" onClick={gotoConfig}>
+            <IconConfig /> 去 Config 設定 Annuli
+          </button>
+        </div>
+        <p className="mori-tab-hint">參考 schema:</p>
+        <pre className="mori-annuli-pre">
 {`{
   "annuli": {
     "enabled": true,
@@ -175,114 +181,75 @@ export default function AnnuliTab() {
   }
 
   return (
-    <div style={{ padding: "1.5rem", maxWidth: "60rem" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
-        <h1 style={{ margin: 0 }}>Annuli — {status.spirit ?? "(unknown spirit)"}</h1>
-        <button onClick={refresh} disabled={loading} title="重新整理">
-          <IconRefresh /> {loading ? "載入中…" : "重新整理"}
-        </button>
+    <div className="mori-tab">
+      <div className="mori-annuli-header">
+        <h1 className="mori-tab-title">Annuli — {status.spirit ?? "(unknown spirit)"}</h1>
+        <div className="mori-annuli-header-actions">
+          <button className="mori-btn" onClick={gotoConfig} title="編輯 annuli 設定">
+            <IconConfig /> 設定
+          </button>
+          <button className="mori-btn" onClick={refresh} disabled={loading} title="重新整理">
+            <IconRefresh /> {loading ? "載入中…" : "重新整理"}
+          </button>
+        </div>
       </div>
 
       {/* Status row */}
-      <div
-        style={{
-          padding: "0.75rem 1rem",
-          marginBottom: "1rem",
-          borderRadius: "0.5rem",
-          background: status.reachable ? "rgba(0,180,80,0.1)" : "rgba(220,80,80,0.1)",
-          border: `1px solid ${status.reachable ? "rgba(0,180,80,0.3)" : "rgba(220,80,80,0.3)"}`,
-        }}
-      >
-        <div style={{ fontSize: "0.9rem" }}>
+      <div className={`mori-annuli-status ${status.reachable ? "ok" : "bad"}`}>
+        <div className="mori-annuli-status-main">
           {status.reachable ? "🟢 connected" : "🔴 unreachable"} · endpoint: <code>{status.endpoint}</code> · spirit: <code>{status.spirit}</code> · user_id: <code>{status.user_id}</code>
         </div>
-        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+        <div className="mori-annuli-status-sub">
           X-Soul-Token: {status.soul_token_configured ? "✅ 設好(可 PUT /soul)" : "⚠️ 沒設(PUT /soul 一律 403)"}
         </div>
         {status.error && (
-          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--error, #cc6666)" }}>
+          <div className="mori-annuli-status-err">
             錯誤:{status.error}
           </div>
         )}
       </div>
 
       {/* Sleep button */}
-      <div style={{ marginBottom: "1.5rem" }}>
+      <div className="mori-annuli-sleep-row">
         <button
+          className="mori-btn"
           onClick={triggerSleep}
           disabled={sleepBusy || !status.reachable}
-          style={{ padding: "0.5rem 1rem", fontSize: "0.95rem" }}
         >
           {sleepBusy ? "🌙 reflecting…(LLM 寫 ring 中)" : "🌙 /sleep — 寫一輪反思年輪"}
         </button>
         {sleepResult && (
-          <div style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>
+          <div className="mori-annuli-sleep-result">
             {sleepResult}
           </div>
         )}
       </div>
 
       {/* SOUL.md */}
-      <section style={{ marginBottom: "2rem" }}>
-        <h2>SOUL.md</h2>
-        <pre
-          style={{
-            background: "var(--surface-alt, #1a1a2e)",
-            padding: "1rem",
-            borderRadius: "0.5rem",
-            overflow: "auto",
-            maxHeight: "20rem",
-            fontSize: "0.85rem",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
+      <section className="mori-annuli-section">
+        <h2 className="mori-annuli-section-title">SOUL.md</h2>
+        <pre className="mori-annuli-pre mori-annuli-soul">
           {soul ?? "(載入中)"}
         </pre>
       </section>
 
       {/* MEMORY § sections */}
-      <section style={{ marginBottom: "2rem" }}>
-        <h2>MEMORY.md sections ({sections.length})</h2>
+      <section className="mori-annuli-section">
+        <h2 className="mori-annuli-section-title">MEMORY.md sections ({sections.length})</h2>
         {sections.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>(沒有 § sections 或讀取失敗)</p>
+          <p className="mori-annuli-empty">(沒有 § sections 或讀取失敗)</p>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0 }}>
+          <ul className="mori-annuli-list">
             {sections.map((s) => (
-              <li
-                key={s.index}
-                style={{
-                  marginBottom: "0.5rem",
-                  border: "1px solid var(--border, #333)",
-                  borderRadius: "0.5rem",
-                  overflow: "hidden",
-                }}
-              >
+              <li key={s.index} className="mori-annuli-mem-item">
                 <button
+                  className="mori-annuli-mem-header"
                   onClick={() => toggleSection(s.index)}
-                  style={{
-                    width: "100%",
-                    padding: "0.5rem 1rem",
-                    textAlign: "left",
-                    background: "transparent",
-                    border: "none",
-                    color: "inherit",
-                    cursor: "pointer",
-                  }}
                 >
                   {expanded.has(s.index) ? "▼" : "▶"} § {s.header}
                 </button>
                 {expanded.has(s.index) && s.body && (
-                  <pre
-                    style={{
-                      padding: "0.75rem 1rem",
-                      margin: 0,
-                      fontSize: "0.85rem",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      background: "var(--surface-alt, #1a1a2e)",
-                    }}
-                  >
+                  <pre className="mori-annuli-pre mori-annuli-mem-body">
                     {s.body}
                   </pre>
                 )}
@@ -293,25 +260,17 @@ export default function AnnuliTab() {
       </section>
 
       {/* Today's events */}
-      <section style={{ marginBottom: "2rem" }}>
-        <h2>今日 events ({events.length})</h2>
+      <section className="mori-annuli-section">
+        <h2 className="mori-annuli-section-title">今日 events ({events.length})</h2>
         {events.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>(今天還沒事件,或對話沒接 annuli)</p>
+          <p className="mori-annuli-empty">(今天還沒事件,或對話沒接 annuli)</p>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, fontSize: "0.85rem" }}>
+          <ul className="mori-annuli-events">
             {events.map((e, i) => (
-              <li
-                key={i}
-                style={{
-                  display: "flex",
-                  padding: "0.4rem 0.5rem",
-                  borderBottom: "1px solid var(--border, #333)",
-                  gap: "0.75rem",
-                }}
-              >
-                <code style={{ minWidth: "5rem", color: "var(--text-muted)" }}>{formatTime(e.ts)}</code>
-                <code style={{ minWidth: "4rem", color: "var(--text-muted)" }}>{e.kind}</code>
-                <span style={{ flex: 1, wordBreak: "break-word" }}>{previewData(e.data_json)}</span>
+              <li key={i} className="mori-annuli-event-row">
+                <code className="mori-annuli-event-ts">{formatTime(e.ts)}</code>
+                <code className="mori-annuli-event-kind">{e.kind}</code>
+                <span className="mori-annuli-event-data">{previewData(e.data_json)}</span>
               </li>
             ))}
           </ul>

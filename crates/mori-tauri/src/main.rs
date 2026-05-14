@@ -6,6 +6,7 @@ mod context_provider;
 mod deps;
 mod annuli_commands;
 mod annuli_config;
+mod annuli_supervisor;
 mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
@@ -95,6 +96,10 @@ pub struct AppState {
     /// Wave 4:如果 annuli.enabled,持有 HTTP client 給對話事件 fire-and-forget +
     /// Ctrl+Alt+Z hotkey 觸發 /sleep。None 表示沒接 annuli。
     pub annuli: Option<Arc<mori_core::annuli::AnnuliClient>>,
+    /// D-1: annuli 子 process supervisor。啟動時 spawn task 寫進去,持有 Child
+    /// handle(kill_on_drop)。Some 之後就 own 那個 python process,app 退出時
+    /// 子 process 跟著掛。`info` 給 status command 回報「我們有沒有 spawn / 為什麼」。
+    pub annuli_supervisor: Mutex<Option<annuli_supervisor::AnnuliSupervisor>>,
     /// Working memory:本次 session 的對話歷史(user / assistant 訊息對)。
     /// 重啟 app 就清空。長期記憶寫進 memory 那邊。
     pub conversation: Mutex<Vec<ChatMessage>>,
@@ -2680,36 +2685,36 @@ fn main() {
         }
     };
 
+    // 載入 annuli config(hoist 出外層 — supervisor spawn task 也要這個 cfg)
+    let annuli_cfg = config_path
+        .as_deref()
+        .map(annuli_config::AnnuliConfig::load)
+        .unwrap_or_default();
+
     // 建立長期記憶 store + (可選)annuli HTTP client。Wave 4:
     // ~/.mori/config.json 有 `annuli.enabled=true` 且 endpoint / spirit / user_id
     // 都齊 → 用 AnnuliMemoryStore(走 HTTP),同時 state.annuli 也持有 client 給
     // 對話事件 fire-and-forget + hotkey 觸發 /sleep 用。否則 fallback LocalMarkdown。
-    let (memory, annuli_client): (Arc<dyn mori_core::memory::MemoryStore>, Option<Arc<mori_core::annuli::AnnuliClient>>) = {
-        let annuli_cfg = config_path
-            .as_deref()
-            .map(annuli_config::AnnuliConfig::load)
-            .unwrap_or_default();
-        if annuli_cfg.is_ready() {
-            tracing::info!(
-                endpoint = %annuli_cfg.endpoint,
-                spirit = %annuli_cfg.spirit_name,
-                user_id = %annuli_cfg.user_id,
-                "annuli memory store enabled — 透過 HTTP 跟 vault 互動",
-            );
-            let client = Arc::new(
-                mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
-                    .expect("failed to build annuli client(check config.json annuli.endpoint)"),
-            );
-            let store = Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
-            (store, Some(client))
-        } else {
-            let memory_root = LocalMarkdownMemoryStore::default_root()
-                .expect("could not determine ~/.mori/memory path");
-            let store = LocalMarkdownMemoryStore::new(memory_root.clone())
-                .expect("failed to initialize memory store");
-            tracing::info!(path = %memory_root.display(), "local markdown memory store ready");
-            (Arc::new(store), None)
-        }
+    let (memory, annuli_client): (Arc<dyn mori_core::memory::MemoryStore>, Option<Arc<mori_core::annuli::AnnuliClient>>) = if annuli_cfg.is_ready() {
+        tracing::info!(
+            endpoint = %annuli_cfg.endpoint,
+            spirit = %annuli_cfg.spirit_name,
+            user_id = %annuli_cfg.user_id,
+            "annuli memory store enabled — 透過 HTTP 跟 vault 互動",
+        );
+        let client = Arc::new(
+            mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
+                .expect("failed to build annuli client(check config.json annuli.endpoint)"),
+        );
+        let store = Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
+        (store, Some(client))
+    } else {
+        let memory_root = LocalMarkdownMemoryStore::default_root()
+            .expect("could not determine ~/.mori/memory path");
+        let store = LocalMarkdownMemoryStore::new(memory_root.clone())
+            .expect("failed to initialize memory store");
+        tracing::info!(path = %memory_root.display(), "local markdown memory store ready");
+        (Arc::new(store), None)
     };
 
     // 5F-1: 確保 ~/.mori/voice_input/ 存在並有預設檔案
@@ -2722,6 +2727,7 @@ fn main() {
         groq_api_key: Mutex::new(None),
         memory,
         annuli: annuli_client,
+        annuli_supervisor: Mutex::new(None),
         conversation: Mutex::new(Vec::new()),
         mode: Mutex::new(Mode::Agent),
         ollama_warmup: Mutex::new(None),
@@ -3037,6 +3043,22 @@ fn main() {
                     ),
                     Err(e) => tracing::warn!(?e, "skill HTTP server failed to start"),
                 }
+            });
+
+            // ── D-1: annuli admin server supervisor ───────────────
+            // 若 annuli.enabled + endpoint 是 localhost + 沒人在跑 → spawn
+            // python main.py admin。kill_on_drop 保證 app 關時子 process 跟著掛。
+            // 非 localhost / 已有人跑 / config disabled / venv 缺 → no-op,
+            // 走 fallback。整個 task 跑在背景,不卡 setup 結束(spawn + 等
+            // health 最多 15s)。
+            let annuli_cfg_for_supervisor = annuli_cfg.clone();
+            let state_for_supervisor = state_for_setup.clone();
+            tauri::async_runtime::spawn(async move {
+                let sup =
+                    annuli_supervisor::AnnuliSupervisor::maybe_spawn(&annuli_cfg_for_supervisor)
+                        .await;
+                tracing::info!(state = sup.info.state, reason = %sup.info.reason, "annuli supervisor settled");
+                *state_for_supervisor.annuli_supervisor.lock() = Some(sup);
             });
 
             // ── Ollama warm-up(僅當 provider=ollama)─────

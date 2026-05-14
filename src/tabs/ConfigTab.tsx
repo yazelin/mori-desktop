@@ -21,6 +21,7 @@ import {
   IconKeyboard,
   IconClipboard,
   IconPencil,
+  IconAnnuli,
 } from "../icons";
 
 // 5P-6: character pack picker
@@ -115,6 +116,7 @@ type SubTabId =
   | "appearance"
   | "hotkey"
   | "x11"
+  | "annuli"
   | "corrections"
   | "raw";
 
@@ -436,12 +438,29 @@ function CharacterPicker() {
   );
 }
 
-function ConfigTab() {
+const ALL_SUBTAB_IDS: SubTabId[] = [
+  "quick", "llm", "voice", "appearance", "hotkey", "x11", "annuli", "corrections", "raw",
+];
+
+function ConfigTab({
+  pendingSubTab,
+  onSubTabApplied,
+}: {
+  pendingSubTab?: string | null;
+  onSubTabApplied?: () => void;
+} = {}) {
   const [raw, setRaw] = useState<string>("");
   const [orig, setOrig] = useState<string>("");
   // 5R-followup-4: sub-tab IA。raw 也是其中一個 sub-tab(取代舊的
   // form / raw 二選一 toggle)。
   const [subTab, setSubTab] = useState<SubTabId>("quick");
+  // 接 MainShell 傳來的 pendingSubTab(其他 tab 用 emit("mori-nav") 跳過來時用)
+  useEffect(() => {
+    if (pendingSubTab && (ALL_SUBTAB_IDS as string[]).includes(pendingSubTab)) {
+      setSubTab(pendingSubTab as SubTabId);
+      onSubTabApplied?.();
+    }
+  }, [pendingSubTab, onSubTabApplied]);
   // X11 session 偵測 — 用來條件 render「X11 only」sub-tab(Wayland 看不到)
   const [isX11, setIsX11] = useState(false);
   // Hotkey sub-tab 上的 session 標籤 + Wayland 提示文案要看實際 session type:
@@ -570,6 +589,7 @@ function ConfigTab() {
     { id: "appearance", label: "Appearance", Icon: IconTree },
     { id: "hotkey", label: "Hotkey", Icon: IconKeyboard },
     ...(isX11 ? [{ id: "x11" as SubTabId, label: "X11 only", Icon: IconKeyboard }] : []),
+    { id: "annuli" as SubTabId, label: "Annuli", Icon: IconAnnuli },
     { id: "corrections" as SubTabId, label: "Corrections", Icon: IconClipboard },
     { id: "raw", label: "Raw JSON", Icon: IconPencil },
   ];
@@ -1038,6 +1058,148 @@ function ConfigTab() {
                   { value: "plain", label: "素色(跟著 theme 漸層)" },
                   { value: "logo", label: "背板(美術 PNG / 自訂)" },
                 ]}
+              />
+            </FormRow>
+          </Section>
+          </>}
+
+          {/* ── Annuli(vault-backed reflection engine) ────── */}
+          {subTab === "annuli" && <>
+          <Section
+            title="Annuli vault 連線"
+            hint="開啟後 Mori 走 annuli HTTP service(localhost:5000 之類)讀寫 vault — SOUL.md / MEMORY.md / events / rings。關掉走本機 ~/.mori/memory/ 那條 fallback。改完要重啟 mori-desktop 才會切換 client。"
+          >
+            <FormRow label="enabled" hint="不打勾就走 LocalMarkdown fallback(舊行為)">
+              <input
+                type="checkbox"
+                checked={cfg.annuli?.enabled ?? false}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    a.enabled = e.target.checked;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="endpoint" hint="annuli HTTP base URL,**沒** trailing slash。本機通常 http://localhost:5000;正式機 https://ching-tech.ddns.net/jinn 之類。">
+              <input
+                type="text"
+                className="mori-input"
+                placeholder="http://localhost:5000"
+                value={cfg.annuli?.endpoint ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    setStrOrUndef(a, "endpoint", e.target.value);
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="spirit_name" hint="vault spirit 名,本機通常 mori,正式機 jinn。錯了會打到別人的 vault。">
+              <input
+                type="text"
+                className="mori-input"
+                placeholder="mori"
+                value={cfg.annuli?.spirit_name ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    setStrOrUndef(a, "spirit_name", e.target.value);
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="user_id" hint="跨機器穩定的使用者識別字串(annuli 用來區隔 events / memory 擁有者)。空字串時啟動會嘗試讀 vault 的 identity/user_id。">
+              <input
+                type="text"
+                className="mori-input"
+                placeholder="yazelin"
+                value={cfg.annuli?.user_id ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    setStrOrUndef(a, "user_id", e.target.value);
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="soul_token" hint="PUT /soul 跟 POST /memory/section 需要這個 X-Soul-Token。空字串 → mori-desktop 就**不能**改 SOUL / MEMORY(read-only)。值要跟 annuli server 啟動時的 ANNULI_SOUL_TOKEN env 一致。">
+              <input
+                type="password"
+                className="mori-input"
+                placeholder="(空 = 唯讀)"
+                value={cfg.annuli?.soul_token ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    setStrOrUndef(a, "soul_token", e.target.value);
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="timeout_secs" hint="HTTP request timeout,預設 10 秒。/sleep 比較久可以設高一點。">
+              <input
+                type="number"
+                className="mori-input"
+                min={1}
+                max={600}
+                placeholder="10"
+                value={cfg.annuli?.timeout_secs ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    const n = parseInt(e.target.value, 10);
+                    if (isNaN(n)) {
+                      delete a.timeout_secs;
+                    } else {
+                      a.timeout_secs = n;
+                    }
+                  })
+                }
+              />
+            </FormRow>
+          </Section>
+          <Section
+            title="Basic auth(可選)"
+            hint="正式機 annuli 走 nginx + basic auth 時填這。本機 localhost 通常不用。"
+          >
+            <FormRow label="user">
+              <input
+                type="text"
+                className="mori-input"
+                placeholder="(空 = 不帶 basic auth)"
+                value={cfg.annuli?.basic_auth?.user ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    const v = e.target.value;
+                    if (!v && !(a.basic_auth?.pass)) {
+                      delete a.basic_auth;
+                      return;
+                    }
+                    const ba = ensureSubObj(a, "basic_auth");
+                    setStrOrUndef(ba, "user", v);
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="pass">
+              <input
+                type="password"
+                className="mori-input"
+                value={cfg.annuli?.basic_auth?.pass ?? ""}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const a = ensureSubObj(c, "annuli");
+                    const v = e.target.value;
+                    if (!v && !(a.basic_auth?.user)) {
+                      delete a.basic_auth;
+                      return;
+                    }
+                    const ba = ensureSubObj(a, "basic_auth");
+                    setStrOrUndef(ba, "pass", v);
+                  })
+                }
               />
             </FormRow>
           </Section>

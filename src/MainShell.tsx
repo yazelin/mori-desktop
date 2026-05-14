@@ -11,6 +11,7 @@
 // - 每個 tab 一個 React component;只 mount 當前選中的 tab,避免重複 IPC
 
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
+import { listen } from "@tauri-apps/api/event";
 import ChatPanel from "./ChatPanel";
 import ProfilesTab from "./tabs/ProfilesTab";
 import ConfigTab from "./tabs/ConfigTab";
@@ -23,6 +24,8 @@ import {
   IconSun, IconMoon,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
+
+type NavPayload = { tab: TabId; subTab?: string };
 
 type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps";
 
@@ -38,15 +41,27 @@ const TABS: TabDef[] = [
   { id: "profiles", Icon: IconProfiles, label: "Profiles", sub: "Voice / Agent" },
   { id: "config",   Icon: IconConfig,   label: "Config",   sub: "config.json" },
   { id: "memory",   Icon: IconMemory,   label: "Memory",   sub: "~/.mori/memory" },
-  { id: "annuli",   Icon: IconAnnuli,   label: "Annuli",   sub: "vault 反思引擎" },
+  { id: "annuli",   Icon: IconAnnuli,   label: "Annuli",   sub: "Vault reflection" },
   { id: "skills",   Icon: IconSkills,   label: "Skills",   sub: "Built-in / Shell" },
   { id: "deps",     Icon: IconDeps,     label: "Deps",     sub: "Optional tools" },
 ];
 
 function MainShell() {
   const [tab, setTab] = useState<TabId>("chat");
+  // 跨 tab 導航:接到 "mori-nav" event 時切 tab,如果帶 subTab 就傳給子 tab 套用
+  const [pendingSubTab, setPendingSubTab] = useState<string | null>(null);
   // brand-3: theme base 給 toggle button 判斷該秀 sun 還是 moon
   const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const u = listen<NavPayload>("mori-nav", (e) => {
+      setTab(e.payload.tab);
+      setPendingSubTab(e.payload.subTab ?? null);
+    });
+    return () => {
+      u.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
 
   // 啟動時把 active theme base 同步到 state(避免 toggle 圖示對不上)
   useEffect(() => {
@@ -111,7 +126,12 @@ function MainShell() {
       <main className="mori-main">
         {tab === "chat" && <ChatPanel />}
         {tab === "profiles" && <ProfilesTab />}
-        {tab === "config" && <ConfigTab />}
+        {tab === "config" && (
+          <ConfigTab
+            pendingSubTab={pendingSubTab}
+            onSubTabApplied={() => setPendingSubTab(null)}
+          />
+        )}
         {tab === "memory" && <MemoryTab />}
         {tab === "annuli" && <AnnuliTab />}
         {tab === "skills" && <SkillsTab />}
