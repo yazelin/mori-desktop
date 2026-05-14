@@ -124,6 +124,15 @@ function MainShell() {
         </nav>
         <div className="mori-sidebar-toggles">
           <button
+            className="mori-sidebar-theme-toggle compact help-only"
+            onClick={() => setQuickstartOpen(true)}
+            title={t("quickstart.help_title")}
+          >
+            <span className="mori-sidebar-item-icon">
+              <IconHelp />
+            </span>
+          </button>
+          <button
             className="mori-sidebar-theme-toggle compact"
             onClick={() => {
               const next = nextLocale(i18n.language);
@@ -148,15 +157,6 @@ function MainShell() {
             </span>
             <span className="mori-sidebar-theme-label">
               {themeBase === "dark" ? "Light" : "Dark"}
-            </span>
-          </button>
-          <button
-            className="mori-sidebar-theme-toggle compact help-only"
-            onClick={() => setQuickstartOpen(true)}
-            title={t("quickstart.help_title")}
-          >
-            <span className="mori-sidebar-item-icon">
-              <IconHelp />
             </span>
           </button>
         </div>

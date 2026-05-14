@@ -314,7 +314,7 @@ function AudioVisualizer({ muted }: { muted: boolean }) {
   return (
     <div ref={containerRef} className="mori-quickstart-header-eq">
       {Array.from({ length: 32 }).map((_, i) => (
-        <span key={i} className="eq-wide-bar" />
+        <div key={i} className="eq-wide-bar" />
       ))}
     </div>
   );
