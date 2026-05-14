@@ -65,14 +65,29 @@ export async function syncLocaleFromConfig(): Promise<Locale> {
   return locale;
 }
 
-/** Locale switcher 用(ConfigTab → Appearance sub-tab)。寫進 config.json + 即時切換。 */
+/** Locale switcher 用(ConfigTab → Appearance / sidebar toggle button)。
+ * 即時切 i18n + 持久化進 config.json — read-modify-write 整顆 JSON。
+ * 失敗 swallow:i18n 本機切過了,只是下次啟動會 fall back。 */
 export async function setLocale(locale: Locale): Promise<void> {
   if (!SUPPORTED_LOCALES.includes(locale)) {
     throw new Error(`unsupported locale: ${locale}`);
   }
   await i18n.changeLanguage(locale);
-  // 寫進 config.json(B 階段 ConfigTab 改 form 後會用 saveConfig 統一寫,
-  // 這裡只是即時切;持久化由 ConfigTab raw JSON 控)
+  // 持久化
+  try {
+    const text = await invoke<string>("config_read");
+    const parsed = JSON.parse(text || "{}");
+    if (parsed.locale === locale) return; // 已是這個 locale,免寫
+    parsed.locale = locale;
+    await invoke("config_write", { text: JSON.stringify(parsed, null, 2) });
+  } catch (e) {
+    console.warn("[i18n] persist locale failed (in-memory 還是切了):", e);
+  }
+}
+
+/** sidebar 一鍵 toggle button 用:zh-TW ↔ en。 */
+export function nextLocale(current: string): Locale {
+  return current === "zh-TW" ? "en" : "zh-TW";
 }
 
 export { i18n };

@@ -117,6 +117,17 @@ export function IconMoon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 🌐 Globe — language switcher
+export function IconGlobe(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12 h20" />
+      <path d="M12 2 a15 15 0 0 1 0 20 a15 15 0 0 1 0 -20" />
+    </svg>
+  );
+}
+
 // ─── brand-3 batch 2: inline action icons(取代 chat / dep / skill emoji)──────
 
 // ✕ Close

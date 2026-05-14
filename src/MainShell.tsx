@@ -22,9 +22,10 @@ import SkillsTab from "./tabs/SkillsTab";
 import DepsTab from "./tabs/DepsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
-  IconSun, IconMoon,
+  IconSun, IconMoon, IconGlobe,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
+import { setLocale, nextLocale } from "./i18n";
 
 type NavPayload = { tab: TabId; subTab?: string };
 
@@ -48,7 +49,7 @@ const TABS: TabDef[] = [
 ];
 
 function MainShell() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [tab, setTab] = useState<TabId>("chat");
   // 跨 tab 導航:接到 "mori-nav" event 時切 tab,如果帶 subTab 就傳給子 tab 套用
   const [pendingSubTab, setPendingSubTab] = useState<string | null>(null);
@@ -115,6 +116,21 @@ function MainShell() {
             );
           })}
         </nav>
+        <button
+          className="mori-sidebar-theme-toggle"
+          onClick={() => {
+            const next = nextLocale(i18n.language);
+            setLocale(next).catch((e) => console.error("[i18n] toggle failed", e));
+          }}
+          title={i18n.language === "zh-TW" ? "Switch to English" : "切到繁體中文"}
+        >
+          <span className="mori-sidebar-item-icon">
+            <IconGlobe />
+          </span>
+          <span className="mori-sidebar-theme-label">
+            {i18n.language === "zh-TW" ? "EN" : "繁中"}
+          </span>
+        </button>
         <button
           className="mori-sidebar-theme-toggle"
           onClick={handleToggle}
