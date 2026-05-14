@@ -38,14 +38,24 @@ class RitualAudio {
     return this.ctx;
   }
 
-  /** 先試音檔,沒就 synth fallback */
+  /** 先試音檔,沒就 synth fallback。多條音檔時隨機選一條(每次開儀式氣氛換)。 */
   startAmbient(): void {
     if (this.usingFile || this.ambientNodes.length > 0) return;
     this.tryStartFile();
   }
 
+  private pickTrackUrl(): string {
+    // public/audio/ 內的 bundle 音檔 — 加新檔案進這個 list 就會被隨機抽到
+    const tracks = [
+      "/audio/ritual-ambient.mp3",
+      "/audio/ritual-ambient-2.mp3",
+      "/audio/ritual-ambient-3.mp3",
+    ];
+    return tracks[Math.floor(Math.random() * tracks.length)];
+  }
+
   private tryStartFile(): void {
-    const el = new Audio("/audio/ritual-ambient.mp3");
+    const el = new Audio(this.pickTrackUrl());
     el.loop = true;
     el.volume = this.muted ? 0 : 0.4;
     el.preload = "auto";

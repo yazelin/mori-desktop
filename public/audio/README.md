@@ -4,9 +4,17 @@ Quickstart 的「召喚儀式」模式會嘗試播 `ritual-ambient.mp3`。沒檔
 
 ## 目前 bundled 的音檔
 
-`ritual-ambient.mp3` — "Film" by **Leberch** ([Pixabay 作者頁](https://pixabay.com/users/leberch-42823964/))
+3 條 ambient 音檔,每次進儀式隨機抽一條(`ritualAudio.ts` 的 `pickTrackUrl()` 控)。全部 by **Leberch** ([Pixabay 作者頁](https://pixabay.com/users/leberch-42823964/)),Pixabay Content License,商業 / 個人 / 開源都可用,**不需署名**(這裡仍註記表示尊重)。
 
-授權:Pixabay Content License。商業 / 個人 / 開源 都可用,**不需署名**(但這裡仍註記表示尊重)。可改:user 把同名檔丟進來會覆蓋。
+| 檔案 | 原檔 |
+|---|---|
+| `ritual-ambient.mp3` | leberch-film-517381 |
+| `ritual-ambient-2.mp3` | leberch-ambient-517427 |
+| `ritual-ambient-3.mp3` | leberch-soft-soft-music-522730 |
+
+加新音檔流程:
+1. 丟 mp3 進這個資料夾
+2. 改 `src/ritualAudio.ts` 的 `tracks` 陣列加路徑
 
 ## 找一條音檔
 
