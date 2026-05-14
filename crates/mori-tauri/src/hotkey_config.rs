@@ -37,6 +37,10 @@ pub const CANCEL_SHORTCUT_ID: &str = "cancel";
 #[cfg(target_os = "linux")]
 pub const PICKER_SHORTCUT_ID: &str = "picker";
 
+/// Wave 4:Portal session 註冊 sleep chord 的穩定 ID。
+#[cfg(target_os = "linux")]
+pub const SLEEP_SHORTCUT_ID: &str = "sleep";
+
 /// VoiceInput slot shortcuts(Alt+0~9 → slot-0 … slot-9)的 portal id prefix。
 #[cfg(target_os = "linux")]
 pub const SLOT_ID_PREFIX: &str = "slot-";
@@ -65,10 +69,13 @@ pub const PROFILE_SLOT_EVENT: &str = "portal-profile-slot";
 
 /// Agent slot 觸發事件(payload 是 slot 編號 u8)。
 pub const AGENT_SLOT_EVENT: &str = "portal-agent-slot";
+/// Wave 4:Sleep hotkey 觸發 annuli POST /rings/new。
+pub const MORI_SLEEP_EVENT: &str = "mori-sleep";
 
 const DEFAULT_TOGGLE: &str = "Ctrl+Alt+Space";
 const DEFAULT_CANCEL: &str = "Ctrl+Alt+Escape";
 const DEFAULT_PICKER: &str = "Ctrl+Alt+P";
+const DEFAULT_SLEEP: &str = "Ctrl+Alt+Z";
 const DEFAULT_VOICE_SLOT_MODIFIER: &str = "Alt";
 const DEFAULT_AGENT_SLOT_MODIFIER: &str = "Ctrl+Alt";
 
@@ -95,6 +102,8 @@ pub struct HotkeyConfig {
     pub toggle: String,
     pub cancel: String,
     pub picker: String,
+    /// Wave 4:Sleep — annuli `POST /rings/new`(do_sleep,寫一篇反思 ring)。
+    pub sleep: String,
     /// Toggle chord 的觸發語意 — `toggle`(一按切換)或 `hold`(按住錄、放開停)。
     pub toggle_mode: ToggleMode,
     /// 套用到 voice slot 0~9 的 modifier(預設 `Alt`)。
@@ -113,6 +122,7 @@ impl Default for HotkeyConfig {
             toggle: DEFAULT_TOGGLE.to_string(),
             cancel: DEFAULT_CANCEL.to_string(),
             picker: DEFAULT_PICKER.to_string(),
+            sleep: DEFAULT_SLEEP.to_string(),
             toggle_mode: ToggleMode::default(),
             voice_slot_modifier: DEFAULT_VOICE_SLOT_MODIFIER.to_string(),
             agent_slot_modifier: DEFAULT_AGENT_SLOT_MODIFIER.to_string(),
@@ -128,6 +138,8 @@ pub enum HotkeyAction {
     Toggle,
     Cancel,
     Picker,
+    /// Wave 4:trigger annuli `POST /rings/new`(do_sleep)。
+    Sleep,
     VoiceSlot(u8),
     AgentSlot(u8),
 }
@@ -143,6 +155,7 @@ impl HotkeyAction {
             HotkeyAction::Toggle => "toggle".to_string(),
             HotkeyAction::Cancel => "cancel".to_string(),
             HotkeyAction::Picker => "picker".to_string(),
+            HotkeyAction::Sleep => "sleep".to_string(),
             HotkeyAction::VoiceSlot(n) => format!("slot-{n}"),
             HotkeyAction::AgentSlot(n) => format!("agent-slot-{n}"),
         }
@@ -154,6 +167,7 @@ impl HotkeyAction {
             HotkeyAction::Toggle => "Mori — 開始 / 停止錄音".to_string(),
             HotkeyAction::Cancel => "Mori — 錄音中按下取消(丟棄音檔,不送出)".to_string(),
             HotkeyAction::Picker => "Mori — 開 Profile picker 視窗(方向鍵選)".to_string(),
+            HotkeyAction::Sleep => "Mori — 進入睡眠反思(寫一輪年輪)".to_string(),
             HotkeyAction::VoiceSlot(0) => {
                 "Mori — VoiceInput 純語音輸入(USER-00 極簡聽寫)".to_string()
             }
@@ -231,6 +245,10 @@ impl HotkeyConfig {
         out.push(HotkeyBinding {
             action: HotkeyAction::Picker,
             key: self.picker.clone(),
+        });
+        out.push(HotkeyBinding {
+            action: HotkeyAction::Sleep,
+            key: self.sleep.clone(),
         });
 
         for n in 0u8..=9 {
@@ -387,7 +405,7 @@ mod tests {
     fn defaults_resolve_without_conflict() {
         let cfg = HotkeyConfig::default();
         let bindings = cfg.resolve().unwrap();
-        assert_eq!(bindings.len(), 23); // toggle + cancel + picker + 10 voice + 10 agent
+        assert_eq!(bindings.len(), 24); // toggle + cancel + picker + sleep + 10 voice + 10 agent
     }
 
     #[cfg(target_os = "linux")]
