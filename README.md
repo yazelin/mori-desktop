@@ -9,6 +9,8 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
+🌲 **Latest** — [**v0.3.2**](https://github.com/yazelin/mori-desktop/releases/tag/v0.3.2):宿靈儀式 (Dwelling Rite) 五幕 onboarding · floating Mori 顯示時機可設定 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+
 ---
 
 ## Demo

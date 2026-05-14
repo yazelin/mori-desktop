@@ -6,6 +6,126 @@
 
 ---
 
+## v0.3.2 — Chat bubble z-order + ConfigTab dropdown polish(2026-05-15)
+
+v0.3.1 釋出後測試時冒出來的兩個小 follow-up,當天連發。
+
+### Bug fix
+
+- **Chat bubble 終於在 Floating Mori 上面**(`fix(bubble)` `35e5832`)
+  - 之前 bubble 跟 floating 都 `alwaysOnTop: true`,X11 上 floating 因 user 互動頻繁(hover / drag)raise 較新就壓住 bubble — 對話內容被遮一半看不到
+  - v0.3.1 加的 `set_phase` 內 re-assert `set_always_on_top(true)` 又把 floating 反覆推回頂層,連既有的 `xdotool windowraise` 都救不了
+  - **修法**:新 Tauri command `floating_set_above(bool)`。bubble 出現時 invoke `(false)` 把 floating **暫時下放** always-on-top 層,bubble 自然唯一在最上;bubble 隱藏時恢復 `(true)`。跨 X11 + Wayland 都 work,不靠 raise voodoo
+
+- **ConfigTab「Mori 出現時機」dropdown 配色一致**(`fix(bubble)` `35e5832`)
+  - v0.3.1 新加的 dropdown 用 native `<select>`,在 Linux webkit2gtk 下 dropdown panel 受 GTK system theme 鎖死,light theme 跑出 dark panel
+  - 改用 codebase 自製 `<Select>` 元件(`src/Select.tsx`),全部走 CSS variable,跟 theme 切換;配色跟 x11_shape 等既有 dropdown 統一
+
+---
+
+## v0.3.1 — Floating Mori 顯示時機可設定(2026-05-15)
+
+讓使用者控制 floating Mori 在桌面上的出現時機 — 不想被擋畫面、想要 Mori 只在你說話時現身、或完全不要 floating,三種模式任選。
+
+### 主要 feature
+
+#### floating.show_mode 三模式(`feat(floating)` `de4bf0e`)
+
+新 config 欄位 `floating.show_mode`,可設三個值:
+
+| 值 | 行為 |
+|---|---|
+| `always`(預設) | Mori 一直在桌面 — 跟 v0.3.0 行為一致 |
+| `recording` | 只在錄音(Phase::Recording / Transcribing / Responding)期間顯示,進 Done / Idle 立即隱藏。Toggle 跟 Hold 兩個 hotkey mode 都自動跟著 |
+| `off` | 完全不顯示 — 純走主視窗 + 熱鍵流程,不想要 floating 的 user |
+
+底層架構:
+- `update_floating_visibility()` 中央 helper,看 quickstart_completed gate + show_mode + 當前 phase 決定 show/hide
+- 三個 hook 點:`set_phase()` / setup hook / `config_write` 後
+- `should_show_floating(mode, phase)` pure 函式,跟 phase 解耦好測
+
+#### Tray 快速 toggle
+
+System tray 右鍵選單加新項目「桌面 Mori:[當前狀態]」,點一下在 `always` ↔ `off` 之間二值切。Label 動態反映當前 show_mode,即時生效 + 寫回 config。
+
+#### Config tab 完整三選一
+
+`Config → Floating Mori` section 加 dropdown「出現時機」,三個選項(包含 `recording`,比 tray 多一個)。
+
+### Bug fix
+
+- **`floating_show()` 不 re-assert always_on_top**(v0.3.0 引入的 regression)
+  - GNOME Wayland mutter 會默默把 `hide() → show()` 後的 window 從 always_on_top layer 降下,導致跑完宿靈儀式後 floating Mori 被主視窗 / 其他 app 壓住
+  - **修法**:`.show()` 後一定 `.set_always_on_top(true)` 重新 assert(同 trick 跟 yazelin/AgentPulse 的 tray show/hide handler 用法一致)
+
+---
+
+## v0.3.0 — 宿靈儀式 · The Dwelling Rite(2026-05-15)
+
+> *「精靈不會無故下來。她下來,是因為有人在底下開了一片林子,並且輕輕喚了她一聲。」*
+
+第一次跑 Mori Desktop 走的 onboarding 從「填表選 provider」整個翻新成**五幕劇情儀式** — 召喚 / 靈氣 / 靈力 / 驗印 / 安頓。Mori 從世界樹高處下到使用者的桌面,user 從「設定者」變成「召喚師」。
+
+▶ [影片演示](https://youtube.com/shorts/43gdfCND8Xc) · 📖 [操作手冊](https://yazelin.github.io/mori-desktop/dwelling-rite.html) · 🌲 [完整 lore](https://yazelin.github.io/world-tree/rules/dwelling-rite)
+
+### 宿靈儀式(Headline feature)
+
+第一次跑 mori-desktop 自動跳出五幕沉浸式 onboarding:
+
+- **第一幕 召喚** — Mori 從世界樹下林,問「你是誰?」, user 報名(自動 prefill `annuli.user_id`)
+- **第二幕 靈氣** — user 分享 Groq STT key,Mori 找回聽覺
+- **第三幕 靈力** — Gemini / OpenAI 相容 / 跳過 三選一(跳過 = `agent_disabled` chat-only)
+- **第四幕 驗印** — 兩道氣依序驗(Groq → agent),累積敘述不互蓋,失敗直接送回對應幕重填
+- **第五幕 安頓** — Mori 真正住下,**《森林書》**第一頁寫下 user 名字, floating Mori 浮現桌面
+
+設計亮點:
+
+- Mori 不主動討 key — user 看著她衰弱主動分享(從被動填表變主動關心)
+- 14 顆螢火飄在 modal 後層,不擾閱讀;modal 不透明蓋住主畫面,沉浸感
+- 第五幕「對上了, {name}。是你的氣息沒錯, 我認得。」緩慢淡入 3-6 秒,儀式收尾
+- 整個視覺主線(燈籠 / 氣息 / 苔蘚 / 月光 / 書 / 年輪)五幕一致串起來
+- 對應 [`world-tree/rules/dwelling-rite.md`](https://github.com/yazelin/world-tree/blob/main/rules/dwelling-rite.md) 詩意敘事
+
+### Quickstart 技術變動
+
+- **新 Tauri commands**:`floating_show`(從 setup 隱藏狀態叫醒)/ `open_external_url`(Tauri webview 不處理 `<a target=_blank>`)
+- **`agent_disabled` flag** 接到 `run_agent_pipeline`,跳過靈力時走 chat-only(不掛 skill,單輪 LLM call)
+- **Mori-core API key resolve 對齊**:Quickstart prefill/save 改寫 `api_keys.{NAME}_API_KEY` 主路徑(舊版誤寫 `providers.openai_compat.api_key`)
+- **首次跑隱藏 floating** — 「歡迎回家, Mori」按下才 show
+- 主視窗 880→**940 高度**;modal 改 flex column(header / equalizer 釘頂、scene-content 中間滾、dots / footer 釘底)
+- Gemini default model 不再 Quickstart hardcode `2.5-flash`,留空走後端 `GEMINI_DEFAULT_MODEL`(`gemini-3.1-flash-lite-preview`)
+
+### Annuli 整合 (Wave 4)
+
+- mori-desktop ↔ annuli HTTP integration(12 steps, #26)
+- annuli config 熱重載 — 改設定不用整個 app 重啟
+- D-1 annuli supervisor + Annuli sub-tab + cross-tab nav
+- D-2 `install-autostart.sh` — Linux XDG autostart entry
+
+### i18n 完整本地化
+
+- React-i18next 基建 + zh-TW / EN 雙語切換(sidebar 地球 icon 一鍵切)
+- 八波抽 string:sidebar / AnnuliTab / ConfigTab / Picker / ChatPanel / MemoryTab / ProfilesTab / SkillsTab / DepsTab / FloatingMori 全部 i18n
+
+### 視覺改進
+
+- Sidebar 3 個 icon 重做(Skills 法杖 / Memory 書 + sparkle / Config 齒輪)
+- Quickstart equalizer:讀真實 freq data 跳動,靜音時壓平
+- 儀式背景:14 顆螢火 + 月光晨曦 radial gradient(dark / light 雙主題)
+
+### Bug fix
+
+- **Windows release 失敗修正** — v0.2.0 Windows CI 一直跑不出 binary,errror `failed to bundle project: Couldn't find a .ico icon`。`icons/icon.ico` 檔案存在但 `tauri.conf.json` bundle.icon 陣列沒列它,Tauri 釋出 bundle 找不到 → bail。修:陣列加上 `icons/icon.ico`。本機 `tauri dev` 不撞此問題(dev 不 bundle)
+- 多輪音樂 visualizer bug fix(autoplay 擋住 / 1 秒重播 / 右邊死寂 / HMR ghost 等)
+
+### Breaking / Migration
+
+- **Config schema 加兩欄**:`user.name`(召喚師之名,給 Mori 喚 user 用)+ `agent_disabled`(跳過靈力時 true)
+- 既有 user 第一次跑 v0.3.0 不會被強迫重跑儀式(`quickstart_completed` flag 保留),但 `annuli.user_id` 會被 Quickstart prefill 認得到
+- 舊版 `providers.openai_compat.api_key` inline 寫法仍能 read(fallback),但新存的會走 `api_keys.{GEMINI,OPENAI}_API_KEY` map
+
+---
+
 ## v0.2.0 — Windows 平台殼 + whisper.cpp shell-out 架構 + CI(2026-05-13)
 
 從 5T 之後一輪重點開發,**主要交付 Windows 10/11 全功能 + 簡化本機 STT
