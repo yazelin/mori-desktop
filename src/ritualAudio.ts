@@ -1,8 +1,20 @@
-// 儀式氛圍音效 — Web Audio API 合成。
+// 儀式氛圍音 — 先試播 `/audio/ritual-ambient.mp3`(user 自己放音檔),
+// 沒檔案就 fallback Web Audio API 合成的 ambient pad。
 //
-// 桌面版**比網頁版簡化**:只一條 ambient pad(3 個低頻 sine + LFO vibrato),
-// 沒步驟 chime / 完成和弦,讓敘事為主、音場為輔。
-// 只在 ritual mode 啟用,direct mode 不播。
+// 為什麼分兩段:
+// - 真的音樂(user 從 Pixabay / Mixkit / FreeSound 下載放進 public/audio/)
+//   音質、層次、情緒都遠勝合成
+// - 沒音檔時 fallback synth,至少有東西(雖然 user 反映像白噪音)
+//
+// 簡單音檔 fallback 流程:
+//   1. Vite 把 public/audio/ritual-ambient.mp3 serve 在 /audio/ 路徑
+//   2. 進 ritual mode → HTMLAudioElement load + play
+//   3. error / not-found → 退到 synth
+//
+// 找 CC0 / royalty-free 音樂:
+//   - https://pixabay.com/music/search/ambient/ (CC0, 不需署名)
+//   - https://mixkit.co/free-stock-music/mood/peaceful/
+//   - https://freemusicarchive.org/genre/Ambient/
 
 class RitualAudio {
   private ctx: AudioContext | null = null;
@@ -10,31 +22,62 @@ class RitualAudio {
   private masterGain: GainNode | null = null;
   private muted: boolean = false;
 
-  /** lazy init — 第一次 play 時建 AudioContext(避免 autoplay 政策擋) */
+  // 音檔模式
+  private audioEl: HTMLAudioElement | null = null;
+  private usingFile: boolean = false;
+
   private ensureContext(): AudioContext {
     if (!this.ctx) {
       const AC = window.AudioContext || (window as any).webkitAudioContext;
       this.ctx = new AC();
       this.masterGain = this.ctx.createGain();
-      // 音量拉高(0.18 → 0.35)— 原本太小,加上低頻被喇叭過濾,user 完全聽不到
       this.masterGain.gain.value = this.muted ? 0 : 0.35;
       this.masterGain.connect(this.ctx.destination);
     }
-    // 如果被 browser 暫停了(idle 太久),resume
     if (this.ctx.state === "suspended") this.ctx.resume();
     return this.ctx;
   }
 
-  /** 開始 ambient pad — 3 個 sine 重疊 + 緩 LFO,持續播放 */
+  /** 先試音檔,沒就 synth fallback */
   startAmbient(): void {
-    if (this.ambientNodes.length > 0) return; // already playing
+    if (this.usingFile || this.ambientNodes.length > 0) return;
+    this.tryStartFile();
+  }
+
+  private tryStartFile(): void {
+    const el = new Audio("/audio/ritual-ambient.mp3");
+    el.loop = true;
+    el.volume = this.muted ? 0 : 0.4;
+    el.preload = "auto";
+
+    // 任一個 error event 都 fallback 到 synth
+    const fallback = () => {
+      if (this.usingFile) return; // 已經切過了
+      console.info("[ritualAudio] no /audio/ritual-ambient.mp3, falling back to synth pad");
+      this.audioEl = null;
+      this.startSynth();
+    };
+    el.addEventListener("error", fallback, { once: true });
+    el.addEventListener("stalled", fallback, { once: true });
+
+    el.play()
+      .then(() => {
+        this.audioEl = el;
+        this.usingFile = true;
+        console.info("[ritualAudio] playing /audio/ritual-ambient.mp3");
+      })
+      .catch((e) => {
+        console.info("[ritualAudio] audio file play failed, fallback to synth:", e);
+        fallback();
+      });
+  }
+
+  private startSynth(): void {
     const ctx = this.ensureContext();
     const out = this.masterGain!;
 
-    // 3 個音疊在 audible range(原本 G1=49Hz 太低,筆電喇叭播不出)
-    // 改成 G3 / D4 / A3 — 中低音 pad,溫的、不刺,user 聽得到
     const freqs = [196.0, 293.66, 220.0]; // G3 / D4 / A3
-    const detunes = [0, 7, -5]; // cents
+    const detunes = [0, 7, -5];
 
     for (let i = 0; i < freqs.length; i++) {
       const osc = ctx.createOscillator();
@@ -44,14 +87,12 @@ class RitualAudio {
 
       const g = ctx.createGain();
       g.gain.value = 0.0;
-      // 緩 fade-in 1.5s — 各 voice gain 0.25(原 0.2 太輕)
       g.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 1.5);
 
-      // LFO vibrato 0.15Hz 微調 detune,讓 pad 不死板
       const lfo = ctx.createOscillator();
       lfo.frequency.value = 0.15 + i * 0.03;
       const lfoGain = ctx.createGain();
-      lfoGain.gain.value = 3.0; // ±3 cents
+      lfoGain.gain.value = 3.0;
       lfo.connect(lfoGain);
       lfoGain.connect(osc.detune);
 
@@ -65,11 +106,20 @@ class RitualAudio {
     }
   }
 
-  /** 淡出 + 停 */
   stopAmbient(): void {
+    // 停音檔
+    if (this.audioEl) {
+      try {
+        this.audioEl.pause();
+        this.audioEl.src = "";
+      } catch {}
+      this.audioEl = null;
+    }
+    this.usingFile = false;
+
+    // 停 synth
     if (!this.ctx || this.ambientNodes.length === 0) return;
     const now = this.ctx.currentTime;
-    // 找出 gain node 做 fade-out
     for (const n of this.ambientNodes) {
       if (n instanceof GainNode) {
         n.gain.cancelScheduledValues(now);
@@ -77,7 +127,6 @@ class RitualAudio {
         n.gain.linearRampToValueAtTime(0, now + 1.0);
       }
     }
-    // 1.2s 後完全 disconnect
     const nodes = this.ambientNodes;
     this.ambientNodes = [];
     setTimeout(() => {
@@ -92,8 +141,11 @@ class RitualAudio {
 
   setMuted(muted: boolean): void {
     this.muted = muted;
-    if (this.masterGain) {
-      const now = this.ctx!.currentTime;
+    if (this.audioEl) {
+      this.audioEl.volume = muted ? 0 : 0.4;
+    }
+    if (this.masterGain && this.ctx) {
+      const now = this.ctx.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
       this.masterGain.gain.linearRampToValueAtTime(muted ? 0 : 0.35, now + 0.2);
     }
@@ -104,5 +156,4 @@ class RitualAudio {
   }
 }
 
-// 單例,跨 Quickstart 重 render 不重建
 export const ritualAudio = new RitualAudio();
