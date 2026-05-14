@@ -138,7 +138,9 @@ export function Quickstart({ onDone }: QuickstartProps) {
   useEffect(() => {
     cancelPendingStop();
     if (mode === "ritual" && !audioMuted) {
-      ritualAudio.startAmbient();
+      // start 失敗(autoplay policy 擋) → 同步 UI 成靜音狀態,user 點 toggle
+      // 才會真正啟動(click 是 user gesture,可繞過 autoplay)
+      ritualAudio.startAmbient().catch(() => setAudioMuted(true));
     } else {
       ritualAudio.stopAmbient();
     }

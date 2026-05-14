@@ -42,36 +42,42 @@ class RitualAudio {
   private gainNode: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
 
-  startAmbient(): void {
-    if (window.__moriRitualAudio) return;
+  /** Promise resolve = 真的播了;reject = browser autoplay 擋了,需 user gesture */
+  startAmbient(): Promise<void> {
+    if (window.__moriRitualAudio) return Promise.resolve();
     const url = TRACKS[Math.floor(Math.random() * TRACKS.length)];
     const el = new Audio(url);
     el.loop = true;
-    el.crossOrigin = "anonymous"; // 給 Web Audio analyser 用
+    el.crossOrigin = "anonymous";
     window.__moriRitualAudio = el;
 
-    // **先**建 audio graph 再 play,避免播放中途 createMediaElementSource
-    // reroute 訊號讓音檔從 0 重播(user 反映的 1 秒後重播 bug)
+    // graph setup 在 play 前,避免播放中途 reroute 害音檔重播
     try {
       this.audioCtx = new AudioContext();
       this.source = this.audioCtx.createMediaElementSource(el);
       this.gainNode = this.audioCtx.createGain();
       this.gainNode.gain.value = window.__moriRitualMuted ? 0 : VOLUME;
       this.analyser = this.audioCtx.createAnalyser();
-      // fftSize 256 → 128 bins,~172 Hz per bin。前 32 bins 覆蓋音樂能量區
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.5;
       this.source.connect(this.gainNode);
       this.gainNode.connect(this.analyser);
       this.analyser.connect(this.audioCtx.destination);
     } catch (e) {
-      console.warn("[ritualAudio] graph setup failed (analyser disabled):", e);
+      console.warn("[ritualAudio] graph setup failed:", e);
     }
 
-    el.play().catch((e) => {
-      console.warn("[ritualAudio] play failed:", e);
-      if (window.__moriRitualAudio === el) window.__moriRitualAudio = null;
-    });
+    // AudioContext autoplay policy:剛建出可能是 suspended(沒 user gesture),
+    // 顯式 resume(若 user gesture 在 React mount 前已發生,這會成功)
+    return Promise.resolve()
+      .then(() => this.audioCtx?.resume())
+      .then(() => el.play())
+      .catch((e) => {
+        // play 失敗最常是 autoplay policy。清掉 audio 讓下次 user-gesture call 重新試
+        console.info("[ritualAudio] play blocked (likely autoplay policy):", e);
+        this.stopAmbient();
+        throw e;
+      });
   }
 
   stopAmbient(): void {
