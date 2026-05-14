@@ -194,6 +194,53 @@
     "appearance": {
       "locale": "UI language",
       "locale_hint": "Switch UI display language. Proper nouns (SOUL.md / MEMORY.md / API key names) always stay in original form."
+    },
+    "sections": {
+      "quick_provider": "Default provider",
+      "quick_provider_hint": "Used by any profile that doesn't specify its own provider. VoiceInput profiles can override their own stt_provider.",
+      "quick_apikeys": "API keys",
+      "quick_apikeys_hint": "Set here or via OS env vars — Mori checks OS env first, falls back to this map (env wins). Key names follow *_API_KEY convention (GEMINI_API_KEY / OPENAI_API_KEY, etc.), values are password fields.",
+      "llm_providers": "Provider config",
+      "llm_providers_hint": "List only the providers you'll use. Empty providers get built-in defaults at startup (api_base / model, etc.).",
+      "llm_routing": "Routing (advanced)",
+      "llm_routing_hint": "Per-skill provider routing. Unset = use the provider above for everything.",
+      "voice_input": "VoiceInput",
+      "voice_input_hint": "Global defaults for VoiceInput mode; each voice profile can override these.",
+      "appearance_locale": "UI language",
+      "appearance_locale_hint": "Switch UI display language. Proper nouns (SOUL.md / MEMORY.md / API key names) always stay in original form.",
+      "appearance_theme": "Theme",
+      "appearance_theme_hint": "Main window palette. Built-ins: Mori Dark / Mori Light. Drop any *.json into the themes folder to add a custom theme (VSCode-like).",
+      "appearance_floating": "Floating Mori",
+      "appearance_floating_hint": "Behavior of the desktop floating widget. Sprite assets live in character packs (~/.mori/characters/<active>/).",
+      "hotkey_toggle_mode": "Toggle mode",
+      "hotkey_toggle_mode_hint": "How Ctrl+Alt+Space (default chord) triggers recording. Saves take effect immediately, no restart.",
+      "hotkey_keys": "Bindings",
+      "hotkey_keys_hint": "Editable global hotkeys. Save then restart mori-desktop to apply (registered at startup, not live-reload).",
+      "x11_floating": "Floating widget (X11)",
+      "x11_floating_hint": "Only applies in X11 sessions. On Wayland the body is truly transparent and there's no XShape equivalent, so these have no effect.",
+      "annuli_connection": "Annuli vault connection",
+      "annuli_connection_hint": "When on, Mori reads/writes the vault via an annuli HTTP service (e.g. localhost:5000) — SOUL.md / MEMORY.md / events / rings. When off, falls back to local ~/.mori/memory/. Restart mori-desktop after changing to swap the client.",
+      "annuli_basic_auth": "Basic auth (optional)",
+      "annuli_basic_auth_hint": "Set when annuli sits behind nginx + basic auth (typically production). Local localhost usually doesn't need this.",
+      "corrections_title": "corrections.md",
+      "corrections_hint": "Shared STT correction word list. Voice / Agent profiles reference it via #file: ../corrections.md so the LLM sees it in the system prompt.",
+      "raw_title": "Raw JSON",
+      "raw_hint": "The entire ~/.mori/config.json. For power users who want to edit routing.skills / shell_skills and other advanced fields not exposed in the form."
+    },
+    "rows": {
+      "provider": "LLM for the main chat / agent",
+      "stt_provider": "Whisper STT (speech-to-text)",
+      "theme_active": "Active theme",
+      "themes_folder": "Drop *.json files here to add to the dropdown above",
+      "themes_folder_rescan": "Rescan folder",
+      "save_corrections": "Save corrections.md",
+      "save_corrections_only_hint": "Saves only corrections.md, not config.json",
+      "char_pack_hint": "Active character pack — switch the character. Folder: ",
+      "char_upgrade_hint": "Upgrade the active pack's single-frame sprites to a 4×4 placeholder sheet (originals backed up to sprites/.backup-<ts>/)",
+      "json_dirty_title": "JSON has unsaved changes",
+      "remove_button_title": "Remove",
+      "field_empty_readonly": "(empty = read-only)",
+      "field_empty_no_basic_auth": "(empty = no basic auth)"
     }
   }
 }

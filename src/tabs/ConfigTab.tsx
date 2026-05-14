@@ -140,23 +140,24 @@ function SubTabNav({
   tabs: SubTabSpec[];
   dirtyJson: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <nav className="mori-config-subnav">
-      {tabs.map((t) => {
-        const Icon = t.Icon;
+      {tabs.map((tab) => {
+        const Icon = tab.Icon;
         return (
           <button
-            key={t.id}
+            key={tab.id}
             type="button"
-            className={`mori-config-subtab ${active === t.id ? "active" : ""}`}
-            onClick={() => onChange(t.id)}
+            className={`mori-config-subtab ${active === tab.id ? "active" : ""}`}
+            onClick={() => onChange(tab.id)}
           >
             <span className="mori-config-subtab-icon">
               <Icon width={14} height={14} />
             </span>
-            <span className="mori-config-subtab-label">{t.label}</span>
-            {dirtyJson && t.id === "raw" && (
-              <span className="mori-config-subtab-dirty" title="JSON 有未存改動" />
+            <span className="mori-config-subtab-label">{tab.label}</span>
+            {dirtyJson && tab.id === "raw" && (
+              <span className="mori-config-subtab-dirty" title={t("config_tab.rows.json_dirty_title")} />
             )}
           </button>
         );
@@ -178,6 +179,7 @@ function KvTable({
   valuePlaceholder?: string;
   valueIsSecret?: boolean;
 }) {
+  const { t } = useTranslation();
   // 之前用 props.rows 直接驅動 render — 但 parent 的 setRows callback 會把
   // 空 key 的 row 過濾掉(不能寫進 JSON object),導致按「+ 新增」加的空白
   // row 在下一個 render 就被父層 filter 掉、看起來像按鈕沒反應。
@@ -216,7 +218,7 @@ function KvTable({
             placeholder={valuePlaceholder}
             autoComplete="off"
           />
-          <button className="mori-btn small ghost" onClick={() => remove(i)} title="刪除">✕</button>
+          <button className="mori-btn small ghost" onClick={() => remove(i)} title={t("config_tab.rows.remove_button_title")}>✕</button>
         </div>
       ))}
       <button className="mori-btn small" onClick={add}>+ 新增</button>
@@ -246,6 +248,7 @@ function ensureSubObj(obj: AnyObj, key: string): AnyObj {
 // brand-3: theme picker — 列 ~/.mori/themes/*.json 給 user 選 / reload。
 // 內建 dark / light + 任何 user 自訂 json file 都會列出。
 function ThemeSection() {
+  const { t } = useTranslation();
   const [themes, setThemes] = useState<ThemeEntry[]>([]);
   const [active, setActive] = useState<string>("dark");
   const [dir, setDir] = useState<string>("");
@@ -285,28 +288,28 @@ function ThemeSection() {
 
   return (
     <Section
-      title="Theme"
-      hint="主視窗配色。內建 Mori Dark / Mori Light;放任何 *.json 到 themes 資料夾即可加入自訂 theme(VSCode-like)。"
+      title={t("config_tab.sections.appearance_theme")}
+      hint={t("config_tab.sections.appearance_theme_hint")}
     >
-      <FormRow label="theme" hint="active 樣式">
+      <FormRow label="theme" hint={t("config_tab.rows.theme_active")}>
         <Select
           value={active}
           onChange={handleChange}
           disabled={busy}
-          options={themes.map((t) => ({
-            value: t.stem,
-            label: `${t.name}${t.builtin ? "" : "  (custom)"}  · ${t.base}`,
+          options={themes.map((theme) => ({
+            value: theme.stem,
+            label: `${theme.name}${theme.builtin ? "" : "  (custom)"}  · ${theme.base}`,
           }))}
         />
       </FormRow>
-      <FormRow label="themes folder" hint="放 *.json 進去會列在上面下拉">
+      <FormRow label="themes folder" hint={t("config_tab.rows.themes_folder")}>
         <div className="mori-theme-path-row">
           <code className="mori-theme-path">{dir || "(loading…)"}</code>
           <button
             className="mori-btn small"
             onClick={refresh}
             disabled={busy}
-            title="重新掃描資料夾"
+            title={t("config_tab.rows.themes_folder_rescan")}
           >Reload</button>
         </div>
       </FormRow>
@@ -355,6 +358,7 @@ function ConfigMemoryTypeChips({
 // 5P-6: Character pack picker — Floating section 內,讓 user 切換 / 列出 / 升級
 // 4×4 placeholder。換 active 後 emit "character-changed" 讓 FloatingMori 即時 re-fetch。
 function CharacterPicker() {
+  const { t } = useTranslation();
   const [chars, setChars] = useState<CharacterEntry[]>([]);
   const [active, setActive] = useState<string>("mori");
   const [characterDir, setCharacterDir] = useState<string>("");
@@ -414,7 +418,7 @@ function CharacterPicker() {
     <>
       <FormRow
         label="character"
-        hint={`Active character pack — 切到要用的角色。資料夾: ${characterDir}`}
+        hint={`${t("config_tab.rows.char_pack_hint")}${characterDir}`}
       >
         <Select
           value={active}
@@ -427,7 +431,7 @@ function CharacterPicker() {
       </FormRow>
       <FormRow
         label=""
-        hint="把 active pack 內 single-frame sprite 升 4×4 placeholder(原檔備份到 sprites/.backup-<ts>/)"
+        hint={t("config_tab.rows.char_upgrade_hint")}
       >
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button className="mori-btn" onClick={onUpgrade} disabled={busy}>
@@ -642,8 +646,8 @@ function ConfigTab({
           {/* ── Quick setup ─────────────────────────────── */}
           {subTab === "quick" && <>
           <Section
-            title="預設 Provider"
-            hint="所有 profile 沒指定 provider 時用這個。VoiceInput profile 可以再 override 自己的 stt_provider。"
+            title={t("config_tab.sections.quick_provider")}
+            hint={t("config_tab.sections.quick_provider_hint")}
           >
             <FormRow label="provider" hint="主對話 / agent 用的 LLM">
               <Select
@@ -662,8 +666,8 @@ function ConfigTab({
           </Section>
 
           <Section
-            title="API Keys"
-            hint="這裡填或 OS 環境變數設都可以 — Mori 先看 OS env var,沒有再讀這份 map(env 優先)。Key 名照 *_API_KEY 慣例(GEMINI_API_KEY / OPENAI_API_KEY 等),值是密碼欄位。"
+            title={t("config_tab.sections.quick_apikeys")}
+            hint={t("config_tab.sections.quick_apikeys_hint")}
           >
             <KvTable
               rows={apiKeysRows}
@@ -678,8 +682,8 @@ function ConfigTab({
           {/* ── LLM / Provider ──────────────────────────── */}
           {subTab === "llm" && <>
           <Section
-            title="Provider 設定"
-            hint="只列你會用的就好。空著的 provider 啟動時用內建預設(api_base / model 等)。"
+            title={t("config_tab.sections.llm_providers")}
+            hint={t("config_tab.sections.llm_providers_hint")}
           >
             <ProviderCard
               name="groq"
@@ -779,8 +783,8 @@ function ConfigTab({
           </Section>
 
           <Section
-            title="Routing(進階)"
-            hint="個別 skill 走不同 provider。沒設 = 全部用上面 provider。"
+            title={t("config_tab.sections.llm_routing")}
+            hint={t("config_tab.sections.llm_routing_hint")}
           >
             <FormRow label="agent" hint="agent loop 用哪個 provider(預設 = provider)">
               <Select
@@ -815,8 +819,8 @@ function ConfigTab({
           {/* ── Voice input ────────────────────────────── */}
           {subTab === "voice" && <>
           <Section
-            title="VoiceInput"
-            hint="VoiceInput 模式的全域預設;每個 voice profile 都可以 override 自己這幾項。"
+            title={t("config_tab.sections.voice_input")}
+            hint={t("config_tab.sections.voice_input_hint")}
           >
             <FormRow label="cleanup_level" hint="smart=LLM+程式 / minimal=只程式 / none=raw 直貼">
               <Select
@@ -861,8 +865,8 @@ function ConfigTab({
           {/* ── Appearance ─────────────────────────────── */}
           {subTab === "appearance" && <>
           <Section
-            title="介面語言 / UI language"
-            hint="切換 UI 顯示語言。Proper noun(SOUL.md / MEMORY.md / API key 名稱)永遠原文。"
+            title={t("config_tab.sections.appearance_locale")}
+            hint={t("config_tab.sections.appearance_locale_hint")}
           >
             <FormRow label="locale" hint="zh-TW / en。改完立即生效,同時寫進 config.json — 重啟也記得。">
               <Select
@@ -881,8 +885,8 @@ function ConfigTab({
           </Section>
           <ThemeSection />
           <Section
-            title="Floating Mori"
-            hint="桌面 floating widget 的視覺行為。Sprite 資產走 character pack(~/.mori/characters/<active>/)。"
+            title={t("config_tab.sections.appearance_floating")}
+            hint={t("config_tab.sections.appearance_floating_hint")}
           >
             <FormRow
               label="animated"
@@ -922,8 +926,8 @@ function ConfigTab({
           {/* ── Hotkey ─────────────────────────────────── */}
           {subTab === "hotkey" && <>
           <Section
-            title="Toggle 模式"
-            hint="Ctrl+Alt+Space(預設 chord)按下後怎麼觸發錄音。改完按 儲存 即時生效,不必重啟。"
+            title={t("config_tab.sections.hotkey_toggle_mode")}
+            hint={t("config_tab.sections.hotkey_toggle_mode_hint")}
           >
             <FormRow
               label="toggle_mode"
@@ -952,7 +956,7 @@ function ConfigTab({
           </Section>
 
           <Section
-            title="鍵位"
+            title={t("config_tab.sections.hotkey_keys")}
             hint={
               sessionType === "wayland"
                 ? "Wayland 上實際鍵位由系統設定決定 — 改 config.json 沒用,要去 GNOME Settings → Keyboard 改。"
@@ -1032,8 +1036,8 @@ function ConfigTab({
           {/* ── X11 only ────────────────────────────────── */}
           {subTab === "x11" && isX11 && <>
           <Section
-            title="Floating 外觀(X11)"
-            hint="只在 X11 session 有效。Wayland 上 body 真透明、XShape 沒對應 API,這幾項都沒影響。"
+            title={t("config_tab.sections.x11_floating")}
+            hint={t("config_tab.sections.x11_floating_hint")}
           >
             <FormRow
               label="x11 shape"
@@ -1096,8 +1100,8 @@ function ConfigTab({
           {/* ── Annuli(vault-backed reflection engine) ────── */}
           {subTab === "annuli" && <>
           <Section
-            title="Annuli vault 連線"
-            hint="開啟後 Mori 走 annuli HTTP service(localhost:5000 之類)讀寫 vault — SOUL.md / MEMORY.md / events / rings。關掉走本機 ~/.mori/memory/ 那條 fallback。改完要重啟 mori-desktop 才會切換 client。"
+            title={t("config_tab.sections.annuli_connection")}
+            hint={t("config_tab.sections.annuli_connection_hint")}
           >
             <FormRow label="enabled" hint="不打勾就走 LocalMarkdown fallback(舊行為)">
               <input
@@ -1157,7 +1161,7 @@ function ConfigTab({
               <input
                 type="password"
                 className="mori-input"
-                placeholder="(空 = 唯讀)"
+                placeholder={t("config_tab.rows.field_empty_readonly")}
                 value={cfg.annuli?.soul_token ?? ""}
                 onChange={(e) =>
                   applyPatch((c) => {
@@ -1190,14 +1194,14 @@ function ConfigTab({
             </FormRow>
           </Section>
           <Section
-            title="Basic auth(可選)"
-            hint="正式機 annuli 走 nginx + basic auth 時填這。本機 localhost 通常不用。"
+            title={t("config_tab.sections.annuli_basic_auth")}
+            hint={t("config_tab.sections.annuli_basic_auth_hint")}
           >
             <FormRow label="user">
               <input
                 type="text"
                 className="mori-input"
-                placeholder="(空 = 不帶 basic auth)"
+                placeholder={t("config_tab.rows.field_empty_no_basic_auth")}
                 value={cfg.annuli?.basic_auth?.user ?? ""}
                 onChange={(e) =>
                   applyPatch((c) => {
@@ -1238,8 +1242,8 @@ function ConfigTab({
           {/* ── Corrections.md(獨立檔,獨立 save) ────────── */}
           {subTab === "corrections" && <>
           <Section
-            title="corrections.md"
-            hint="共用 STT 校正詞表。Voice / Agent profile 用 #file: ../corrections.md 引用,LLM 看 system prompt 時讀進去。"
+            title={t("config_tab.sections.corrections_title")}
+            hint={t("config_tab.sections.corrections_hint")}
           >
             <textarea
               className="mori-config-textarea"
@@ -1253,13 +1257,13 @@ function ConfigTab({
                 className="mori-btn primary"
                 onClick={saveCorrections}
                 disabled={!corrDirty}
-                title="只存 corrections.md,不存 config.json"
-              >儲存 corrections.md</button>
+                title={t("config_tab.rows.save_corrections_only_hint")}
+              >{t("config_tab.rows.save_corrections")}</button>
               <button
                 className="mori-btn"
                 onClick={() => setCorrText(corrOrig)}
                 disabled={!corrDirty}
-              >還原</button>
+              >{t("common.revert")}</button>
               <StatusBadge status={corrStatus} />
             </div>
           </Section>
@@ -1268,8 +1272,8 @@ function ConfigTab({
           {/* ── Raw JSON view ──────────────────────────── */}
           {subTab === "raw" && <>
           <Section
-            title="Raw JSON"
-            hint="整份 ~/.mori/config.json,給 power user 直接編 routing.skills / shell_skills 等沒在表單裡的進階欄位。"
+            title={t("config_tab.sections.raw_title")}
+            hint={t("config_tab.sections.raw_hint")}
           >
             <textarea
               className={`mori-config-textarea ${rawError ? "has-error" : ""}`}
