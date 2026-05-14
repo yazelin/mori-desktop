@@ -893,20 +893,20 @@ function ConfigTab({
               label={t("config_tab.rows.floating_show_mode")}
               hint={t("config_tab.rows.hint_floating_show_mode")}
             >
-              <select
-                className="mori-input"
+              <Select
                 value={cfg.floating?.show_mode ?? "always"}
-                onChange={(e) =>
+                options={[
+                  { value: "always", label: t("config_tab.rows.floating_show_always") },
+                  { value: "recording", label: t("config_tab.rows.floating_show_recording") },
+                  { value: "off", label: t("config_tab.rows.floating_show_off") },
+                ]}
+                onChange={(v) =>
                   applyPatch((c) => {
                     const f = ensureSubObj(c, "floating");
-                    f.show_mode = e.target.value;
+                    f.show_mode = v;
                   })
                 }
-              >
-                <option value="always">{t("config_tab.rows.floating_show_always")}</option>
-                <option value="recording">{t("config_tab.rows.floating_show_recording")}</option>
-                <option value="off">{t("config_tab.rows.floating_show_off")}</option>
-              </select>
+              />
             </FormRow>
             <FormRow
               label="animated"

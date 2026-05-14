@@ -737,6 +737,19 @@ fn config_write(
     Ok(())
 }
 
+/// v0.3.1: chat_bubble 出現時呼叫 `floating_set_above(false)` 把 floating 暫時
+/// 從 always-on-top 層放下,bubble 自然顯示在上;bubble 隱藏時 `(true)` 恢復。
+/// 比靠 xdotool windowraise 更穩(Wayland 沒 raise API、X11 raise 也會被
+/// always_on_top re-assert 蓋掉)。
+#[tauri::command]
+fn floating_set_above(app: AppHandle, enabled: bool) -> Result<(), String> {
+    if let Some(f) = app.get_webview_window("floating") {
+        f.set_always_on_top(enabled)
+            .map_err(|e| format!("set_always_on_top: {e}"))?;
+    }
+    Ok(())
+}
+
 /// 召喚師按下宿靈儀式第五幕「歡迎回家, Mori」後呼叫 — 讓 floating Mori 現身桌面。
 /// 在儀式完成前 floating 是隱藏的(setup hook 讀 quickstart_completed 決定),
 /// 這裡是真正讓她「住下」的那個瞬間。
@@ -3070,6 +3083,7 @@ fn main() {
             config_read,
             config_write,
             floating_show,
+            floating_set_above,
             open_external_url,
             corrections_read,
             corrections_write,

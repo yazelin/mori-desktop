@@ -39,14 +39,15 @@ function ChatBubble() {
       console.log("[chat_bubble] show", { x, y, len: text.length });
       setText(text);
       try {
+        // v0.3.1: 把 floating 從 always-on-top 層暫時下放,bubble 自然在上;
+        // 比 xdotool windowraise 穩(跨 X11 + Wayland),不會被後續 raise event 推翻
+        await invoke("floating_set_above", { enabled: false }).catch(
+          (err: unknown) => console.warn("[chat_bubble] floating_set_above(false) failed", err),
+        );
         await win.setSize(new LogicalSize(WIDTH, MIN_HEIGHT));
         await win.setPosition(new LogicalPosition(x, y));
         await win.show();
-        // X11:兩個視窗都 alwaysOnTop:true,同 layer 內 floating 因互動較頻
-        // 繁(hover / drag)raise 較新會壓在 chat_bubble 上面 — 文字看不到。
-        // setAlwaysOnTop toggle 只翻 state 不 re-raise within layer,要真正
-        // raise 必須走 X11 XRaiseWindow。force_raise_window 後端 shell-out
-        // xdotool windowraise 解決。Wayland no-op。
+        // 雙保險:X11 上額外用 xdotool 把 bubble raise 一次。Wayland no-op。
         await invoke("force_raise_window", { label: "chat_bubble" }).catch(
           (err: unknown) => console.warn("[chat_bubble] force_raise failed", err),
         );
@@ -55,6 +56,10 @@ function ChatBubble() {
 
     const unlistenHide = listen("chat-bubble-hide", async () => {
       console.log("[chat_bubble] hide");
+      // bubble 消失後恢復 floating 的 always-on-top — Mori 回到該在的層
+      invoke("floating_set_above", { enabled: true }).catch(
+        (err: unknown) => console.warn("[chat_bubble] floating_set_above(true) failed", err),
+      );
       try {
         // 5K-1c: 跟 picker 同樣策略,移 off-screen 而非 hide() —
         // visible 保留,WMClass group 已建立,後續 show 不會再造成 dock 堆疊
