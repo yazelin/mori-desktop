@@ -6,6 +6,81 @@
 
 ---
 
+## v0.4.1 — EN starter set + 範本管理 UI + OS theme 自動偵測(2026-05-15)
+
+v0.4.0 加了 8 個中文 starter,user 想試英文版?改壞了想還原?之前都得手動 cp examples/。這版加 **內建範本管理**:Profiles tab「加入範本」按鈕,modal 列出 binary 內建的 zh + en 各 11 份 starter,點一下複製進 ~/.mori/(已存在會問是否覆蓋)。
+
+底層加了一份 [`docs/tokenizer-comparison.md`](docs/tokenizer-comparison.md) 把 zh vs en token 比較跑出來放進去 — `o200k_harmony`(gpt-oss-120b)上 EN 省 26%,Gemini Flash 省 8%,GPT-4 cl100k 省 44%。給「想自己決定哪份省 quota」的 power user 看資料、做選擇。
+
+順便把 OS theme prefers-color-scheme 接上 — fresh install 沒設過 active_theme 時,Mori 預設值跟 OS 系統設定走(浮現淺色 OS → Mori 淺色,反之亦然)。User 顯式 set 過就尊重 user。
+
+### 主要 feature
+
+#### 內建 starter 範本管理(Profiles tab「加入範本」)
+
+新後端 Tauri commands:
+- `list_starter_templates(kind)` — 回傳 binary 內 `include_str!` 包好的 zh + en 範本清單(`StarterTemplate { filename, lang, display }`)
+- `install_starter_template(kind, filename, overwrite)` — 寫一份到 `~/.mori/<dir>/<filename>`,檔已存在時 `overwrite=false` 回 `already exists`(前端 confirm 後傳 `overwrite=true`)
+
+Profiles tab 每個 section(voice / agent)heading 加「加入範本」按鈕 → 開 modal 列出所有可選範本(zh + en × 各 6 / 5),lang badge(zh 桑色 / en 綠色),filter pill 三段「全部 / 中文 / English」。點任一行「加入」立刻寫進 ~/.mori/,reload 後立即出現在 profile list 可用。
+
+Use case:
+- 你不小心把 `USER-04.哄老婆開心.md` 改壞了 → 加入範本 → 找原檔 → 覆寫還原
+- 你想試英文版省 token → 加入範本 → 切 English filter → 加 USER-04.sweet-message.md 進去 → Alt+4 試試
+- 兩語並存:zh / en 範本 filename 故意不同(`USER-04.哄老婆開心.md` vs `USER-04.sweet-message.md`),兩份都裝可以共存
+
+#### EN starter set 全集(12 個範本進 binary)
+
+`examples-en/` 新增完整翻譯:
+
+| Voice (`examples-en/voice_input/`) | Agent (`examples-en/agent/`) |
+|---|---|
+| USER-00.minimal | AGENT (default) |
+| USER-01.casual-chat | AGENT-01.translate |
+| USER-02.formal-letter | AGENT-02.workflow |
+| USER-03.line-post | AGENT-03.zerotype-agent |
+| USER-04.sweet-message | AGENT-04.youtube-summary |
+| USER-05.prompt-optim | AGENT-05.listen |
+
+所有翻譯是 zh 版的忠實對譯 — 結構 / 範例 / 規則邏輯不變,只換語言。fresh install 預設仍 auto-deploy zh 版(維持 v0.4.0 行為,避免 zh 用戶突然看到英文 starter 嚇到),en 版要靠新 UI「加入範本」主動裝。
+
+#### `docs/tokenizer-comparison.md` — zh vs en token 數對比 + 中英取捨建議
+
+跑 4 對 starter(USER-03/04/05 + AGENT-05)的 system prompt body,測 3 個 tokenizer(`o200k_harmony` gpt-oss / Gemini Flash / `cl100k_base` GPT-4)。
+
+| Provider | EN 比 ZH 省 |
+|---|---|
+| gpt-oss-120b(Groq 預設)| **-26.3%** |
+| Gemini Flash | -8.4% |
+| GPT-4 cl100k(僅參考)| -44.1% |
+
+附:reproducible 跑法(`scratch/tokenizer-test/` 內有 `compare.py` / `compare_gemini.py`)、密度數據(chars/tok)、實際 TPM 影響估算、各 provider 對應 starter 語系建議。
+
+#### OS theme 自動偵測(prefers-color-scheme)
+
+`theme_get_active` Tauri command 加 `default_light: bool` 參數,前端從 `window.matchMedia('(prefers-color-scheme: light)')` 算後傳進去。新邏輯:
+
+- 已存在 `~/.mori/active_theme` 檔 → **尊重 user 顯式 set 過的值**(忽略 hint)
+- 沒檔 → 用 hint 決定:OS 系統淺色 → Mori 淺色;OS 深色 / 不支援 → Mori 深色
+
+跟 OS 一致的 first-launch 體驗,user 不必先去 ConfigTab 切一次。
+
+### 工程
+
+- 新 Tauri commands 註冊:`list_starter_templates`、`install_starter_template`
+- 新 mori-core API:`agent_profile::list_agent_starters` / `get_agent_starter_content`、`voice_input_profile::list_voice_starters` / `get_voice_starter_content`(`StarterTemplate { filename, lang, display, content }`)
+- 新 i18n strings:`profiles_tab.add_template_*` 系列、`profiles_tab.template_*` 系列(zh-TW + en)
+- 新 CSS:`.mori-template-modal` / `.mori-template-row` / `.mori-template-row-lang.lang-{zh,en}` 配色
+- Theme:`get_active_stem_with_default(default_light)` 新 helper,舊 `get_active_stem()` 保留(委派預設 false = dark)
+
+### 留 v0.4.2 / v0.5
+
+- **Quickstart 加 starter locale picker** — 第一次儀式時讓 user 選裝中或英 starter,寫進 config.json(`starter_locale`),`ensure_*_dir_initialized` 依此選 deploy。這版 user 用 Profiles tab「加入範本」也能達成同件事,Quickstart picker 只是更省一步
+- **Phase B per-pipeline artifacts**(`~/.mori/recordings/<時戳>/` 完整 I/O snapshot)— ZeroType 啟發,給 Whisper fine-tune 資料源用
+- **Phase C installed apps catalog** — Win UserAssist / Linux .desktop / macOS Spotlight 三平台掃描,注入 OpenAppSkill system prompt
+
+---
+
 ## v0.4.0 — Windows out-of-the-box + 觀測層 + 隱私 redact + Quickstart polish(2026-05-15)
 
 四條主軸:**Windows 終於 first-class**(短名 binary 自動探 `.cmd` shim、`cmd /C` 規避 CVE-2024-24576、`file_stem` 偵測協定、PATH 分隔符)、**首版觀測層**(Phase A logs:JSONL append-only + LogsTab UI,LLM call 全自動入帳,除錯不再靠肉眼盯 terminal)、**隱私 redact**(clipboard / selection 進 LLM API 之前掃 API key 樣式遮蔽,音 ZeroType 觀察反思的功課)、跟**Quickstart 全面 polish**(儀式收尾 modal+音樂同步淡出、Direct mode 重做技術名詞 + 一頁完成 + env var 對稱偵測 Gemini/OpenAI、`verify_llm_key` 真打 API 而不偷懶 skip)。另外:Chat topbar 顯示 active profile / Profiles tab 開資料夾按鈕 / Memory tab 'unknown' type 修好 / 系統狀態 modal 在 Windows / macOS 顯示正確 OS label。

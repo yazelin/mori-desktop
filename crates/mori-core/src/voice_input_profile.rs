@@ -544,29 +544,127 @@ pub fn ensure_voice_input_dir_initialized() {
     }
 }
 
+// ─── Starter templates(zh + en 兩語都包進 binary)─────────────────────
+//
+// 跟 agent_profile.rs 同模式。fresh install 只 auto-deploy zh(維持 v0.4.0
+// 行為);en 版要靠 Profiles tab「加入範本」UI 主動加。
+//
 // 5R-followup:USER-00 ship 一份實體檔(內容跟 FALLBACK_PROFILE_MD 一致),
 // 讓 floating sprite 切 slot 0 時也有 display name 出 chip。沒這份 file
 // 的話 Alt+0 切過去就只有「mode change」沒 profile 名提示。
-const STARTER_USER_00_FILENAME: &str = "USER-00.純文字輸入.md";
-const STARTER_USER_00_MD: &str =
-    include_str!("../../../examples/voice_input/USER-00.純文字輸入.md");
-const STARTER_USER_01_FILENAME: &str = "USER-01.朋友閒聊.md";
-const STARTER_USER_01_MD: &str =
-    include_str!("../../../examples/voice_input/USER-01.朋友閒聊.md");
-// v0.4:多 4 個 starter — 正式信件、LINE 貼文、哄老婆、提示詞優化。
-// fresh install 直接看到 Alt+0~5 都有 profile,不必自己學 frontmatter 才能跑。
-const STARTER_USER_02_FILENAME: &str = "USER-02.正式信件.md";
-const STARTER_USER_02_MD: &str =
-    include_str!("../../../examples/voice_input/USER-02.正式信件.md");
-const STARTER_USER_03_FILENAME: &str = "USER-03.LINE貼文.md";
-const STARTER_USER_03_MD: &str =
-    include_str!("../../../examples/voice_input/USER-03.LINE貼文.md");
-const STARTER_USER_04_FILENAME: &str = "USER-04.哄老婆開心.md";
-const STARTER_USER_04_MD: &str =
-    include_str!("../../../examples/voice_input/USER-04.哄老婆開心.md");
-const STARTER_USER_05_FILENAME: &str = "USER-05.提示詞優化.md";
-const STARTER_USER_05_MD: &str =
-    include_str!("../../../examples/voice_input/USER-05.提示詞優化.md");
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StarterTemplate {
+    pub filename: &'static str,
+    pub lang: &'static str,
+    pub display: &'static str,
+    #[serde(skip)]
+    pub content: &'static str,
+}
+
+const VOICE_STARTERS: &[StarterTemplate] = &[
+    // zh — 跟 v0.4.0 行為一致,fresh install auto-deploy
+    StarterTemplate {
+        filename: "USER-00.純文字輸入.md",
+        lang: "zh",
+        display: "USER-00 · 純文字輸入",
+        content: include_str!("../../../examples/voice_input/USER-00.純文字輸入.md"),
+    },
+    StarterTemplate {
+        filename: "USER-01.朋友閒聊.md",
+        lang: "zh",
+        display: "USER-01 · 朋友閒聊",
+        content: include_str!("../../../examples/voice_input/USER-01.朋友閒聊.md"),
+    },
+    StarterTemplate {
+        filename: "USER-02.正式信件.md",
+        lang: "zh",
+        display: "USER-02 · 正式信件",
+        content: include_str!("../../../examples/voice_input/USER-02.正式信件.md"),
+    },
+    StarterTemplate {
+        filename: "USER-03.LINE貼文.md",
+        lang: "zh",
+        display: "USER-03 · LINE 貼文",
+        content: include_str!("../../../examples/voice_input/USER-03.LINE貼文.md"),
+    },
+    StarterTemplate {
+        filename: "USER-04.哄老婆開心.md",
+        lang: "zh",
+        display: "USER-04 · 哄老婆開心",
+        content: include_str!("../../../examples/voice_input/USER-04.哄老婆開心.md"),
+    },
+    StarterTemplate {
+        filename: "USER-05.提示詞優化.md",
+        lang: "zh",
+        display: "USER-05 · 提示詞優化",
+        content: include_str!("../../../examples/voice_input/USER-05.提示詞優化.md"),
+    },
+    // en — 不 auto-deploy,UI「加入範本」可選裝。filename 跟 zh 不同避免衝突
+    StarterTemplate {
+        filename: "USER-00.minimal.md",
+        lang: "en",
+        display: "USER-00 · minimal",
+        content: include_str!("../../../examples-en/voice_input/USER-00.minimal.md"),
+    },
+    StarterTemplate {
+        filename: "USER-01.casual-chat.md",
+        lang: "en",
+        display: "USER-01 · casual-chat",
+        content: include_str!("../../../examples-en/voice_input/USER-01.casual-chat.md"),
+    },
+    StarterTemplate {
+        filename: "USER-02.formal-letter.md",
+        lang: "en",
+        display: "USER-02 · formal-letter",
+        content: include_str!("../../../examples-en/voice_input/USER-02.formal-letter.md"),
+    },
+    StarterTemplate {
+        filename: "USER-03.line-post.md",
+        lang: "en",
+        display: "USER-03 · line-post",
+        content: include_str!("../../../examples-en/voice_input/USER-03.line-post.md"),
+    },
+    StarterTemplate {
+        filename: "USER-04.sweet-message.md",
+        lang: "en",
+        display: "USER-04 · sweet-message",
+        content: include_str!("../../../examples-en/voice_input/USER-04.sweet-message.md"),
+    },
+    StarterTemplate {
+        filename: "USER-05.prompt-optim.md",
+        lang: "en",
+        display: "USER-05 · prompt-optim",
+        content: include_str!("../../../examples-en/voice_input/USER-05.prompt-optim.md"),
+    },
+];
+
+/// 列出所有 voice starter 範本(zh + en),UI「加入範本」用。
+pub fn list_voice_starters() -> Vec<StarterTemplate> {
+    VOICE_STARTERS.to_vec()
+}
+
+/// 依 filename 拿 starter 內容,用於 install_starter_template Tauri command。
+pub fn get_voice_starter_content(filename: &str) -> Option<&'static str> {
+    VOICE_STARTERS
+        .iter()
+        .find(|t| t.filename == filename)
+        .map(|t| t.content)
+}
+
+// Backward-compat aliases — fresh-install for-loop 用 zh 那 6 個。
+const STARTER_USER_00_FILENAME: &str = VOICE_STARTERS[0].filename;
+const STARTER_USER_00_MD: &str = VOICE_STARTERS[0].content;
+const STARTER_USER_01_FILENAME: &str = VOICE_STARTERS[1].filename;
+const STARTER_USER_01_MD: &str = VOICE_STARTERS[1].content;
+const STARTER_USER_02_FILENAME: &str = VOICE_STARTERS[2].filename;
+const STARTER_USER_02_MD: &str = VOICE_STARTERS[2].content;
+const STARTER_USER_03_FILENAME: &str = VOICE_STARTERS[3].filename;
+const STARTER_USER_03_MD: &str = VOICE_STARTERS[3].content;
+const STARTER_USER_04_FILENAME: &str = VOICE_STARTERS[4].filename;
+const STARTER_USER_04_MD: &str = VOICE_STARTERS[4].content;
+const STARTER_USER_05_FILENAME: &str = VOICE_STARTERS[5].filename;
+const STARTER_USER_05_MD: &str = VOICE_STARTERS[5].content;
 
 // ─── Built-in fallback ────────────────────────────────────────────────────
 

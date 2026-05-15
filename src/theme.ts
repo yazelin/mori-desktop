@@ -34,10 +34,18 @@ export function applyTheme(theme: Theme): void {
   root.style.colorScheme = theme.base;
 }
 
-/** 啟動時呼叫:抓 active theme 套上去 */
+/** 啟動時呼叫:抓 active theme 套上去。
+ *
+ * v0.4.1:傳 OS 的 `prefers-color-scheme` 給後端當 fallback hint — 沒
+ * active_theme 檔(fresh install)時依 OS 設定選 light/dark。已 set 過的
+ * 用戶後端會忽略 hint 走自己設定。
+ */
 export async function loadActiveTheme(): Promise<[string, Theme] | null> {
   try {
-    const [stem, theme] = await invoke<[string, Theme]>("theme_get_active");
+    const defaultLight =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-color-scheme: light)").matches === true;
+    const [stem, theme] = await invoke<[string, Theme]>("theme_get_active", { defaultLight });
     applyTheme(theme);
     return [stem, theme];
   } catch (e) {

@@ -361,21 +361,116 @@ pub fn ensure_agent_dir_initialized() {
     }
 }
 
-const STARTER_AGENT_01_FILENAME: &str = "AGENT-01.翻譯助手.md";
-const STARTER_AGENT_01_MD: &str =
-    include_str!("../../../examples/agent/AGENT-01.翻譯助手.md");
-const STARTER_AGENT_02_FILENAME: &str = "AGENT-02.工作流.md";
-const STARTER_AGENT_02_MD: &str =
-    include_str!("../../../examples/agent/AGENT-02.工作流.md");
-const STARTER_AGENT_03_FILENAME: &str = "AGENT-03.ZeroType Agent.md";
-const STARTER_AGENT_03_MD: &str =
-    include_str!("../../../examples/agent/AGENT-03.ZeroType Agent.md");
-const STARTER_AGENT_04_FILENAME: &str = "AGENT-04.YouTube 摘要.md";
-const STARTER_AGENT_04_MD: &str =
-    include_str!("../../../examples/agent/AGENT-04.YouTube 摘要.md");
-const STARTER_AGENT_05_FILENAME: &str = "AGENT-05.聽我指令.md";
-const STARTER_AGENT_05_MD: &str =
-    include_str!("../../../examples/agent/AGENT-05.聽我指令.md");
+// ─── Starter templates(zh + en 兩語都包進 binary)─────────────────────
+//
+// v0.4.0 把 zh starter ship 進去;v0.4.1 加 en 版,UI 加「加入範本」讓 user
+// 選哪語系裝(預設仍 zh,Quickstart locale picker 之後可決定)。
+// `auto_deploy = true` 的會被 ensure_agent_dir_initialized() 在 fresh install
+// 時自動寫到 ~/.mori/agent/(只 zh 版,en 版要靠 UI 主動加)。
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StarterTemplate {
+    pub filename: &'static str,
+    pub lang: &'static str, // "zh" | "en"
+    /// 文件 stem 不含副檔名,UI 顯示用
+    pub display: &'static str,
+    /// content 不出去 — 透過 get_agent_starter_content 拉
+    #[serde(skip)]
+    pub content: &'static str,
+}
+
+const AGENT_STARTERS: &[StarterTemplate] = &[
+    // zh
+    StarterTemplate {
+        filename: "AGENT-01.翻譯助手.md",
+        lang: "zh",
+        display: "AGENT-01 · 翻譯助手",
+        content: include_str!("../../../examples/agent/AGENT-01.翻譯助手.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-02.工作流.md",
+        lang: "zh",
+        display: "AGENT-02 · 工作流",
+        content: include_str!("../../../examples/agent/AGENT-02.工作流.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-03.ZeroType Agent.md",
+        lang: "zh",
+        display: "AGENT-03 · ZeroType Agent",
+        content: include_str!("../../../examples/agent/AGENT-03.ZeroType Agent.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-04.YouTube 摘要.md",
+        lang: "zh",
+        display: "AGENT-04 · YouTube 摘要",
+        content: include_str!("../../../examples/agent/AGENT-04.YouTube 摘要.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-05.聽我指令.md",
+        lang: "zh",
+        display: "AGENT-05 · 聽我指令",
+        content: include_str!("../../../examples/agent/AGENT-05.聽我指令.md"),
+    },
+    // en — 同 stem,EN 翻譯版,UI「加入範本」可選裝。注意 filename 跟 zh 不同
+    // (display 部分換英文)避免 zh / en 同檔名衝突 — user 可同時擁有兩語版本。
+    StarterTemplate {
+        filename: "AGENT-01.translate.md",
+        lang: "en",
+        display: "AGENT-01 · translate",
+        content: include_str!("../../../examples-en/agent/AGENT-01.translate.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-02.workflow.md",
+        lang: "en",
+        display: "AGENT-02 · workflow",
+        content: include_str!("../../../examples-en/agent/AGENT-02.workflow.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-03.zerotype-agent.md",
+        lang: "en",
+        display: "AGENT-03 · zerotype-agent",
+        content: include_str!("../../../examples-en/agent/AGENT-03.zerotype-agent.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-04.youtube-summary.md",
+        lang: "en",
+        display: "AGENT-04 · youtube-summary",
+        content: include_str!("../../../examples-en/agent/AGENT-04.youtube-summary.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-05.listen.md",
+        lang: "en",
+        display: "AGENT-05 · listen",
+        content: include_str!("../../../examples-en/agent/AGENT-05.listen.md"),
+    },
+];
+
+/// 列出所有 agent starter 範本(zh + en),UI「加入範本」用。
+pub fn list_agent_starters() -> Vec<StarterTemplate> {
+    AGENT_STARTERS.to_vec()
+}
+
+/// 依 filename 拿 starter 內容,用於 install_starter_template Tauri command。
+/// 找不到回 None,caller 該回 user-friendly error。
+pub fn get_agent_starter_content(filename: &str) -> Option<&'static str> {
+    AGENT_STARTERS
+        .iter()
+        .find(|t| t.filename == filename)
+        .map(|t| t.content)
+}
+
+// Backward-compat aliases — fresh-install auto-deploy 用,只走 zh 版。
+// 不破壞舊 init flow,for-loop 仍能正常用這幾個 const。
+const STARTER_AGENT_01_FILENAME: &str = AGENT_STARTERS[0].filename;
+const STARTER_AGENT_01_MD: &str = AGENT_STARTERS[0].content;
+const STARTER_AGENT_02_FILENAME: &str = AGENT_STARTERS[1].filename;
+const STARTER_AGENT_02_MD: &str = AGENT_STARTERS[1].content;
+const STARTER_AGENT_03_FILENAME: &str = AGENT_STARTERS[2].filename;
+const STARTER_AGENT_03_MD: &str = AGENT_STARTERS[2].content;
+const STARTER_AGENT_04_FILENAME: &str = AGENT_STARTERS[3].filename;
+const STARTER_AGENT_04_MD: &str = AGENT_STARTERS[3].content;
+const STARTER_AGENT_05_FILENAME: &str = AGENT_STARTERS[4].filename;
+const STARTER_AGENT_05_MD: &str = AGENT_STARTERS[4].content;
 
 /// 給上層用：取得 enabled_skills 的 HashSet，方便 contains 檢查。
 pub fn enabled_skills_set(profile: &AgentProfile) -> Option<HashSet<String>> {

@@ -109,11 +109,19 @@ pub fn read(stem: &str) -> Result<Theme> {
 }
 
 pub fn get_active_stem() -> String {
+    get_active_stem_with_default(false)
+}
+
+/// v0.4.1:首次啟動沒 active_theme 檔時,用 `default_light` 提示 fallback
+/// 是該選 light 還是 dark。前端可從 `prefers-color-scheme` 算這個值傳進來
+/// → user 在 OS 設了 light theme,Mori 預設也跟 light。
+/// 已存在 active_theme 檔時 hint 忽略 — 尊重 user 顯式 set 過的值。
+pub fn get_active_stem_with_default(default_light: bool) -> String {
     std::fs::read_to_string(active_theme_path())
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "dark".to_string())
+        .unwrap_or_else(|| if default_light { "light".to_string() } else { "dark".to_string() })
 }
 
 pub fn set_active_stem(stem: &str) -> Result<()> {

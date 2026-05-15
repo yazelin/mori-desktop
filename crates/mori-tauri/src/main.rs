@@ -1001,6 +1001,67 @@ fn open_profile_dir(kind: String) -> Result<(), String> {
         .map_err(|e| format!("open {}: {e}", dir.display()))
 }
 
+/// v0.4.1:列出內建 starter 範本(zh + en 兩語都包進 binary)— Profiles tab
+/// 「加入範本」UI 用。回 (filename, lang, display)。
+#[tauri::command]
+fn list_starter_templates(
+    kind: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let templates: Vec<mori_core::voice_input_profile::StarterTemplate> = match kind.as_str() {
+        "voice" => mori_core::voice_input_profile::list_voice_starters(),
+        "agent" => mori_core::agent_profile::list_agent_starters()
+            .into_iter()
+            .map(|t| mori_core::voice_input_profile::StarterTemplate {
+                filename: t.filename,
+                lang: t.lang,
+                display: t.display,
+                content: t.content,
+            })
+            .collect(),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    Ok(templates
+        .into_iter()
+        .map(|t| {
+            serde_json::json!({
+                "filename": t.filename,
+                "lang": t.lang,
+                "display": t.display,
+            })
+        })
+        .collect())
+}
+
+/// v0.4.1:把指定 starter 範本寫到 ~/.mori/<dir>/<filename>。檔已存在時:
+/// - overwrite=false → 回 Err("already exists"),前端應 confirm
+/// - overwrite=true → 覆蓋
+/// 用途:user 改壞 .md 想還原 / 想加裝另一語系版本。
+#[tauri::command]
+fn install_starter_template(
+    kind: String,
+    filename: String,
+    overwrite: bool,
+) -> Result<String, String> {
+    let dir = match kind.as_str() {
+        "voice" => mori_dir().join("voice_input"),
+        "agent" => mori_dir().join("agent"),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    let content = match kind.as_str() {
+        "voice" => mori_core::voice_input_profile::get_voice_starter_content(&filename),
+        "agent" => mori_core::agent_profile::get_agent_starter_content(&filename),
+        _ => None,
+    };
+    let content = content.ok_or_else(|| format!("template not found: {filename}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
+    let path = dir.join(&filename);
+    if path.exists() && !overwrite {
+        return Err(format!("already exists: {}", path.display()));
+    }
+    std::fs::write(&path, content).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(format!("installed: {}", path.display()))
+}
+
 // ─── 5L-4: Memory + Skills IPC ────────────────────────────────────
 
 #[derive(serde::Serialize, Clone)]
@@ -1185,10 +1246,13 @@ fn theme_read(stem: String) -> Result<crate::theme::Theme, String> {
     crate::theme::read(&stem).map_err(|e| format!("read theme {stem}: {e:#}"))
 }
 
-/// 回 (stem, theme) 給 frontend 啟動時套用
+/// 回 (stem, theme) 給 frontend 啟動時套用。
+/// v0.4.1:`default_light` hint(從前端 prefers-color-scheme 算)在沒
+/// active_theme 檔時決定 fallback 是 light 還是 dark — user 在 OS 設淺色,
+/// Mori 預設跟。已存在 user 顯式 set 過的 theme 時 hint 忽略,尊重 user 選擇。
 #[tauri::command]
-fn theme_get_active() -> Result<(String, crate::theme::Theme), String> {
-    let stem = crate::theme::get_active_stem();
+fn theme_get_active(default_light: Option<bool>) -> Result<(String, crate::theme::Theme), String> {
+    let stem = crate::theme::get_active_stem_with_default(default_light.unwrap_or(false));
     let theme = crate::theme::read(&stem)
         .or_else(|_| crate::theme::read("dark")) // fallback
         .map_err(|e| format!("read active theme: {e:#}"))?;
@@ -3226,6 +3290,8 @@ fn main() {
             profile_write,
             profile_delete,
             open_profile_dir,
+            list_starter_templates,
+            install_starter_template,
             active_profiles,
             log_tail,
             log_dates,
