@@ -411,7 +411,7 @@
       "field_empty_no_basic_auth": "(empty = no basic auth)",
       "hint_quick_provider": "LLM for main chat / agent",
       "hint_quick_stt": "Whisper STT (speech-to-text)",
-      "hint_llm_gemini_key": "Set GEMINI_API_KEY in the API Keys section above, or via $GEMINI_API_KEY env var (env wins). Leave model / api_base blank to use defaults.",
+      "hint_llm_gemini_key": "Gemini API key isn't entered on this page — use one of these two paths:\n(1) Add `GEMINI_API_KEY` to the [Quick] subtab's \"API Keys\" section\n(2) Or set `GEMINI_API_KEY` OS env var (wins; if set, (1) is ignored)\nGet a key at https://aistudio.google.com/.\nLeave `model` / `api_base` blank to use Google defaults (`gemini-3.1-flash-lite-preview` + standard endpoint) — most users don't need to change them.",
       "hint_llm_whisper_server": "v2: Mori no longer builds whisper.cpp itself; it now spawns the official whisper-server as a child process. Model + engine can both be installed in one click from the Deps tab — no manual config edits.",
       "hint_llm_routing_agent": "Which provider the agent loop uses (default = provider above)",
       "hint_llm_routing_skills": "skill_name → provider (empty = use agent / provider above)",

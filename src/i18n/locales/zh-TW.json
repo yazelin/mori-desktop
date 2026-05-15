@@ -411,7 +411,7 @@
       "field_empty_no_basic_auth": "(空 = 不帶 basic auth)",
       "hint_quick_provider": "主對話 / agent 用的 LLM",
       "hint_quick_stt": "Whisper STT(語音轉文字)",
-      "hint_llm_gemini_key": "API key 在上方 API Keys 區填 GEMINI_API_KEY，或設 $GEMINI_API_KEY 環境變數(env 優先)。model / api_base 留空就用預設值。",
+      "hint_llm_gemini_key": "Gemini 不在這一頁填 API key — 走以下兩條任一條:\n（1）在 [Quick] 分頁的「API Keys」區填一條 `GEMINI_API_KEY`\n（2）或設 OS 環境變數 `GEMINI_API_KEY`(優先;設了的話 [Quick] 那條會被忽略)\nkey 可在 https://aistudio.google.com/ 申請。\n下方 `model` / `api_base` 兩格留空就用 Google 官方預設值(`gemini-3.1-flash-lite-preview` + 標準 endpoint),大部分用戶不必動。",
       "hint_llm_whisper_server": "v2:Mori 自己不編 whisper.cpp，改 spawn 官方 whisper-server 子程序。模型 + 引擎兩件事都可以從 Deps 頁一鍵裝完，不用手動改 config。",
       "hint_llm_routing_agent": "agent loop 用哪個 provider(預設 = provider)",
       "hint_llm_routing_skills": "skill_name → provider(空 = 用 agent / provider)",

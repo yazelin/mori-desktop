@@ -761,13 +761,15 @@
   font-family: system-ui, sans-serif;
 }
 /* Portal 版:position:fixed,top/left 由 JS getBoundingClientRect 算。z-index
-   爆大確保壓過 modal backdrop(1000)/ floating sprite。 */
+   爆大確保壓過 modal backdrop(1000)/ floating sprite。`pre-line` 讓 i18n
+   string 內的 \n 渲染成換行(原版 `normal` 會 collapse)。 */
 .mori-hint-popover.portal {
   display: block;
   position: fixed;
   z-index: 10000;
   top: auto;
   left: auto;
+  white-space: pre-line;
 }
 .mori-hint:hover .mori-hint-popover:not(.portal),
 .mori-hint:focus-within .mori-hint-popover:not(.portal) {
