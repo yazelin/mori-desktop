@@ -79,6 +79,47 @@ export function Quickstart({ onDone }: QuickstartProps) {
     onDone();
   };
 
+  // v0.4.2:starter 範本語系 — 第一次安裝時讓 user 選中或英。預設依 OS locale
+  // (navigator.language 開頭 zh → 中文,其他 → 英文 — 跟 i18n detectLocaleSync
+  // 一致 logic)。Direct mode 暴露 picker;ritual mode 直接吃 detect 結果不問,
+  // 不打斷儀式 narrative。doSave 時依此 install 對應一份 starter 進 ~/.mori/。
+  const detectStarterLocaleSync = (): "zh" | "en" => {
+    const nav = (typeof navigator !== "undefined" && navigator.language) || "";
+    return nav.toLowerCase().startsWith("zh") ? "zh" : "en";
+  };
+  const [starterLocale, setStarterLocale] = useState<"zh" | "en">(detectStarterLocaleSync);
+  // 安裝 starter 集合 — 撈 list_starter_templates 內所有指定 lang 的 entries,
+  // 平行 invoke install_starter_template。overwrite=false:user 已有同檔不蓋
+  // (ensure_*_dir_initialized 先 deploy 過 zh,user 選 en 就 add 進去,不打架)。
+  const installStarterSet = async (locale: "zh" | "en"): Promise<void> => {
+    try {
+      const [voices, agents] = await Promise.all([
+        invoke<Array<{ filename: string; lang: string }>>("list_starter_templates", { kind: "voice" }),
+        invoke<Array<{ filename: string; lang: string }>>("list_starter_templates", { kind: "agent" }),
+      ]);
+      const tasks: Promise<void>[] = [];
+      for (const v of voices) {
+        if (v.lang === locale) {
+          tasks.push(
+            invoke<void>("install_starter_template", { kind: "voice", filename: v.filename, overwrite: false })
+              .catch(() => {}), // already-exists / 其他失敗都吃掉,不擋 Quickstart 完成
+          );
+        }
+      }
+      for (const a of agents) {
+        if (a.lang === locale) {
+          tasks.push(
+            invoke<void>("install_starter_template", { kind: "agent", filename: a.filename, overwrite: false })
+              .catch(() => {}),
+          );
+        }
+      }
+      await Promise.all(tasks);
+    } catch (e) {
+      console.warn("[quickstart] installStarterSet failed (continuing):", e);
+    }
+  };
+
   // 召喚師之名(第一幕)— 必填,後端寫進 user.name,Mori 之後對話喚這個名
   const [summonerName, setSummonerName] = useState("");
   // 靈氣 = Groq STT key(第二幕)
@@ -314,8 +355,13 @@ export function Quickstart({ onDone }: QuickstartProps) {
       }
 
       cfg.quickstart_completed = true;
+      cfg.starter_locale = starterLocale;
       delete cfg.quickstart_skipped;
       await invoke("config_write", { text: JSON.stringify(cfg, null, 2) });
+      // v0.4.2:依 starterLocale 安裝對應 starter 進 ~/.mori/。fresh install
+      // 已 deploy zh(ensure_dir),user 選 en 會 add 進去,zh 也保留(他可
+      // 之後在 Profiles 刪不要的)。
+      await installStarterSet(starterLocale);
       // 第五幕收尾:讓 floating Mori 在桌面浮現 — 她真的住進來了
       try {
         await invoke("floating_show");
@@ -425,6 +471,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             envGroqDetected={envGroqDetected}
             envGeminiDetected={envGeminiDetected}
             envOpenaiDetected={envOpenaiDetected}
+            starterLocale={starterLocale} setStarterLocale={setStarterLocale}
           />
         ) : (
           <DwellingRite
@@ -443,6 +490,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             envGroqDetected={envGroqDetected}
             envGeminiDetected={envGeminiDetected}
             envOpenaiDetected={envOpenaiDetected}
+            starterLocale={starterLocale} setStarterLocale={setStarterLocale}
             onSwitchToDirect={() => setMode("direct")}
           />
         )}
@@ -511,6 +559,8 @@ interface CommonProps {
   envGroqDetected: boolean;
   envGeminiDetected: boolean;
   envOpenaiDetected: boolean;
+  starterLocale: "zh" | "en";
+  setStarterLocale: (l: "zh" | "en") => void;
 }
 
 // ─── 直接模式 ───────────────────────────────────────────────
@@ -520,7 +570,8 @@ function DirectForm(props: CommonProps) {
     powerChoice, setPowerChoice, powerKey, setPowerKey, showPower, setShowPower,
     powerBase, setPowerBase, powerModel, setPowerModel,
     verify, setVerify, doVerify, doSave, doSkip,
-    envGroqDetected, envGeminiDetected, envOpenaiDetected } = props;
+    envGroqDetected, envGeminiDetected, envOpenaiDetected,
+    starterLocale, setStarterLocale } = props;
 
   const auraReal = auraKey.trim().length > 5 || (envGroqDetected && auraKey.trim() === "");
   // env-only path:env 偵測到 + 沒填 key 也算 ready(custom 多要求 api_base 已填)
@@ -677,6 +728,40 @@ function DirectForm(props: CommonProps) {
           </div>
         </div>
       )}
+
+      <div className="mori-quickstart-field">
+        <label>
+          {t("quickstart.direct_starter_locale_label")}
+          <a
+            href="https://github.com/yazelin/mori-desktop/blob/main/docs/tokenizer-comparison.md"
+            onClick={(e) => {
+              e.preventDefault();
+              invoke("open_external_url", {
+                url: "https://github.com/yazelin/mori-desktop/blob/main/docs/tokenizer-comparison.md",
+              }).catch(console.warn);
+            }}
+            className="mori-quickstart-help-link"
+          >
+            {t("quickstart.direct_starter_locale_help")}
+          </a>
+        </label>
+        <div className="mori-quickstart-provider-grid">
+          {(["en", "zh"] as const).map((l) => (
+            <button
+              key={l}
+              className={`mori-quickstart-provider-card ${starterLocale === l ? "active" : ""}`}
+              onClick={() => setStarterLocale(l)}
+            >
+              <span className="provider-name">
+                {t(`quickstart.direct_starter_locale_${l}_name`)}
+              </span>
+              <span className="provider-hint">
+                {t(`quickstart.direct_starter_locale_${l}_hint`)}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="mori-quickstart-verify-row">
         <button className="mori-btn" onClick={doVerify} disabled={!canVerify}>

@@ -8,7 +8,8 @@
 //   未列在 form 的 key 也會保留(round-trip 不丟資料)
 // - 儲存:寫整個 JSON 物件
 
-import { useEffect, useMemo, useState, type SVGProps } from "react";
+import React, { useEffect, useMemo, useState, type SVGProps } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
@@ -169,14 +170,63 @@ function FormRow({
 }
 
 /** ⓘ icon + hover/focus 後出 popover 顯示 hint。把長 hint 從 inline 文字
- *  改成 on-demand 提示,大幅減少 Config tab 垂直密度。 */
+ *  改成 on-demand 提示,大幅減少 Config tab 垂直密度。
+ *
+ *  v0.4.2:popover 用 React Portal 渲染到 document.body — 之前 CSS-only
+ *  absolute popover 會被 ancestor 的 overflow:hidden / scroll container 切掉
+ *  (Config sticky subnav layout + tab scrollable 共同造成)。Portal 直接
+ *  脫離 DOM 子樹,position:fixed + getBoundingClientRect 動態算位置就解。 */
 function HintTooltip({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
+  const anchorRef = React.useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  const place = () => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // popover 預設展開在 icon 下方 4px;若 viewport 右側不夠 280px,改靠右對齊
+    const viewportW = window.innerWidth;
+    const popoverW = 280;
+    const left = Math.min(r.left, viewportW - popoverW - 8);
+    setPos({ top: r.bottom + 4, left: Math.max(8, left) });
+  };
+
+  const show = () => {
+    place();
+    setOpen(true);
+  };
+  const hide = () => setOpen(false);
+
   return (
-    <span className="mori-hint" tabIndex={0} aria-label={t("config_tab.rows.help_aria")}>
-      <span className="mori-hint-icon">ⓘ</span>
-      <span className="mori-hint-popover">{children}</span>
-    </span>
+    <>
+      <span
+        ref={anchorRef}
+        className="mori-hint"
+        tabIndex={0}
+        aria-label={t("config_tab.rows.help_aria")}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+      >
+        <span className="mori-hint-icon">ⓘ</span>
+      </span>
+      {open &&
+        createPortal(
+          <div
+            className="mori-hint-popover portal"
+            style={{ top: pos.top, left: pos.left }}
+            // 滑進 popover 不會消失(讓 user 能複製文字)
+            onMouseEnter={() => setOpen(true)}
+            onMouseLeave={hide}
+          >
+            {children}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

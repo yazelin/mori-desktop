@@ -6,6 +6,58 @@
 
 ---
 
+## v0.4.2 — Quickstart 中/英 starter picker(OS locale 自動偵測)(2026-05-15)
+
+v0.4.1 加了「加入範本」UI 讓 user 隨時自己撈,v0.4.2 把這條路收進**第一次安裝流程**:Direct mode 加 starter 範本語系 picker(中文 / English),預設值依 OS locale 自動偵測(`navigator.language` 開頭 `zh-*` → 中文,其他 → English)。Ritual mode 不打斷儀式 narrative,silent 走相同 detect 結果。
+
+新用戶第一次跑完 Quickstart 就有對應語系 starter 進 ~/.mori/,不必再去 Profiles tab「加入範本」手動補。
+
+### 主要 feature
+
+#### Quickstart starter 範本語系 picker(僅 Direct mode 暴露)
+
+DirectForm 加 `<provider-card>` 風格 2-選 picker(English / 中文範本),狀態存在 Quickstart 元件內,doSave 時 :
+
+1. 寫進 `~/.mori/config.json` 的 `starter_locale`(`"zh"` | `"en"`),供將來追蹤 / debug 用
+2. 呼叫新 helper `installStarterSet(locale)`:撈 `list_starter_templates` 過濾對應 lang,並行 `install_starter_template(overwrite: false)` 寫進 ~/.mori/
+
+Card hint 直接寫:「English 範本省 26% TPM(gpt-oss)/ 8%(Gemini)」,連同 token 對比 docs 的連結放右上角。
+
+預設值邏輯:`navigator.language` 開頭 `zh-*` → 預選中文(台灣 user 看 .md 友善);其他 → 預選 English(數據 win)。Linux 走 LANG env,Windows / macOS 走系統 locale,跨平台一致。
+
+#### Ritual mode auto-pick(不問,不打斷儀式)
+
+Ritual 第一幕到第五幕都沒加新 question — 想保留儀式詩意流。底層 starter locale 取 Quickstart 元件初始化時 `detectStarterLocaleSync()` 結果(同 Direct mode 預設),user 完成儀式後一樣 install 對應一份。想要 override → 切到 Direct mode 顯式選。
+
+### Bug fix
+
+- **HintTooltip popover 被 ancestor `overflow:hidden` 切掉**(`ConfigTab.tsx` + `shell.css`)
+  - 原本走 CSS-only `position: absolute` + `:hover { display: block }`,被 Config tab 的 sticky subnav layout + ancestor scroll container 切到看不見內容
+  - 修法:popover 改用 **React Portal** 渲染到 `document.body`,`position: fixed` + `getBoundingClientRect` 動態算 top/left。viewport 右側不夠 280px 自動靠右對齊
+  - 跨整個 Config tab 所有 hint 都修好(40+ 條 hint,user 回報只貼一個但症狀通用)
+
+### 設計取捨
+
+- **預設值決策**:中英 default 不一律走「省 TPM 那邊」(EN),而是跟 OS locale 走。理由:台灣 user 改 .md 仍偏好繁中(就算多吃 26% token),token 省下來但 .md 不順手反而是負優化
+- **新 user 可能會有「zh + en 都有」的狀況**:`ensure_*_dir_initialized` 維持 v0.4.0 行為 — fresh install 自動 deploy zh starter,然後 Quickstart 又 install 一份 en(user 選 en 時)。結果有 12+12 = 24 個檔案。可在 Profiles tab「開啟資料夾」手動刪不要的;v0.4.3 / v0.5 會考慮「replace 而非 add」的選項
+- **doSkip 不 install starter**:user 明確跳過儀式 → 維持 fresh-install 自帶的 zh starter,不額外動。要切 en 走 Profiles「加入範本」
+
+### 工程
+
+- 新 i18n strings:`quickstart.direct_starter_locale_*`(label / help / zh_name / zh_hint / en_name / en_hint)各 6 條(zh-TW + en)
+- Quickstart 元件:加 `starterLocale` state + `setStarterLocale`,detect helper,`installStarterSet(locale)` 並行 install 對應 lang 所有 entries
+- DirectForm CommonProps 新增 `starterLocale` + `setStarterLocale` 兩個 prop
+- `doSave` 寫 config.starter_locale 後呼叫 `installStarterSet`,寫進 floating_show 前
+- 沒新後端 commands(複用 v0.4.1 的 `list_starter_templates` + `install_starter_template`)
+
+### 留 v0.4.3 / v0.5
+
+- **Replace mode**:Quickstart 選 en 時提供「移除既有 zh starter」選項,避免 zh + en 並存的混亂
+- **Phase B per-pipeline artifacts**(`~/.mori/recordings/<時戳>/` 完整 I/O snapshot,Whisper fine-tune farm)
+- **Phase C installed apps catalog**(open_app skill 強化,平台 scan UserAssist / .desktop / Spotlight)
+
+---
+
 ## v0.4.1 — EN starter set + 範本管理 UI + OS theme 自動偵測(2026-05-15)
 
 v0.4.0 加了 8 個中文 starter,user 想試英文版?改壞了想還原?之前都得手動 cp examples/。這版加 **內建範本管理**:Profiles tab「加入範本」按鈕,modal 列出 binary 內建的 zh + en 各 11 份 starter,點一下複製進 ~/.mori/(已存在會問是否覆蓋)。

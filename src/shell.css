@@ -739,6 +739,10 @@
   color: var(--c-text);
 }
 .mori-hint-popover {
+  /* legacy CSS-only popover (display: none + :hover { display: block })
+     被 ancestor overflow:hidden / scroll container 切到 — v0.4.2 改 React
+     Portal 渲染到 body,走 .mori-hint-popover.portal 那條 fixed positioning
+     path。這條保留給沒升級的舊路徑 fallback。 */
   display: none;
   position: absolute;
   top: 22px;
@@ -756,8 +760,17 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   font-family: system-ui, sans-serif;
 }
-.mori-hint:hover .mori-hint-popover,
-.mori-hint:focus-within .mori-hint-popover {
+/* Portal 版:position:fixed,top/left 由 JS getBoundingClientRect 算。z-index
+   爆大確保壓過 modal backdrop(1000)/ floating sprite。 */
+.mori-hint-popover.portal {
+  display: block;
+  position: fixed;
+  z-index: 10000;
+  top: auto;
+  left: auto;
+}
+.mori-hint:hover .mori-hint-popover:not(.portal),
+.mori-hint:focus-within .mori-hint-popover:not(.portal) {
   display: block;
 }
 
