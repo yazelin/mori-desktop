@@ -13,6 +13,7 @@ pub mod agent;
 pub mod agent_profile;
 pub mod annuli;
 pub mod context;
+pub mod corrections;
 pub mod event_log;
 pub mod installed_apps;
 pub mod llm;
