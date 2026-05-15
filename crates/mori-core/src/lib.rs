@@ -21,6 +21,7 @@ pub mod paste;
 pub mod redact;
 pub mod runtime;
 pub mod skill;
+pub mod tokenize;
 pub mod url_detect;
 pub mod voice_cleanup;
 pub mod voice_input_profile;

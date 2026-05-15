@@ -12,6 +12,7 @@ import { IconVoiceMic, IconTree, IconClose } from "../icons";
 type ProfileEntry = { stem: string; display: string };
 type Kind = "voice" | "agent";
 type StarterTemplate = { filename: string; lang: "zh" | "en"; display: string };
+type TokenEstimate = { gpt_oss: number; gemini: number };
 
 function OpenFolderButton({ kind }: { kind: Kind }) {
   const { t } = useTranslation();
@@ -203,11 +204,50 @@ function NewProfileButton({
   );
 }
 
+/** v0.4.3:profile system prompt token 估算 chip。
+ *  數字格式 `~512 / ~440` — 前 gpt-oss(o200k_harmony,Mori 預設 groq provider
+ *  跑的)/ 後 Gemini Flash。啟發法,±10% 準確度。title 解釋 disclaimer。
+ *  沒拿到估算(profile 不在磁碟 / 後端錯)就不渲染,不卡 row。 */
+function TokenBadge({ est }: { est: TokenEstimate | undefined }) {
+  const { t } = useTranslation();
+  if (!est) return null;
+  return (
+    <span
+      className="mori-profile-row-tokens"
+      title={t("profiles_tab.token_estimate_tooltip", {
+        gpt_oss: est.gpt_oss,
+        gemini: est.gemini,
+      })}
+    >
+      ~{est.gpt_oss}/{est.gemini} tok
+    </span>
+  );
+}
+
 function ProfilesTab() {
   const { t } = useTranslation();
   const [voice, setVoice] = useState<ProfileEntry[]>([]);
   const [agent, setAgent] = useState<ProfileEntry[]>([]);
   const [editing, setEditing] = useState<{ kind: Kind; stem: string } | null>(null);
+  // v0.4.3:每筆 profile 的 token 估算(gpt-oss / Gemini)— 啟發法,±10%
+  const [voiceTokens, setVoiceTokens] = useState<Record<string, TokenEstimate>>({});
+  const [agentTokens, setAgentTokens] = useState<Record<string, TokenEstimate>>({});
+
+  const fetchTokens = async (kind: Kind, entries: ProfileEntry[]) => {
+    const results = await Promise.all(
+      entries.map(async (p) => {
+        try {
+          const est = await invoke<TokenEstimate>("estimate_profile_tokens", { kind, stem: p.stem });
+          return [p.stem, est] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const map: Record<string, TokenEstimate> = {};
+    for (const r of results) if (r) map[r[0]] = r[1];
+    return map;
+  };
 
   const reload = async () => {
     try {
@@ -217,6 +257,9 @@ function ProfilesTab() {
       ]);
       setVoice(v);
       setAgent(a);
+      // token 估算並行抓,reload 後立即顯示;個別失敗不擋整列表 render
+      void fetchTokens("voice", v).then(setVoiceTokens);
+      void fetchTokens("agent", a).then(setAgentTokens);
     } catch (e) { console.error(e); }
   };
 
@@ -245,7 +288,10 @@ function ProfilesTab() {
           {voice.map((p) => (
             <div key={p.stem} className="mori-profile-row">
               <div className="mori-profile-row-info">
-                <span className="mori-profile-row-name">{p.display}</span>
+                <div className="mori-profile-row-line1">
+                  <span className="mori-profile-row-name">{p.display}</span>
+                  <TokenBadge est={voiceTokens[p.stem]} />
+                </div>
                 <span className="mori-profile-row-stem">{p.stem}</span>
               </div>
               <div className="mori-profile-row-actions">
@@ -276,7 +322,10 @@ function ProfilesTab() {
           {agent.map((p) => (
             <div key={p.stem} className="mori-profile-row">
               <div className="mori-profile-row-info">
-                <span className="mori-profile-row-name">{p.display}</span>
+                <div className="mori-profile-row-line1">
+                  <span className="mori-profile-row-name">{p.display}</span>
+                  <TokenBadge est={agentTokens[p.stem]} />
+                </div>
                 <span className="mori-profile-row-stem">{p.stem}</span>
               </div>
               <div className="mori-profile-row-actions">

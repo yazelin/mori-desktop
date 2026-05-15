@@ -6,6 +6,60 @@
 
 ---
 
+## v0.4.3 — Profiles token 估算 chip + Config 文案大掃除(2026-05-15)
+
+兩件事:**Profiles tab 每筆 profile 顯示 token 估算**(gpt-oss / Gemini 兩家,啟發法 ±10%)+ **Config tab 那些 user 看不懂的 hint 全部重寫**。
+
+token 估算給 user 直覺感受「我這個 profile 改完比之前重多少」 — 啟發法純 Rust 0 deps(不 bundle tiktoken-rs 兩三 MB),用 [`docs/tokenizer-comparison.md`](docs/tokenizer-comparison.md) 跑出的 empirical ratios 估算 CJK / 非 CJK 各自 chars/tok 加總。
+
+Config hint 大掃除:每個 LLM provider 的 binary hint 從「PATH 上的 X binary 名稱」這種預設 user 懂 PATH 環境變數的術語,改成「通常填 \`X\`」白話版;同時把 v0.4.0 之前的「Windows 必須是 X.cmd」過時警告砍掉(v0.4.0 已加 `.cmd` 自動偵測);每個 *-bash / *-cli provider 加新 topHint 解釋這 provider 走的什麼 protocol + 各自前置條件。
+
+### 主要 feature
+
+#### Profiles tab token 估算 chip
+
+每筆 profile row 名稱旁邊加 token 估算 chip `~512/440 tok`(前 gpt-oss,後 Gemini),hover 出 tooltip 詳細解釋。
+
+新 mori-core 模組 `tokenize`:
+- `estimate_tokens(body: &str) -> TokenEstimate { gpt_oss, gemini }` — char-class 啟發法,Unicode CJK 字段 vs 其他非空白字元各別 ratio
+- `strip_frontmatter(text: &str) -> &str` — 去 YAML frontmatter,只算 system prompt body
+- 8 個 unit tests 鎖行為(empty / whitespace / 中文 / 英文 / 過渡 / no-frontmatter / broken-frontmatter / sanity-zh-more)
+
+新 Tauri command `estimate_profile_tokens(kind, stem)`:讀 profile 檔 → strip frontmatter → estimate → 回 `{ gpt_oss, gemini }`。ProfilesTab reload 後並行 invoke 所有 profile 的估算,個別失敗不擋整列表。
+
+**為什麼啟發法不 bundle tiktoken-rs**:
+- tiktoken-rs ~2-5MB binary 漲幅,只為了「顯示估算」不划算
+- Gemini SentencePiece 沒 release,本來就無法 bundle exact
+- ±10% 對 Profiles UI 而言完全夠用(directional 判斷而不是 billing)
+- empirical ratios 是從 v0.4.1 docs 的 4 對中英 starter 實測得出(8 個 tokenizer 數據點)
+
+#### Config tab LLM provider hint 大掃除
+
+`gemini` provider 的 top hint(`hint_llm_gemini_key`)— v0.4.2 暫修過,這版再 polish:含 aistudio.google.com 申請連結、`\n` 換行、明說「(1)Quick 分頁(2)env var」兩條 path、`model` / `api_base` 預設值說明。
+
+新加 2 條共用 top hint(`hint_llm_bash_proxy` / `hint_llm_chat_proxy`),套到 `claude-bash` / `gemini-bash` / `codex-bash` / `claude-cli` / `gemini-cli` / `codex-cli` 6 個 provider:
+- **`-bash` 系列**:解釋這是「本地裝的 AI CLI 當主 agent loop」走法,列出各家前置條件(Claude Code OAuth / npm i -g @google/gemini-cli / @openai/codex 等)+ Win 限制(codex native variant 不支援)
+- **`-cli` 系列**:解釋這是「同 *-bash 但省略 Bash agent loop」(純文字 in/out,給 skill 內部 LLM 用)
+
+binary 欄位 hint 從「PATH 上的 X binary 名稱」改「通常填 \`X\`」,刪掉過時的 Windows .cmd 警告(v0.4.0 已自動 detect),改加 codex-bash 對 Windows 版本要求(v0.130+ JS 版)的提醒。
+
+### 工程
+
+- 新 mori-core 模組:`tokenize`(`estimate_tokens` / `strip_frontmatter` / 8 unit tests)
+- 新 Tauri command 註冊:`estimate_profile_tokens`
+- ProfilesTab:`TokenBadge` 元件 + `voiceTokens` / `agentTokens` state + 並行 fetch
+- 新 i18n strings:`profiles_tab.token_estimate_tooltip` / `config_tab.rows.hint_llm_bash_proxy` / `config_tab.rows.hint_llm_chat_proxy`(zh-TW + en)
+- 新 CSS:`.mori-profile-row-tokens`(monospace pill)+ `.mori-profile-row-line1`(name + chip 同 row)+ `.mori-profile-row-info { min-width: 0 }` 防 overflow
+- ProfilesTab JSX 結構小調整:row-info 第一行 wrap 成 div(name + token chip),stem 仍第二行
+
+### 留 v0.5 / v0.4.4
+
+- **token 估算精準度升級**:若有 user 反映 ±10% 不夠 → 換 tiktoken-rs(`o200k_harmony` only,~1MB)
+- **Phase B per-pipeline artifacts**(ZeroType-inspired Whisper fine-tune farm)
+- **Phase C installed apps catalog**(open_app skill 強化)
+
+---
+
 ## v0.4.2 — Quickstart 中/英 starter picker(OS locale 自動偵測)(2026-05-15)
 
 v0.4.1 加了「加入範本」UI 讓 user 隨時自己撈,v0.4.2 把這條路收進**第一次安裝流程**:Direct mode 加 starter 範本語系 picker(中文 / English),預設值依 OS locale 自動偵測(`navigator.language` 開頭 `zh-*` → 中文,其他 → English)。Ritual mode 不打斷儀式 narrative,silent 走相同 detect 結果。

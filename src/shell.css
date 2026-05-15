@@ -353,8 +353,25 @@
   border-radius: 8px;
 }
 .mori-profile-row:hover { background: var(--c-sidebar-hover-bg); }
-.mori-profile-row-info { display: flex; flex-direction: column; gap: 2px; }
+.mori-profile-row-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mori-profile-row-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .mori-profile-row-name { font-size: 13px; font-weight: 500; }
+.mori-profile-row-tokens {
+  font-size: 10px;
+  color: var(--c-text-muted);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  white-space: nowrap;
+  cursor: help;
+}
 .mori-profile-row-stem {
   font-size: 10.5px;
   color: var(--c-text-soft);

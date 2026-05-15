@@ -1032,6 +1032,26 @@ fn list_starter_templates(
         .collect())
 }
 
+/// v0.4.3:估算 profile system prompt 的 token 數(gpt-oss + Gemini 兩家)。
+/// 走 char-class 啟發法,±10% 準確度,給 Profiles tab UI 顯示用。完整原理見
+/// `mori_core::tokenize` 模組註解。
+#[tauri::command]
+fn estimate_profile_tokens(
+    kind: String,
+    stem: String,
+) -> Result<mori_core::tokenize::TokenEstimate, String> {
+    let dir = match kind.as_str() {
+        "voice" => mori_dir().join("voice_input"),
+        "agent" => mori_dir().join("agent"),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    let path = dir.join(format!("{stem}.md"));
+    let body = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let stripped = mori_core::tokenize::strip_frontmatter(&body);
+    Ok(mori_core::tokenize::estimate_tokens(stripped))
+}
+
 /// v0.4.1:把指定 starter 範本寫到 ~/.mori/<dir>/<filename>。檔已存在時:
 /// - overwrite=false → 回 Err("already exists"),前端應 confirm
 /// - overwrite=true → 覆蓋
@@ -3292,6 +3312,7 @@ fn main() {
             open_profile_dir,
             list_starter_templates,
             install_starter_template,
+            estimate_profile_tokens,
             active_profiles,
             log_tail,
             log_dates,

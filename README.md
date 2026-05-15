@@ -9,7 +9,7 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-🌲 **Latest** — [**v0.4.2**](https://github.com/yazelin/mori-desktop/releases/tag/v0.4.2):Quickstart starter 範本中/英 picker(OS locale 自動偵測預設)· v0.4.1 → EN starter set + Profiles 加入範本 UI + tokenizer docs + OS theme 自動偵測 · v0.4.0 → Windows OOB + 觀測層 + 隱私 redact · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+🌲 **Latest** — [**v0.4.3**](https://github.com/yazelin/mori-desktop/releases/tag/v0.4.3):Profiles 每筆 token 估算 chip(gpt-oss / Gemini 兩家,啟發法 ±10%)· Config tab LLM provider hint 大掃除(過時 Windows .cmd 警告砍掉、各 *-bash / -cli 加前置條件說明)· v0.4.2 → Quickstart 中/英 starter picker · v0.4.1 → EN starter set + Profiles 加入範本 UI · v0.4.0 → Windows 開箱即用 + 觀測層 + 隱私 redact · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 

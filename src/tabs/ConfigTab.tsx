@@ -68,42 +68,48 @@ const PROVIDER_SCHEMAS: Record<string, { fields: ProviderField[]; topHintKey?: s
   },
   "claude-bash": {
     fields: [
-      { key: "binary", label: "binary", hint: "PATH 上的 claude binary 名稱(Windows: claude.cmd 或絕對路徑)" },
-      { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
-      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+      { key: "binary", label: "binary", hint: "通常填 `claude`(已裝過就在 PATH 上)。完整路徑也可。" },
+      { key: "model", label: "model", hint: "(留空用 claude CLI 內建預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空 Mori 自動偵測)" },
     ],
+    topHintKey: "config_tab.rows.hint_llm_bash_proxy",
   },
   "claude-cli": {
     fields: [
-      { key: "binary", label: "binary", hint: "claude" },
+      { key: "binary", label: "binary", hint: "通常填 `claude`" },
       { key: "model", label: "model" },
     ],
+    topHintKey: "config_tab.rows.hint_llm_chat_proxy",
   },
   "gemini-bash": {
     fields: [
-      { key: "binary", label: "binary", hint: "PATH 上的 gemini binary 名稱(Windows 必須是 gemini.cmd 或絕對路徑)" },
-      { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
-      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+      { key: "binary", label: "binary", hint: "通常填 `gemini`(短名 Mori 自動探 .cmd shim,從 v0.4.0 起)" },
+      { key: "model", label: "model", hint: "(留空用 gemini CLI 內建預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空 Mori 自動偵測)" },
     ],
+    topHintKey: "config_tab.rows.hint_llm_bash_proxy",
   },
   "gemini-cli": {
     fields: [
-      { key: "binary", label: "binary", hint: "PATH 上的 gemini binary 名稱(Windows: gemini.cmd)" },
+      { key: "binary", label: "binary", hint: "通常填 `gemini`(同 gemini-bash)" },
       { key: "model", label: "model" },
     ],
+    topHintKey: "config_tab.rows.hint_llm_chat_proxy",
   },
   "codex-bash": {
     fields: [
-      { key: "binary", label: "binary", hint: "PATH 上的 codex binary 名稱" },
-      { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
-      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+      { key: "binary", label: "binary", hint: "通常填 `codex`(Windows 需 v0.130+ JS 版,native 變體不支援 Win)" },
+      { key: "model", label: "model", hint: "(留空用 codex CLI 內建預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空 Mori 自動偵測)" },
     ],
+    topHintKey: "config_tab.rows.hint_llm_bash_proxy",
   },
   "codex-cli": {
     fields: [
-      { key: "binary", label: "binary", hint: "PATH 上的 codex binary 名稱" },
+      { key: "binary", label: "binary", hint: "通常填 `codex`(同 codex-bash)" },
       { key: "model", label: "model" },
     ],
+    topHintKey: "config_tab.rows.hint_llm_chat_proxy",
   },
   "whisper-local": {
     fields: [
