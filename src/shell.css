@@ -336,6 +336,7 @@
   margin-bottom: 10px;
 }
 .mori-profiles-section-head h3 { margin: 0; }
+.mori-profiles-section-actions { display: flex; gap: 6px; }
 
 .mori-profiles-list {
   display: flex;
@@ -1256,6 +1257,101 @@
   font-family: ui-monospace, monospace;
 }
 
+/* ─── LogsTab — v0.4 Phase A 觀測 ─────────────────────────── */
+.mori-logs-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.mori-logs-toolbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+.mori-logs-toolbar-field > span {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mori-logs-count {
+  font-size: 11px;
+  color: var(--c-text-muted);
+  font-family: ui-monospace, monospace;
+  margin-left: auto;
+}
+.mori-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mori-logs-row {
+  padding: 6px 10px;
+  background: var(--c-divider);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-success-bg);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  transition: background 100ms ease;
+}
+.mori-logs-row:hover {
+  background: rgba(106, 143, 114, 0.10);
+}
+.mori-logs-row.err {
+  border-left-color: var(--c-danger-text);
+}
+.mori-logs-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mori-logs-ts {
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+.mori-logs-kind {
+  color: var(--c-brand-text);
+  font-weight: 500;
+  min-width: 8em;
+}
+.mori-logs-provider {
+  color: var(--c-text);
+}
+.mori-logs-model {
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+.mori-logs-latency {
+  color: var(--c-text-muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+.mori-logs-status.ok { color: var(--c-success-text); }
+.mori-logs-status.err { color: var(--c-danger-text); }
+.mori-logs-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--c-danger-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mori-logs-json {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: var(--c-bg);
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--c-text-muted);
+}
+
 .mori-memory-list {
   display: flex;
   flex-direction: column;
@@ -1892,6 +1988,14 @@
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(4px);
+  transition: opacity 600ms ease-out, backdrop-filter 600ms ease-out;
+}
+/* 「回家」/「跳過」按下後加 closing class:整個 modal 600ms 淡出,音樂同步漸弱
+   (見 ritualAudio.fadeOutAndStop)。不直接 onDone 硬切。 */
+.mori-quickstart-backdrop.closing {
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(0px);
 }
 .mori-quickstart-backdrop.mode-ritual {
   /* 儀式模式深沉 + 森林 radial gradient — 沉浸用,完全蓋住主畫面 */
@@ -2495,6 +2599,53 @@
 }
 .mori-quickstart-footer .mori-btn:first-child {
   margin-right: auto;
+}
+
+/* Direct setup form — compact one-page form for power users.
+   只在 .mori-direct-form 範圍內覆寫 quickstart 共用樣式,儀式模式不影響。 */
+.mori-direct-form .mori-quickstart-intro {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mori-direct-form .mori-quickstart-field {
+  margin-bottom: 8px;
+}
+.mori-direct-form .mori-quickstart-field label {
+  font-size: 11.5px;
+  margin-bottom: 3px;
+}
+.mori-direct-form .mori-quickstart-env-banner {
+  margin: 4px 0 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+/* Provider chooser:Direct 模式不要 2-col grid 大卡,改 horizontal pills 一列三顆 */
+.mori-direct-form .mori-quickstart-provider-grid {
+  display: flex;
+  grid-template-columns: none;
+  gap: 6px;
+}
+.mori-direct-form .mori-quickstart-provider-card {
+  flex: 1;
+  padding: 6px 10px;
+  min-width: 0;
+}
+.mori-direct-form .mori-quickstart-provider-card .provider-name {
+  font-size: 12.5px;
+}
+.mori-direct-form .mori-quickstart-provider-card .provider-hint {
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mori-direct-form .mori-quickstart-verify-row {
+  margin: 8px 0 12px;
+}
+.mori-direct-form .mori-quickstart-help-link {
+  font-size: 10.5px;
 }
 
 /* ─── Ritual mode ─────────────────────── */

@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "mori-cli"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2553,13 +2553,14 @@ dependencies = [
 
 [[package]]
 name = "mori-core"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "futures-util",
  "hound",
+ "regex",
  "reqwest 0.12.28",
  "schemars 0.8.22",
  "serde",
@@ -2573,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "mori-tauri"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "arboard",

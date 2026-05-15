@@ -179,6 +179,7 @@ fn blocking_read_index(path: &Path) -> Result<Vec<MemoryIndexEntry>> {
         return Ok(Vec::new());
     }
     let text = std::fs::read_to_string(path).context("read index")?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut out = Vec::new();
     for line in text.lines() {
         let line = line.trim_start();
@@ -206,11 +207,17 @@ fn blocking_read_index(path: &Path) -> Result<Vec<MemoryIndexEntry>> {
             .trim_start_matches([' ', '—', '-', '–'])
             .trim()
             .to_string();
+        // MEMORY.md 索引格式只存 [name](id.md) — description,沒帶 type。
+        // 補抓:讀對應 .md frontmatter 拿真 type。N+1 file reads — 對 memory
+        // list 規模(典型 <100)成本可忽略,換取列表 UI 上 type chip 正確。
+        let memory_type = blocking_read_memory(&dir.join(format!("{id}.md")))
+            .map(|m| m.memory_type)
+            .unwrap_or_else(|_| MemoryType::Other("unknown".into()));
         out.push(MemoryIndexEntry {
             id,
             name: name.to_string(),
             description,
-            memory_type: MemoryType::Other("unknown".into()),
+            memory_type,
         });
     }
     Ok(out)

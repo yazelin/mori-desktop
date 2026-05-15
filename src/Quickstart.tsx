@@ -68,6 +68,16 @@ interface QuickstartProps {
 export function Quickstart({ onDone }: QuickstartProps) {
   const { t, i18n } = useTranslation();
   const [mode, setMode] = useState<Mode>("ritual");
+  // 收尾用 — 「回家」按下後 modal 跟音樂同步 fade-out 600ms 才 onDone,
+  // 不直接硬切視窗破壞儀式氣氛。Direct mode 也吃同一路徑(沒音樂時純 CSS 淡出)。
+  const [closing, setClosing] = useState(false);
+  const FADE_MS = 600;
+  const closeWithFade = async () => {
+    setClosing(true);
+    ritualAudio.fadeOutAndStop(FADE_MS); // 沒在播也安全 no-op
+    await new Promise((r) => setTimeout(r, FADE_MS));
+    onDone();
+  };
 
   // 召喚師之名(第一幕)— 必填,後端寫進 user.name,Mori 之後對話喚這個名
   const [summonerName, setSummonerName] = useState("");
@@ -83,10 +93,15 @@ export function Quickstart({ onDone }: QuickstartProps) {
 
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
 
-  // 偵測 GROQ_API_KEY env var 是否已設(後端 startup 會讀進 state.groq_api_key)
+  // 偵測 env var:groq / gemini / openai-compat 三條都看,讓 user
+  // 不必重複貼 key(已經透過 OS 設過就直接通過驗證)。
   const [envGroqDetected, setEnvGroqDetected] = useState(false);
+  const [envGeminiDetected, setEnvGeminiDetected] = useState(false);
+  const [envOpenaiDetected, setEnvOpenaiDetected] = useState(false);
   useEffect(() => {
     invoke<boolean>("has_groq_key").then(setEnvGroqDetected).catch(() => {});
+    invoke<boolean>("has_gemini_key").then(setEnvGeminiDetected).catch(() => {});
+    invoke<boolean>("has_openai_key").then(setEnvOpenaiDetected).catch(() => {});
   }, []);
 
   // Pre-fill 既有 config(user 透過 Help 重進儀式時不用全部從頭設)
@@ -189,9 +204,13 @@ export function Quickstart({ onDone }: QuickstartProps) {
     };
 
     try {
+      // key 留空 + env_name hint → 後端 fallback 讀 GROQ_API_KEY env 真打 API。
+      // 「有 env 就跳過驗證」的 shortcut 不算測試 — env 值可能錯 / 過期 / quota 滿,
+      // 真連一次 /models 才確認得了。
       await invoke<string>("verify_llm_key", {
         provider: "groq",
         key: auraKey.trim(),
+        envName: "GROQ_API_KEY",
       });
     } catch (e: any) {
       await ensureMin(auraStartedAt);
@@ -212,12 +231,17 @@ export function Quickstart({ onDone }: QuickstartProps) {
     // 階段 2:驗靈力 — 維持「aura 過了 + 順著靈力脈絡」兩段敘述
     setVerify({ kind: "running", phase: "power", auraVerified: true });
     const powerStartedAt = Date.now();
+
     try {
       const base = powerChoice === "gemini" ? GEMINI_BASE : powerBase.trim();
+      // env-only path 也走 verify_llm_key — 後端拿 envName 讀真值打 API,
+      // 不偷懶判 OK。Gemini → GEMINI_API_KEY,custom → OPENAI_API_KEY。
+      const envName = powerChoice === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
       const msg = await invoke<string>("verify_llm_key", {
         provider: "openai_compat",
         key: powerKey.trim(),
         apiBase: base,
+        envName,
       });
       await ensureMin(powerStartedAt);
       // 最後一拍呼吸,再揭曉「對上了」
@@ -261,13 +285,22 @@ export function Quickstart({ onDone }: QuickstartProps) {
         cfg.provider = "groq";
         cfg.agent_disabled = true;
       } else if (powerChoice === "gemini") {
-        // Gemini → api_keys.GEMINI_API_KEY + provider = "gemini"
-        cfg.api_keys.GEMINI_API_KEY = powerKey.trim();
+        // Gemini → api_keys.GEMINI_API_KEY + provider = "gemini"。
+        // env-only path:key 空 + envGeminiDetected → 不寫進 config(讓 env 繼續主導,
+        // 避免空字串 shadow OS env var)
+        const trimmed = powerKey.trim();
+        if (trimmed) {
+          cfg.api_keys.GEMINI_API_KEY = trimmed;
+        }
         cfg.provider = "gemini";
         delete cfg.agent_disabled;
       } else {
         // custom OpenAI-compat → api_keys.OPENAI_API_KEY + providers.openai_compat.*
-        cfg.api_keys.OPENAI_API_KEY = powerKey.trim();
+        // 同 gemini 邏輯:env-only 不覆寫
+        const trimmed = powerKey.trim();
+        if (trimmed) {
+          cfg.api_keys.OPENAI_API_KEY = trimmed;
+        }
         if (!cfg.providers.openai_compat) cfg.providers.openai_compat = {};
         cfg.providers.openai_compat.api_base = powerBase.trim();
         cfg.providers.openai_compat.api_key_env = "OPENAI_API_KEY";
@@ -289,7 +322,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
       } catch (e) {
         console.warn("[quickstart] floating_show failed", e);
       }
-      onDone();
+      await closeWithFade();
     } catch (e: any) {
       // doSave 失敗 (config 寫入錯誤,不是 key 驗證錯誤) — 標記為 power 路徑,
       // 因為 doSave 一定發生在 verify ok 之後;這條 err 路徑 user 看不到 SceneSealing
@@ -305,7 +338,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
     } catch (e) {
       console.warn("[quickstart] failed to mark completed", e);
     }
-    onDone();
+    await closeWithFade();
   };
 
   // 擋住 modal 到 pre-fill IPC 完成
@@ -314,7 +347,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
   }
 
   return (
-    <div className={`mori-quickstart-backdrop mode-${mode}`}>
+    <div className={`mori-quickstart-backdrop mode-${mode}${closing ? " closing" : ""}`}>
       {/* 儀式模式 — 14 顆螢火,飄在 modal 後面(z-index:0)不擾閱讀。
           modal 背景刻意半透明(86-92%),螢火淡淡透出來 */}
       {mode === "ritual" && (
@@ -390,6 +423,8 @@ export function Quickstart({ onDone }: QuickstartProps) {
             verify={verify} setVerify={setVerify}
             doVerify={doVerify} doSave={doSave} doSkip={doSkip}
             envGroqDetected={envGroqDetected}
+            envGeminiDetected={envGeminiDetected}
+            envOpenaiDetected={envOpenaiDetected}
           />
         ) : (
           <DwellingRite
@@ -406,6 +441,8 @@ export function Quickstart({ onDone }: QuickstartProps) {
             verify={verify} setVerify={setVerify}
             doVerify={doVerify} doSave={doSave} doSkip={doSkip}
             envGroqDetected={envGroqDetected}
+            envGeminiDetected={envGeminiDetected}
+            envOpenaiDetected={envOpenaiDetected}
             onSwitchToDirect={() => setMode("direct")}
           />
         )}
@@ -472,6 +509,8 @@ interface CommonProps {
   verify: VerifyState; setVerify: (v: VerifyState) => void;
   doVerify: () => void; doSave: () => void; doSkip: () => void;
   envGroqDetected: boolean;
+  envGeminiDetected: boolean;
+  envOpenaiDetected: boolean;
 }
 
 // ─── 直接模式 ───────────────────────────────────────────────
@@ -480,25 +519,38 @@ function DirectForm(props: CommonProps) {
   const { t, summonerName, setSummonerName, auraKey, setAuraKey, showAura, setShowAura,
     powerChoice, setPowerChoice, powerKey, setPowerKey, showPower, setShowPower,
     powerBase, setPowerBase, powerModel, setPowerModel,
-    verify, setVerify, doVerify, doSave, doSkip, envGroqDetected } = props;
+    verify, setVerify, doVerify, doSave, doSkip,
+    envGroqDetected, envGeminiDetected, envOpenaiDetected } = props;
 
   const auraReal = auraKey.trim().length > 5 || (envGroqDetected && auraKey.trim() === "");
-  const powerReal = powerChoice === "skip" || (powerChoice !== null && powerKey.trim().length > 5);
+  // env-only path:env 偵測到 + 沒填 key 也算 ready(custom 多要求 api_base 已填)
+  const geminiEnvOnly = powerChoice === "gemini" && envGeminiDetected && powerKey.trim() === "";
+  const customEnvOnly = powerChoice === "custom" && envOpenaiDetected && powerKey.trim() === ""
+    && powerBase.trim().length > 0;
+  const powerReal = powerChoice === "skip"
+    || geminiEnvOnly
+    || customEnvOnly
+    || (powerChoice !== null && powerKey.trim().length > 5);
   const nameReal = summonerName.trim().length > 0;
   const canVerify = nameReal && auraReal && powerReal && verify.kind !== "running";
-  const canSave = nameReal && auraReal && powerReal && (verify.kind === "ok" || (envGroqDetected && powerChoice === "skip"));
+  const canSave = nameReal && auraReal && powerReal && (
+    verify.kind === "ok"
+    || (envGroqDetected && powerChoice === "skip")
+    || geminiEnvOnly
+    || customEnvOnly
+  );
 
   return (
-    <div className="mori-quickstart-ritual-step">
+    <div className="mori-quickstart-ritual-step mori-direct-form">
       <div className="mori-quickstart-scene-content">
-      <p className="mori-quickstart-intro">{t("quickstart.intro")}</p>
+      <p className="mori-quickstart-intro">{t("quickstart.direct_intro")}</p>
 
       <div className="mori-quickstart-field">
-        <label>{t("quickstart.dwelling_scene_1_name_label")}</label>
+        <label>{t("quickstart.direct_name_label")}</label>
         <input
           type="text"
           className="mori-input"
-          placeholder={t("quickstart.dwelling_scene_1_name_placeholder")}
+          placeholder={t("quickstart.direct_name_placeholder")}
           value={summonerName}
           onChange={(e) => setSummonerName(e.target.value)}
         />
@@ -512,12 +564,12 @@ function DirectForm(props: CommonProps) {
             onClick={(e) => { e.preventDefault(); invoke("open_external_url", { url: GROQ_HELP_URL }).catch(console.warn); }}
             className="mori-quickstart-help-link"
           >
-            {t("quickstart.dwelling_scene_2_aura_help")}
+            {t("quickstart.direct_groq_help")}
           </a>
         </label>
         {envGroqDetected && (
           <div className="mori-quickstart-env-banner">
-            ✓ {t("quickstart.dwelling_scene_2_env_detected")}
+            ✓ {t("quickstart.direct_groq_env_detected")}
           </div>
         )}
         <div className="mori-quickstart-key-input-row">
@@ -549,12 +601,12 @@ function DirectForm(props: CommonProps) {
               <span className="provider-name">
                 {p === "gemini" ? t("quickstart.dwelling_scene_3_card_gemini_name")
                   : p === "custom" ? t("quickstart.dwelling_scene_3_card_compat_name")
-                  : t("quickstart.dwelling_scene_3_skip_link")}
+                  : t("quickstart.direct_skip_link")}
               </span>
               <span className="provider-hint">
                 {p === "gemini" ? t("quickstart.dwelling_scene_3_card_gemini_hint")
                   : p === "custom" ? t("quickstart.dwelling_scene_3_card_compat_hint")
-                  : t("quickstart.dwelling_scene_3_skip_note")}
+                  : t("quickstart.direct_skip_note")}
               </span>
             </button>
           ))}
@@ -600,9 +652,17 @@ function DirectForm(props: CommonProps) {
               }}
               className="mori-quickstart-help-link"
             >
-              {t("quickstart.dwelling_scene_3_power_help")}
+              {t("quickstart.direct_provider_help")}
             </a>
           </label>
+          {((powerChoice === "gemini" && envGeminiDetected) ||
+            (powerChoice === "custom" && envOpenaiDetected)) && (
+            <div className="mori-quickstart-env-banner">
+              ✓ {t(powerChoice === "gemini"
+                ? "quickstart.scene_3_env_detected_gemini"
+                : "quickstart.scene_3_env_detected_openai")}
+            </div>
+          )}
           <div className="mori-quickstart-key-input-row">
             <input
               type={showPower ? "text" : "password"}
@@ -628,8 +688,8 @@ function DirectForm(props: CommonProps) {
       </div>
 
       <div className="mori-quickstart-footer">
-        <button className="mori-btn" onClick={doSkip}>{t("quickstart.skip_button")}</button>
-        <button className="mori-btn primary" onClick={doSave} disabled={!canSave}>{t("quickstart.save_button")}</button>
+        <button className="mori-btn" onClick={doSkip}>{t("quickstart.direct_skip_button")}</button>
+        <button className="mori-btn primary" onClick={doSave} disabled={!canSave}>{t("quickstart.direct_save_button")}</button>
       </div>
     </div>
   );
@@ -806,10 +866,18 @@ function ScenePower({
   t, summonerName, powerChoice, setPowerChoice,
   powerKey, setPowerKey, showPower, setShowPower,
   powerBase, setPowerBase, powerModel, setPowerModel,
-  setVerify, dots, onBack, onNext,
+  setVerify, envGeminiDetected, envOpenaiDetected, dots, onBack, onNext,
 }: StepProps) {
+  // env-only path:env 偵測到 + 沒填 key 也算 ready(custom 多要求 api_base)
+  const geminiEnvOnly =
+    powerChoice === "gemini" && envGeminiDetected && powerKey.trim() === "";
+  const customEnvOnly =
+    powerChoice === "custom" && envOpenaiDetected && powerKey.trim() === "" &&
+    powerBase.trim().length > 5;
   const keyReady =
     powerChoice === "skip" ||
+    geminiEnvOnly ||
+    customEnvOnly ||
     (powerChoice !== null && powerKey.trim().length > 5 &&
       (powerChoice === "gemini" || powerBase.trim().length > 5));
 
@@ -895,6 +963,14 @@ function ScenePower({
               {t("quickstart.dwelling_scene_3_power_help")}
             </a>
           </label>
+          {((powerChoice === "gemini" && envGeminiDetected) ||
+            (powerChoice === "custom" && envOpenaiDetected)) && (
+            <div className="mori-quickstart-env-banner">
+              ✓ {t(powerChoice === "gemini"
+                ? "quickstart.scene_3_env_detected_gemini"
+                : "quickstart.scene_3_env_detected_openai")}
+            </div>
+          )}
           <div className="mori-quickstart-key-input-row">
             <input
               type={showPower ? "text" : "password"}

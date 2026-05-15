@@ -6,6 +6,118 @@
 
 ---
 
+## v0.4.0 — Windows out-of-the-box + 觀測層 + 隱私 redact + Quickstart polish(2026-05-15)
+
+四條主軸:**Windows 終於 first-class**(短名 binary 自動探 `.cmd` shim、`cmd /C` 規避 CVE-2024-24576、`file_stem` 偵測協定、PATH 分隔符)、**首版觀測層**(Phase A logs:JSONL append-only + LogsTab UI,LLM call 全自動入帳,除錯不再靠肉眼盯 terminal)、**隱私 redact**(clipboard / selection 進 LLM API 之前掃 API key 樣式遮蔽,音 ZeroType 觀察反思的功課)、跟**Quickstart 全面 polish**(儀式收尾 modal+音樂同步淡出、Direct mode 重做技術名詞 + 一頁完成 + env var 對稱偵測 Gemini/OpenAI、`verify_llm_key` 真打 API 而不偷懶 skip)。另外:Chat topbar 顯示 active profile / Profiles tab 開資料夾按鈕 / Memory tab 'unknown' type 修好 / 系統狀態 modal 在 Windows / macOS 顯示正確 OS label。
+
+### 主要 feature
+
+#### Windows out-of-the-box:bash CLI provider 短名也能跑
+
+新 `cli_command()` helper(`crates/mori-core/src/llm/bash_cli_agent.rs`)在 Windows 上自動處理三個非對稱:
+
+| 場景 | 行為 |
+|---|---|
+| `binary: "claude"` | Rust 原生補 `.exe`,直接 spawn(跟以前一樣) |
+| `binary: "gemini"`(短名,npm-shim 場景) | 探 PATH 找 `gemini.exe`(沒) → 找 `gemini.cmd`(有)→ 自動 `cmd /C` 包一層 |
+| `binary: "gemini.cmd"` | 直接 `cmd /C` 包(規避 CVE-2024-24576) |
+| `binary: "C:\path\to\gemini.cmd"` | 同上,絕對路徑也走 cmd /C |
+
+效果:Linux 跟 Windows 的 `~/.mori/config.json` 終於可以**用同一份短名寫法**(`"claude" / "gemini" / "codex"`),Win 用戶不必再記 `.cmd` 規矩。
+
+#### Chat panel 顯示當前 active profile
+
+Top bar 從只顯示「Mode · provider · model」擴成「Mode · **profile** · provider · model」。Profile 名稱(例 `AGENT-01.翻譯助手` / `USER-00.純文字輸入`)依當前 mode 自動切換 voice / agent。
+
+新 backend Tauri command `active_profiles`,前端在 `phase=done` + `voice-input-profile-switched` event 觸發時自動 refresh — 中途切 provider / profile 不必重啟視窗就會反映。
+
+#### Profiles tab 加「開啟資料夾」按鈕
+
+VoiceInput / Agent 兩個 section heading 各加一顆「開啟資料夾」,點了用 OS 檔案管理員開 `~/.mori/voice_input/` 或 `~/.mori/agent/`,方便手動拖 .md 進去 / 改名 / 刪 / 改完用 OS 工具備份。
+
+新 backend Tauri command `open_profile_dir(kind)`,複用 `action_skills::open_url_for_quickstart`(底下是同一份 `xdg-open` / `ShellExecuteExW` 跨平台實作)。
+
+#### Fresh install 多 8 個 starter profile(過去只有 4 個)
+
+`~/.mori/{voice_input,agent}/` 第一次啟動補的 starter profile 從原本 4 個(USER-00 / USER-01 / AGENT / AGENT-01)擴成 12 個:
+
+| Voice (`~/.mori/voice_input/`) | Agent (`~/.mori/agent/`) |
+|---|---|
+| USER-00.純文字輸入 | AGENT(default) |
+| USER-01.朋友閒聊 | AGENT-01.翻譯助手 |
+| **USER-02.正式信件** 🆕 | **AGENT-02.工作流** 🆕 |
+| **USER-03.LINE貼文** 🆕 | **AGENT-03.ZeroType Agent** 🆕 |
+| **USER-04.哄老婆開心** 🆕 | **AGENT-04.YouTube 摘要** 🆕 |
+| **USER-05.提示詞優化** 🆕 | **AGENT-05.聽我指令** 🆕 |
+
+之前 examples/ 目錄已有的範本(USER-02 / AGENT-02 / 03 / 04)只當 repo 內參考,沒寫進 binary 也沒 deploy 到 ~/.mori/。這版用 `include_str!` 通通包進去,fresh install 直接全有,user 按 Alt+0~5 / Ctrl+Alt+0~5 切換就能體驗每個範本。
+
+3 個新範本參考 ZeroType 改寫成 Mori 格式(USER-03.LINE貼文 / USER-04.哄老婆開心 / USER-05.提示詞優化 + AGENT-05.聽我指令)。冪等:已有同名檔不覆蓋,使用者自己改過的內容保留。
+
+外部依賴提醒寫在各 .md 開頭 comment:
+- AGENT-03 需 `~/bin/mori-trigger-zerotype.sh` + Chrome ZeroType extension
+- AGENT-04 需 yt-dlp(Deps tab 一鍵裝)+ `~/bin/mori-youtube-transcript.sh`
+- 其他 starter 全部無外部依賴
+
+#### 隱私:clipboard / selection 進 LLM 前自動 redact API key
+
+每次 LLM call,Mori 會把使用者當下 clipboard + selection 塞進 system prompt(讓「翻譯這個」「潤一下」等代名詞指令能找到原文)。但 user 可能剛複製 `gsk_xxx` / `sk-xxx` / `AIzaSy...`,**整段會送進 Groq / Gemini / Claude provider API**。
+
+新模組 `mori-core::redact`:5 個 pattern 從精準到寬鬆(Groq / OpenAI / Google / Bearer / 40+ 高熵 fallback)→ 替換成 `<REDACTED:probable-secret>` marker。每次 redact 命中 emit `redaction` event 到 event_log(audit 看得到,**不存原文**)。9 個 unit tests 鎖行為。
+
+跨 ZeroType 案件學到:ZeroType 把整段 CLIPBOARD 寫進磁碟 + 送 provider,觀察到實際 leak 過 Groq + Google key。Mori v0.4 至少先把 LLM API 那條路堵住;Phase B per-pipeline artifacts 寫磁碟前也會走同一條 redact path。
+
+#### Phase A 觀測:JSONL event log + LogsTab
+
+新模組 `crates/mori-core/src/event_log.rs` — append-only JSON Lines,每日 rotate `~/.mori/logs/mori-YYYY-MM-DD.jsonl`。設計刻意極簡(0 新 deps、走 OS file-append atomicity、失敗安靜 warn 不擋業務、`tail -f | jq .` 直接看)。
+
+當前 hook:`bash_cli_agent::chat` 首尾 — 每次 claude / gemini / codex CLI agent 呼叫都 emit `llm_call` event(provider / model / binary / latency_ms / ok / error / output_chars)。後續版本會加 transcribe / skill_dispatch / spawn_error 各埋點。
+
+新 tab **Logs**:date dropdown(picker 列出所有日期)+ kind filter + provider filter,每行可點開展開完整 JSON。後端 Tauri commands `log_tail` / `log_dates`。
+
+#### 「宿靈儀式」收尾:modal + 音樂同步淡出
+
+之前按下「歡迎回家, Mori」modal 硬切消失、音樂瞬斷,破壞最後一拍呼吸。`ritualAudio` 加 `fadeOutAndStop(ms)`(走 gainNode.linearRampToValueAtTime 漸弱),Quickstart 加 `closing` state + `closeWithFade()` helper,modal 同步 CSS opacity transition 600ms,onDone 之後才實際關。Direct mode skip / 儀式 save 兩條路都吃同一條 fade-out path。
+
+#### Direct setup 模式:給趕時間的人 — 技術用詞 + 制式表格 + 一頁完成
+
+Quickstart 有兩個模式 — **儀式**(詩意,5 幕)跟 **Direct**(快速設定)。Direct 之前還是用儀式的詩意文案(「召喚師之名 / 靈氣 / 靈力」),這版改成純技術名詞(「使用者名稱 / Groq API key / LLM provider」),layout 也從鬆散垂直 stack 改成緊湊「label + input」表格(provider chooser 從 2-col 大卡改成 horizontal 3-pill,env-banner / verify row 全縮),一張 modal 高度看完所有欄位。
+
+新 i18n 系列 `quickstart.direct_*`(zh-TW + en),儀式詩意系列 `quickstart.dwelling_scene_*` 一條都沒動。
+
+#### Quickstart 自動偵測 Groq / Gemini / OpenAI env var(verify 也真打 API)
+
+過去儀式只看 `GROQ_API_KEY`,user 已經設了 `GEMINI_API_KEY` / `OPENAI_API_KEY` env var 還是要在第三幕手填一次 key。新後端 Tauri commands `has_gemini_key` / `has_openai_key` 跟 groq 對稱,前端三條欄位都加偵測 banner「偵測到 \<NAME\>,key 欄位可留空直接驗證」。
+
+**驗證 key 按鈕真的去測**:`verify_llm_key` 後端加 `env_name` 參數,key 留空時 fallback 讀環境變數真值打 `GET /models` API。**不是「有 env 就判 OK」的偷懶 shortcut** — env 值可能值錯 / 過期 / quota 滿 / endpoint 改了,真連一次才知道。前端永遠不碰 env 內容(安全:不洩漏到 webview)。`doSave` 也不覆寫 config 空字串避免 shadow OS env var。
+
+### Bug fix
+
+- **`CliProtocol::detect` 用 `file_stem` 不用 `file_name`**(`bash_cli_agent.rs`)
+  - Windows 上 binary 常帶副檔名(`gemini.cmd` / `claude.exe`),`file_name` 看整串不 match `"gemini"` → 落到 Claude default → 用 claude 的 args 送給 gemini → `Unknown arguments: print, session-persistence, system-prompt`
+  - 改用 `file_stem` 去掉副檔名,`gemini.cmd` / `gemini.exe` / 絕對路徑都正確識別。加 unit test `protocol_detect_strips_extension` 鎖行為
+
+- **PATH 注入 separator hardcoded `:` → Windows `;` / Unix `:`**(`bash_cli_agent.rs`)
+  - `mori_cli_path` 注入 PATH 時用 `:` 接,Windows 整條 PATH 變一條壞 token,gemini.cmd 內部 fallback 找 `node` 全爆
+  - 改用 `cfg!(windows)` 選分隔符
+
+- **Memory tab type chip 顯示 "unknown"**(`crates/mori-core/src/memory/markdown.rs`)
+  - `blocking_read_index` 從 `MEMORY.md` 解 index entry 時把 `memory_type` 硬寫成 `Other("unknown")` —— 因為 MEMORY.md 格式 `- [name](id.md) — description` 本來就不存 type
+  - 點開單筆走 `parse_memory` 解 frontmatter 拿到真 type,所以**列表顯示 unknown 但點開正確**這個對不上很 confusing
+  - 修法:`blocking_read_index` 對每筆 index entry 額外讀對應 `<id>.md` 補抓真 type。N+1 file reads,典型 <100 筆規模 negligible
+
+### 工程
+
+- 新 Tauri commands 註冊到 `invoke_handler`:`active_profiles`、`open_profile_dir`、`log_tail`、`log_dates`、`has_gemini_key`、`has_openai_key`
+- 新 i18n string:`profiles_tab.open_folder_button`、`quickstart.scene_3_env_detected_gemini` / `_openai`、`quickstart.direct_*` 系列(10 個)、`logs_tab.*` 系列(11 個)、`sidebar.logs` / `_sub`(zh-TW + en 各一份)
+- CSS:`.mori-chat-mode-profile` chip、`.mori-profiles-section-actions` flex、`.mori-direct-form` 緊湊表格 overrides、`.mori-quickstart-backdrop.closing` 600ms 淡出 transition、`.mori-logs-*` 系列(monospace 表格 + ok/err 左邊框配色)
+- Unit tests:`bash_cli_agent::tests` 14 通過(2 ignored,需真 gemini / codex CLI 才測 integration);新加 `protocol_detect_strips_extension`
+- 新檔 [`config.example.json`](config.example.json):repo 根目錄完整欄位範本(secrets 全留空、binary 走短名、`provider: "groq"` 預設),README「裝完還沒設」段指過去,新用戶可以一鍵複製到 `~/.mori/config.json` 改值
+- `ritualAudio.fadeOutAndStop(ms)`:gainNode 線性 ramp 到 0 + 等 ms 後 stopAmbient,Promise 等 timeout 完才 resolve
+- 觀測層後續路線(留 v0.5+):Phase B per-pipeline artifacts(`~/.mori/recordings/<時戳>/` 完整 I/O snapshot)、Phase C installed apps catalog(open_app skill 注入)、per-turn provider badge in chat thread。架構分析參考 ZeroType 的 3 層觀測模型(app log / per-pipeline / app catalog)
+
+---
+
 ## v0.3.2 — Chat bubble z-order + ConfigTab dropdown polish(2026-05-15)
 
 v0.3.1 釋出後測試時冒出來的兩個小 follow-up,當天連發。

@@ -527,6 +527,10 @@ pub fn ensure_voice_input_dir_initialized() {
     for (filename, content) in [
         (STARTER_USER_00_FILENAME, STARTER_USER_00_MD),
         (STARTER_USER_01_FILENAME, STARTER_USER_01_MD),
+        (STARTER_USER_02_FILENAME, STARTER_USER_02_MD),
+        (STARTER_USER_03_FILENAME, STARTER_USER_03_MD),
+        (STARTER_USER_04_FILENAME, STARTER_USER_04_MD),
+        (STARTER_USER_05_FILENAME, STARTER_USER_05_MD),
     ] {
         let starter_path = dir.join(filename);
         if starter_path.exists() {
@@ -549,6 +553,20 @@ const STARTER_USER_00_MD: &str =
 const STARTER_USER_01_FILENAME: &str = "USER-01.朋友閒聊.md";
 const STARTER_USER_01_MD: &str =
     include_str!("../../../examples/voice_input/USER-01.朋友閒聊.md");
+// v0.4:多 4 個 starter — 正式信件、LINE 貼文、哄老婆、提示詞優化。
+// fresh install 直接看到 Alt+0~5 都有 profile,不必自己學 frontmatter 才能跑。
+const STARTER_USER_02_FILENAME: &str = "USER-02.正式信件.md";
+const STARTER_USER_02_MD: &str =
+    include_str!("../../../examples/voice_input/USER-02.正式信件.md");
+const STARTER_USER_03_FILENAME: &str = "USER-03.LINE貼文.md";
+const STARTER_USER_03_MD: &str =
+    include_str!("../../../examples/voice_input/USER-03.LINE貼文.md");
+const STARTER_USER_04_FILENAME: &str = "USER-04.哄老婆開心.md";
+const STARTER_USER_04_MD: &str =
+    include_str!("../../../examples/voice_input/USER-04.哄老婆開心.md");
+const STARTER_USER_05_FILENAME: &str = "USER-05.提示詞優化.md";
+const STARTER_USER_05_MD: &str =
+    include_str!("../../../examples/voice_input/USER-05.提示詞優化.md");
 
 // ─── Built-in fallback ────────────────────────────────────────────────────
 

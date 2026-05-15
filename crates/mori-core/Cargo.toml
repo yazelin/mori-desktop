@@ -31,5 +31,10 @@ tracing = { workspace = true }
 # hound: WAV decode/encode。跨平台需要(mori-tauri 也用)。
 hound = "3.5"
 
+# redact 模組用 — 進 LLM system prompt 前掃 clipboard / selection 內疑似
+# API key / Bearer token 樣式,自動遮蔽。regex 在 Cargo.lock 已是傳遞依賴
+# (tracing-subscriber / reqwest 都用),這裡顯式宣告便於直接 use。
+regex = "1"
+
 [dev-dependencies]
 tempfile = "3"

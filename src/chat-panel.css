@@ -41,6 +41,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.mori-chat-mode-profile {
+  color: var(--c-text-soft);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .mori-chat-topbar-actions { display: flex; gap: 4px; }
 

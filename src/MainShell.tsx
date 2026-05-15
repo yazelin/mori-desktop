@@ -20,6 +20,7 @@ import MemoryTab from "./tabs/MemoryTab";
 import AnnuliTab from "./tabs/AnnuliTab";
 import SkillsTab from "./tabs/SkillsTab";
 import DepsTab from "./tabs/DepsTab";
+import LogsTab from "./tabs/LogsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
   IconSun, IconMoon, IconGlobe, IconHelp,
@@ -30,7 +31,7 @@ import { Quickstart, shouldShowQuickstart } from "./Quickstart";
 
 type NavPayload = { tab: TabId; subTab?: string };
 
-type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps";
+type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs";
 
 type TabDef = {
   id: TabId;
@@ -47,6 +48,7 @@ const TABS: TabDef[] = [
   { id: "annuli",   Icon: IconAnnuli,   key: "annuli" },
   { id: "skills",   Icon: IconSkills,   key: "skills" },
   { id: "deps",     Icon: IconDeps,     key: "deps" },
+  { id: "logs",     Icon: IconHelp,     key: "logs" },
 ];
 
 function MainShell() {
@@ -175,6 +177,7 @@ function MainShell() {
         {tab === "annuli" && <AnnuliTab />}
         {tab === "skills" && <SkillsTab />}
         {tab === "deps" && <DepsTab />}
+        {tab === "logs" && <LogsTab />}
       </main>
       {quickstartOpen && <Quickstart onDone={() => setQuickstartOpen(false)} />}
     </div>

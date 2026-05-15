@@ -1,0 +1,102 @@
+{
+  "_README": "複製這個檔到 ~/.mori/config.json(Linux/macOS) 或 C:\\Users\\<you>\\.mori\\config.json(Windows),填入你的 API key 後啟動 mori-desktop。或者直接首次啟動跑宿靈儀式(Dwelling Rite),它會幫你填基本欄位。Secrets 建議走環境變數(GROQ_API_KEY / GEMINI_API_KEY),不要寫死進這個檔。",
+
+  "provider": "groq",
+  "stt_provider": "groq",
+
+  "providers": {
+    "groq": {
+      "model": "openai/gpt-oss-120b",
+      "stt_model": "whisper-large-v3-turbo",
+      "api_key": ""
+    },
+
+    "ollama": {
+      "base_url": "http://localhost:11434",
+      "model": "qwen3:8b"
+    },
+
+    "whisper-local": {
+      "language": "zh",
+      "model_path": ""
+    },
+
+    "claude-bash": {
+      "binary": "claude",
+      "model": null,
+      "mori_cli_path": null
+    },
+    "claude-cli": {
+      "binary": "claude",
+      "model": null
+    },
+
+    "gemini-bash": {
+      "binary": "gemini",
+      "model": null,
+      "mori_cli_path": null
+    },
+    "gemini-cli": {
+      "binary": "gemini",
+      "model": null
+    },
+
+    "codex-bash": {
+      "binary": "codex",
+      "model": null,
+      "mori_cli_path": null
+    },
+    "codex-cli": {
+      "binary": "codex",
+      "model": null
+    },
+
+    "gemini": {
+      "api_base": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model": "gemini-2.5-flash"
+    }
+  },
+
+  "api_keys": {
+    "GEMINI_API_KEY": ""
+  },
+
+  "routing": {
+    "agent": null,
+    "skills": {}
+  },
+
+  "hotkeys": {
+    "toggle": "Ctrl+Alt+Space",
+    "cancel": "Ctrl+Alt+Escape",
+    "picker": "Ctrl+Alt+P",
+    "voice_slot_modifier": "Alt",
+    "agent_slot_modifier": "Ctrl+Alt",
+    "voice_slot_overrides": {},
+    "agent_slot_overrides": {}
+  },
+
+  "voice_input": {
+    "cleanup_level": "smart"
+  },
+
+  "floating": {
+    "animated": true,
+    "show_mode": "always",
+    "x11_backplate": "plain",
+    "x11_shape": "circle",
+    "x11_shape_radius": 16
+  },
+
+  "annuli": {
+    "enabled": false,
+    "endpoint": "http://127.0.0.1:5000",
+    "spirit": "",
+    "user_id": "",
+    "soul_token": ""
+  },
+
+  "user": {
+    "name": ""
+  }
+}

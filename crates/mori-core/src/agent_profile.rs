@@ -339,20 +339,24 @@ pub fn ensure_agent_dir_initialized() {
             tracing::info!(path = %default_path.display(), "created default AGENT.md");
         }
     }
-    // Starter AGENT-01(slot 1)— 翻譯助手範本
-    let starter_path = dir.join(STARTER_AGENT_01_FILENAME);
-    if !starter_path.exists() {
-        if let Err(e) = std::fs::write(&starter_path, STARTER_AGENT_01_MD) {
-            tracing::warn!(
-                ?e,
-                path = %starter_path.display(),
-                "could not write starter AGENT-01",
-            );
+    // Starters AGENT-01..05(slot 1~5)— 翻譯 / 工作流 / ZeroType Agent forward /
+    // YouTube 摘要 / 聽我指令。各自有外部依賴(AGENT-03 需 shell script、AGENT-04
+    // 需 yt-dlp),.md body 內有「你要做的事」說明,user 看了再決定是否啟用。
+    for (filename, content) in [
+        (STARTER_AGENT_01_FILENAME, STARTER_AGENT_01_MD),
+        (STARTER_AGENT_02_FILENAME, STARTER_AGENT_02_MD),
+        (STARTER_AGENT_03_FILENAME, STARTER_AGENT_03_MD),
+        (STARTER_AGENT_04_FILENAME, STARTER_AGENT_04_MD),
+        (STARTER_AGENT_05_FILENAME, STARTER_AGENT_05_MD),
+    ] {
+        let starter_path = dir.join(filename);
+        if starter_path.exists() {
+            continue;
+        }
+        if let Err(e) = std::fs::write(&starter_path, content) {
+            tracing::warn!(?e, path = %starter_path.display(), "could not write starter");
         } else {
-            tracing::info!(
-                path = %starter_path.display(),
-                "created starter AGENT-01 (Ctrl+Alt+1 切到翻譯模式)",
-            );
+            tracing::info!(path = %starter_path.display(), "created starter agent profile");
         }
     }
 }
@@ -360,6 +364,18 @@ pub fn ensure_agent_dir_initialized() {
 const STARTER_AGENT_01_FILENAME: &str = "AGENT-01.翻譯助手.md";
 const STARTER_AGENT_01_MD: &str =
     include_str!("../../../examples/agent/AGENT-01.翻譯助手.md");
+const STARTER_AGENT_02_FILENAME: &str = "AGENT-02.工作流.md";
+const STARTER_AGENT_02_MD: &str =
+    include_str!("../../../examples/agent/AGENT-02.工作流.md");
+const STARTER_AGENT_03_FILENAME: &str = "AGENT-03.ZeroType Agent.md";
+const STARTER_AGENT_03_MD: &str =
+    include_str!("../../../examples/agent/AGENT-03.ZeroType Agent.md");
+const STARTER_AGENT_04_FILENAME: &str = "AGENT-04.YouTube 摘要.md";
+const STARTER_AGENT_04_MD: &str =
+    include_str!("../../../examples/agent/AGENT-04.YouTube 摘要.md");
+const STARTER_AGENT_05_FILENAME: &str = "AGENT-05.聽我指令.md";
+const STARTER_AGENT_05_MD: &str =
+    include_str!("../../../examples/agent/AGENT-05.聽我指令.md");
 
 /// 給上層用：取得 enabled_skills 的 HashSet，方便 contains 檢查。
 pub fn enabled_skills_set(profile: &AgentProfile) -> Option<HashSet<String>> {

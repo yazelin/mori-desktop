@@ -31,6 +31,65 @@ use tokio::process::Command;
 
 use super::{ChatMessage, ChatResponse, LlmProvider, ToolCall, ToolDefinition};
 
+/// 構造 spawn 子程序的 Command。Linux / macOS 直接 `Command::new(binary)` 就好;
+/// Windows 有兩個非對稱要處理,讓使用者**寫短名 `"gemini"` 也能跑**:
+///
+/// 1. **CVE-2024-24576**:Rust 1.77.2+ 擋掉直接 spawn `.cmd` / `.bat`,回
+///    `batch file arguments are invalid`。對策:透過 `cmd /C` 包一層,Rust
+///    看到的 spawn target 是 cmd.exe(regular PE),繞過 batch-file 偵測。
+///
+/// 2. **Rust `Command::new` 在 Windows 只自動補 `.exe`,不補 `.cmd` / `.bat`**。
+///    npm 全域裝的 CLI(gemini / codex / 多數 node-based 工具)是 `.cmd` shim,
+///    短名找不到。對策:binary 是短名(無副檔名、無路徑分隔)時主動掃 PATH:
+///    - 先看 `<binary>.exe`(找到就讓 Rust 自動補,效率最好)
+///    - 再看 `<binary>.cmd` / `.bat`(找到包 `cmd /C` 走 (1) 路徑)
+///    - 都沒找到 → fallback 原 `Command::new(binary)`,讓 Rust 自己 spawn 失敗
+fn cli_command(binary: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let lower = binary.to_ascii_lowercase();
+        // 已含 .cmd / .bat 副檔名 → 不論短名或絕對路徑,直接走 cmd /C
+        if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(binary);
+            return c;
+        }
+        // 含路徑分隔 / 含副檔名 → 使用者明確指定,不介入
+        let has_separator = binary.contains('/') || binary.contains('\\');
+        let has_ext = std::path::Path::new(binary).extension().is_some();
+        if !has_separator && !has_ext {
+            // 純短名:看 PATH 上實際是 .exe 還是 .cmd / .bat
+            if find_on_windows_path(&format!("{binary}.exe")).is_some() {
+                // Rust std::process::Command 在 Windows 會自動補 .exe,直接 spawn
+                return Command::new(binary);
+            }
+            for ext in ["cmd", "bat"] {
+                if let Some(full) = find_on_windows_path(&format!("{binary}.{ext}")) {
+                    let mut c = Command::new("cmd");
+                    c.arg("/C").arg(full);
+                    return c;
+                }
+            }
+            // 都沒找到 — fallthrough 讓 Rust 自己回 "program not found" error
+        }
+    }
+    Command::new(binary)
+}
+
+/// Windows-only: 逐個 PATH 目錄找 filename(已含副檔名),回第一個命中的絕對路徑。
+/// 不存在或 PATH 沒設 → None。
+#[cfg(windows)]
+fn find_on_windows_path(filename: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(filename);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// 各 AI CLI 的呼叫協定差異。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliProtocol {
@@ -50,12 +109,14 @@ pub enum CliProtocol {
 
 impl CliProtocol {
     /// 從 binary 檔名自動偵測協定。
+    /// 用 `file_stem` 去掉副檔名 — Windows 上 binary 可能是 `gemini.cmd` /
+    /// `claude.exe`,看整個 file_name 會錯失 match。
     fn detect(binary: &str) -> Self {
-        let name = std::path::Path::new(binary)
-            .file_name()
+        let stem = std::path::Path::new(binary)
+            .file_stem()
             .and_then(|n| n.to_str())
             .unwrap_or(binary);
-        match name {
+        match stem {
             "gemini" => Self::Gemini,
             "codex" => Self::Codex,
             _ => Self::Claude,
@@ -233,6 +294,9 @@ impl LlmProvider for BashCliAgentProvider {
         // Tools 列表故意忽略 — 我們把 dispatch 的決策外包給 CLI,Mori 內部
         // 看到的是 single-shot chat。CLI 收 system prompt 知道有 mori CLI 可用。
         //
+        // event_log:這次 LLM call 開始計時,結束時 emit jsonl 事件(成功 / 錯誤都記),
+        // LogsTab 看得到「這輪用哪個 provider、花多久、有沒有錯」。
+        let started_at = std::time::Instant::now();
         let cli_instructions = self.system_prompt();
         let system_prompt = merge_upstream_system(&messages, &cli_instructions);
         let transcript = format_transcript(&messages);
@@ -248,14 +312,17 @@ impl LlmProvider for BashCliAgentProvider {
             if cur.is_empty() {
                 extra.to_string_lossy().into_owned()
             } else {
-                format!("{}:{}", extra.display(), cur)
+                // PATH 分隔字元 — Windows `;`,Unix `:`。寫死 `:` 會在 Windows
+                // 把整個 PATH 變一條 token,讓子程序 PATH 查找全爆。
+                let sep = if cfg!(windows) { ";" } else { ":" };
+                format!("{}{}{}", extra.display(), sep, cur)
             }
         });
 
         let (mut cmd, stdin_bytes, suppress_stderr) = match self.protocol {
             CliProtocol::Claude => {
                 let allowed_tools = format!("Bash({} *)", self.mori_basename);
-                let mut c = Command::new(&self.binary);
+                let mut c = cli_command(&self.binary);
                 c.arg("--print")
                     .arg("--no-session-persistence")
                     .arg("--allowedTools").arg(&allowed_tools)
@@ -268,7 +335,7 @@ impl LlmProvider for BashCliAgentProvider {
             CliProtocol::Gemini => {
                 // system prompt 嵌進 stdin 頂部;YOLO 警告走 stderr → 丟掉。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
-                let mut c = Command::new(&self.binary);
+                let mut c = cli_command(&self.binary);
                 c.arg("-p").arg("")
                     .arg("--yolo")
                     .arg("--output-format").arg("text");
@@ -280,7 +347,7 @@ impl LlmProvider for BashCliAgentProvider {
             CliProtocol::Codex => {
                 // codex 走 `codex exec` subcommand；system prompt 嵌進 stdin 頂部。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
-                let mut c = Command::new(&self.binary);
+                let mut c = cli_command(&self.binary);
                 c.arg("exec")
                     .arg("--dangerously-bypass-approvals-and-sandbox");
                 if let Some(model) = &self.model {
@@ -292,7 +359,7 @@ impl LlmProvider for BashCliAgentProvider {
                 // chat-only:省略 --yolo → gemini 不自動執行 tool;
                 // non-TTY 下無法取得使用者核准 → 實質只輸出文字。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
-                let mut c = Command::new(&self.binary);
+                let mut c = cli_command(&self.binary);
                 c.arg("-p").arg("")
                     .arg("--output-format").arg("text");
                 if let Some(model) = &self.model {
@@ -304,7 +371,7 @@ impl LlmProvider for BashCliAgentProvider {
                 // chat-only:省略 --dangerously-bypass-approvals-and-sandbox →
                 // tool 執行需手動核准;non-TTY 下核准不可得 → 純文字任務實質 chat-only。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
-                let mut c = Command::new(&self.binary);
+                let mut c = cli_command(&self.binary);
                 c.arg("exec");
                 if let Some(model) = &self.model {
                     c.arg("--model").arg(model);
@@ -361,18 +428,38 @@ impl LlmProvider for BashCliAgentProvider {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!(
+            let msg = format!(
                 "{} CLI failed (exit={}): {}",
                 self.binary,
                 output.status,
                 if stderr.is_empty() { "(stderr suppressed)" } else { stderr.trim() }
             );
+            crate::event_log::append(serde_json::json!({
+                "kind": "llm_call",
+                "provider": self.name(),
+                "model": self.model(),
+                "binary": self.binary,
+                "latency_ms": started_at.elapsed().as_millis() as u64,
+                "ok": false,
+                "error": msg,
+            }));
+            bail!(msg);
         }
 
         let response = String::from_utf8(output.stdout)
             .context("agent CLI stdout was not UTF-8")?
             .trim()
             .to_string();
+
+        crate::event_log::append(serde_json::json!({
+            "kind": "llm_call",
+            "provider": self.name(),
+            "model": self.model(),
+            "binary": self.binary,
+            "latency_ms": started_at.elapsed().as_millis() as u64,
+            "ok": true,
+            "output_chars": response.chars().count(),
+        }));
 
         Ok(ChatResponse {
             content: Some(response),
@@ -515,6 +602,24 @@ mod tests {
     fn unknown_binary_defaults_to_claude_protocol() {
         let p = BashCliAgentProvider::new("my-custom-ai", PathBuf::from("/tmp/mori"), None);
         assert_eq!(p.protocol, CliProtocol::Claude);
+    }
+
+    /// Windows 用 file_stem 偵測:`gemini.cmd` / `gemini.exe` / 絕對路徑都得 match gemini。
+    /// (之前用 file_name 看整串,`gemini.cmd` 不 match `"gemini"` → 落到 Claude default)
+    #[test]
+    fn protocol_detect_strips_extension() {
+        assert_eq!(CliProtocol::detect("gemini.cmd"), CliProtocol::Gemini);
+        assert_eq!(CliProtocol::detect("gemini.exe"), CliProtocol::Gemini);
+        assert_eq!(CliProtocol::detect("codex.cmd"), CliProtocol::Codex);
+        assert_eq!(CliProtocol::detect("/usr/local/bin/gemini"), CliProtocol::Gemini);
+        assert_eq!(CliProtocol::detect("claude.exe"), CliProtocol::Claude);
+
+        // Windows 反斜線只在 Windows 上被 Path 當分隔符;Linux test runner 別測這條。
+        #[cfg(windows)]
+        assert_eq!(
+            CliProtocol::detect("C:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd"),
+            CliProtocol::Gemini
+        );
     }
 
     #[test]

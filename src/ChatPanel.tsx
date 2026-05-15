@@ -66,6 +66,11 @@ type ChatProviderInfo = {
   stt: SttInfo;
 };
 
+type ActiveProfiles = {
+  voice: string;
+  agent: string;
+};
+
 import {
   IconChat as IconBubble,
   IconKeyboard,
@@ -100,6 +105,7 @@ function ChatPanel() {
   const [showStatus, setShowStatus] = useState(false);
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
   const [chatProvider, setChatProvider] = useState<ChatProviderInfo | null>(null);
+  const [activeProfiles, setActiveProfiles] = useState<ActiveProfiles | null>(null);
   const [warmup, setWarmup] = useState<WarmupState | null>(null);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [coreVersion, setCoreVersion] = useState("");
@@ -126,23 +132,41 @@ function ChatPanel() {
     invoke<boolean>("has_groq_key").then(setHasKey).catch(() => {});
     invoke<BuildInfo>("build_info").then(setBuildInfo).catch(() => {});
     invoke<string>("linux_session_type").then(setSessionType).catch(() => {});
-    invoke<ChatProviderInfo>("chat_provider_info")
-      .then((info) => {
-        setChatProvider(info);
-        if (info.warmup) setWarmup(info.warmup);
-      })
-      .catch(() => {});
+    const refreshProvider = () => {
+      invoke<ChatProviderInfo>("chat_provider_info")
+        .then((info) => {
+          setChatProvider(info);
+          if (info.warmup) setWarmup(info.warmup);
+        })
+        .catch(() => {});
+    };
+    const refreshActiveProfiles = () => {
+      invoke<ActiveProfiles>("active_profiles").then(setActiveProfiles).catch(() => {});
+    };
+    refreshProvider();
+    refreshActiveProfiles();
     refreshConversation();
 
     const unlistenPhase = listen<Phase>("phase-changed", (e) => {
       setPhase(e.payload);
-      if (e.payload.kind === "done") refreshConversation();
+      if (e.payload.kind === "done") {
+        refreshConversation();
+        // 每輪結束重抓 provider / profile,反映使用者中途切 provider 或
+        // profile(經 Picker / Profiles tab / config.json 直接改)。
+        refreshProvider();
+        refreshActiveProfiles();
+      }
       // 5A-3b: 新 pipeline 啟動(recording / transcribing)→ 清掉舊 fallback 訊息
       if (e.payload.kind === "recording" || e.payload.kind === "transcribing") {
         setSystemMessages([]);
       }
     });
     const unlistenMode = listen<Mode>("mode-changed", (e) => setMode(e.payload));
+    // Picker / Profiles tab / Alt+N 切 profile 都會 emit 這個 event
+    const unlistenProfileSwitched = listen("voice-input-profile-switched", () => {
+      refreshActiveProfiles();
+      refreshProvider();
+    });
     const unlistenAudio = listen<number>("audio-level", (e) => setAudioLevel(e.payload));
     const unlistenWarmup = listen<WarmupState>("ollama-warmup", (e) => setWarmup(e.payload));
     const unlistenCtx = listen<typeof lastContext>("context-captured", (e) =>
@@ -160,6 +184,7 @@ function ChatPanel() {
       unlistenWarmup.then((f) => f());
       unlistenCtx.then((f) => f());
       unlistenSys.then((f) => f());
+      unlistenProfileSwitched.then((f) => f());
     };
   }, []);
 
@@ -216,6 +241,11 @@ function ChatPanel() {
             {(() => { const I = MODE_LABEL[mode].Icon; return <I width={16} height={16} />; })()}
           </span>
           <span className="mori-chat-mode-text">{MODE_LABEL[mode].label}</span>
+          {activeProfiles && mode !== "background" && (
+            <span className="mori-chat-mode-profile">
+              · {mode === "voice_input" ? activeProfiles.voice : activeProfiles.agent}
+            </span>
+          )}
           {chatProvider && (
             <span className="mori-chat-mode-provider">
               · {chatProvider.name} · {chatProvider.model}
@@ -438,7 +468,12 @@ function StatusRows({
         return t("chat_panel.session_path_wayland");
       case "linux-other":
         return t("chat_panel.session_path_linux_other");
-      case "non-linux":
+      case "windows":
+        return t("chat_panel.session_path_windows");
+      case "macos":
+        return t("chat_panel.session_path_macos");
+      case "non-linux": // legacy value(舊版 Mori 二進制可能還回這個)
+      case "other":
         return t("chat_panel.session_path_other");
       default:
         return sessionType || "...";

@@ -9,7 +9,7 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-🌲 **Latest** — [**v0.3.2**](https://github.com/yazelin/mori-desktop/releases/tag/v0.3.2):宿靈儀式 (Dwelling Rite) 五幕 onboarding · floating Mori 顯示時機可設定 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+🌲 **Latest** — [**v0.4.0**](https://github.com/yazelin/mori-desktop/releases/tag/v0.4.0):Windows out-of-the-box(短名 binary 自動探 `.cmd`)· Phase A 觀測層(JSONL events + LogsTab)· 隱私 redact(clipboard / selection 進 LLM 前自動遮蔽 API key 樣式)· Quickstart Direct mode 重做 + verify 真打 API · 儀式收尾 modal+音樂同步淡出 · Chat topbar 顯示 active profile · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 
@@ -47,7 +47,8 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 3. 啟動主視窗 + 桌面右下 floating sprite
 
 裝完還沒設 LLM provider 的話,第一次按 `Ctrl+Alt+Space` 會抱怨 — 去 Config tab 填 Groq key
-或選離線組合(`whisper-local` STT + `ollama` LLM)。詳細步驟見
+或選離線組合(`whisper-local` STT + `ollama` LLM)。完整欄位範本見 repo 根目錄
+[`config.example.json`](config.example.json)(複製到 `~/.mori/config.json` 改值即可)。詳細步驟見
 [**docs/getting-started**](https://yazelin.github.io/mori-desktop/getting-started.html)。
 
 ---

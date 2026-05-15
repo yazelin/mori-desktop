@@ -10,6 +10,19 @@ import { IconVoiceMic, IconTree } from "../icons";
 type ProfileEntry = { stem: string; display: string };
 type Kind = "voice" | "agent";
 
+function OpenFolderButton({ kind }: { kind: Kind }) {
+  const { t } = useTranslation();
+  const open = () =>
+    invoke("open_profile_dir", { kind }).catch((e: any) =>
+      alert(`${t("profiles_tab.open_folder_button")} 失敗：${e}`),
+    );
+  return (
+    <button className="mori-btn" onClick={open}>
+      {t("profiles_tab.open_folder_button")}
+    </button>
+  );
+}
+
 function NewProfileButton({
   kind,
   onCreated,
@@ -80,7 +93,10 @@ function ProfilesTab() {
       <section className="mori-profiles-section">
         <div className="mori-profiles-section-head">
           <h3><IconVoiceMic width={14} height={14} /> {t("profiles_tab.voice_section")} ({voice.length})</h3>
-          <NewProfileButton kind="voice" onCreated={reload} />
+          <div className="mori-profiles-section-actions">
+            <OpenFolderButton kind="voice" />
+            <NewProfileButton kind="voice" onCreated={reload} />
+          </div>
         </div>
         <div className="mori-profiles-list">
           {voice.map((p) => (
@@ -107,7 +123,10 @@ function ProfilesTab() {
       <section className="mori-profiles-section">
         <div className="mori-profiles-section-head">
           <h3><IconTree width={14} height={14} /> {t("profiles_tab.agent_section")} ({agent.length})</h3>
-          <NewProfileButton kind="agent" onCreated={reload} />
+          <div className="mori-profiles-section-actions">
+            <OpenFolderButton kind="agent" />
+            <NewProfileButton kind="agent" onCreated={reload} />
+          </div>
         </div>
         <div className="mori-profiles-list">
           {agent.map((p) => (

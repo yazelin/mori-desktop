@@ -35,6 +35,9 @@ Thumbs.db
 # Claude Code session state(不該進版本控制 — 個人 IDE-like artifact)
 .claude/
 
+# 開發用 scratch — tokenizer 測試 / 一次性實驗腳本,不進 repo。
+scratch/
+
 # `tauri icon` 副產物:不在我們支援的平台清單裡的 icon 格式 — 我們只支援
 # Linux(PNG)+ Windows(ICO),其他都不 build / 不 commit。若日後加 Mac /
 # iOS / Android / Microsoft Store 再把對應行刪掉。

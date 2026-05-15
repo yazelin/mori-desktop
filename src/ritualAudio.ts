@@ -97,6 +97,32 @@ class RitualAudio {
     this.audioCtx = null;
   }
 
+  /**
+   * 漸弱然後 stop。儀式收尾「回家」按鈕用,避免音樂突然斷掉破壞氣氛。
+   * gain 線性 ramp 到 0,等 ms 後再 teardown audio graph。
+   * Promise 在 stopAmbient 跑完才 resolve;沒在播也安全(no-op resolve)。
+   */
+  fadeOutAndStop(durationMs: number = 600): Promise<void> {
+    if (this.gainNode && this.audioCtx) {
+      const now = this.audioCtx.currentTime;
+      const seconds = durationMs / 1000;
+      const current = this.gainNode.gain.value;
+      try {
+        this.gainNode.gain.cancelScheduledValues(now);
+        this.gainNode.gain.setValueAtTime(current, now);
+        this.gainNode.gain.linearRampToValueAtTime(0, now + seconds);
+      } catch (e) {
+        console.warn("[ritualAudio] fadeOut gain ramp failed", e);
+      }
+    }
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        this.stopAmbient();
+        resolve();
+      }, durationMs);
+    });
+  }
+
   setMuted(muted: boolean): void {
     window.__moriRitualMuted = muted;
     // 走 gainNode(在 audio graph 內)— audio el 的 volume 在 setupAudioGraph

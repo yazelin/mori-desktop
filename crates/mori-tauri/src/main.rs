@@ -224,7 +224,11 @@ fn is_x11_session() -> bool {
 /// - `"wayland"`   — Linux Wayland,走 xdg-desktop-portal GlobalShortcuts
 /// - `"linux-other"` — Linux 但 XDG_SESSION_TYPE 是 tty / 未設(headless / 容器),
 ///                    熱鍵失效但 UI toggle 仍可用
-/// - `"non-linux"` — macOS / Windows,Mori 走非 Linux 分支
+/// - `"windows"`   — Windows,tauri-plugin-global-shortcut 直接 work
+/// - `"macos"`     — macOS,tauri-plugin-global-shortcut 直接 work
+/// - `"other"`     — 其他平台(理論上不會發生)
+///
+/// 函數名歷史包袱叫 `linux_session_type`,但回傳值已含全平台。
 #[tauri::command]
 fn linux_session_type() -> String {
     #[cfg(target_os = "linux")]
@@ -235,9 +239,17 @@ fn linux_session_type() -> String {
             _ => "linux-other".to_string(),
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     {
-        "non-linux".to_string()
+        "windows".to_string()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos".to_string()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        "other".to_string()
     }
 }
 
@@ -451,6 +463,27 @@ fn has_groq_key(state: tauri::State<Arc<AppState>>) -> bool {
     state.groq_api_key.lock().is_some()
 }
 
+/// Quickstart 第三幕(靈力)用 — 看 `GEMINI_API_KEY` 是否已存在於 OS env var。
+/// 跟 groq 不一樣:Gemini 走 `resolve_api_key("GEMINI_API_KEY")` lazy lookup,
+/// 不在啟動時存進 state,所以這條直接讀 env 就好。
+#[tauri::command]
+fn has_gemini_key() -> bool {
+    has_env_key("GEMINI_API_KEY")
+}
+
+/// Quickstart 第三幕(自訂 OpenAI-compat 端點)用 — 看 `OPENAI_API_KEY` 是否
+/// 已存在於 OS env var。跟 Gemini 對稱(api_base 仍需 user 在 UI 填)。
+#[tauri::command]
+fn has_openai_key() -> bool {
+    has_env_key("OPENAI_API_KEY")
+}
+
+fn has_env_key(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
 /// F — Quickstart 用。驗證 user 給的 LLM API key 真的能連。
 /// 不打 chat completions(會花 credit),只 GET /models list,200 = key 有效。
 ///
@@ -467,11 +500,23 @@ async fn verify_llm_key(
     provider: String,
     key: String,
     api_base: Option<String>,
+    env_name: Option<String>,
 ) -> Result<String, String> {
-    let key = key.trim().to_string();
-    if key.is_empty() {
+    // key 空 + 有 env_name → 後端 fallback 讀 env var 拿真值打 API,前端不碰 key 內容。
+    // 不打 API 就判 OK 不算測試 — env var 可能值錯 / quota 滿 / endpoint 改了,
+    // 真打一次 /models 才知道。
+    let typed = key.trim().to_string();
+    let (effective_key, via_env) = if !typed.is_empty() {
+        (typed, false)
+    } else if let Some(name) = env_name.as_deref() {
+        match std::env::var(name) {
+            Ok(v) if !v.trim().is_empty() => (v.trim().to_string(), true),
+            _ => return Err(format!("API key 是空的(環境變數 {name} 也沒設或為空)")),
+        }
+    } else {
         return Err("API key 是空的".into());
-    }
+    };
+    let key = effective_key;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
@@ -500,7 +545,11 @@ async fn verify_llm_key(
 
     let status = resp.status();
     match status.as_u16() {
-        200 => Ok(format!("{provider} API key 驗證 OK")),
+        200 => Ok(if via_env {
+            format!("{provider} API key 驗證 OK(使用環境變數)")
+        } else {
+            format!("{provider} API key 驗證 OK")
+        }),
         401 | 403 => Err(format!(
             "API key 無效({}) — 重新檢查 key 完整不完整,或對應 console 重產生",
             status
@@ -903,6 +952,53 @@ fn profile_delete(kind: String, stem: String) -> Result<(), String> {
     };
     let path = dir.join(format!("{stem}.md"));
     std::fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))
+}
+
+/// Chat panel topbar 顯示用 — 當前 active voice / agent profile 的 stem。
+/// 前端依當前 Mode 決定顯示哪個;每次 phase=done 跟收到 profile-switched event
+/// 都重抓一次。
+#[derive(serde::Serialize)]
+struct ActiveProfiles {
+    voice: String,
+    agent: String,
+}
+
+/// LogsTab UI 用 — 撈某天的 events,newest-first,最多 limit 筆。
+/// 過濾(kind / provider)放前端做(payload 量小,前端 filter 比後端動態 query 簡單)。
+#[tauri::command]
+fn log_tail(date: Option<String>, limit: Option<usize>) -> Vec<serde_json::Value> {
+    let d = date.unwrap_or_else(mori_core::event_log::today);
+    let n = limit.unwrap_or(200);
+    mori_core::event_log::read_tail(&d, n)
+}
+
+/// LogsTab UI 的日期 picker:列出 ~/.mori/logs/ 內所有 mori-YYYY-MM-DD.jsonl,newest first。
+#[tauri::command]
+fn log_dates() -> Vec<String> {
+    mori_core::event_log::list_dates()
+}
+
+#[tauri::command]
+fn active_profiles() -> ActiveProfiles {
+    ActiveProfiles {
+        voice: mori_core::voice_input_profile::load_active_profile().name,
+        agent: mori_core::agent_profile::load_active_agent_profile().name,
+    }
+}
+
+/// 用 OS 檔案管理員開 profile 資料夾 — 方便直接把 .md 拖進去 / 改名 / 刪。
+/// 走 action_skills::platform::open_url(同一份 xdg-open / ShellExecuteExW 實作),
+/// 對「資料夾路徑」兩平台都會開預設 file manager。
+#[tauri::command]
+fn open_profile_dir(kind: String) -> Result<(), String> {
+    let dir = match kind.as_str() {
+        "voice" => mori_dir().join("voice_input"),
+        "agent" => mori_dir().join("agent"),
+        other => return Err(format!("unknown profile kind: {other}")),
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
+    crate::action_skills::open_url_for_quickstart(&dir.to_string_lossy())
+        .map_err(|e| format!("open {}: {e}", dir.display()))
 }
 
 // ─── 5L-4: Memory + Skills IPC ────────────────────────────────────
@@ -2855,8 +2951,19 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
              — 沒有改寫意圖,只是問)→ 直接在 chat 回答,**不**呼叫 paste_selection_back,\
              **不**動使用者編輯區。\n\n",
         );
+        // v0.4 Phase A 隱私:選取文字可能含 API key / Bearer token(user 反白
+        // .env / config / 終端機輸出),進 LLM API 之前先 redact。audit event
+        // 寫進 event_log,marker 不存原文。
+        let (redacted_sel, n_redacted) = mori_core::redact::redact_secrets(sel);
+        if n_redacted > 0 {
+            mori_core::event_log::append(serde_json::json!({
+                "kind": "redaction",
+                "source": "selection",
+                "count": n_redacted,
+            }));
+        }
         prompt.push_str("```\n");
-        prompt.push_str(sel);
+        prompt.push_str(&redacted_sel);
         prompt.push_str("\n```\n");
     }
 
@@ -2896,8 +3003,19 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
             prompt.push_str(note);
             prompt.push_str("\n\n");
         }
+        // v0.4 Phase A 隱私:剪貼簿是最大洩漏點 — user 剛複製 API key / 密碼
+        // / 私訊都會被無條件塞進 system prompt 送 provider。先 redact 高風險
+        // 樣式(gsk_* / sk-* / AIzaSy* / Bearer * / 40+ char 高熵字串)。
+        let (redacted_clip, n_redacted) = mori_core::redact::redact_secrets(&preview);
+        if n_redacted > 0 {
+            mori_core::event_log::append(serde_json::json!({
+                "kind": "redaction",
+                "source": "clipboard",
+                "count": n_redacted,
+            }));
+        }
         prompt.push_str("```\n");
-        prompt.push_str(&preview);
+        prompt.push_str(&redacted_clip);
         prompt.push_str("\n```\n");
     }
 
@@ -3082,6 +3200,8 @@ fn main() {
             chat_provider_info,
             current_phase,
             has_groq_key,
+            has_gemini_key,
+            has_openai_key,
             verify_llm_key,
             toggle,
             reset_conversation,
@@ -3105,6 +3225,10 @@ fn main() {
             profile_read,
             profile_write,
             profile_delete,
+            open_profile_dir,
+            active_profiles,
+            log_tail,
+            log_dates,
             memory_list,
             memory_read,
             memory_write,
