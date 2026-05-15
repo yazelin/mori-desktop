@@ -377,9 +377,21 @@ impl Skill for OpenAppSkill {
         "open_app"
     }
     fn description(&self) -> &'static str {
-        "Launch a locally installed desktop application by name (e.g. Firefox, Code, Slack). \
-         Linux: searches ~/.local/share/applications and /usr/share/applications .desktop entries. \
-         Windows: resolves via App Paths registry + PATH."
+        // v0.5.0:第一次呼叫時掃 installed apps catalog(top 50 most recent),
+        // 塞進 description。LLM 收 tool spec 時就看得到「user 機器實際裝什麼」,
+        // 不必再猜。OnceLock 緩存,process 內第一次後 O(1);catalog 變動要重啟
+        // mori 才會 refresh(Profiles tab 改 enabled_skills 開關 open_app 也算)。
+        static CACHED: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+        CACHED.get_or_init(|| {
+            let base = "Launch a locally installed desktop application by name (e.g. Firefox, Code, Slack). \
+                Linux: searches ~/.local/share/applications and /usr/share/applications .desktop entries. \
+                Windows: resolves via App Paths registry + PATH. \
+                macOS: launches via `open -a`.";
+            let catalog = mori_core::installed_apps::get_or_refresh(None);
+            let installed_section = mori_core::installed_apps::format_for_llm(&catalog, 50);
+            let full = format!("{base}{installed_section}");
+            Box::leak(full.into_boxed_str())
+        })
     }
     fn parameters_schema(&self) -> Value {
         json!({

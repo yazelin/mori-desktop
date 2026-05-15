@@ -1032,6 +1032,24 @@ fn list_starter_templates(
         .collect())
 }
 
+/// v0.5.0:列出 installed apps catalog(從 cache 讀;沒 cache 自動 scan 一次)。
+/// 給 Config tab 的 Apps section 顯示用。fresh install + 從未 refresh 過會慢
+/// (Win 走 Start Menu + Desktop 遞迴掃,通常 <500ms;Linux 解 .desktop;macOS 掃 .app)。
+#[tauri::command]
+async fn list_installed_apps() -> Result<mori_core::installed_apps::Catalog, String> {
+    tokio::task::spawn_blocking(|| mori_core::installed_apps::get_or_refresh(None))
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))
+}
+
+/// v0.5.0:強制重新掃 installed apps。Config UI 「重新整理」按鈕用。
+#[tauri::command]
+async fn refresh_installed_apps() -> Result<mori_core::installed_apps::Catalog, String> {
+    tokio::task::spawn_blocking(|| mori_core::installed_apps::refresh())
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))
+}
+
 /// v0.4.3:估算 profile system prompt 的 token 數(gpt-oss + Gemini 兩家)。
 /// 走 char-class 啟發法,±10% 準確度,給 Profiles tab UI 顯示用。完整原理見
 /// `mori_core::tokenize` 模組註解。
@@ -3313,6 +3331,8 @@ fn main() {
             list_starter_templates,
             install_starter_template,
             estimate_profile_tokens,
+            list_installed_apps,
+            refresh_installed_apps,
             active_profiles,
             log_tail,
             log_dates,

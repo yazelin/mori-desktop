@@ -6,6 +6,86 @@
 
 ---
 
+## v0.5.0 — Installed apps catalog(open_app 不亂猜)(2026-05-15)
+
+ZeroType 啟發的 Phase C — Mori 在每個平台 scan 已裝的 desktop apps,寫進 `~/.mori/installed-apps.<platform>.json` cache,當 active profile 啟用 `open_app` skill 時把**最近 50 個常用 app 列表**塞進 LLM 看到的 tool description。LLM 不再憑「user 講 'SQL' 就猜成 SQL Server / SQLite / 其他」,直接 match 列表內的 display name。
+
+### 主要 feature
+
+#### 跨平台 installed apps scan(`mori-core::installed_apps`)
+
+新模組,3 個 platform 各自 cfg-gated 實作:
+
+| OS | Scan 來源 |
+|---|---|
+| **Windows** | `%ProgramData%\Microsoft\Windows\Start Menu\Programs\*.lnk` + `%APPDATA%\...\Start Menu\Programs\*.lnk` + `%PUBLIC%\Desktop` + `%USERPROFILE%\Desktop`(遞迴掃 `.lnk`)|
+| **Linux** | `$XDG_DATA_HOME/applications` + 每個 `$XDG_DATA_DIRS/applications` + `/var/lib/flatpak/exports/share/applications` + `/var/lib/snapd/desktop/applications`(parse `.desktop`:`Name=` / `Exec=` / `NoDisplay=true` skip) |
+| **macOS** | `/Applications/*.app` + `~/Applications/*.app` + `/System/Applications/*.app`(macOS Catalina+) |
+
+每個 entry 帶 `display_name` / `launch_target` / `source`(provenance)/ `last_used_at`(取檔案 mtime 當代理 signal — Windows UserAssist registry / macOS Spotlight kMDItemLastUsedDate 等更精準 source 留 v0.5.1+)。
+
+#### Cache 機制 + lazy refresh
+
+- 寫 `~/.mori/installed-apps.<platform>.json`(跨平台同 schema,JSON 可讀)
+- `load_cached()` 啟動時不 scan,等 OpenAppSkill 第一次 invoke 才觸發
+- `Catalog::is_stale(hours)` 判斷 staleness(目前 hardcoded 不檢 stale,留 caller 政策)
+- `refresh()` 強制重 scan + 覆寫 cache
+- `get_or_refresh(stale_hours)`:cache 存在 + 不 stale → 用 cache;否則 refresh
+
+`Catalog::sorted_by_recency()` 把 entries 依 `last_used_at` 降冪排序(最近用過在前,沒 signal 的塞最後)。
+
+#### LLM context injection — `OpenAppSkill::description`
+
+第一次 `description()` 被呼叫(LLM tool definitions 建立時)即 lazy scan + format:
+
+```
+Launch a locally installed desktop application by name (...)
+
+## 此機器已安裝的 app(共 387 個,以下列出最近常用 50 個)
+
+- `KV STUDIO Ver.12G` (~2h ago)
+- `Chrome` (~1h ago)
+- `SQL Server Management Studio 21` (~4h ago)
+- ...(top 50)
+
+(還有 337 個較少用的 app 沒列出。user 講的若不在上面 → 在 chat 跟 user 確認完整名稱,**不要亂猜**。)
+
+選 app 時請**直接 match 上面列表的 display name**(允許 fuzzy:user 講 "SQL" → match "SQL Server Management Studio 21")。
+```
+
+OnceLock 緩存,process 內第一次後 O(1) 取。**Catalog 變動要重啟 mori 才會 refresh**(power user 主動 `refresh_installed_apps` Tauri command 也行,但 LLM 仍看 cached description)— v0.5.1 加 invalidation。
+
+#### 新 Tauri commands
+
+- `list_installed_apps()` → 回 cache(沒 cache 自動 scan),`spawn_blocking` 避免擋 UI
+- `refresh_installed_apps()` → 強制重 scan + 覆寫 cache,給 UI「重新整理」按鈕用
+
+兩個都已註冊到 invoke_handler,可從前端 invoke。
+
+### 工程
+
+- 新 mori-core 模組 + 3 platform impl(`installed_apps/{mod,windows,linux,macos}.rs`)
+- `Catalog` / `InstalledApp` JSON-serializable schema,跨平台一致
+- 3 unit tests(`sorted_by_recency_recent_first` / `is_stale_fresh` / `is_stale_old`)+ Linux desktop file parse 也有 3 tests(只在 Linux build 跑)
+- 砍 token cost:top-K = 50 而非 387 全 inventory。實測 50 個 entries 系統 prompt 多 ~600-800 tokens(o200k_harmony),可接受
+
+### 已知限制 / 留 v0.5.1+
+
+- **沒 catalog refresh on profile change**:user 切換 enabled_skills 開關 open_app 時,description 已 OnceLock 緩存,要重啟才會反映新 catalog。實作 invalidation API
+- **Windows lnk target 沒 parse**:`launch_target` 留 .lnk path,ShellExecute 直接打開。實作 lnk parser 拿真執行檔(Win32 IShellLink 走 windows crate)
+- **沒接 Win UserAssist / macOS Spotlight**:`last_used_at` 走檔案 mtime 代理,不夠精準。UserAssist 是 ROT13 編碼 registry,要寫專 parser
+- **AppX / UWP / Microsoft Store apps 不在 scan 範圍**(Start Menu .lnk 多數會有,但 AUMID-only 的 app 沒 .lnk 抓不到)
+- **沒前端 UI 顯示 catalog**:目前只能透過 `~/.mori/installed-apps.<platform>.json` 看 — v0.5.1 加 Config tab 一個 section 顯示 count + refresh button
+
+### 留 v0.5.x
+
+- **Phase B per-pipeline artifacts**(Whisper fine-tune farm)
+- **Catalog UI in Config tab**(refresh button + list view)
+- **Description refresh invalidation**(catalog 換新後不必重啟)
+- **More signal sources**(Win UserAssist registry / macOS Spotlight)
+
+---
+
 ## v0.4.3 — Profiles token 估算 chip + Config 文案大掃除(2026-05-15)
 
 兩件事:**Profiles tab 每筆 profile 顯示 token 估算**(gpt-oss / Gemini 兩家,啟發法 ±10%)+ **Config tab 那些 user 看不懂的 hint 全部重寫**。
