@@ -1615,7 +1615,15 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
             stop_and_transcribe(app, state);
         }
         Phase::Transcribing | Phase::Responding { .. } => {
-            tracing::info!("toggle while busy — ignored");
+            // Mori 目前沒做 async task queue,新 hotkey 進來就 abort 舊 pipeline + 開新錄音。
+            // 行為跟 Ctrl+Alt+Esc 一致,差在 Esc 停在 Idle 不再開錄。
+            tracing::info!(?current, "toggle while busy — aborting pipeline + starting new recording");
+            if let Some(task) = state.pipeline_task.lock().take() {
+                task.abort();
+            }
+            state.set_phase(&app, Phase::Idle);
+            *state.hotkey_window_context.lock() = capture_window_context();
+            start_recording(&app, &state);
         }
     }
 }
@@ -1637,7 +1645,14 @@ fn handle_hotkey_pressed(app: AppHandle, state: Arc<AppState>) {
             tracing::debug!("hotkey press while already recording — ignored");
         }
         Phase::Transcribing | Phase::Responding { .. } => {
-            tracing::info!("hotkey press while busy — ignored");
+            // 同 toggle 路徑:沒 task queue, abort 舊 pipeline 開新錄音。
+            tracing::info!(?current, "hotkey press while busy — aborting pipeline + starting new recording");
+            if let Some(task) = state.pipeline_task.lock().take() {
+                task.abort();
+            }
+            state.set_phase(&app, Phase::Idle);
+            *state.hotkey_window_context.lock() = capture_window_context();
+            start_recording(&app, &state);
         }
     }
 }
