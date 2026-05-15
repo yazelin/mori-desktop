@@ -39,20 +39,88 @@ type SaveStatus =
   | { kind: "ok" }
   | { kind: "err"; message: string };
 
-// 已知的 named providers — 來自 mori-core/src/llm/mod.rs
-const ALL_PROVIDERS = [
-  "groq",
-  "gemini",
-  "ollama",
-  "claude-cli",
-  "claude-bash",
-  "gemini-bash",
-  "codex-bash",
-  "gemini-cli",
-  "codex-cli",
-] as const;
+// 已知的 named providers schema(typed fields)— 來源是 mori-core/src/llm/mod.rs。
+// 任何在 config.json `providers.<name>` 但**不在**這 registry 的, render 時 fallback
+// 到通用 KvTable editor(讓 user 自訂 OpenAI-compat 端點之類也能直接編輯)。
+//
+// 順序就是 UI 上 card 的展示順序。
+const PROVIDER_SCHEMAS: Record<string, { fields: ProviderField[]; topHintKey?: string }> = {
+  groq: {
+    fields: [
+      { key: "api_key", label: "api_key", secret: true, hint: "gsk_... — 這裡填或設 $GROQ_API_KEY env(env 優先)" },
+      { key: "model", label: "model", hint: "openai/gpt-oss-120b" },
+      { key: "stt_model", label: "stt_model", hint: "whisper-large-v3-turbo" },
+    ],
+  },
+  gemini: {
+    fields: [
+      { key: "model", label: "model", hint: "gemini-3.1-flash-lite-preview" },
+      { key: "api_base", label: "api_base", hint: "https://generativelanguage.googleapis.com/v1beta/openai/" },
+    ],
+    topHintKey: "config_tab.rows.hint_llm_gemini_key",
+  },
+  ollama: {
+    fields: [
+      { key: "base_url", label: "base_url", hint: "http://localhost:11434" },
+      { key: "model", label: "model", hint: "qwen3:8b" },
+    ],
+  },
+  "claude-bash": {
+    fields: [
+      { key: "binary", label: "binary", hint: "PATH 上的 claude binary 名稱(Windows: claude.cmd 或絕對路徑)" },
+      { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+    ],
+  },
+  "claude-cli": {
+    fields: [
+      { key: "binary", label: "binary", hint: "claude" },
+      { key: "model", label: "model" },
+    ],
+  },
+  "gemini-bash": {
+    fields: [
+      { key: "binary", label: "binary", hint: "PATH 上的 gemini binary 名稱(Windows 必須是 gemini.cmd 或絕對路徑)" },
+      { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+    ],
+  },
+  "gemini-cli": {
+    fields: [
+      { key: "binary", label: "binary", hint: "PATH 上的 gemini binary 名稱(Windows: gemini.cmd)" },
+      { key: "model", label: "model" },
+    ],
+  },
+  "codex-bash": {
+    fields: [
+      { key: "binary", label: "binary", hint: "PATH 上的 codex binary 名稱" },
+      { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
+    ],
+  },
+  "codex-cli": {
+    fields: [
+      { key: "binary", label: "binary", hint: "PATH 上的 codex binary 名稱" },
+      { key: "model", label: "model" },
+    ],
+  },
+  "whisper-local": {
+    fields: [
+      { key: "model_path", label: "model_path", hint: "~/.mori/models/ggml-small.bin(去 Deps 頁一鍵下載)" },
+      { key: "server_binary", label: "server_binary", hint: "~/.mori/bin/whisper-server[.exe](去 Deps 頁一鍵下載,或填絕對路徑指向 GPU 版本)" },
+      { key: "language", label: "language", hint: "zh / en / auto(留空 = auto detect)" },
+    ],
+    topHintKey: "config_tab.rows.hint_llm_whisper_server",
+  },
+};
+
+// 已知 provider 的 name 列表(給上方 dropdown 用)。
+const KNOWN_PROVIDERS = Object.keys(PROVIDER_SCHEMAS);
 
 const STT_PROVIDERS = ["groq", "whisper-local"] as const;
+
+// type ProviderField defined further down, but PROVIDER_SCHEMAS above
+// references it — TypeScript hoists type declarations so this works.
 
 function Section({
   title,
@@ -665,7 +733,10 @@ function ConfigTab({
               <Select
                 value={getStr(cfg, "provider", "groq")}
                 onChange={(v) => applyPatch((c) => setStrOrUndef(c, "provider", v))}
-                options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
+                options={[
+                  ...KNOWN_PROVIDERS,
+                  ...Object.keys(cfg.providers ?? {}).filter((n) => !PROVIDER_SCHEMAS[n]),
+                ].map((p) => ({ value: p, label: p }))}
               />
             </FormRow>
             <FormRow label="stt_provider" hint={t("config_tab.rows.hint_quick_stt")}>
@@ -697,98 +768,57 @@ function ConfigTab({
             title={t("config_tab.sections.llm_providers")}
             hint={t("config_tab.sections.llm_providers_hint")}
           >
-            <ProviderCard
-              name="groq"
-              cfg={cfg.providers?.groq}
-              fields={[
-                { key: "api_key", label: "api_key", secret: true, hint: "gsk_... — 這裡填或設 $GROQ_API_KEY env(env 優先)" },
-                { key: "model", label: "model", hint: "openai/gpt-oss-120b" },
-                { key: "stt_model", label: "stt_model", hint: "whisper-large-v3-turbo" },
+            {/* Render order: 先 schema 已知的(維持固定順序), 再 config 裡有但 schema 沒收錄的(自訂)*/}
+            {(() => {
+              const customs = Object.keys(cfg.providers ?? {}).filter(
+                (n) => !PROVIDER_SCHEMAS[n],
+              );
+              const all = [...KNOWN_PROVIDERS, ...customs];
+              return all.map((name) => {
+                const schema = PROVIDER_SCHEMAS[name];
+                const onPatch = (patch: (provider: AnyObj) => void) =>
+                  applyPatch((c) => {
+                    const p = ensureSubObj(c, "providers");
+                    const sub = ensureSubObj(p, name);
+                    patch(sub);
+                  });
+                if (schema) {
+                  return (
+                    <ProviderCard
+                      key={name}
+                      name={name}
+                      cfg={cfg.providers?.[name]}
+                      fields={schema.fields}
+                      hint={schema.topHintKey ? t(schema.topHintKey) : undefined}
+                      onPatch={onPatch}
+                    />
+                  );
+                }
+                return (
+                  <CustomProviderCard
+                    key={name}
+                    name={name}
+                    cfg={cfg.providers?.[name]}
+                    onPatch={onPatch}
+                    onDelete={() =>
+                      applyPatch((c) => {
+                        const p = ensureSubObj(c, "providers");
+                        delete p[name];
+                      })
+                    }
+                  />
+                );
+              });
+            })()}
+            <AddProviderButton
+              existingNames={[
+                ...KNOWN_PROVIDERS,
+                ...Object.keys(cfg.providers ?? {}),
               ]}
-              onPatch={(patch) =>
+              onAdd={(name) =>
                 applyPatch((c) => {
                   const p = ensureSubObj(c, "providers");
-                  const g = ensureSubObj(p, "groq");
-                  patch(g);
-                })
-              }
-            />
-            <ProviderCard
-              name="gemini"
-              cfg={cfg.providers?.gemini}
-              fields={[
-                { key: "model", label: "model", hint: "gemini-3.1-flash-lite-preview" },
-                { key: "api_base", label: "api_base", hint: "https://generativelanguage.googleapis.com/v1beta/openai/" },
-              ]}
-              hint={t("config_tab.rows.hint_llm_gemini_key")}
-              onPatch={(patch) =>
-                applyPatch((c) => {
-                  const p = ensureSubObj(c, "providers");
-                  const g = ensureSubObj(p, "gemini");
-                  patch(g);
-                })
-              }
-            />
-            <ProviderCard
-              name="ollama"
-              cfg={cfg.providers?.ollama}
-              fields={[
-                { key: "base_url", label: "base_url", hint: "http://localhost:11434" },
-                { key: "model", label: "model", hint: "qwen3:8b" },
-              ]}
-              onPatch={(patch) =>
-                applyPatch((c) => {
-                  const p = ensureSubObj(c, "providers");
-                  const o = ensureSubObj(p, "ollama");
-                  patch(o);
-                })
-              }
-            />
-            <ProviderCard
-              name="claude-bash"
-              cfg={cfg.providers?.["claude-bash"]}
-              fields={[
-                { key: "binary", label: "binary", hint: "PATH 上的 claude binary 名稱" },
-                { key: "model", label: "model", hint: "(留空用 CLI 預設)" },
-                { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空自動偵測)" },
-              ]}
-              onPatch={(patch) =>
-                applyPatch((c) => {
-                  const p = ensureSubObj(c, "providers");
-                  const b = ensureSubObj(p, "claude-bash");
-                  patch(b);
-                })
-              }
-            />
-            <ProviderCard
-              name="claude-cli"
-              cfg={cfg.providers?.["claude-cli"]}
-              fields={[
-                { key: "binary", label: "binary", hint: "claude" },
-                { key: "model", label: "model" },
-              ]}
-              onPatch={(patch) =>
-                applyPatch((c) => {
-                  const p = ensureSubObj(c, "providers");
-                  const cc = ensureSubObj(p, "claude-cli");
-                  patch(cc);
-                })
-              }
-            />
-            <ProviderCard
-              name="whisper-local"
-              cfg={cfg.providers?.["whisper-local"]}
-              fields={[
-                { key: "model_path", label: "model_path", hint: "~/.mori/models/ggml-small.bin(去 Deps 頁一鍵下載)" },
-                { key: "server_binary", label: "server_binary", hint: "~/.mori/bin/whisper-server[.exe](去 Deps 頁一鍵下載,或填絕對路徑指向 GPU 版本)" },
-                { key: "language", label: "language", hint: "zh / en / auto(留空 = auto detect)" },
-              ]}
-              hint={t("config_tab.rows.hint_llm_whisper_server")}
-              onPatch={(patch) =>
-                applyPatch((c) => {
-                  const p = ensureSubObj(c, "providers");
-                  const w = ensureSubObj(p, "whisper-local");
-                  patch(w);
+                  ensureSubObj(p, name);
                 })
               }
             />
@@ -814,7 +844,10 @@ function ConfigTab({
                     }
                   })
                 }
-                options={ALL_PROVIDERS.map((p) => ({ value: p, label: p }))}
+                options={[
+                  ...KNOWN_PROVIDERS,
+                  ...Object.keys(cfg.providers ?? {}).filter((n) => !PROVIDER_SCHEMAS[n]),
+                ].map((p) => ({ value: p, label: p }))}
               />
             </FormRow>
             <FormRow label="skills" hint={t("config_tab.rows.hint_llm_routing_skills")}>
@@ -1379,6 +1412,131 @@ function ProviderCard({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// 自訂 / 未列在 PROVIDER_SCHEMAS 的 provider — 用通用 KvTable 編輯任意 key/value,
+// 適合 OpenAI-compat 自訂端點(`api_base` / `api_key_env` / `model` ...)。
+function CustomProviderCard({
+  name,
+  cfg,
+  onPatch,
+  onDelete,
+}: {
+  name: string;
+  cfg: AnyObj | undefined;
+  onPatch: (patch: (provider: AnyObj) => void) => void;
+  onDelete: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(true);
+  const present = !!cfg && Object.keys(cfg).length > 0;
+  const rows: Array<{ k: string; v: string }> = cfg
+    ? Object.entries(cfg).map(([k, v]) => ({ k, v: v == null ? "" : String(v) }))
+    : [];
+  return (
+    <div className={`mori-provider-card ${collapsed ? "collapsed" : ""}`}>
+      <div
+        className="mori-provider-card-head"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <span className="mori-provider-name">{name}</span>
+        <span className="mori-provider-hint" style={{ opacity: 0.6 }}>自訂</span>
+        {present && <span className="mori-provider-set">已設</span>}
+        <span className="mori-provider-toggle">{collapsed ? "▸" : "▾"}</span>
+      </div>
+      {!collapsed && (
+        <div className="mori-provider-card-body">
+          <KvTable
+            rows={rows}
+            setRows={(newRows) => {
+              onPatch((p) => {
+                // 整個重寫:把舊 key 全清掉再放新的(否則刪除的 row 留在 JSON)。
+                for (const k of Object.keys(p)) delete p[k];
+                for (const { k, v } of newRows) {
+                  if (k) p[k] = v;
+                }
+              });
+            }}
+            keyPlaceholder="api_base / api_key_env / model ..."
+            valuePlaceholder=""
+          />
+          <button
+            className="mori-btn small ghost"
+            style={{ marginTop: 8 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`刪除 provider "${name}"?\n(只清除 config.json 中此 provider 的條目)`)) {
+                onDelete();
+              }
+            }}
+          >
+            刪除此 provider
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 「+ 新增 provider」按鈕 — 點開後輸入名稱, 按 Enter 加入(空 object), 接著可用
+// CustomProviderCard 編輯其欄位。
+function AddProviderButton({
+  existingNames,
+  onAdd,
+}: {
+  existingNames: string[];
+  onAdd: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const trimmed = name.trim();
+  const dup = trimmed && existingNames.includes(trimmed);
+  if (!editing) {
+    return (
+      <button
+        className="mori-btn small"
+        style={{ marginTop: 8 }}
+        onClick={() => {
+          setEditing(true);
+          setName("");
+        }}
+      >
+        + 新增 provider
+      </button>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+      <input
+        className="mori-input"
+        autoFocus
+        placeholder="provider 名稱 (e.g. azure-gpt41)"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && trimmed && !dup) {
+            onAdd(trimmed);
+            setEditing(false);
+          } else if (e.key === "Escape") {
+            setEditing(false);
+          }
+        }}
+      />
+      <button
+        className="mori-btn small"
+        disabled={!trimmed || !!dup}
+        onClick={() => {
+          onAdd(trimmed);
+          setEditing(false);
+        }}
+      >
+        加入
+      </button>
+      <button className="mori-btn small ghost" onClick={() => setEditing(false)}>
+        取消
+      </button>
+      {dup && <span style={{ color: "var(--danger, #c00)", fontSize: 12 }}>已存在</span>}
     </div>
   );
 }
