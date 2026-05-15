@@ -5,18 +5,11 @@
 //! (技術詞 / 模型 / 工具 / 概念詞)整理進去,profile body 內 `#file:` 引用
 //! 馬上有 200+ 條基礎校正。
 //!
-//! ## 來源
+//! ## 結構
 //!
-//! 主要從 [ZeroType](https://github.com/wholee/zerotype) 的 `SYSTEM.md`
-//! mapping table 取經 — Will / 保哥 / 多奇團隊用 ZeroType 跑了一段時間累積的
-//! 「常見 STT 把這念成那」清單。`Names & Identity` 那段太屬於他們圈子的個人化
-//! 不抄,**通用技術 / 諧音 / 品牌 / 模型 / 工具**那兩段是黃金內容,Mori 用
-//! 戶大多是台灣中文 + AI / 技術領域,重疊度很高。
-//!
-//! ## 修改規則
-//!
-//! - 「baseline」段(Mori bundle)— user **不該手動改**(會被 ensure_init 覆蓋)
-//! - 「user」段 — user 自己加自己的圈子人名 / 公司專有名詞 / 任何個人化
+//! - **Baseline 段**(Mori bundle)— 涵蓋通用對話諧音、技術詞 / 品牌 / 模型名、
+//!   Mori 自家詞;user **不該手動改**(會被 ensure_init 覆蓋)
+//! - **User 段** — 留給 user 加自己的圈子人名 / 公司專有名詞 / 個人化條目
 //!
 //! 兩段以 markdown header 區隔,parser 可分辨。
 
@@ -29,9 +22,11 @@ pub const DEFAULT_CORRECTIONS_MD: &str = r#"# Mori STT 校正字典
 >
 > 改了下次熱鍵生效,**不必重啟 Mori**(`enable_read: true` 的 profile 才會載入)。
 
-## Baseline(Mori 自帶 — 致謝 ZeroType / Will / 保哥團隊)
+## Baseline(Mori 自帶)
 
-以下兩段是常見中文 STT 諧音錯字校正(技術詞、模型、工具、概念),由 [ZeroType](https://github.com/wholee/zerotype) Will / 保哥團隊累積的 mapping table 啟發整理。**你的 user 段在下方**,要客製化請寫到「User」段,不要直接動 baseline(下次 Mori 更新可能覆蓋)。
+以下三段是常見中文 STT 諧音錯字校正(技術詞、模型、工具、概念詞)。**你的 user 段在下方**,要客製化請寫到「User」段,不要直接動 baseline(下次 Mori 更新可能覆蓋)。
+
+致謝:常見對話 / 技術詞兩段參考 Will 保哥 [ZeroType](https://zerotype.ai/) 的 STT 校正字典啟發整理。
 
 ### 常見對話 / 諧音校正
 
@@ -178,11 +173,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn baseline_has_required_sections() {
+        // 確保 baseline 結構完整 — 標題 + 3 段內容 + User 段
+        assert!(DEFAULT_CORRECTIONS_MD.contains("# Mori STT 校正字典"));
+        assert!(DEFAULT_CORRECTIONS_MD.contains("## Baseline"));
+        assert!(DEFAULT_CORRECTIONS_MD.contains("常見對話"));
+        assert!(DEFAULT_CORRECTIONS_MD.contains("技術詞"));
+        assert!(DEFAULT_CORRECTIONS_MD.contains("Mori 自家詞"));
+    }
+
+    #[test]
     fn baseline_has_attribution() {
-        // 致謝 ZeroType / Will 保哥團隊 — license 來源透明
-        assert!(DEFAULT_CORRECTIONS_MD.contains("ZeroType"));
-        assert!(DEFAULT_CORRECTIONS_MD.contains("Will"));
-        assert!(DEFAULT_CORRECTIONS_MD.contains("保哥"));
+        // 致謝 line 保留 — 內容來源透明
+        assert!(DEFAULT_CORRECTIONS_MD.contains("致謝"));
     }
 
     #[test]

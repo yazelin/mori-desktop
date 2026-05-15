@@ -2,7 +2,7 @@
 
 > v0.4.1 加入 EN starter 之前先做的 baseline 研究。給「想自己研究哪個 starter 套省 token」的 power user 看,提供數據 + 取捨建議。
 
-Mori 的 system prompt 是 LLM 每輪 chat 都重送的「常駐成本」 — 用越多 token,就越快踩到 TPM rate limit + agent 多輪 tool-call 越貴。我們的 v0.3 系列 starter 是純中文,2026-05 加 ZeroType 風格範本時順手量了一下 EN 翻譯版的 token 數,結論直接影響 v0.4.1 的設計(中英 starter 並行 + Quickstart 偵測 OS locale 預設選 EN)。
+Mori 的 system prompt 是 LLM 每輪 chat 都重送的「常駐成本」 — 用越多 token,就越快踩到 TPM rate limit + agent 多輪 tool-call 越貴。我們的 v0.3 系列 starter 是純中文,2026-05 加新範本時順手量了一下 EN 翻譯版的 token 數,結論直接影響 v0.4.1 的設計(中英 starter 並行 + Quickstart 偵測 OS locale 預設選 EN)。
 
 ## 1. 怎麼量
 
@@ -98,4 +98,4 @@ agent loop 跑 3-5 輪時,**ZH 比 EN 早 25% 踩到 8000 TPM limit**,Groq 回 4
 - 量的是 **system prompt body**,沒算 **runtime 注入 context**(時間 / clipboard preview / selection / memory index)。後者每輪都加,實測整個 prompt 規模 system + 動態大約 1:1 至 1:2 比例
 - 沒量 **tool schema** 跟 **agent loop 對話歷史**累積。多輪疊起來,system prompt 佔比反而下降
 - 中英 starter 用詞密度可能受我翻譯品質影響(faithful 翻譯但不是同份語料,結構等價)。誤差約 ±5%
-- ZeroType / 別人 prompt 的中英 ratio 可能不一樣 — 看 prompt 結構(table / bullet 多 → 中英差距更小)
+- 不同 prompt 結構中英 ratio 可能差異更大或更小(table / bullet / 標點密度都影響)

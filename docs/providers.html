@@ -215,6 +215,24 @@ mori CLI HTTP 到主程式 dispatch skill → 結果回 claude → claude 給最
 
 <p>類似的還有 <code>gemini-bash</code> / <code>codex-bash</code>,把 <code>"binary"</code> 換成 <code>"gemini"</code> / <code>"codex"</code> 即可。</p>
 
+<div class="note">
+  <strong>Windows 短名 binary 自動探 <code>.cmd</code> shim(v0.4.0+)</strong>:
+  <code>gemini</code> 跟 <code>codex</code> 在 Windows 是 npm 裝的 <code>.cmd</code> shim
+  (<code>%APPDATA%\npm\gemini.cmd</code>),Rust <code>Command::new</code> 只自動補
+  <code>.exe</code> 不補 <code>.cmd</code>。v0.4.0 加了 <code>cli_command()</code> helper:
+  binary 是短名時自動探 PATH 上的 <code>.exe</code> → <code>.cmd</code> → <code>.bat</code>,
+  找到 <code>.cmd</code> 包 <code>cmd /C</code> 規避 Rust 1.77.2+ 的 CVE-2024-24576 batch
+  file 限制。**Linux / Windows 現在用同一份短名寫法**,Win 用戶不必再記 <code>.cmd</code>
+  規矩。詳見 <a href="troubleshooting.html#windows-bash-cli">Troubleshooting → Windows
+  Bash CLI 不能 spawn</a>。
+</div>
+
+<p><strong>Codex 在 Windows 注意</strong>:<code>@openai/codex</code> npm package 0.7 系列是
+@native release(`use-native` 旗標),只有 Linux / macOS native binary,**Windows 不支援會
+直接拒絕跑**(`Unsupported platform: win32`)。v0.130+ 改純 JS impl 才跨平台。
+<code>npm install -g @openai/codex</code> 後若 <code>codex --version</code> 報錯,升級到
+0.130+ 試試。</p>
+
 <h2>進階:per-skill provider 路由</h2>
 <p>agent 跟個別 skill 可走不同 provider 省 Groq TPD:</p>
 

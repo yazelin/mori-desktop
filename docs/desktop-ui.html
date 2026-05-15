@@ -58,12 +58,14 @@
 <table class="spec-table">
   <thead><tr><th>id</th><th>icon</th><th>label</th><th>主內容</th></tr></thead>
   <tbody>
-    <tr><td><code>chat</code></td><td><code>IconChat</code></td><td>對話</td><td>scrollable thread + bottom input bar</td></tr>
-    <tr><td><code>profiles</code></td><td><code>IconProfiles</code></td><td>Profiles</td><td>voice / agent profile list + 切換 + 編輯 modal</td></tr>
+    <tr><td><code>chat</code></td><td><code>IconChat</code></td><td>對話</td><td>scrollable thread + bottom input bar(v0.4.0+ topbar 顯示 profile + provider + model)</td></tr>
+    <tr><td><code>profiles</code></td><td><code>IconProfiles</code></td><td>Profiles</td><td>voice / agent profile list + 切換 + 編輯 modal + token 估算 chip(v0.4.3+)+ 加入範本 / 開啟資料夾 按鈕(v0.4.1+)</td></tr>
     <tr><td><code>config</code></td><td><code>IconConfig</code></td><td>Config</td><td>config.json typed form + raw JSON + corrections.md + theme picker</td></tr>
     <tr><td><code>memory</code></td><td><code>IconMemory</code></td><td>Memory</td><td>~/.mori/memory/ list + 全文搜尋 + 編輯 modal</td></tr>
+    <tr><td><code>annuli</code></td><td><code>IconAnnuli</code></td><td>Annuli</td><td>annuli vault status / SOUL.md preview / MEMORY sections / events / sleep button(Wave 4 MVP)</td></tr>
     <tr><td><code>skills</code></td><td><code>IconSkills</code></td><td>Skills</td><td>當前 profile 啟用 skills 列表 + parameters</td></tr>
     <tr><td><code>deps</code></td><td><code>IconDeps</code></td><td>Deps</td><td>optional 工具 / 模型 偵測 + 安裝</td></tr>
+    <tr><td><code>logs</code></td><td><code>IconHelp</code></td><td>Logs</td><td>v0.4.0+ 事件 log:date / kind / provider filter + 每行可展開 JSON。除錯第一站</td></tr>
   </tbody>
 </table>
 <p>Sidebar 底部另有 <code>IconSun</code> / <code>IconMoon</code> theme toggle button(brand-3)。</p>
@@ -77,7 +79,7 @@
 <h2>Chat Panel(對話 tab)</h2>
 <p>結構由上到下:</p>
 <ol>
-  <li><strong>top bar</strong> — mode chip(<code>IconChat</code> / <code>IconKeyboard</code> / <code>IconSleep</code> · provider · model)+ 三個 icon button(<code>IconSleep</code>/<code>IconSun</code> 休眠 toggle · <code>IconRefresh</code> 重置 · <code>IconConfig</code> status)</li>
+  <li><strong>top bar</strong> — mode chip(<code>IconChat</code> / <code>IconKeyboard</code> / <code>IconSleep</code>)<strong>· active profile</strong>(v0.4.0+,例 <code>AGENT-01.翻譯助手</code> / <code>USER-00.純文字輸入</code>,依 mode 自動切)<strong>· provider · model</strong> + 三個 icon button(<code>IconSleep</code>/<code>IconSun</code> 休眠 toggle · <code>IconRefresh</code> 重置 · <code>IconConfig</code> status)。Profile chip 在 phase=done / profile-switched event 觸發時自動 refresh</li>
   <li><strong>thread</strong> — scrollable;user 訊息靠右 sand 泡泡(暖色)、Mori 靠左 forest-soft 泡泡(葉脈綠)、<code>IconTool</code> tool chip 顯示 LLM 用了哪個 skill</li>
   <li><strong>progress chip</strong> — 錄音中(秒數 + 音量條)/ 轉錄中 / 思考中</li>
   <li><strong>input bar</strong> — 永遠在底部:<code>IconMic</code> / <code>IconStop</code> mic button + textarea(auto-grow)+ 送出 button</li>

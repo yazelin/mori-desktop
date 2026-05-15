@@ -389,15 +389,34 @@ paste_shortcut: ctrl_v
   </div>
 </div>
 
+<h2 class="group-title">v0.4.1+ 新增 starter(自動 deploy)</h2>
+
+<p>v0.4.1 起 fresh install 自動 deploy 6 個 voice + 6 個 agent starter,不只上面 5 個:</p>
+
+<table class="spec-table">
+  <thead><tr><th>Voice (Alt+N)</th><th>Agent (Ctrl+Alt+N)</th></tr></thead>
+  <tbody>
+    <tr><td><code>USER-00.純文字輸入</code></td><td><code>AGENT.md</code>(default Mori)</td></tr>
+    <tr><td><code>USER-01.朋友閒聊</code></td><td><code>AGENT-01.翻譯助手</code></td></tr>
+    <tr><td><code>USER-02.正式信件</code></td><td><code>AGENT-02.工作流</code></td></tr>
+    <tr><td><strong><code>USER-03.LINE貼文</code> 🆕</strong></td><td><code>AGENT-03.ZeroType Agent</code>(forward Chrome ext)</td></tr>
+    <tr><td><strong><code>USER-04.哄老婆開心</code> 🆕</strong></td><td><code>AGENT-04.YouTube 摘要</code>(需 yt-dlp)</td></tr>
+    <tr><td><strong><code>USER-05.提示詞優化</code> 🆕</strong></td><td><strong><code>AGENT-05.聽我指令</code> 🆕</strong>(多 tool 通用助理)</td></tr>
+  </tbody>
+</table>
+
+<p>v0.4.1 起也 bundle <strong>EN 對照版</strong>(<code>USER-00.minimal</code> / <code>AGENT-01.translate</code> / 等共 12 個)。fresh install 預設 deploy 中文那 12 個,EN 版透過 <strong>Profiles → 加入範本</strong> 按鈕主動裝。詳見 <a href="tokenizer-comparison.md">tokenizer 對比</a>(EN starter 在 gpt-oss-120b 省 26% TPM)。</p>
+
 <h2 class="group-title">怎麼用</h2>
 
 <ol>
-  <li>從上面複製想要的範本 → 存成
-    <code>~/.mori/agent/AGENT-NN.顯示名稱.md</code> 或
-    <code>~/.mori/voice_input/USER-NN.顯示名稱.md</code></li>
-  <li>主視窗 <strong>Profiles tab</strong> 會自動列出(或主視窗 <strong>重新 reload</strong>)</li>
-  <li>按熱鍵切過去:<code>Ctrl+Alt+N</code>(agent)/ <code>Alt+N</code>(voice_input),
-    N 是檔名前綴數字</li>
+  <li><strong>Fresh install:</strong>第一次跑 Mori 上述 12 個都自動 deploy 到 <code>~/.mori/{voice_input,agent}/</code></li>
+  <li><strong>自己加新範本:</strong>從上面複製想要的範本 → 存成 <code>~/.mori/agent/AGENT-NN.顯示名稱.md</code>
+    或 <code>~/.mori/voice_input/USER-NN.顯示名稱.md</code></li>
+  <li><strong>還原 / 換語系:</strong>Profiles tab「加入範本」按鈕(v0.4.1+)→ modal 列出 binary 內建
+    22 份 starter(zh + en)+ filter,點「加入」一鍵 deploy。改壞還原 / 試另一語系都用這個</li>
+  <li>主視窗 <strong>Profiles tab</strong> 會自動列出新增的(每筆 row 旁邊還有 token 估算 chip,v0.4.3+)</li>
+  <li>按熱鍵切過去:<code>Ctrl+Alt+N</code>(agent)/ <code>Alt+N</code>(voice_input),N 是檔名前綴數字</li>
   <li>按 <code>Ctrl+Alt+Space</code> 開始錄音</li>
   <li>改 profile 內容後不需重啟,下一次熱鍵會即時讀新內容</li>
 </ol>

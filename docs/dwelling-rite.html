@@ -90,6 +90,44 @@
   <a href="https://yazelin.github.io/world-tree/rules/dwelling-rite">World Tree · 宿靈儀式</a>。
 </div>
 
+<div class="note">
+  <strong>兩個模式(v0.4.2+)</strong>:儀式頂端 toggle 可切「<strong>儀式</strong>」(預設,5 幕詩意 onboarding)
+  跟「<strong>Direct setup</strong>」(制式表格、一頁完成,給趕時間 / 喜歡技術用詞的 user)。
+  Direct mode 的功能完全等同儀式,只是 UI 更緊湊、文案改技術名詞(「使用者名稱」/「Groq API key」/「LLM provider」,
+  不是「召喚師之名」/「靈氣」/「靈力」)。
+</div>
+
+<h2 id="env-detect">自動偵測 OS env var(v0.4.2+)</h2>
+
+<p>儀式 / Direct 都會 detect 以下 OS 環境變數,若已設好就**banner 提示 key 欄位可留空**,
+驗證按鈕真打 API(用 env var 拿到的真值)確認:</p>
+
+<ul>
+  <li><code>GROQ_API_KEY</code> → 第二幕「靈氣」</li>
+  <li><code>GEMINI_API_KEY</code> → 第三幕「靈力」選 Gemini 時</li>
+  <li><code>OPENAI_API_KEY</code> → 第三幕「靈力」選 OpenAI-compat 時</li>
+</ul>
+
+<p>**沒設 env var 就照原本流程手填 key**。設了的話省一步,而且 key 從來不進 webview / config 檔
+(env-only 路徑 doSave 不覆寫 config 的空字串,避免 shadow OS env var)。</p>
+
+<h2 id="starter-locale">Starter 範本語系 picker(v0.4.2+ · 僅 Direct 模式暴露)</h2>
+
+<p>第一次安裝時可選**裝中文 starter 還是英文 starter**(各 6 個 voice + 6 個 agent 範本)。
+預設依 OS locale 自動偵測(<code>navigator.language</code> 開頭 <code>zh-*</code> → 中文,其他 → English)。</p>
+
+<p>中英 starter 在不同 LLM tokenizer 下 token 數差距:</p>
+
+<ul>
+  <li><strong>gpt-oss-120b</strong>(Mori 預設 groq provider):EN 省 26% TPM</li>
+  <li><strong>Gemini Flash</strong>:EN 省 8% TPM(差距較小,中文 tokenizer 友善)</li>
+</ul>
+
+<p>選錯了不要緊 — 進主視窗後 <strong>Profiles → 加入範本</strong> 隨時補裝另一語系版本。詳見
+<a href="tokenizer-comparison.md">Tokenizer 對比</a>。</p>
+
+<p>儀式模式不暴露這個 picker(不打斷 narrative 流),silent 走相同 OS detect 結果。</p>
+
 <h2>影片走過一遍</h2>
 
 <a href="https://youtube.com/shorts/43gdfCND8Xc" target="_blank" rel="noopener">

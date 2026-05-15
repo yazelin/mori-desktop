@@ -9,7 +9,7 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-🌲 **Latest** — [**v0.5.1**](https://github.com/yazelin/mori-desktop/releases/tag/v0.5.1):**STT corrections baseline**(200+ 條諧音 / 技術詞校正,致謝 [ZeroType](https://github.com/wholee/zerotype) 啟發)+ **Context anti-injection hard rule**(剪貼簿 / 視窗標題內含類指令文字 LLM 不再中招)· v0.5.0 → Installed apps catalog(open_app 不亂猜)· v0.4.3 → Profiles token 估算 chip · v0.4.2 → Quickstart 中/英 picker · v0.4.0 → Windows 開箱即用 + 觀測層 + 隱私 redact · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+🌲 **Latest** — [**v0.5.2**](https://github.com/yazelin/mori-desktop/releases/tag/v0.5.2):**Docs sync**(8 個 HTML 全更新到當前功能 — 過去 v0.4.0~v0.5.1 doc 沒同步的補完)· v0.5.1 → STT corrections baseline + Context anti-injection · v0.5.0 → Installed apps catalog · v0.4.3 → token 估算 chip + Config hint 大掃除 · v0.4.0 → Windows 開箱即用 + 觀測層 + 隱私 redact · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 
@@ -72,9 +72,12 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 3. **中斷** — `Ctrl+Alt+Esc` 隨時丟掉錄音 / abort LLM call
 4. **忘了 slot 編號** — `Ctrl+Alt+P` 開 picker
 
-預設安裝就送一份 USER-00 / USER-01 / AGENT-00 / AGENT-01 可用,自訂 slot 2~9 用同檔名格式
-`AGENT-NN.<display>.md` / `USER-NN.<display>.md` 丟到 `~/.mori/agent/` / `~/.mori/voice_input/`
-即可(範本見 [`examples/`](examples/) 或 [Profile 範本頁](https://yazelin.github.io/mori-desktop/profile-examples.html))。
+預設安裝就送 6 個 voice + 6 個 agent starter(`USER-00.純文字輸入` ~ `USER-05.提示詞優化` /
+`AGENT.md` + `AGENT-01.翻譯助手` ~ `AGENT-05.聽我指令`),slot 0~5 都有,熱鍵切換馬上可用。
+v0.4.1+ 也 bundle EN 對照版,**Profiles tab「加入範本」按鈕**可一鍵換語系 / 還原
+(改壞了也救得回來)。自訂 slot 6~9 用同檔名格式 `AGENT-NN.<display>.md` /
+`USER-NN.<display>.md` 丟到 `~/.mori/agent/` / `~/.mori/voice_input/` 即可
+(範本見 [`examples/`](examples/) 或 [Profile 範本頁](https://yazelin.github.io/mori-desktop/profile-examples.html))。
 
 完整熱鍵清單 + 自訂方式 → [docs/hotkeys](https://yazelin.github.io/mori-desktop/hotkeys.html)。
 
@@ -91,21 +94,31 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 **LLM Providers**
 - 雲端 — Groq / Gemini
 - 本機 — `whisper-local` STT + `ollama` LLM(100% 離線可跑)
-- Bash CLI proxy — `claude` / `gemini` / `codex`(Pro/Max quota 沿用)
+- Bash CLI proxy — `claude` / `gemini` / `codex`(用 user 自己的 Pro/Max quota,
+  v0.4.0+ Windows 短名 binary 自動探 `.cmd` shim)
 - OpenAI-compat 自訂端點 — Azure OpenAI / OpenRouter / 自家代理寫進 `providers.<name>`
   就能用,見 [docs/providers](https://yazelin.github.io/mori-desktop/providers.html)
 
 **個人化**
 - 長期記憶(`~/.mori/memory/*.md`,user 可編)+ 自動 inject 進 context
-- 剪貼簿 / 反白 / URL 自動進 context
-- 雙 theme(dark / light)+ VSCode-like 自訂(`~/.mori/themes/*.json`)
+- 剪貼簿 / 反白 / URL 自動進 context(v0.4.0+ 進 LLM 前自動 redact API key 樣式)
+- **STT 校正字典**(v0.5.1+)— `~/.mori/corrections.md` bundle 200+ 條常見諧音 / 技術詞校正,profile 可 `#file:` 引用
+- 雙 theme(dark / light)+ VSCode-like 自訂(`~/.mori/themes/*.json`)+ v0.4.1+ **OS prefers-color-scheme 自動偵測**
 - 替換 floating Mori 角色 — 4×4 sprite sheet animation + character pack 系統
   (規範見 [docs/character-pack](docs/character-pack.md),`.moripack.zip` import 規劃中)
 - 完整視覺品牌系統(公式書 = 單一可信來源)
 
-**可靠性**
+**可靠性 / 觀測 / 隱私**
 - 所有 LLM provider 都有 timeout 兜底
 - Agent loop 殘留 child 不會卡死 — `Ctrl+Alt+Esc` 一鍵 SIGKILL
+- **Phase A 觀測層**(v0.4.0+)— `~/.mori/logs/mori-YYYY-MM-DD.jsonl` 每次 LLM call /
+  spawn error / redaction 全自動入帳,**LogsTab** UI 可 filter 看,除錯不用盯 terminal
+- **隱私 redact**(v0.4.0+)— clipboard / selection 進 LLM API 之前掃 `gsk_*` / `sk-*` /
+  `AIzaSy*` / `Bearer *` 等 token 樣式遮蔽,**token 永遠不離開本機**
+- **Context anti-injection**(v0.5.1+)— context section 加 hard rule,LLM 不再把剪貼簿
+  / 視窗標題裡夾的「忽略上述」「執行 X」之類 payload 當 user 指令執行
+- **Installed apps catalog**(v0.5.0+)— 跨平台 scan 用戶實際裝的 app,top 50 注入
+  `open_app` skill description,LLM 不亂猜「user 講 SQL 是 SQL Server 還是 SQLite」
 
 未來規劃(非同步任務隊列 / AgentPulse 通知 / TTS / wake word / Annuli 長期人格演化)詳見
 [**roadmap**](docs/roadmap.md)。
@@ -121,10 +134,10 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 | **Ubuntu 26.04 + GNOME Wayland** | 主力開發 + 測試 |
 | **Linux X11**(任何發行版) | 全功能 |
 | **Linux Wayland**(GNOME / KDE / ...) | 需要 `xdg-desktop-portal` ≥ 1.19 — 24.04 LTS 自帶 1.18 不夠新,熱鍵會掛(改 portal 即可) |
-| **Windows 10 / 11** | **v0.2 全功能上線**(2026-05) — 主力 dev 機之一 |
+| **Windows 10 / 11** | **v0.4.0 first-class**(2026-05)— 短名 binary 自動探 `.cmd` shim,Linux/Win config 對稱寫法,主力 dev 機之一 |
 | **macOS** | 主視窗 UI 可跑,voice pipeline 三塊還沒接 — contributor 路徑,見 [roadmap](docs/roadmap.md) |
 
-### 功能 × 平台對照(v0.2)
+### 功能 × 平台對照(v0.5.x)
 
 | 能力 | Linux X11 | Linux Wayland | Windows | macOS |
 |---|---|---|---|---|
@@ -135,7 +148,7 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 | `SendInput` Ctrl+V paste-back | ✅ xdotool / ydotool | ✅ ydotool | ✅ Win32 `SendInput` | ❌ 沒寫 |
 | 滑鼠反白即讀(不必 Ctrl+C) | ✅ xclip PRIMARY | ✅ 同上 | ❌ **OS 沒這 primitive**(必先 Ctrl+C) | 部份 NSPasteboard |
 | 視窗 context(process / title) | ✅ xdotool + `/proc` | ✅ 同上 | ✅ Win32 `GetForegroundWindow` 等 | ❌ 沒寫 |
-| Mori 主視窗 + tabs(Chat / Config / Profile / Memory / Skills / Deps) | ✅ | ✅ | ✅ | ✅ |
+| Mori 主視窗 + tabs(Chat / Profiles / Config / Memory / Annuli / Skills / Deps / Logs) | ✅ | ✅ | ✅ | ✅ |
 | Floating Mori 精靈(透明 + 動畫) | ✅ XShape 1-bit clip | ✅ CSS border-radius | ✅ Tauri transparent window | ⚠️ 沒測 |
 | Tray icon + 右鍵 menu | ✅ AppIndicator | ✅ AppIndicator | ✅ | ⚠️ 沒測 |
 | Character pack(sprite 動畫) | ✅ | ✅ | ✅ 4×4 placeholder 寫到 `%USERPROFILE%\.mori\characters\` | ✅ |
@@ -150,7 +163,7 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 ### Windows 已知細微差別
 
 1. **「滑鼠反白即讀」** — Windows OS 沒有 X11 PRIMARY selection 概念。User 要用「反白 → 直接講話讓 Mori 處理」流程的話,必須**先 Ctrl+C** 把選取內容放進剪貼簿。Linux X11 可以直接拖反白讀到。
-2. **`open_app` 解析範圍** — Windows 走 `ShellExecuteExW` 自動查 App Paths 註冊表(chrome / code / firefox / msedge / notepad / winword 等預設 app)+ PATH。Start Menu 釘選的 `.lnk` shortcut 跟 Microsoft Store apps(AUMID)目前不一定能解 — roadmap 中。
+2. **`open_app` 解析範圍** — Windows 走 `ShellExecuteExW` 自動查 App Paths 註冊表 + PATH。v0.5.0+ 加 **installed apps catalog**:Mori scan 你的 Start Menu / Desktop `.lnk`,top 50 常用 app 注入 LLM tool description,LLM 用列表 match 而不是猜。Microsoft Store apps(AUMID-only)目前仍不一定能解 — roadmap 中。
 3. **本機 whisper-server 一鍵下載** — Linux 在 Deps 頁可一鍵裝;Windows 目前要從 [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) 手動下載 `whisper-bin-x64.zip` → 解壓 → 整套(.exe + .dll)放到 `%USERPROFILE%\.mori\bin\`。Deps 頁有 Manual 指令引導。
 
 ### 架構備註

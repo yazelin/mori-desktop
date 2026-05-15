@@ -192,14 +192,50 @@ systemctl --user enable --now ydotoold
   <li>第一次按 <code>Ctrl+Alt+P</code> 後 dev console 應該看到 picker 視窗的 <code>[picker] open</code> log</li>
 </ul>
 
+<h2 id="logs-tab">先看 Logs tab(v0.4.0+ 觀測層)</h2>
+
+<p>任何「Mori 回應怪 / spawn 失敗 / API call 沒結果」這類問題,**第一步先看 Logs tab**。
+v0.4.0 起 Mori 自動把每次 LLM call / spawn error / fallback / redaction 寫進
+<code>~/.mori/logs/mori-YYYY-MM-DD.jsonl</code>(JSONL append-only,跨平台一致):</p>
+
+<ul>
+  <li>UI 內開 Mori 主視窗 → <strong>Logs</strong> 分頁 → 看 date / kind / provider filter</li>
+  <li>terminal 內 <code>tail -f ~/.mori/logs/mori-2026-05-15.jsonl | jq .</code>(Win 走 PowerShell <code>Get-Content -Wait</code>)</li>
+  <li>每個 event 含 <code>kind</code>(llm_call / spawn_error / redaction / fallback)+ <code>provider</code> /
+    <code>model</code> / <code>latency_ms</code> / <code>ok</code> / <code>error</code>。
+    <code>ok=false</code> 那筆通常就是兇手</li>
+</ul>
+
+<h2 id="windows-bash-cli">Windows:bash CLI provider spawn 失敗</h2>
+
+<p>過去常見錯誤(v0.4.0 之前):</p>
+
+<pre><code>provider chat (round 0): spawn `C:\Users\yazel\AppData\Roaming\npm\gemini.cmd`: batch file arguments are invalid</code></pre>
+
+<p>原因:Rust 1.77.2+ 因 CVE-2024-24576 fix,直接 spawn <code>.cmd</code> / <code>.bat</code>
+帶 args 會被擋。**v0.4.0 起 Mori 已自動處理** — <code>cli_command()</code> helper 看 binary
+是 <code>.cmd</code> / <code>.bat</code> 時包一層 <code>cmd /C</code>,Rust 看到的 spawn target
+是 cmd.exe (regular PE) 就過了。</p>
+
+<p>**現在 Windows 推薦做法**(v0.4.0+):</p>
+<ul>
+  <li>config.json 用**短名** <code>"binary": "gemini"</code>(Mori 自動探 PATH 上的 <code>gemini.cmd</code>)</li>
+  <li>或寫絕對路徑 <code>"binary": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\gemini.cmd"</code></li>
+  <li>**過去文件提到「Windows 必須是 .cmd 或絕對路徑」已過時**,v0.4.0 起短名通用</li>
+</ul>
+
+<p>Codex 在 Windows 額外注意:<code>@openai/codex@0.7</code> 是 @native release,只有
+Linux / macOS native binary,**Windows 直接拒絕跑**(`Unsupported platform: win32`)。
+升級到 0.130+ 的純 JS 版才跨平台。</p>
+
 <h2 id="bug-report">回報 bug</h2>
 
 <p>到 <a href="https://github.com/yazelin/mori-desktop/issues">GitHub Issues</a>。
 請附:</p>
 <ul>
-  <li>OS / 桌面環境(Ubuntu 26.04 GNOME Wayland 等)</li>
-  <li>Mori 版本(<code>~/.mori/runtime.json</code> 或 git commit hash)</li>
-  <li><code>~/.mori/log</code> 最後幾行(若存在)</li>
+  <li>OS / 桌面環境(Ubuntu 26.04 GNOME Wayland / Windows 11 / macOS 等)</li>
+  <li>Mori 版本(系統狀態 modal 或 git commit hash)</li>
+  <li><code>~/.mori/logs/mori-YYYY-MM-DD.jsonl</code> 對應時間附近的幾筆 event(Logs tab 可看)</li>
   <li>重現步驟</li>
 </ul>
 

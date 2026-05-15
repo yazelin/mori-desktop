@@ -159,22 +159,25 @@ npm run tauri dev</code></pre>
 
 <div class="tree">~/.mori/
 ├── config.json              <span class="auto-tag">[auto] stub 自動寫入</span>
-├── active_theme             <span class="auto-tag">[auto] active theme stem(切 theme 時寫)</span>
+├── active_theme             <span class="auto-tag">[auto] active theme stem(切 theme 時寫;v0.4.1+ fresh install 跟 OS prefers-color-scheme 走)</span>
 ├── themes/
 │   ├── dark.json            <span class="auto-tag">[auto] Mori Dark 內建 theme</span>
 │   └── light.json           <span class="auto-tag">[auto] Mori Light 內建 theme</span>
-├── agent/
-│   ├── AGENT.md             <span class="auto-tag">[auto] 預設 agent profile(Ctrl+Alt+0)</span>
-│   └── AGENT-NN.&lt;name&gt;.md  <span class="auto-tag">[auto] 5R starter:AGENT-01~04(可改 / 可刪)</span>
-├── voice_input/
-│   └── USER-NN.&lt;name&gt;.md   <span class="auto-tag">[auto] 5R starter:USER-00/01/02(可改 / 可刪)</span>
+├── agent/                   <span class="auto-tag">[auto] v0.4.1 起 deploy 6 個 starter</span>
+│   ├── AGENT.md             <span class="auto-tag">  default Mori(Ctrl+Alt+0)</span>
+│   └── AGENT-01..05.&lt;name&gt;.md  <span class="auto-tag">  翻譯助手 / 工作流 / ZeroType Agent / YouTube 摘要 / 聽我指令</span>
+├── voice_input/             <span class="auto-tag">[auto] v0.4.1 起 deploy 6 個 starter</span>
+│   └── USER-00..05.&lt;name&gt;.md   <span class="auto-tag">  純文字輸入 / 朋友閒聊 / 正式信件 / LINE貼文 / 哄老婆 / 提示詞優化</span>
 ├── characters/              <span class="auto-tag">[auto] 5P character pack:預設 mori/ + active 檔</span>
 │   ├── mori/
 │   │   ├── manifest.json
 │   │   └── sprites/         <span class="auto-tag">  6 個 state PNG(4×4 sheet)</span>
 │   └── active               <span class="auto-tag">  一行,當前 active character 名</span>
+├── corrections.md           <span class="auto-tag">[auto] v0.5.1+ deploy baseline(200+ 條 STT 校正 + User 段)</span>
 ├── memory/                  <span class="user-tag">[lazy] 第一次 RememberSkill 寫入時建</span>
-├── corrections.md           <span class="user-tag">[opt] 共用糾錯規則(profile #file: 引用)</span>
+├── logs/                    <span class="auto-tag">[auto] v0.4.0+ JSONL event log(每日 rotate mori-YYYY-MM-DD.jsonl)</span>
+├── installed-apps.<i>&lt;platform&gt;</i>.json  <span class="auto-tag">[lazy] v0.5.0+ open_app catalog(active profile 啟用 open_app 時 scan)</span>
+├── runtime.json             <span class="auto-tag">[auto] skill HTTP server port + 其他 runtime state</span>
 └── models/                  <span class="user-tag">[opt] whisper-local 模型放這(Deps tab 一鍵下載)</span></div>
 
 <p>
