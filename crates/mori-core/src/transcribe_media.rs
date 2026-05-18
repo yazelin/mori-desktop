@@ -147,38 +147,54 @@ pub async fn transcribe_media_file(
     if !input.exists() {
         bail!("file not found: {}", input.display());
     }
-    let chunk_secs = opts.chunk_seconds.unwrap_or(CHUNK_SECONDS);
     let duration = probe_duration_secs(input).await;
     let wav = extract_wav_bytes(input).await?;
     tracing::info!(
         path = %input.display(),
         duration_secs = duration,
         wav_bytes = wav.len(),
-        chunk_secs,
+        chunk_secs = opts.chunk_seconds.unwrap_or(CHUNK_SECONDS),
         "transcribe_media: extracted WAV"
     );
+    transcribe_wav_bytes(wav, duration, input, provider, opts, progress).await
+}
+
+/// 拿到 WAV bytes 後的轉錄核心 — 抽出讓 mock provider 可單元測。
+///
+/// 跟 `transcribe_media_file` 差別:跳過 ffmpeg 抽取階段,直接接受 WAV bytes
+/// 跟「已知 duration」。生產路徑由 `transcribe_media_file` 餵 ffmpeg 結果進來;
+/// 測試路徑可餵手工合成的 WAV(免 ffmpeg subprocess)。
+pub async fn transcribe_wav_bytes(
+    wav: Vec<u8>,
+    duration_secs: f32,
+    source_path: &Path,
+    provider: Arc<dyn TranscriptionProvider>,
+    opts: TranscribeOpts,
+    progress: Option<ProgressFn>,
+) -> Result<TranscribeResult> {
+    let chunk_secs = opts.chunk_seconds.unwrap_or(CHUNK_SECONDS);
 
     // 不分塊 → 整檔 POST
-    let should_chunk = chunk_secs > 0 && duration > chunk_secs as f32 + 5.0; // +5s 容差,避免邊界檔多跑一塊
+    let should_chunk = chunk_secs > 0 && duration_secs > chunk_secs as f32 + 5.0; // +5s 容差,避免邊界檔多跑一塊
     if !should_chunk {
         if let Some(cb) = &progress {
-            cb(1, 1, input);
+            cb(1, 1, source_path);
         }
         let text = provider
             .transcribe(wav)
             .await
-            .with_context(|| format!("transcribe {}", input.display()))?;
+            .with_context(|| format!("transcribe {}", source_path.display()))?;
         return Ok(TranscribeResult {
-            source_path: input.to_path_buf(),
+            source_path: source_path.to_path_buf(),
             text,
-            duration_secs: duration,
+            duration_secs,
             chunks: 1,
         });
     }
 
     // 分塊:把 WAV 解成 raw samples,切等長 chunk,each chunk 重新包成 WAV header
     let chunks = split_wav_into_chunks(&wav, chunk_secs)
-        .with_context(|| format!("split WAV {}", input.display()))?;
+        .with_context(|| format!("split WAV {}", source_path.display()))?;
     let total = chunks.len() as u32;
     tracing::info!(
         total_chunks = total,
@@ -190,12 +206,14 @@ pub async fn transcribe_media_file(
     for (i, chunk_wav) in chunks.into_iter().enumerate() {
         let idx = i as u32 + 1;
         if let Some(cb) = &progress {
-            cb(idx, total, input);
+            cb(idx, total, source_path);
         }
-        let part = provider
-            .transcribe(chunk_wav)
-            .await
-            .with_context(|| format!("transcribe chunk {idx}/{total} of {}", input.display()))?;
+        let part = provider.transcribe(chunk_wav).await.with_context(|| {
+            format!(
+                "transcribe chunk {idx}/{total} of {}",
+                source_path.display()
+            )
+        })?;
         let part = part.trim();
         if !part.is_empty() {
             if !combined.is_empty() {
@@ -206,9 +224,9 @@ pub async fn transcribe_media_file(
     }
 
     Ok(TranscribeResult {
-        source_path: input.to_path_buf(),
+        source_path: source_path.to_path_buf(),
         text: combined,
-        duration_secs: duration,
+        duration_secs,
         chunks: total,
     })
 }
@@ -406,5 +424,180 @@ mod tests {
             assert_eq!(&c[..4], b"RIFF");
             assert_eq!(&c[8..12], b"WAVE");
         }
+    }
+
+    // ─── transcribe_wav_bytes with mock provider ──────────────────────
+    //
+    // Mock `TranscriptionProvider`:每次 `transcribe()` 拿 canned 字串(or 依
+    // call index 拿不同字串),記錄 call 次數,讓 test 驗證 chunks → text 流程。
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::Mutex as TokioMutex;
+
+    struct MockProvider {
+        /// 每次 call 拿 chunk index 對應字串。空 → 拿 default。
+        canned: Vec<String>,
+        call_count: AtomicUsize,
+        /// 也記下每次收到的 bytes 大小(用來驗 chunked input)
+        received_sizes: TokioMutex<Vec<usize>>,
+    }
+
+    impl MockProvider {
+        fn new(canned: Vec<&str>) -> Self {
+            Self {
+                canned: canned.into_iter().map(String::from).collect(),
+                call_count: AtomicUsize::new(0),
+                received_sizes: TokioMutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TranscriptionProvider for MockProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        async fn transcribe(&self, audio: Vec<u8>) -> anyhow::Result<String> {
+            let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
+            self.received_sizes.lock().await.push(audio.len());
+            let text = self
+                .canned
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| format!("mock-chunk-{}", idx + 1));
+            Ok(text)
+        }
+    }
+
+    #[tokio::test]
+    async fn transcribe_wav_bytes_single_chunk() {
+        // 1 秒 WAV、chunk_secs=300 → 不切,單次 call,回 canned 字串。
+        let wav = wrap_pcm_as_wav(&vec![0u8; 32_000]);
+        let provider = Arc::new(MockProvider::new(vec!["hello world"]));
+        let r = transcribe_wav_bytes(
+            wav,
+            1.0,
+            Path::new("/test/foo.mp3"),
+            provider.clone(),
+            TranscribeOpts {
+                language: None,
+                chunk_seconds: Some(300),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.text, "hello world");
+        assert_eq!(r.chunks, 1);
+        assert_eq!(r.duration_secs, 1.0);
+        assert_eq!(r.source_path, Path::new("/test/foo.mp3"));
+        assert_eq!(provider.call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn transcribe_wav_bytes_multi_chunk_concatenates() {
+        // 10 秒 WAV、chunk_secs=3 → 切 4 塊,call 4 次,文字以空白接起。
+        let wav = wrap_pcm_as_wav(&vec![0u8; 32_000 * 10]);
+        let provider = Arc::new(MockProvider::new(vec![
+            "chunk one",
+            "chunk two",
+            "chunk three",
+            "chunk four",
+        ]));
+        let r = transcribe_wav_bytes(
+            wav,
+            10.0,
+            Path::new("/test/long.mp3"),
+            provider.clone(),
+            TranscribeOpts {
+                language: None,
+                chunk_seconds: Some(3),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.text, "chunk one chunk two chunk three chunk four");
+        assert_eq!(r.chunks, 4);
+        assert_eq!(provider.call_count.load(Ordering::SeqCst), 4);
+        // 每塊應該收到合理大小的 WAV(都是 chunk-3sec 上下;最後一塊較小)
+        let sizes = provider.received_sizes.lock().await.clone();
+        assert_eq!(sizes.len(), 4);
+        for size in &sizes[..3] {
+            assert!(*size > 44, "chunk WAV should have header + data, got {size}");
+        }
+    }
+
+    #[tokio::test]
+    async fn transcribe_wav_bytes_chunk_secs_zero_disables_split() {
+        // chunk_seconds=Some(0) → 不分塊不論多長
+        let wav = wrap_pcm_as_wav(&vec![0u8; 32_000 * 60]); // 60 秒
+        let provider = Arc::new(MockProvider::new(vec!["whole file"]));
+        let r = transcribe_wav_bytes(
+            wav,
+            60.0,
+            Path::new("/test/long.mp3"),
+            provider.clone(),
+            TranscribeOpts {
+                language: None,
+                chunk_seconds: Some(0),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.text, "whole file");
+        assert_eq!(r.chunks, 1);
+        assert_eq!(provider.call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn transcribe_wav_bytes_progress_callback_fires_per_chunk() {
+        let wav = wrap_pcm_as_wav(&vec![0u8; 32_000 * 10]);
+        let provider = Arc::new(MockProvider::new(vec!["a", "b", "c", "d"]));
+        let calls: Arc<std::sync::Mutex<Vec<(u32, u32)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let calls_ref = calls.clone();
+        let cb: ProgressFn = Arc::new(move |cur, total, _p| {
+            calls_ref.lock().unwrap().push((cur, total));
+        });
+        let _ = transcribe_wav_bytes(
+            wav,
+            10.0,
+            Path::new("/test/long.mp3"),
+            provider,
+            TranscribeOpts {
+                language: None,
+                chunk_seconds: Some(3),
+            },
+            Some(cb),
+        )
+        .await
+        .unwrap();
+        let observed = calls.lock().unwrap().clone();
+        assert_eq!(observed, vec![(1, 4), (2, 4), (3, 4), (4, 4)]);
+    }
+
+    #[tokio::test]
+    async fn transcribe_wav_bytes_empty_parts_are_skipped() {
+        // 模擬 whisper 偶爾在一塊回空字串 — 不該影響其他塊的串接
+        let wav = wrap_pcm_as_wav(&vec![0u8; 32_000 * 10]);
+        let provider = Arc::new(MockProvider::new(vec!["one", "", "three", ""]));
+        let r = transcribe_wav_bytes(
+            wav,
+            10.0,
+            Path::new("/test/long.mp3"),
+            provider,
+            TranscribeOpts {
+                language: None,
+                chunk_seconds: Some(3),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        // 空字串被 skip,不該變成 "one  three" 多空格
+        assert_eq!(r.text, "one three");
+        assert_eq!(r.chunks, 4);
     }
 }

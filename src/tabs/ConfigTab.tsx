@@ -967,6 +967,38 @@ function ConfigTab({
                 }
               />
             </FormRow>
+            <FormRow label="trim_silence_threshold" hint={t("config_tab.rows.hint_voice_trim_silence_threshold")}>
+              <input
+                type="number"
+                min={0.001}
+                max={0.2}
+                step={0.005}
+                value={Number(cfg.voice_input?.trim_silence_threshold ?? 0.02)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const vi = ensureSubObj(c, "voice_input");
+                    const n = Number(e.target.value);
+                    vi.trim_silence_threshold = Number.isFinite(n) ? Math.max(0.001, Math.min(0.2, n)) : 0.02;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="min_audio_rms" hint={t("config_tab.rows.hint_voice_min_audio_rms")}>
+              <input
+                type="number"
+                min={0.001}
+                max={0.2}
+                step={0.001}
+                value={Number(cfg.voice_input?.min_audio_rms ?? 0.012)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const vi = ensureSubObj(c, "voice_input");
+                    const n = Number(e.target.value);
+                    vi.min_audio_rms = Number.isFinite(n) ? Math.max(0.001, Math.min(0.2, n)) : 0.012;
+                  })
+                }
+              />
+            </FormRow>
 
             <FormRow
               label="inject_memory_types"
