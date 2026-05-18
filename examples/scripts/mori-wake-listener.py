@@ -65,7 +65,8 @@ def main():
         sys.exit(3)
 
     try:
-        model = Model(wakeword_models=[model_path])
+        # openWakeWord 0.4+ API:kwarg 是 wakeword_model_paths(複數 + _paths 後綴)
+        model = Model(wakeword_model_paths=[model_path])
     except Exception as e:
         emit({"event": "error", "msg": f"model load failed: {e}"})
         sys.exit(4)
