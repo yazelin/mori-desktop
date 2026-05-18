@@ -1,9 +1,9 @@
-# Cross-platform compile gate — 防止「在 Ubuntu 改 code 把 Windows path 弄壞」
+# Cross-platform verification gate — 防止「在 Ubuntu 改 code 把 Windows path 弄壞」
 # 或反過來的 regression。每次 push 到 main / PR 開或更新時跑。
 #
-# 不跑 `cargo test`(部分 test shell-out 平台特定工具),不跑 clippy / fmt
-# (codebase 尚未全 clean,之後加)。目標單純:「workspace 在兩個平台都能
-# 編過」。
+# CI 跟本機 / Codex Cloud / Claude Code 共用 `scripts/verify.sh`,避免不同
+# agent 各自猜驗證命令。fmt / clippy 目前仍是 opt-in strict mode,因為既有
+# codebase 尚未全 clean。
 #
 # 預期耗時:第一次 ~10-15 min(無 cache);之後 ~3-5 min(rust-cache 命中)。
 
@@ -66,11 +66,11 @@ jobs:
       - name: npm ci
         run: npm ci
 
-      - name: Build frontend (dist/)
-        run: npm run build
-
-      # ── Cargo check ─────────────────────────────────────────────────────
-      # --all-targets:同時 check lib / bin / tests / examples。
-      # --workspace:三個 crates 全部(mori-core / mori-tauri / mori-cli)。
-      - name: Cargo check workspace
-        run: cargo check --workspace --all-targets
+      # ── Shared verification ─────────────────────────────────────────────
+      # 同時服務 CI / 本機 / cloud agents:
+      # - npm run build (tsc + vite + mori-cli prebuild)
+      # - cargo test -p mori-core --lib (stable unit-test subset)
+      # - cargo check --workspace --all-targets (三個 crates 全部)
+      - name: Verify
+        shell: bash
+        run: bash scripts/verify.sh
