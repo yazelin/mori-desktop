@@ -36,6 +36,7 @@
 //! 只做「偵測 wake → callback」。Callback 端決定怎麼接(目前接到 start_recording
 //! + 10s 後 stop_and_transcribe)。多輪 ask / confirm-before-act 在 Phase 3B+。
 
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -45,6 +46,38 @@ use std::thread::JoinHandle;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde::Deserialize;
+
+/// Bundled hey-mori.onnx(TTS-only generic 訓練版,205 KB,對英文發音「Hey Mori」
+/// 通用適用)。`ensure_default_model` 在 user dir 沒檔時寫一份過去當預設,
+/// **不覆寫 user 自訓過的 model**(自訓對個人聲線命中率更高)。
+const BUNDLED_HEY_MORI_ONNX: &[u8] = include_bytes!("../assets/wakeword/hey-mori.onnx");
+
+/// 確保 `<mori_dir>/wakeword/hey-mori.onnx` 存在。沒檔 → 解壓 bundled。
+/// 已存在 → 完全不動(user 可能訓過自己的)。
+pub fn ensure_default_model(mori_dir: &Path) {
+    let path = mori_dir.join("wakeword").join("hey-mori.onnx");
+    if path.exists() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            tracing::warn!(error = %e, dir = %parent.display(), "ensure_default_model: mkdir failed");
+            return;
+        }
+    }
+    match fs::write(&path, BUNDLED_HEY_MORI_ONNX) {
+        Ok(()) => tracing::info!(
+            path = %path.display(),
+            size = BUNDLED_HEY_MORI_ONNX.len(),
+            "installed bundled hey-mori.onnx (TTS-only generic)",
+        ),
+        Err(e) => tracing::warn!(
+            error = %e,
+            path = %path.display(),
+            "ensure_default_model: write failed",
+        ),
+    }
+}
 
 /// 啟動 listener 的設定。從 `~/.mori/config.json` 的 `listening_mode` 區塊讀。
 #[derive(Debug, Clone)]
