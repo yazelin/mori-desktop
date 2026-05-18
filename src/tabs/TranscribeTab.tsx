@@ -156,7 +156,7 @@ function DepsPanel({
       <div className="mori-transcribe-deps-header">
         <h3>{t("transcribe_tab.deps_section")}</h3>
         <button className="mori-btn small ghost" onClick={onRefresh} disabled={refreshing}>
-          <IconRefresh width={12} height={12} /> 重檢
+          <IconRefresh width={12} height={12} /> {t("transcribe_tab.deps_recheck")}
         </button>
       </div>
       <Row
