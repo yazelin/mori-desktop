@@ -807,6 +807,25 @@ fn read_voice_trim_silence_threshold() -> f32 {
         .unwrap_or(0.02)
 }
 
+/// 啟動時的預設 mode。讀 `~/.mori/config.json` 的 `startup_mode`(`"voice_input"`
+/// / `"agent"`)。預設 voice_input — dictation 是高頻路徑,啟動即可用對齊
+/// iOS / macOS 系統內建語音輸入直覺。
+fn read_startup_mode() -> Mode {
+    let path = mori_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Mode::VoiceInput;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Mode::VoiceInput;
+    };
+    match json.pointer("/startup_mode").and_then(|v| v.as_str()) {
+        Some("agent") => Mode::Agent,
+        Some("voice_input") => Mode::VoiceInput,
+        Some("background") => Mode::Background,
+        _ => Mode::VoiceInput,
+    }
+}
+
 /// 整段 RMS 低於這個值 → 跳過 STT(視為純靜音/雜訊,Whisper 會幻覺)。
 /// 0.012 經驗值。clamp 0.001~0.2。
 fn read_voice_min_audio_rms() -> f64 {
@@ -3669,7 +3688,7 @@ fn main() {
         annuli: parking_lot::RwLock::new(annuli_client),
         annuli_supervisor: Mutex::new(None),
         conversation: Mutex::new(Vec::new()),
-        mode: Mutex::new(Mode::Agent),
+        mode: Mutex::new(read_startup_mode()),
         ollama_warmup: Mutex::new(None),
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
         pipeline_task: Mutex::new(None),

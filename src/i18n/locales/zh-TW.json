@@ -428,6 +428,7 @@
       "hint_llm_whisper_server": "v2:Mori 自己不編 whisper.cpp，改 spawn 官方 whisper-server 子程序。模型 + 引擎兩件事都可以從 Deps 頁一鍵裝完，不用手動改 config。",
       "hint_llm_routing_agent": "agent loop 用哪個 provider(預設 = provider)",
       "hint_llm_routing_skills": "skill_name → provider(空 = 用 agent / provider)",
+      "hint_startup_mode": "啟動時預設模式。voice_input = 純 dictation 不過 agent;agent = 跟 Mori 對話;background = 麥克風關。改完重啟生效",
       "hint_voice_cleanup": "smart=LLM+程式 / minimal=只程式 / none=raw 直貼",
       "hint_voice_trim_silence": "錄音送 STT 前先修剪首尾靜音（建議開啟）",
       "hint_voice_trim_silence_min_ms": "靜音連續至少幾毫秒才修剪（也會套用到中間停頓）",
