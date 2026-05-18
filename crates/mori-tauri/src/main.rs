@@ -2,19 +2,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod action_skills;
-mod context_provider;
-mod deps;
 mod annuli_commands;
 mod annuli_config;
 mod annuli_supervisor;
+mod character_pack;
+mod context_provider;
+mod deps;
 mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
+mod recording;
 mod x11_hotkey;
 #[cfg(target_os = "linux")]
 mod x11_shape;
-mod recording;
-mod character_pack;
 // 5U: selection / paste-back 拆 platform-specific 檔案,公開 API 一致
 // (read_primary_selection / PlatformPasteController / send_enter /
 // warn_if_setup_missing),main.rs 跨平台 call 同一份名稱。
@@ -304,11 +304,7 @@ fn read_floating_shape(config_path: &std::path::Path) -> (String, u32) {
 /// `shape` = "square" | "rounded" | "circle"
 /// `radius` = logical px(只 rounded 用),Rust 端轉 physical(× scaleFactor)
 #[tauri::command]
-fn apply_floating_shape(
-    app: AppHandle,
-    shape: String,
-    radius: u32,
-) -> Result<(), String> {
+fn apply_floating_shape(app: AppHandle, shape: String, radius: u32) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         if !x11_hotkey::is_x11_session() {
@@ -352,7 +348,9 @@ fn read_floating_backplate(theme: String) -> Result<Option<String>, String> {
         };
         let allowed_theme = matches!(theme.as_str(), "dark" | "light");
         if !allowed_theme {
-            return Err(format!("invalid theme '{theme}', expected 'dark' or 'light'"));
+            return Err(format!(
+                "invalid theme '{theme}', expected 'dark' or 'light'"
+            ));
         }
         let path = std::path::PathBuf::from(home)
             .join(".mori/floating")
@@ -532,7 +530,11 @@ async fn verify_llm_key(
             }
             trimmed
         }
-        other => return Err(format!("不支援的 provider:{other}(只有 groq / openai_compat)")),
+        other => {
+            return Err(format!(
+                "不支援的 provider:{other}(只有 groq / openai_compat)"
+            ))
+        }
     };
 
     let url = format!("{base}/models");
@@ -611,11 +613,7 @@ fn get_conversation(state: tauri::State<Arc<AppState>>) -> Vec<ChatTurn> {
         .map(|m| ChatTurn {
             role: m.role.clone(),
             content: m.content.clone().unwrap_or_default(),
-            tools_called: m
-                .tool_calls
-                .iter()
-                .map(|tc| tc.name.clone())
-                .collect(),
+            tools_called: m.tool_calls.iter().map(|tc| tc.name.clone()).collect(),
         })
         .collect()
 }
@@ -638,15 +636,18 @@ fn set_mode_cmd(app: AppHandle, state: tauri::State<Arc<AppState>>, mode: Mode) 
 fn cancel_recording(app: AppHandle, state: tauri::State<Arc<AppState>>) {
     let phase = state.phase.lock().clone();
     if !matches!(phase, Phase::Recording { .. }) {
-        tracing::info!(?phase, "cancel_recording called outside Recording — ignored");
+        tracing::info!(
+            ?phase,
+            "cancel_recording called outside Recording — ignored"
+        );
         return;
     }
     // Stop and discard:取出 recorder、停 stream、把 bytes 丟掉。
     if let Some(rec) = state.recorder.lock().take() {
         match rec.stop() {
             Ok(audio) => {
-                let secs = audio.samples.len() as f32
-                    / (audio.sample_rate as f32 * audio.channels as f32);
+                let secs =
+                    audio.samples.len() as f32 / (audio.sample_rate as f32 * audio.channels as f32);
                 tracing::info!(
                     duration_secs = secs,
                     samples = audio.samples.len(),
@@ -675,7 +676,10 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
     // 但仍然不允許 Recording / Transcribing / Responding 中切進來。
     {
         let phase = state.phase.lock();
-        if !matches!(*phase, Phase::Idle | Phase::Done { .. } | Phase::Error { .. }) {
+        if !matches!(
+            *phase,
+            Phase::Idle | Phase::Done { .. } | Phase::Error { .. }
+        ) {
             tracing::info!("submit_text while busy — ignored");
             return;
         }
@@ -685,18 +689,19 @@ fn submit_text(app: AppHandle, state: tauri::State<Arc<AppState>>, text: String)
     // Agent 走 `routing.agent`(可走 tool calling 的:groq / ollama);個別 skill
     // 可在 `routing.skills.<name>` 指到 chat-only provider(claude-cli)用 user
     // 自己的 quota。沒設 routing 時整套退化成全部用 provider。
-    let routing = match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone()))) {
-        Ok(r) => r,
-        Err(e) => {
-            state.set_phase(
-                &app,
-                Phase::Error {
-                    message: format!("{e:#}"),
-                },
-            );
-            return;
-        }
-    };
+    let routing =
+        match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone()))) {
+            Ok(r) => r,
+            Err(e) => {
+                state.set_phase(
+                    &app,
+                    Phase::Error {
+                        message: format!("{e:#}"),
+                    },
+                );
+                return;
+            }
+        };
     let routing = Arc::new(routing);
 
     let state_clone = state.inner().clone();
@@ -753,6 +758,33 @@ fn config_read() -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
 }
 
+fn read_voice_trim_silence_enabled() -> bool {
+    let path = mori_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return true;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return true;
+    };
+    json.pointer("/voice_input/trim_silence_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+fn read_voice_trim_silence_min_ms() -> u32 {
+    let path = mori_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return 300;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return 300;
+    };
+    json.pointer("/voice_input/trim_silence_min_ms")
+        .and_then(|v| v.as_u64())
+        .map(|v| v.clamp(1, 5_000) as u32)
+        .unwrap_or(300)
+}
+
 #[tauri::command]
 fn config_write(
     app: AppHandle,
@@ -760,8 +792,7 @@ fn config_write(
     text: String,
 ) -> Result<(), String> {
     // Validate JSON parses before write,不然容易把 config.json 寫壞
-    serde_json::from_str::<serde_json::Value>(&text)
-        .map_err(|e| format!("invalid JSON: {e}"))?;
+    serde_json::from_str::<serde_json::Value>(&text).map_err(|e| format!("invalid JSON: {e}"))?;
     let path = mori_dir().join("config.json");
     std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
     // 5P-4: 廣播 config 變動,讓 FloatingMori 等 window 重讀(目前主要給 floating
@@ -892,8 +923,7 @@ fn open_external_url(url: String) -> Result<(), String> {
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
         return Err(format!("only http(s) URLs allowed: {trimmed}"));
     }
-    crate::action_skills::open_url_for_quickstart(trimmed)
-        .map_err(|e| format!("open url: {e}"))
+    crate::action_skills::open_url_for_quickstart(trimmed).map_err(|e| format!("open url: {e}"))
 }
 
 #[tauri::command]
@@ -1004,9 +1034,7 @@ fn open_profile_dir(kind: String) -> Result<(), String> {
 /// v0.4.1:列出內建 starter 範本(zh + en 兩語都包進 binary)— Profiles tab
 /// 「加入範本」UI 用。回 (filename, lang, display)。
 #[tauri::command]
-fn list_starter_templates(
-    kind: String,
-) -> Result<Vec<serde_json::Value>, String> {
+fn list_starter_templates(kind: String) -> Result<Vec<serde_json::Value>, String> {
     let templates: Vec<mori_core::voice_input_profile::StarterTemplate> = match kind.as_str() {
         "voice" => mori_core::voice_input_profile::list_voice_starters(),
         "agent" => mori_core::agent_profile::list_agent_starters()
@@ -1064,8 +1092,8 @@ fn estimate_profile_tokens(
         other => return Err(format!("unknown profile kind: {other}")),
     };
     let path = dir.join(format!("{stem}.md"));
-    let body = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let body =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let stripped = mori_core::tokenize::strip_frontmatter(&body);
     Ok(mori_core::tokenize::estimate_tokens(stripped))
 }
@@ -1118,7 +1146,10 @@ fn memory_type_str(t: &mori_core::memory::MemoryType) -> String {
 #[tauri::command]
 async fn memory_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<MemoryEntry>, String> {
     let memory = state.memory_handle();
-    let entries = memory.read_index().await.map_err(|e| format!("read_index: {e}"))?;
+    let entries = memory
+        .read_index()
+        .await
+        .map_err(|e| format!("read_index: {e}"))?;
     Ok(entries
         .into_iter()
         .map(|e| MemoryEntry {
@@ -1199,12 +1230,20 @@ async fn memory_write(
         last_used: now,
         body: args.body,
     };
-    state.memory_handle().write(memory_entry).await.map_err(|e| format!("write: {e}"))
+    state
+        .memory_handle()
+        .write(memory_entry)
+        .await
+        .map_err(|e| format!("write: {e}"))
 }
 
 #[tauri::command]
 async fn memory_delete(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.memory_handle().delete(&id).await.map_err(|e| format!("delete: {e}"))
+    state
+        .memory_handle()
+        .delete(&id)
+        .await
+        .map_err(|e| format!("delete: {e}"))
 }
 
 /// 5L-5: 全文搜尋 memory(name / description / body 都搜)。
@@ -1336,9 +1375,7 @@ fn character_get_active() -> Result<(String, crate::character_pack::CharacterMan
 }
 
 #[tauri::command]
-fn character_set_active(
-    stem: String,
-) -> Result<crate::character_pack::CharacterManifest, String> {
+fn character_set_active(stem: String) -> Result<crate::character_pack::CharacterManifest, String> {
     crate::character_pack::set_active(&stem).map_err(|e| format!("set active: {e:#}"))?;
     let m = crate::character_pack::load_manifest(&stem)
         .map_err(|e| format!("load manifest {stem}: {e:#}"))?;
@@ -1378,12 +1415,17 @@ fn character_sprite_data_url(stem: String, state: String) -> Result<String, Stri
         let bytes = std::fs::read(p).map_err(|e| format!("read sprite {state}: {e:#}"))?;
         return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)));
     }
-    Err(format!("sprite not found: {} (no fallback available)", state))
+    Err(format!(
+        "sprite not found: {} (no fallback available)",
+        state
+    ))
 }
 
 #[tauri::command]
 fn character_dir() -> String {
-    crate::character_pack::characters_dir().display().to_string()
+    crate::character_pack::characters_dir()
+        .display()
+        .to_string()
 }
 
 /// 升級任意 character pack 內 single-frame sprite 到 4×4 placeholder。
@@ -1500,10 +1542,16 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
         .map_err(|e| format!("build routing: {e}"))?;
     let mut registry = SkillRegistry::new();
     let mem_arc: Arc<dyn MemoryStore> = memory;
-    registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
+    registry.register(Arc::new(TranslateSkill::new(
+        routing.skill_provider("translate"),
+    )));
     registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
-    registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
-    registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+    registry.register(Arc::new(SummarizeSkill::new(
+        routing.skill_provider("summarize"),
+    )));
+    registry.register(Arc::new(ComposeSkill::new(
+        routing.skill_provider("compose"),
+    )));
     registry.register(Arc::new(FetchUrlSkill::new()));
     registry.register(Arc::new(RememberSkill::new(mem_arc.clone())));
     registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
@@ -1585,11 +1633,7 @@ fn picker_list_agent_profiles() -> Vec<ProfileEntry> {
 }
 
 #[tauri::command]
-fn picker_switch_voice_profile(
-    app: AppHandle,
-    state: tauri::State<Arc<AppState>>,
-    stem: String,
-) {
+fn picker_switch_voice_profile(app: AppHandle, state: tauri::State<Arc<AppState>>, stem: String) {
     if !matches!(*state.mode.lock(), Mode::VoiceInput) {
         state.set_mode(&app, Mode::VoiceInput);
     }
@@ -1599,11 +1643,7 @@ fn picker_switch_voice_profile(
 }
 
 #[tauri::command]
-fn picker_switch_agent_profile(
-    app: AppHandle,
-    state: tauri::State<Arc<AppState>>,
-    stem: String,
-) {
+fn picker_switch_agent_profile(app: AppHandle, state: tauri::State<Arc<AppState>>, stem: String) {
     if !matches!(*state.mode.lock(), Mode::Agent) {
         state.set_mode(&app, Mode::Agent);
     }
@@ -1701,7 +1741,11 @@ fn capture_window_context() -> HotkeyWindowContext {
         "hotkey window context captured",
     );
 
-    HotkeyWindowContext { process_name, window_title, selected_text }
+    HotkeyWindowContext {
+        process_name,
+        window_title,
+        selected_text,
+    }
 }
 
 /// Windows:GetForegroundWindow + GetWindowThreadProcessId +
@@ -1714,7 +1758,8 @@ fn capture_window_context() -> HotkeyWindowContext {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle, HWND, MAX_PATH};
     use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
@@ -1815,7 +1860,10 @@ fn handle_hotkey_toggle(app: AppHandle, state: Arc<AppState>) {
         Phase::Transcribing | Phase::Responding { .. } => {
             // Mori 目前沒做 async task queue,新 hotkey 進來就 abort 舊 pipeline + 開新錄音。
             // 行為跟 Ctrl+Alt+Esc 一致,差在 Esc 停在 Idle 不再開錄。
-            tracing::info!(?current, "toggle while busy — aborting pipeline + starting new recording");
+            tracing::info!(
+                ?current,
+                "toggle while busy — aborting pipeline + starting new recording"
+            );
             if let Some(task) = state.pipeline_task.lock().take() {
                 task.abort();
             }
@@ -1844,7 +1892,10 @@ fn handle_hotkey_pressed(app: AppHandle, state: Arc<AppState>) {
         }
         Phase::Transcribing | Phase::Responding { .. } => {
             // 同 toggle 路徑:沒 task queue, abort 舊 pipeline 開新錄音。
-            tracing::info!(?current, "hotkey press while busy — aborting pipeline + starting new recording");
+            tracing::info!(
+                ?current,
+                "hotkey press while busy — aborting pipeline + starting new recording"
+            );
             if let Some(task) = state.pipeline_task.lock().take() {
                 task.abort();
             }
@@ -1893,22 +1944,18 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) {
             let app_clone = app.clone();
             let state_clone = state.clone();
             tauri::async_runtime::spawn(async move {
-                let mut interval =
-                    tokio::time::interval(std::time::Duration::from_millis(33));
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
                 loop {
                     interval.tick().await;
                     // 只有錄音中才推
-                    let still_recording = matches!(
-                        *state_clone.phase.lock(),
-                        Phase::Recording { .. }
-                    );
+                    let still_recording =
+                        matches!(*state_clone.phase.lock(), Phase::Recording { .. });
                     if !still_recording {
                         // 推一次 0 結尾,UI 平滑回零
                         let _ = app_clone.emit("audio-level", 0.0_f32);
                         break;
                     }
-                    let raw = level_handle
-                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let raw = level_handle.load(std::sync::atomic::Ordering::Relaxed);
                     let normalized = raw as f32 / u16::MAX as f32;
                     let _ = app_clone.emit("audio-level", normalized);
                 }
@@ -1949,9 +1996,7 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             mori_core::voice_input_profile::load_active_profile()
                 .frontmatter
                 .stt_provider
-                .unwrap_or_else(|| {
-                    mori_core::llm::transcribe::active_transcribe_snapshot().name
-                })
+                .unwrap_or_else(|| mori_core::llm::transcribe::active_transcribe_snapshot().name)
         } else {
             mori_core::llm::transcribe::active_transcribe_snapshot().name
         };
@@ -1967,7 +2012,16 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         // 改成 "whisper-local" 走 whisper.cpp 離線推理(配上本機 chat
         // provider 就 100% Groq-free)。
         let transcribe_result: anyhow::Result<String> = async {
-            let audio = recorder.stop().context("stop recorder")?;
+            let mut audio = recorder.stop().context("stop recorder")?;
+            if read_voice_trim_silence_enabled() {
+                let before = audio.samples.len();
+                audio.trim_silence_runs(0.01, read_voice_trim_silence_min_ms());
+                tracing::info!(
+                    before_samples = before,
+                    after_samples = audio.samples.len(),
+                    "applied silence-run trim before STT"
+                );
+            }
             let duration = audio.duration_secs();
             let rms = if audio.samples.is_empty() {
                 0.0
@@ -2001,14 +2055,13 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
             // 5F: VoiceInput mode 時，profile 可用 stt_provider 覆蓋全域 STT 設定
-            let stt_override: Option<String> =
-                if matches!(*state.mode.lock(), Mode::VoiceInput) {
-                    mori_core::voice_input_profile::load_active_profile()
-                        .frontmatter
-                        .stt_provider
-                } else {
-                    None
-                };
+            let stt_override: Option<String> = if matches!(*state.mode.lock(), Mode::VoiceInput) {
+                mori_core::voice_input_profile::load_active_profile()
+                    .frontmatter
+                    .stt_provider
+            } else {
+                None
+            };
 
             let stt = match stt_override.as_deref() {
                 Some(name) => mori_core::llm::transcribe::build_named_transcription_provider(
@@ -2051,7 +2104,8 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         // Stage 2: routing 拆 agent + per-skill provider(5A-3)。STT 一定走 Groq
         // Whisper(stage 1),但 chat 跟 skill 各自的 provider 由 routing 決定。
         let routing =
-            match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone()))) {
+            match mori_core::llm::Routing::build_from_config(Some(retry_callback_for(app.clone())))
+            {
                 Ok(r) => Arc::new(r),
                 Err(e) => {
                     state.set_phase(
@@ -2141,7 +2195,11 @@ async fn run_agent_pipeline(
         Some(name) => match mori_core::llm::build_named_provider(name, None) {
             Ok(p) => p,
             Err(e) => {
-                tracing::warn!(?e, name, "agent profile provider not found, falling back to routing.agent");
+                tracing::warn!(
+                    ?e,
+                    name,
+                    "agent profile provider not found, falling back to routing.agent"
+                );
                 routing.agent.clone()
             }
         },
@@ -2188,7 +2246,9 @@ async fn run_agent_pipeline(
         let memory_for_skills: Arc<dyn MemoryStore> = memory.clone();
         let mut registry = SkillRegistry::new();
         let allows = |name: &str| -> bool {
-            if agent_disabled { return false; }
+            if agent_disabled {
+                return false;
+            }
             match &enabled_set {
                 Some(set) => set.contains(name),
                 None => true, // None = 全開
@@ -2208,16 +2268,22 @@ async fn run_agent_pipeline(
             registry.register(Arc::new(EditMemorySkill::new(memory_for_skills.clone())));
         }
         if allows("translate") {
-            registry.register(Arc::new(TranslateSkill::new(routing.skill_provider("translate"))));
+            registry.register(Arc::new(TranslateSkill::new(
+                routing.skill_provider("translate"),
+            )));
         }
         if allows("polish") {
             registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
         }
         if allows("summarize") {
-            registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
+            registry.register(Arc::new(SummarizeSkill::new(
+                routing.skill_provider("summarize"),
+            )));
         }
         if allows("compose") {
-            registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
+            registry.register(Arc::new(ComposeSkill::new(
+                routing.skill_provider("compose"),
+            )));
         }
         if allows("fetch_url") {
             registry.register(Arc::new(mori_core::skill::FetchUrlSkill::new()));
@@ -2276,9 +2342,7 @@ async fn run_agent_pipeline(
         // emit tool_call + execute 後直接結束(不再 round LLM 等 final text),
         // 適合「轉發 / bridge」型 profile(如 ZeroType bridge)避免不必要的二次
         // LLM call 卡 hang。預設 multi_turn(現有對話行為)。
-        let mode = AgentMode::from_str_or_default(
-            agent_profile.frontmatter.agent_mode.as_deref(),
-        );
+        let mode = AgentMode::from_str_or_default(agent_profile.frontmatter.agent_mode.as_deref());
 
         // 5A-3b: agent loop fallback chain — 走 option (a):整個 respond_with_mode
         // 在 fallback provider 上從頭重跑(history + transcript 不變)。
@@ -2461,9 +2525,7 @@ async fn run_voice_input_pipeline(
     }
 
     // 5F-1: 載入 profile 系統
-    use mori_core::voice_input_profile::{
-        load_active_profile, ResolvedProvider,
-    };
+    use mori_core::voice_input_profile::{load_active_profile, ResolvedProvider};
 
     let profile = load_active_profile();
     let level = profile.cleanup_level_effective();
@@ -2508,7 +2570,10 @@ async fn run_voice_input_pipeline(
                     build_voice_dict_section(&mems)
                 }
                 Err(e) => {
-                    tracing::warn!(?e, "voice-input memory list_by_types failed, continuing without inject");
+                    tracing::warn!(
+                        ?e,
+                        "voice-input memory list_by_types failed, continuing without inject"
+                    );
                     String::new()
                 }
             }
@@ -2525,19 +2590,20 @@ async fn run_voice_input_pipeline(
     // 決定 LLM provider:profile `provider:` 設了走 build_named_provider
     // (5N+ 起 5 個 hard-coded built-in 之外會 fallback 查 config.json
     // providers.<name>);沒設交給 routing。
-    let llm_provider: Arc<dyn mori_core::llm::LlmProvider> = match profile.frontmatter.resolved_provider() {
-        ResolvedProvider::Named(name) => {
-            match mori_core::llm::build_named_provider(&name, None) {
-                Ok(p) => {
-                    tracing::info!(provider = %p.name(), "voice-input using named provider");
-                    p
-                }
-                Err(e) => {
-                    tracing::warn!(?e, "profile provider not found, falling back to routing");
-                    routing.skill_provider("voice_input_cleanup")
-                }
+    let llm_provider: Arc<dyn mori_core::llm::LlmProvider> = match profile
+        .frontmatter
+        .resolved_provider()
+    {
+        ResolvedProvider::Named(name) => match mori_core::llm::build_named_provider(&name, None) {
+            Ok(p) => {
+                tracing::info!(provider = %p.name(), "voice-input using named provider");
+                p
             }
-        }
+            Err(e) => {
+                tracing::warn!(?e, "profile provider not found, falling back to routing");
+                routing.skill_provider("voice_input_cleanup")
+            }
+        },
         ResolvedProvider::Default => routing.skill_provider("voice_input_cleanup"),
     };
 
@@ -2584,7 +2650,9 @@ async fn run_voice_input_pipeline(
                 vec![],
                 move |failed, next, err| {
                     tracing::warn!(
-                        failed, next, ?err,
+                        failed,
+                        next,
+                        ?err,
                         "voice-input cleanup falling back to next provider",
                     );
                     let _ = app_cb.emit(
@@ -2714,13 +2782,14 @@ fn populate_urls_detected(ctx: &mut MoriContext, transcript: &str) {
     use mori_core::url_detect::extract_urls;
     let mut all: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let push = |all: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, urls: Vec<String>| {
-        for u in urls {
-            if seen.insert(u.clone()) {
-                all.push(u);
+    let push =
+        |all: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, urls: Vec<String>| {
+            for u in urls {
+                if seen.insert(u.clone()) {
+                    all.push(u);
+                }
             }
-        }
-    };
+        };
     push(&mut all, &mut seen, extract_urls(transcript));
     if let Some(c) = &ctx.clipboard {
         push(&mut all, &mut seen, extract_urls(c));
@@ -2795,11 +2864,19 @@ fn build_context_section(
     out.push_str("**當前焦點視窗**\n");
     out.push_str(&format!(
         "- process: {}\n",
-        if win_ctx.process_name.is_empty() { "(未知)" } else { &win_ctx.process_name },
+        if win_ctx.process_name.is_empty() {
+            "(未知)"
+        } else {
+            &win_ctx.process_name
+        },
     ));
     out.push_str(&format!(
         "- title: {}\n\n",
-        if win_ctx.window_title.is_empty() { "(未知)" } else { &win_ctx.window_title },
+        if win_ctx.window_title.is_empty() {
+            "(未知)"
+        } else {
+            &win_ctx.window_title
+        },
     ));
 
     out.push_str("**使用者抓到的內容**\n");
@@ -2834,7 +2911,11 @@ fn build_context_section(
 
     if let Some(idx) = memory_index {
         out.push_str("\n## 你的長期記憶索引\n");
-        out.push_str(if idx.trim().is_empty() { "(目前沒有記憶)" } else { idx });
+        out.push_str(if idx.trim().is_empty() {
+            "(目前沒有記憶)"
+        } else {
+            idx
+        });
         out.push('\n');
     }
 
@@ -2855,7 +2936,9 @@ fn chinese_weekday(en: &str) -> &'static str {
 }
 
 fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%a)").to_string();
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M (%a)")
+        .to_string();
     let mut prompt = String::new();
 
     prompt.push_str(
@@ -2870,7 +2953,8 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     prompt.push_str("# 工具呼叫授權(重要)\n\n");
     prompt.push_str(
         "你**已經被使用者完全授權**呼叫下方列出的所有 tool(open_url / open_app / \
-         send_keys / google_search / paste_selection_back / 記憶相關 skill / 等)。\n\n");
+         send_keys / google_search / paste_selection_back / 記憶相關 skill / 等)。\n\n",
+    );
     prompt.push_str("**禁止**回應這類藉口:\n");
     prompt.push_str("- 「需要授權才能執行...」\n");
     prompt.push_str("- 「請在權限提示中允許」\n");
@@ -2879,17 +2963,21 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     prompt.push_str("- 任何形式的「需要使用者授權 / 開啟某項權限」的推託\n\n");
     prompt.push_str(
         "Mori 跑在使用者**本機**、tool 都在本機執行、使用者用自己的熱鍵主動觸發 — \
-         所有 tool 都已預先授權。直接呼叫即可。\n\n");
+         所有 tool 都已預先授權。直接呼叫即可。\n\n",
+    );
     prompt.push_str(
         "**參數不夠時**:反問使用者具體值(例:「打開瀏覽器」沒指定 → 反問\
-         「Firefox / Chrome / Edge?」),**不要**用「授權 / 權限」當拒絕理由。\n\n");
+         「Firefox / Chrome / Edge?」),**不要**用「授權 / 權限」當拒絕理由。\n\n",
+    );
 
     prompt.push_str("回覆規則:\n");
     prompt.push_str("- 一律使用繁體中文,語氣自然、簡潔\n");
     prompt.push_str("- 不寫前言或客套(例如「好的」、「沒問題」、「以下是」)— 直接進主題\n");
-    prompt.push_str("- 若使用者問你**功能上**真的做不到的事(沒有對應 tool),\
+    prompt.push_str(
+        "- 若使用者問你**功能上**真的做不到的事(沒有對應 tool),\
          老實說「目前還沒這個能力」(這跟上面講的「授權」是兩回事 — \
-         做不到 OK,但不要假借授權為由拒絕)\n");
+         做不到 OK,但不要假借授權為由拒絕)\n",
+    );
     prompt.push_str("- 回覆長度配合提問:閒聊就一兩句,問題要解釋才展開\n\n");
 
     prompt.push_str("可用工具:\n\n");
@@ -2899,52 +2987,59 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     prompt.push_str(
         "  • system prompt 末尾有「長期記憶索引」段,只列出每筆記憶的 id、\
          name、短描述。如果使用者問題的關鍵字在索引裡看到相關的 memory,\
-         先呼叫 recall_memory(id=該 id) 把細節拉進來,再答。\n");
+         先呼叫 recall_memory(id=該 id) 把細節拉進來,再答。\n",
+    );
     prompt.push_str(
         "  • 一輪可叫多次(若多筆記憶相關,各拉一次)。但只在必要時叫 — \
-         索引上看不出相關的問題就不要硬叫。\n\n");
+         索引上看不出相關的問題就不要硬叫。\n\n",
+    );
 
     // remember
     prompt.push_str("**remember(title, content, category)**:寫入長期記憶。\n");
     prompt.push_str(
         "  • 觸發時機:使用者明確說「記住...」「以後...」「我喜歡...」、\
-         分享生日 / 紀念日 / 偏好 / 重要人事物。閒聊或一般問答不要硬叫。\n");
+         分享生日 / 紀念日 / 偏好 / 重要人事物。閒聊或一般問答不要硬叫。\n",
+    );
     prompt.push_str(
         "  • Title 規則:**穩定 + 簡潔**。日期事件用「YYYY-MM-DD 主題」\
          (例:「2026-05-11 會議」);人物 / 偏好用主題(例:「老婆生日」、\
-         「常用編輯器」)。\n");
+         「常用編輯器」)。\n",
+    );
     prompt.push_str(
         "  • **整合而非新增**:若使用者補充 / 更正既有記憶(可從索引看到 title \
          相同或相關),先呼叫 recall_memory 拿舊 content,再呼叫 remember 用\
-         **同 title** + 「舊 content + 新訊息整合後的完整版本」,不可只寫新訊息。\n");
+         **同 title** + 「舊 content + 新訊息整合後的完整版本」,不可只寫新訊息。\n",
+    );
     prompt.push_str(
         "    範例:既有「2026-05-11 會議」(content=「2026-05-11 有會議」),\
-         使用者補充「是頻譜電子的會議」→ 你應該:\n");
-    prompt.push_str(
-        "      1. recall_memory(id=「2026-05-11_會議」)拿到舊 content\n");
+         使用者補充「是頻譜電子的會議」→ 你應該:\n",
+    );
+    prompt.push_str("      1. recall_memory(id=「2026-05-11_會議」)拿到舊 content\n");
     prompt.push_str(
         "      2. remember(title=「2026-05-11 會議」, \
-         content=「2026-05-11 與頻譜電子開會」)\n");
-    prompt.push_str(
-        "  • Content 一律寫**完整脈絡**(時間、人物、地點、事件),不要片段。\n");
+         content=「2026-05-11 與頻譜電子開會」)\n",
+    );
+    prompt.push_str("  • Content 一律寫**完整脈絡**(時間、人物、地點、事件),不要片段。\n");
     prompt.push_str("  • 呼叫後用一兩句自然語言確認記下了什麼。\n\n");
 
     // edit_memory
     prompt.push_str(
         "**edit_memory(id, new_content, [new_description])**:\
-         更新既有記憶的內容。\n");
+         更新既有記憶的內容。\n",
+    );
     prompt.push_str(
         "  • 對既有記憶補充 / 更正用這個比 remember 更明確 — \
-         不會因 title 微差建出重複檔。\n");
-    prompt.push_str(
-        "  • 標準流程:recall_memory(看舊內容)→ edit_memory(寫整合後新內容)。\n");
+         不會因 title 微差建出重複檔。\n",
+    );
+    prompt.push_str("  • 標準流程:recall_memory(看舊內容)→ edit_memory(寫整合後新內容)。\n");
     prompt.push_str("  • new_content 一樣要是「舊 + 新」整合版,不可只寫新訊息。\n\n");
 
     // forget_memory
     prompt.push_str("**forget_memory(id)**:刪除一筆記憶。\n");
     prompt.push_str(
         "  • 觸發時機:使用者**明確要求**忘掉(「忘掉那個」、「不用記了」、\
-         「把 X 刪掉」)。意圖不明確就不要主動刪。\n");
+         「把 X 刪掉」)。意圖不明確就不要主動刪。\n",
+    );
     prompt.push_str("  • Destructive 操作,刪了沒救。確認 id 對。\n\n");
 
     // 文字處理類 skills(phase 2)
@@ -2953,90 +3048,94 @@ fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
     prompt.push_str("  • target_lang 常用:zh-TW / zh-CN / en / ja / ko\n\n");
 
     prompt.push_str("**polish(text, [tone])**:潤稿改錯。\n");
-    prompt.push_str(
-        "  • 觸發:「潤一下這段」、「改錯字」、「修文法」、「fix the grammar」\n");
-    prompt.push_str(
-        "  • tone:formal / casual / concise / detailed / auto(預設)\n\n");
+    prompt.push_str("  • 觸發:「潤一下這段」、「改錯字」、「修文法」、「fix the grammar」\n");
+    prompt.push_str("  • tone:formal / casual / concise / detailed / auto(預設)\n\n");
 
     prompt.push_str("**summarize(text, [style], [max_points])**:摘要長文。\n");
-    prompt.push_str(
-        "  • 觸發:「幫我摘要」、「重點是什麼」、「TLDR」、「太長了濃縮一下」\n");
+    prompt.push_str("  • 觸發:「幫我摘要」、「重點是什麼」、「TLDR」、「太長了濃縮一下」\n");
     prompt.push_str("  • style:bullet_points(預設)/ one_paragraph / tldr\n\n");
 
     prompt.push_str("**compose(kind, topic, [audience], [length_hint])**:草擬文字。\n");
-    prompt.push_str(
-        "  • 觸發:「幫我寫」、「draft」、「草稿一下」 — 使用者要你*寫*而非答\n");
-    prompt.push_str(
-        "  • kind:email / message / essay / social_post / other\n");
+    prompt.push_str("  • 觸發:「幫我寫」、「draft」、「草稿一下」 — 使用者要你*寫*而非答\n");
+    prompt.push_str("  • kind:email / message / essay / social_post / other\n");
     prompt.push_str("  • length_hint:short / medium(預設)/ long\n\n");
 
     prompt.push_str(
         "**選 skill 的判斷**:閒聊或一般問答**直接答**,不要硬叫工具。\
          上面這些 text skills 是當使用者**明確要求一個動作**(翻譯 / 潤稿 / \
-         摘要 / 撰寫)時才呼叫。\n\n");
+         摘要 / 撰寫)時才呼叫。\n\n",
+    );
 
     // Paste-back skill(phase 4C):反白即改寫的回填動作
     prompt.push_str("**paste_selection_back(text)**:把處理過的文字貼回使用者反白範圍。\n");
     prompt.push_str(
         "  • **硬規則**:只要 system prompt 有 `# 當下反白文字` 段 + 使用者用\
          動詞(翻譯 / 潤稿 / 摘要 / 改寫 / 改短 / 改成 X 語氣 / 英文化…),\
-         **流程是固定的**:\n");
+         **流程是固定的**:\n",
+    );
     prompt.push_str(
         "      1. translate / polish / summarize / compose 處理反白文字,\
-         source_text **一律**填那段反白(忽略剪貼簿)。\n");
+         source_text **一律**填那段反白(忽略剪貼簿)。\n",
+    );
     prompt.push_str(
         "      2. 拿到結果**立刻**呼叫 `paste_selection_back(text=結果)` —\
-         **這步不可省略**,沒 paste 等於整件事沒完成,使用者會以為 Mori 沒做事。\n");
+         **這步不可省略**,沒 paste 等於整件事沒完成,使用者會以為 Mori 沒做事。\n",
+    );
     prompt.push_str(
         "  • **不要叫的情境**:使用者只是**問問題**(「這在講什麼」、\
          「what does this mean」、「這段為什麼這樣寫」)→ 直接 chat 回答,\
-         **不**呼叫這個 skill,**不**動使用者編輯區。\n");
+         **不**呼叫這個 skill,**不**動使用者編輯區。\n",
+    );
     prompt.push_str(
         "  • **平台差異**:Linux 走 xclip + xdotool/ydotool;Windows 走 SetClipboardData + SendInput。\
          Windows 沒有 X11 PRIMARY selection,所以使用者必須先 Ctrl+C 才有東西可貼。\n\n");
 
     // Action skills(phase 5G):open_url / open_app / send_keys / google_search / 等
     prompt.push_str("**open_url(url)**:在系統預設瀏覽器開 URL。\n");
-    prompt.push_str(
-        "  • 觸發:「打開 https://...」、「開 google.com」(明確帶 URL)。\n");
+    prompt.push_str("  • 觸發:「打開 https://...」、「開 google.com」(明確帶 URL)。\n");
     prompt.push_str("  • url 必須是 http:// 或 https:// 開頭的絕對 URL。\n\n");
 
     prompt.push_str("**open_app(app)**:啟動本機 app。\n");
-    prompt.push_str(
-        "  • 觸發:「打開 firefox」、「開 vscode」、「launch chrome」(明確指定 app)。\n");
+    prompt
+        .push_str("  • 觸發:「打開 firefox」、「開 vscode」、「launch chrome」(明確指定 app)。\n");
     prompt.push_str(
         "  • **如果使用者只說「打開瀏覽器」沒指定哪個**,**不要硬猜** — \
          直接 chat 反問「Firefox / Chrome / Edge 哪個?」(用一兩句),\
-         **不要**編造「需要授權」或其他藉口。\n");
+         **不要**編造「需要授權」或其他藉口。\n",
+    );
     prompt.push_str(
         "  • 範例對應:「打開 firefox」→ open_app(app=\"firefox\");「打開 vscode」→ open_app(app=\"code\")。\n\n");
 
     prompt.push_str("**send_keys(keys)**:對當下視窗送鍵盤組合。\n");
-    prompt.push_str(
-        "  • 觸發:「按 Ctrl+S」、「Alt+Tab 切視窗」、「按 Enter」(明確的鍵盤動作)。\n");
+    prompt.push_str("  • 觸發:「按 Ctrl+S」、「Alt+Tab 切視窗」、「按 Enter」(明確的鍵盤動作)。\n");
     prompt.push_str("  • 格式:「Ctrl+S」/「Alt+Shift+Period」/「F5」。\n\n");
 
     prompt.push_str("**google_search(query)** / **ask_chatgpt(prompt)** / **ask_gemini(prompt)** / **find_youtube(query)**:\
                      開瀏覽器到對應網站 + 預填查詢。\n");
     prompt.push_str(
-        "  • 觸發:「google 一下 X」/「問 ChatGPT X」/「問 Gemini X」/「YouTube 搜 X」。\n");
+        "  • 觸發:「google 一下 X」/「問 ChatGPT X」/「問 Gemini X」/「YouTube 搜 X」。\n",
+    );
     prompt.push_str("  • 不要主動叫 — 使用者明確點名才叫。\n\n");
 
     prompt.push_str(
         "**動作 skill 共同規則**:沒有對應 URL / app / key 等具體參數時,\
-         **反問使用者**,不要編造藉口拒絕。\n\n");
+         **反問使用者**,不要編造藉口拒絕。\n\n",
+    );
 
     // Mode skill(phase 4B-2)
     prompt.push_str("**set_mode(mode)**:切換 Active / Background。\n");
     prompt.push_str(
         "  • 觸發 background:「晚安」、「先休眠」、「我先離開了」、「下班了」、\
-         「安靜一下」、「我去開會了」(明確表示要你閉麥)。\n");
+         「安靜一下」、「我去開會了」(明確表示要你閉麥)。\n",
+    );
     prompt.push_str(
         "  • 觸發 active:「醒醒」、「起來」、「我回來了」、「在嗎」、\
-         「我們繼續」(明確要 Mori 回來工作)。\n");
+         「我們繼續」(明確要 Mori 回來工作)。\n",
+    );
     prompt.push_str(
         "  • 意圖不明確時不要切;切之後一兩句確認就好,語氣帶點精靈感(\
-         例如休眠回「好,我先閉眼,叫我就回來」)。\n\n");
+         例如休眠回「好,我先閉眼,叫我就回來」)。\n\n",
+    );
 
     prompt.push_str(&format!("現在時間:{now}\n"));
 
@@ -3245,7 +3344,10 @@ fn main() {
     // ~/.mori/config.json 有 `annuli.enabled=true` 且 endpoint / spirit / user_id
     // 都齊 → 用 AnnuliMemoryStore(走 HTTP),同時 state.annuli 也持有 client 給
     // 對話事件 fire-and-forget + hotkey 觸發 /sleep 用。否則 fallback LocalMarkdown。
-    let (memory, annuli_client): (Arc<dyn mori_core::memory::MemoryStore>, Option<Arc<mori_core::annuli::AnnuliClient>>) = if annuli_cfg.is_ready() {
+    let (memory, annuli_client): (
+        Arc<dyn mori_core::memory::MemoryStore>,
+        Option<Arc<mori_core::annuli::AnnuliClient>>,
+    ) = if annuli_cfg.is_ready() {
         tracing::info!(
             endpoint = %annuli_cfg.endpoint,
             spirit = %annuli_cfg.spirit_name,
@@ -3256,7 +3358,9 @@ fn main() {
             mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
                 .expect("failed to build annuli client(check config.json annuli.endpoint)"),
         );
-        let store = Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
+        let store = Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(
+            client.clone(),
+        ));
         (store, Some(client))
     } else {
         let memory_root = LocalMarkdownMemoryStore::default_root()
@@ -4088,7 +4192,10 @@ mod tests {
     #[test]
     fn context_section_shows_unknown_when_window_empty() {
         let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), None);
-        assert!(out.contains("(未知)"), "should show 未知 for empty window: {out}");
+        assert!(
+            out.contains("(未知)"),
+            "should show 未知 for empty window: {out}"
+        );
     }
 
     #[test]
@@ -4138,7 +4245,10 @@ mod tests {
     fn context_section_omits_memory_when_none() {
         // VoiceInput 不傳 memory_index — 該段完全不該出現
         let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), None);
-        assert!(!out.contains("長期記憶索引"), "memory section leaked: {out}");
+        assert!(
+            !out.contains("長期記憶索引"),
+            "memory section leaked: {out}"
+        );
     }
 
     #[test]

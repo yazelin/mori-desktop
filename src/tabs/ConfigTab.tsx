@@ -939,6 +939,35 @@ function ConfigTab({
                 ]}
               />
             </FormRow>
+            <FormRow label="trim_silence_enabled" hint={t("config_tab.rows.hint_voice_trim_silence")}>
+              <input
+                type="checkbox"
+                checked={cfg.voice_input?.trim_silence_enabled ?? true}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const vi = ensureSubObj(c, "voice_input");
+                    vi.trim_silence_enabled = e.target.checked;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="trim_silence_min_ms" hint={t("config_tab.rows.hint_voice_trim_silence_min_ms")}>
+              <input
+                type="number"
+                min={1}
+                max={5000}
+                step={50}
+                value={Number(cfg.voice_input?.trim_silence_min_ms ?? 300)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const vi = ensureSubObj(c, "voice_input");
+                    const n = Number(e.target.value);
+                    vi.trim_silence_min_ms = Number.isFinite(n) ? Math.max(1, Math.min(5000, Math.round(n))) : 300;
+                  })
+                }
+              />
+            </FormRow>
+
             <FormRow
               label="inject_memory_types"
               hint={t("config_tab.rows.hint_voice_inject")}
