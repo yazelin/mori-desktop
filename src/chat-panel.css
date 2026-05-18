@@ -113,16 +113,17 @@
 }
 .mori-bubble.user { align-self: flex-end; align-items: flex-end; }
 .mori-bubble.assistant { align-self: flex-start; align-items: flex-start; }
-/* voice_input = 語音輸入留下的紀錄(不是對話)— 置中、灰調、跟左右兩邊的對話 bubble 視覺區隔。
-   **寬度固定 90%** 不隨內容變 — log-style entry 對齊讓 user 一眼掃過去整齊,
-   不像 chat bubble 那種「短訊息窄、長訊息寬」shrink-wrap 排版。 */
+/* voice_input = 語音輸入留下的紀錄(不是對話)— 撐滿 thread 寬度,跟左右靠邊的對話 bubble
+   視覺區隔。改成 width: 100% 而非 align-self: stretch + width: auto — 後者在某些
+   browser 跟 base `.mori-bubble { max-width: 80% }` 互動有 quirk(stretch 沒生效),
+   100% explicit 最穩定。 */
 .mori-bubble.voice_input {
-  align-self: stretch;       /* 撐滿父層寬度(父層 .mori-thread 是 flex column) */
-  align-items: stretch;      /* bubble-body 也撐滿 */
-  width: auto;
-  max-width: none;
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
   position: relative;        /* 子層 .bubble-copy-btn 用 absolute 定位 */
-  margin: 0 auto;
 }
 
 .mori-bubble .role-label {

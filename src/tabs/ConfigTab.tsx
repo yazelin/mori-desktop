@@ -923,6 +923,21 @@ function ConfigTab({
             title={t("config_tab.sections.voice_input")}
             hint={t("config_tab.sections.voice_input_hint")}
           >
+            <FormRow label="startup_mode" hint={t("config_tab.rows.hint_startup_mode")}>
+              <Select
+                value={cfg.startup_mode ?? "voice_input"}
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    c.startup_mode = v;
+                  })
+                }
+                options={[
+                  { value: "voice_input", label: "voice_input(dictation,啟動即可用)" },
+                  { value: "agent", label: "agent(對話模式,跟 Mori 互動)" },
+                  { value: "background", label: "background(假寐,麥克風關)" },
+                ]}
+              />
+            </FormRow>
             <FormRow label="cleanup_level" hint={t("config_tab.rows.hint_voice_cleanup")}>
               <Select
                 value={cfg.voice_input?.cleanup_level ?? "smart"}
