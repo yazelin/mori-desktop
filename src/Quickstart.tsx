@@ -17,7 +17,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { IconGlobe, IconSun, IconMoon, IconEqualizer } from "./icons";
+import { IconGlobe, IconSun, IconMoon, IconEqualizer, IconEye, IconEyeOff } from "./icons";
 import { setLocale, nextLocale } from "./i18n";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { ritualAudio } from "./ritualAudio";
@@ -634,8 +634,14 @@ function DirectForm(props: CommonProps) {
               if (verify.kind !== "idle") setVerify({ kind: "idle" });
             }}
           />
-          <button type="button" className="mori-btn ghost small" onClick={() => setShowAura(!showAura)}>
-            {showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+          <button
+            type="button"
+            className="mori-btn ghost icon-only mori-key-toggle"
+            onClick={() => setShowAura(!showAura)}
+            title={showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            aria-label={showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+          >
+            {showAura ? <IconEyeOff width={16} height={16} /> : <IconEye width={16} height={16} />}
           </button>
         </div>
       </div>
@@ -722,8 +728,14 @@ function DirectForm(props: CommonProps) {
               value={powerKey}
               onChange={(e) => { setPowerKey(e.target.value); if (verify.kind !== "idle") setVerify({ kind: "idle" }); }}
             />
-            <button type="button" className="mori-btn ghost small" onClick={() => setShowPower(!showPower)}>
-              {showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            <button
+              type="button"
+              className="mori-btn ghost icon-only mori-key-toggle"
+              onClick={() => setShowPower(!showPower)}
+              title={showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+              aria-label={showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            >
+              {showPower ? <IconEyeOff width={16} height={16} /> : <IconEye width={16} height={16} />}
             </button>
           </div>
         </div>
@@ -764,7 +776,12 @@ function DirectForm(props: CommonProps) {
       </div>
 
       <div className="mori-quickstart-verify-row">
-        <button className="mori-btn" onClick={doVerify} disabled={!canVerify}>
+        <button
+          className="mori-btn"
+          onClick={doVerify}
+          disabled={!canVerify}
+          title={t("quickstart.verify_button_hint")}
+        >
           {verify.kind === "running" ? t("quickstart.verifying") : t("quickstart.verify_button")}
         </button>
         {verify.kind === "ok" && <span className="mori-quickstart-verify-msg ok">✓ {verify.msg}</span>}
@@ -773,8 +790,21 @@ function DirectForm(props: CommonProps) {
       </div>
 
       <div className="mori-quickstart-footer">
-        <button className="mori-btn" onClick={doSkip}>{t("quickstart.direct_skip_button")}</button>
-        <button className="mori-btn primary" onClick={doSave} disabled={!canSave}>{t("quickstart.direct_save_button")}</button>
+        <button
+          className="mori-btn"
+          onClick={doSkip}
+          title={t("quickstart.direct_skip_button_hint")}
+        >
+          {t("quickstart.direct_skip_button")}
+        </button>
+        <button
+          className="mori-btn primary"
+          onClick={doSave}
+          disabled={!canSave}
+          title={t("quickstart.direct_save_button_hint")}
+        >
+          {t("quickstart.direct_save_button")}
+        </button>
       </div>
     </div>
   );
@@ -869,12 +899,32 @@ function SceneSummoning({
 
       {dots}
       <div className="mori-quickstart-footer">
-        <button className="mori-btn ghost" onClick={doSkip}>{t("quickstart.ritual_dismiss")}</button>
-        <button className="mori-btn ghost" onClick={onSwitchToDirect}>{t("quickstart.ritual_switch_direct")}</button>
-        <button className="mori-btn primary" onClick={onNext} disabled={!nameReady}>
-          {nameReady
-            ? t("quickstart.dwelling_scene_1_button", { name: summonerName.trim() })
-            : t("quickstart.dwelling_scene_1_name_label")}
+        <button
+          className="mori-btn ghost"
+          onClick={doSkip}
+          title={t("quickstart.ritual_dismiss_hint")}
+        >
+          {t("quickstart.ritual_dismiss")}
+        </button>
+        <button
+          className="mori-btn ghost"
+          onClick={onSwitchToDirect}
+          title={t("quickstart.ritual_switch_direct_hint")}
+        >
+          {t("quickstart.ritual_switch_direct")}
+        </button>
+        <button
+          className="mori-btn primary mori-quickstart-next"
+          onClick={onNext}
+          disabled={!nameReady}
+          title={nameReady ? t("quickstart.ritual_next_hint") : t("quickstart.ritual_next_disabled_1")}
+        >
+          <span>
+            {nameReady
+              ? t("quickstart.dwelling_scene_1_button", { name: summonerName.trim() })
+              : t("quickstart.dwelling_scene_1_name_label")}
+          </span>
+          <span className="mori-quickstart-next-arrow" aria-hidden>→</span>
         </button>
       </div>
     </div>
@@ -927,8 +977,14 @@ function SceneAura({
               }}
               autoFocus
             />
-            <button type="button" className="mori-btn ghost small" onClick={() => setShowAura(!showAura)}>
-              {showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            <button
+              type="button"
+              className="mori-btn ghost icon-only mori-key-toggle"
+              onClick={() => setShowAura(!showAura)}
+              title={showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+              aria-label={showAura ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            >
+              {showAura ? <IconEyeOff width={16} height={16} /> : <IconEye width={16} height={16} />}
             </button>
           </div>
         </div>
@@ -936,9 +992,22 @@ function SceneAura({
 
       {dots}
       <div className="mori-quickstart-footer">
-        <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
-        <button className="mori-btn primary" onClick={onNext} disabled={!auraReady}>
-          {t("quickstart.dwelling_scene_2_button")}
+        <button
+          className="mori-btn mori-quickstart-back"
+          onClick={onBack}
+          title={t("quickstart.ritual_back_hint")}
+        >
+          <span className="mori-quickstart-back-arrow" aria-hidden>←</span>
+          <span>{t("quickstart.ritual_back")}</span>
+        </button>
+        <button
+          className="mori-btn primary mori-quickstart-next"
+          onClick={onNext}
+          disabled={!auraReady}
+          title={auraReady ? t("quickstart.ritual_next_hint") : t("quickstart.ritual_next_disabled_2")}
+        >
+          <span>{t("quickstart.dwelling_scene_2_button")}</span>
+          <span className="mori-quickstart-next-arrow" aria-hidden>→</span>
         </button>
       </div>
     </div>
@@ -1068,8 +1137,14 @@ function ScenePower({
               }}
               autoFocus
             />
-            <button type="button" className="mori-btn ghost small" onClick={() => setShowPower(!showPower)}>
-              {showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            <button
+              type="button"
+              className="mori-btn ghost icon-only mori-key-toggle"
+              onClick={() => setShowPower(!showPower)}
+              title={showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+              aria-label={showPower ? t("quickstart.dwelling_scene_2_hide_key") : t("quickstart.dwelling_scene_2_show_key")}
+            >
+              {showPower ? <IconEyeOff width={16} height={16} /> : <IconEye width={16} height={16} />}
             </button>
           </div>
         </div>
@@ -1094,11 +1169,26 @@ function ScenePower({
 
       {dots}
       <div className="mori-quickstart-footer">
-        <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
-        <button className="mori-btn primary" onClick={onNext} disabled={!keyReady}>
-          {powerChoice === "skip"
-            ? t("quickstart.dwelling_scene_3_button_skip")
-            : t("quickstart.dwelling_scene_3_button")}
+        <button
+          className="mori-btn mori-quickstart-back"
+          onClick={onBack}
+          title={t("quickstart.ritual_back_hint")}
+        >
+          <span className="mori-quickstart-back-arrow" aria-hidden>←</span>
+          <span>{t("quickstart.ritual_back")}</span>
+        </button>
+        <button
+          className="mori-btn primary mori-quickstart-next"
+          onClick={onNext}
+          disabled={!keyReady}
+          title={keyReady ? t("quickstart.ritual_next_hint") : t("quickstart.ritual_next_disabled_3")}
+        >
+          <span>
+            {powerChoice === "skip"
+              ? t("quickstart.dwelling_scene_3_button_skip")
+              : t("quickstart.dwelling_scene_3_button")}
+          </span>
+          <span className="mori-quickstart-next-arrow" aria-hidden>→</span>
         </button>
       </div>
     </div>
@@ -1195,9 +1285,22 @@ function SceneSealing({
         </div>
       ) : (
       <div className="mori-quickstart-footer">
-        <button className="mori-btn" onClick={onBack}>{t("quickstart.ritual_back")}</button>
-        <button className="mori-btn primary" onClick={onNext} disabled={verify.kind !== "ok"}>
-          {t("quickstart.dwelling_scene_4_button")}
+        <button
+          className="mori-btn mori-quickstart-back"
+          onClick={onBack}
+          title={t("quickstart.ritual_back_hint")}
+        >
+          <span className="mori-quickstart-back-arrow" aria-hidden>←</span>
+          <span>{t("quickstart.ritual_back")}</span>
+        </button>
+        <button
+          className="mori-btn primary mori-quickstart-next"
+          onClick={onNext}
+          disabled={verify.kind !== "ok"}
+          title={verify.kind === "ok" ? t("quickstart.ritual_next_hint") : t("quickstart.ritual_next_disabled_4")}
+        >
+          <span>{t("quickstart.dwelling_scene_4_button")}</span>
+          <span className="mori-quickstart-next-arrow" aria-hidden>→</span>
         </button>
       </div>
       )}
@@ -1234,8 +1337,13 @@ function SceneSettling({
       </div>
 
       <div className="mori-quickstart-footer single">
-        <button className="mori-btn primary large" onClick={doSave}>
-          {t("quickstart.dwelling_scene_5_button")}
+        <button
+          className="mori-btn primary large mori-quickstart-settle"
+          onClick={doSave}
+          title={t("quickstart.dwelling_scene_5_button_hint")}
+        >
+          <span className="mori-quickstart-settle-mark" aria-hidden>✦</span>
+          <span>{t("quickstart.dwelling_scene_5_button")}</span>
         </button>
       </div>
     </div>

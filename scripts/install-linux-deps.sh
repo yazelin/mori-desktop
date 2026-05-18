@@ -25,6 +25,7 @@
 #   libsoup-3.0-dev                HTTP client used by WebKitGTK
 #   libjavascriptcoregtk-4.1-dev   JS runtime headers
 #   libasound2-dev                 ALSA headers (cpal — Mori 麥克風用)
+#   ffmpeg                         音/影片 → WAV 抽取(轉錄功能執行期用)
 #   pkg-config build-essential curl wget file   build glue
 #
 # Reference: https://v2.tauri.app/start/prerequisites/#linux
@@ -60,6 +61,9 @@ PACKAGES=(
     libjavascriptcoregtk-4.1-dev
     # ALSA headers — needed by cpal (mic capture in mori-tauri)
     libasound2-dev
+    # ffmpeg — 執行期工具,音/影片檔抽 WAV 給 whisper-local 用(轉錄功能)
+    # 不算 Tauri build dep,但放這裡讓 dev 一鍵裝齊,免去 transcribe 失敗的「找不到 ffmpeg」
+    ffmpeg
     pkg-config
     build-essential
     curl

@@ -372,6 +372,22 @@
   white-space: nowrap;
   cursor: help;
 }
+.mori-profile-row-provider {
+  font-size: 10.5px;
+  color: var(--c-text);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--c-sidebar-active-bg, var(--c-bg));
+  border: 1px solid var(--c-border);
+  white-space: nowrap;
+  cursor: help;
+}
+.mori-profile-row-provider.is-default {
+  color: var(--c-text-soft);
+  background: var(--c-bg);
+  font-style: italic;
+}
 .mori-profile-row-stem {
   font-size: 10.5px;
   color: var(--c-text-soft);
@@ -2291,7 +2307,14 @@
   color: rgba(180, 210, 185, 0.78);
 }
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-help-link {
-  color: rgba(170, 220, 180, 0.75);
+  color: rgba(170, 220, 180, 0.85);
+  border-color: rgba(168, 197, 162, 0.32);
+  background: rgba(20, 50, 35, 0.35);
+}
+.mori-quickstart-backdrop.mode-ritual .mori-quickstart-help-link:hover {
+  color: rgba(200, 235, 205, 0.98);
+  border-color: rgba(168, 197, 162, 0.6);
+  background: rgba(40, 75, 55, 0.5);
 }
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-field-hint,
 .mori-quickstart-backdrop.mode-ritual .mori-quickstart-optional-tag {
@@ -2440,7 +2463,14 @@
   color: rgba(80, 110, 90, 0.7);
 }
 [data-theme-base="light"] .mori-quickstart-backdrop.mode-ritual .mori-quickstart-help-link {
-  color: rgba(60, 110, 80, 0.75);
+  color: rgba(60, 110, 80, 0.85);
+  border-color: rgba(106, 143, 114, 0.35);
+  background: rgba(230, 240, 220, 0.5);
+}
+[data-theme-base="light"] .mori-quickstart-backdrop.mode-ritual .mori-quickstart-help-link:hover {
+  color: rgba(40, 85, 60, 1);
+  border-color: rgba(106, 143, 114, 0.7);
+  background: rgba(210, 230, 200, 0.75);
 }
 [data-theme-base="light"] .mori-quickstart-backdrop.mode-ritual .mori-quickstart-field-hint,
 [data-theme-base="light"] .mori-quickstart-backdrop.mode-ritual .mori-quickstart-optional-tag {
@@ -2588,15 +2618,64 @@
   color: var(--c-text);
   margin-bottom: 6px;
 }
+/* 從文字連結升級成 pill 按鈕 — 讓 user 一眼看出是可點的、不是裝飾文字。
+   背景刻意 transparent + subtle border,維持儀式低調感,不喧賓奪主 */
 .mori-quickstart-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--c-text-muted);
   text-decoration: none;
+  padding: 3px 9px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-bg);
+  transition: border-color 120ms, color 120ms, background 120ms;
+  cursor: pointer;
+  white-space: nowrap;
 }
 .mori-quickstart-help-link:hover {
   color: var(--c-brand-text);
-  text-decoration: underline;
+  border-color: var(--c-border-strong);
+  background: var(--c-divider);
+  text-decoration: none;
 }
+
+/* 「下一步」按鈕的箭頭 — hover 時往右滑一點,強化「前進」訊號;
+   按鈕被 disabled 時不要動,免得空 hover 出現假感受 */
+.mori-quickstart-next,
+.mori-quickstart-back,
+.mori-quickstart-settle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.mori-quickstart-next-arrow,
+.mori-quickstart-back-arrow,
+.mori-quickstart-settle-mark {
+  display: inline-block;
+  transition: transform 140ms ease-out;
+  font-size: 1.05em;
+  line-height: 1;
+}
+.mori-quickstart-next:not(:disabled):hover .mori-quickstart-next-arrow {
+  transform: translateX(3px);
+}
+.mori-quickstart-back:not(:disabled):hover .mori-quickstart-back-arrow {
+  transform: translateX(-3px);
+}
+.mori-quickstart-settle:not(:disabled):hover .mori-quickstart-settle-mark {
+  transform: rotate(72deg) scale(1.15);
+}
+
+/* key 顯示/隱藏 icon-button — 跟 .mori-input 高度齊;hover 漂亮一點 */
+.mori-key-toggle {
+  flex-shrink: 0;
+  padding: 7px 9px;
+  color: var(--c-text-muted);
+}
+.mori-key-toggle:hover { color: var(--c-text); }
 .mori-quickstart-provider-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2911,4 +2990,259 @@
 @keyframes ritual-sparkle {
   0%, 100% { opacity: 0.5; transform: scale(0.95); }
   50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ─── Transcribe tab ───────────────────────────────────────────────── */
+
+.mori-tab-transcribe { max-width: 920px; }
+
+.mori-transcribe-deps {
+  background: var(--c-divider);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.mori-transcribe-deps.loading { color: var(--c-text-muted); font-size: 13px; }
+.mori-transcribe-deps-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.mori-transcribe-deps-header h3 { margin: 0; font-size: 13px; font-weight: 500; }
+.mori-transcribe-dep-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.mori-transcribe-dep-badge {
+  font-size: 10.5px;
+  font-family: ui-monospace, monospace;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.mori-transcribe-dep-row.ok .mori-transcribe-dep-badge {
+  background: var(--c-success-bg);
+  color: var(--c-success-text);
+}
+.mori-transcribe-dep-row.missing .mori-transcribe-dep-badge {
+  background: var(--c-danger-bg, rgba(220,80,80,0.18));
+  color: var(--c-danger-text);
+}
+.mori-transcribe-dep-label { font-weight: 500; color: var(--c-text); }
+.mori-transcribe-dep-detail {
+  color: var(--c-text-soft);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.mori-transcribe-dep-hint {
+  flex-basis: 100%;
+  margin-left: 60px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+
+.mori-transcribe-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.mori-transcribe-lang-picker {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.mori-transcribe-lang-picker .mori-input.small {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.mori-transcribe-block-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--c-danger-bg, rgba(220,80,80,0.12));
+  color: var(--c-danger-text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+}
+
+.mori-transcribe-mode-section { display: flex; flex-direction: column; gap: 14px; }
+.mori-transcribe-droparea {
+  border: 2px dashed var(--c-border);
+  border-radius: 10px;
+  padding: 22px 18px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.mori-transcribe-droparea-hint {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--c-text-soft);
+  word-break: break-all;
+}
+.mori-transcribe-droparea-supported {
+  margin: 0;
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+.mori-transcribe-run-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mori-transcribe-progress {
+  font-size: 12px;
+  color: var(--c-text-muted);
+  font-family: ui-monospace, monospace;
+}
+.mori-transcribe-error {
+  background: var(--c-danger-bg, rgba(220,80,80,0.12));
+  color: var(--c-danger-text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.mori-transcribe-result {
+  background: var(--c-divider);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mori-transcribe-result-meta {
+  font-size: 11px;
+  color: var(--c-text-muted);
+  font-family: ui-monospace, monospace;
+}
+.mori-transcribe-result-textarea {
+  width: 100%;
+  min-height: 180px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  resize: vertical;
+}
+.mori-transcribe-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mori-transcribe-save-msg {
+  font-size: 11px;
+  color: var(--c-text-soft);
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+.mori-transcribe-empty {
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.mori-transcribe-batch-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mori-transcribe-batch-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--c-border);
+}
+.mori-transcribe-batch-row:last-child { border-bottom: none; }
+.mori-transcribe-batch-row.status-running { background: var(--c-active-bg, rgba(100,200,200,0.08)); }
+.mori-transcribe-batch-row.status-ok { color: var(--c-text); }
+.mori-transcribe-batch-row.status-err { background: rgba(220,80,80,0.08); }
+.mori-transcribe-batch-name {
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mori-transcribe-batch-status { font-size: 11px; color: var(--c-text-muted); }
+.mori-transcribe-batch-meta { font-size: 11px; color: var(--c-text-soft); font-family: ui-monospace, monospace; }
+.mori-transcribe-batch-err {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--c-danger-text);
+  white-space: pre-wrap;
+}
+.mori-transcribe-batch-detail {
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.mori-transcribe-batch-detail summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  color: var(--c-text-soft);
+}
+
+.mori-transcribe-meeting-hint {
+  font-size: 12px;
+  color: var(--c-text-muted);
+  margin: 0;
+}
+.mori-transcribe-meeting-warn {
+  font-size: 11.5px;
+  color: var(--c-text-soft);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mori-transcribe-meeting-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mori-transcribe-meeting-state {
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+}
+.mori-transcribe-meeting-state.recording {
+  color: var(--c-danger-text);
+  animation: meeting-pulse 1.6s ease-in-out infinite;
+}
+.mori-transcribe-meeting-state.transcribing { color: var(--c-text-soft); }
+.mori-transcribe-meeting-state.done { color: var(--c-success-text); }
+@keyframes meeting-pulse {
+  0%, 100% { opacity: 0.65; }
+  50%      { opacity: 1; }
 }

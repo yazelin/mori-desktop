@@ -25,6 +25,8 @@
     "clipboard-manager:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "dialog:default",
+    "dialog:allow-open"
   ]
 }
