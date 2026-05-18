@@ -6,7 +6,7 @@
 
 ---
 
-## v0.6.0 — Phase 3 Hey Mori 喚醒生態(Mode::Listening + wake-word + wake-ack + VAD)(2026-05-18)
+## v0.6.0 — Phase 3 Hey Mori 喚醒生態(Mode::Listening + wake-word + wake-ack + VAD)(2026-05-19)
 
 從 v0.5.2(Docs sync)以來累積一整條 **Phase 3** 線:user 不用按熱鍵,直接對麥克風喊「Hey Mori」就觸發錄音 + STT + agent。這版把整條 pipeline 端到端做完並 ship 預設可用版 — fresh install 不用任何外部下載就有基本「Hey Mori」能力。
 
