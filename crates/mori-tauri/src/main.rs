@@ -25,6 +25,7 @@ mod shell_skill;
 mod skill_server;
 mod theme;
 mod transcribe_cmds;
+mod wake_sound;
 mod wake_word;
 
 use std::sync::Arc;
@@ -887,21 +888,22 @@ fn read_voice_trim_silence_threshold() -> f32 {
 }
 
 /// Listening mode 下,wake-word 觸發錄音後最多錄多久(秒)。
-/// Phase 3A 沒做 VAD-based 自動停,固定時間 cap。預設 10s。
+/// Phase 3A 沒做 VAD-based 自動停,固定時間 cap。預設 6s — 對短指令
+/// (「Hey Mori 開瀏覽器」)夠用,長指令可在 config 拉高。
 /// 之後 Phase 3B 改成 silence-based stop。
 /// clamp 2~60 秒。
 fn read_listening_max_record_secs() -> u32 {
     let path = mori_dir().join("config.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return 10;
+        return 6;
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return 10;
+        return 6;
     };
     json.pointer("/listening_mode/max_record_secs")
         .and_then(|v| v.as_u64())
         .map(|v| v.clamp(2, 60) as u32)
-        .unwrap_or(10)
+        .unwrap_or(6)
 }
 
 /// 啟動時的預設 mode。讀 `~/.mori/config.json` 的 `startup_mode`(`"voice_input"`
@@ -3910,6 +3912,12 @@ fn main() {
             transcribe_cmds::meeting_recording_start,
             transcribe_cmds::meeting_recording_stop,
             transcribe_cmds::meeting_recording_status,
+            wake_sound::wake_ack_status,
+            wake_sound::wake_ack_set_active,
+            wake_sound::wake_ack_set_enabled,
+            wake_sound::wake_ack_preview,
+            wake_sound::wake_ack_upload,
+            wake_sound::wake_ack_delete_alternate,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -3931,6 +3939,10 @@ fn main() {
             if let Err(e) = crate::character_pack::ensure_default() {
                 tracing::warn!(error = %e, "character_pack::ensure_default failed");
             }
+
+            // Phase 3A.1.2:ensure ~/.mori/wakeword/sounds/(wake-ack 預設檔 + 5 個備選)。
+            // 從 binary 內嵌寫入,已存在不覆蓋(user 改過的 wake-ack.wav 保留)。
+            wake_sound::ensure_files(&mori_dir());
 
             // 啟動初始 floating visibility — update_floating_visibility 自己會看:
             //   - quickstart_completed (儀式還沒完成 → 強制隱藏)
@@ -4464,6 +4476,14 @@ fn main() {
                 // 不在 listener thread 裡呼叫 handle_hotkey_pressed — 它會 lock
                 // state.phase 等等,跑長一點怕擋住 Tauri event 派發。spawn 走。
                 tauri::async_runtime::spawn(async move {
+                    // Phase 3A.1.2:wake-ack 音效。blocking 直到 ack 播完才開錄音,
+                    // 避免 ack 從喇叭出來被 mic 收回污染 STT。spawn_blocking 把 rodio
+                    // 的 sleep_until_end 移出 async runtime,不擋其他 task。
+                    let ack_dir = mori_dir();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        wake_sound::play_wake_ack(&ack_dir);
+                    })
+                    .await;
                     handle_hotkey_pressed(handle.clone(), state.clone());
                     let max_secs = read_listening_max_record_secs();
                     tracing::info!(max_secs, "wake-triggered recording started, auto-stop timer armed");

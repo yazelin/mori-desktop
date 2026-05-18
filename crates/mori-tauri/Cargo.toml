@@ -44,6 +44,11 @@ axum = { version = "0.7", default-features = false, features = ["http1", "json",
 cpal = "0.15"
 # WAV encoding (so we can ship audio bytes to Whisper without an external encoder)
 hound = "3.5"
+# Audio playback — Phase 3A wake-ack 用。cpal-based,跟現有 input stack 同源。
+# WAV-only(decoder feature 拔了 mp3 / vorbis,Mori 自己 bake 的都 wav)。
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
+# 隨機選 wake-ack 短句
+rand = "0.8"
 # Lock-free shared state for the audio callback path
 parking_lot = "0.12"
 # Async stream utilities — needed to consume ashpd's GlobalShortcuts signal stream.
