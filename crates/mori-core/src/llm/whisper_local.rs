@@ -53,11 +53,37 @@ pub struct LocalWhisperProvider {
     server: Arc<WhisperServer>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalWhisperConfig {
+    pub model_path: PathBuf,
+    pub language: Option<String>,
+    pub server_binary: PathBuf,
+}
+
+impl LocalWhisperConfig {
+    pub fn with_language_override(mut self, language: Option<String>) -> Self {
+        if language.is_some() {
+            self.language = language;
+        }
+        self
+    }
+}
+
 impl LocalWhisperProvider {
     pub const NAME: &'static str = "whisper-local";
 
     /// 從 `~/.mori/config.json` 蓋出 provider。
     pub fn from_config() -> Result<Self> {
+        Self::from_resolved_config(Self::resolved_config())
+    }
+
+    /// 從 config 蓋出 provider,但允許呼叫端用 UI / command 指定本次語言。
+    pub fn from_config_with_language_override(language: Option<String>) -> Result<Self> {
+        let cfg = Self::resolved_config().with_language_override(language);
+        Self::from_resolved_config(cfg)
+    }
+
+    pub fn resolved_config() -> LocalWhisperConfig {
         let cfg = mori_config_path();
         let model_path = cfg
             .as_deref()
@@ -69,11 +95,21 @@ impl LocalWhisperProvider {
             .and_then(|p| super::groq::read_json_pointer(p, "/providers/whisper-local/language"));
         let server_binary = cfg
             .as_deref()
-            .and_then(|p| super::groq::read_json_pointer(p, "/providers/whisper-local/server_binary"))
+            .and_then(|p| {
+                super::groq::read_json_pointer(p, "/providers/whisper-local/server_binary")
+            })
             .map(PathBuf::from)
             .unwrap_or_else(default_server_binary);
 
-        Self::new(&model_path, language, &server_binary)
+        LocalWhisperConfig {
+            model_path,
+            language,
+            server_binary,
+        }
+    }
+
+    fn from_resolved_config(cfg: LocalWhisperConfig) -> Result<Self> {
+        Self::new(&cfg.model_path, cfg.language, &cfg.server_binary)
     }
 
     pub fn new(model_path: &Path, language: Option<String>, server_binary: &Path) -> Result<Self> {
@@ -149,7 +185,11 @@ impl Drop for RunningServer {
         // 最佳努力 — kill 是非阻塞,送 SIGKILL(Linux)/ TerminateProcess(Win)。
         // 不 wait(可能跑在 tokio thread,blocking wait 會卡 runtime)。OS reap。
         let _ = self.child.kill();
-        tracing::debug!(port = self.port, pid = self.child.id(), "whisper-server killed on drop");
+        tracing::debug!(
+            port = self.port,
+            pid = self.child.id(),
+            "whisper-server killed on drop"
+        );
     }
 }
 
@@ -267,7 +307,11 @@ impl WhisperServer {
         let port = self.ensure_started().await?;
         let url = format!("http://127.0.0.1:{port}/inference");
 
-        tracing::debug!(bytes = audio.len(), port, "whisper-server inference request");
+        tracing::debug!(
+            bytes = audio.len(),
+            port,
+            "whisper-server inference request"
+        );
 
         let part = reqwest::multipart::Part::bytes(audio)
             .file_name("audio.wav")
@@ -355,6 +399,46 @@ pub fn default_server_binary() -> PathBuf {
     }
 }
 
+/// 檢查 binary path 是否可執行。接受:
+/// - 絕對/相對路徑:檔案必須存在
+/// - 裸 command 名稱:在 PATH 內找得到即可
+pub fn server_binary_available(binary: &Path) -> bool {
+    if binary.components().count() > 1 || binary.is_absolute() {
+        return binary.exists();
+    }
+    command_in_path(binary)
+}
+
+fn command_in_path(command: &Path) -> bool {
+    let Some(command_name) = command.to_str() else {
+        return false;
+    };
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let candidates = command_name_candidates(command_name);
+    std::env::split_paths(&paths).any(|dir| candidates.iter().any(|name| dir.join(name).exists()))
+}
+
+#[cfg(windows)]
+fn command_name_candidates(command_name: &str) -> Vec<String> {
+    if Path::new(command_name).extension().is_some() {
+        return vec![command_name.to_string()];
+    }
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.BAT;.CMD".to_string());
+    pathext
+        .split(';')
+        .filter(|ext| !ext.trim().is_empty())
+        .map(|ext| format!("{command_name}{}", ext.to_ascii_lowercase()))
+        .chain(std::iter::once(command_name.to_string()))
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn command_name_candidates(command_name: &str) -> Vec<String> {
+    vec![command_name.to_string()]
+}
+
 fn mori_config_path() -> Option<PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -374,6 +458,7 @@ fn pick_free_port() -> Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn default_model_path_in_mori_dir() {
@@ -383,7 +468,11 @@ mod tests {
             s.contains(".mori") && s.contains("models"),
             "default 路徑該指向 ~/.mori/models/, 實際:{s}",
         );
-        assert!(path.file_name().unwrap().to_string_lossy().ends_with(".bin"));
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(".bin"));
     }
 
     #[test]
@@ -391,9 +480,15 @@ mod tests {
         let p = default_server_binary();
         let s = p.to_string_lossy();
         if cfg!(windows) {
-            assert!(s.ends_with("whisper-server.exe"), "Windows binary 該帶 .exe: {s}");
+            assert!(
+                s.ends_with("whisper-server.exe"),
+                "Windows binary 該帶 .exe: {s}"
+            );
         } else {
-            assert!(s.ends_with("whisper-server"), "Unix binary 不該帶副檔名: {s}");
+            assert!(
+                s.ends_with("whisper-server"),
+                "Unix binary 不該帶副檔名: {s}"
+            );
         }
     }
 
@@ -411,6 +506,53 @@ mod tests {
             msg.contains("not found") && msg.contains("huggingface"),
             "should include download instructions: {msg}"
         );
+    }
+
+    #[test]
+    fn config_language_override_replaces_existing_language() {
+        let cfg = LocalWhisperConfig {
+            model_path: PathBuf::from("/tmp/model.bin"),
+            language: Some("zh".to_string()),
+            server_binary: PathBuf::from("whisper-server"),
+        };
+        let cfg = cfg.with_language_override(Some("ja".to_string()));
+        assert_eq!(cfg.language.as_deref(), Some("ja"));
+    }
+
+    #[test]
+    fn config_language_override_none_preserves_existing_language() {
+        let cfg = LocalWhisperConfig {
+            model_path: PathBuf::from("/tmp/model.bin"),
+            language: Some("zh".to_string()),
+            server_binary: PathBuf::from("whisper-server"),
+        };
+        let cfg = cfg.with_language_override(None);
+        assert_eq!(cfg.language.as_deref(), Some("zh"));
+    }
+
+    #[test]
+    fn provider_language_accessor_returns_configured_language() {
+        let model = tempfile::NamedTempFile::new().unwrap();
+        let provider = LocalWhisperProvider::new(
+            model.path(),
+            Some("ja".to_string()),
+            Path::new("whisper-server"),
+        )
+        .unwrap();
+        assert_eq!(provider.language(), Some("ja"));
+    }
+
+    #[test]
+    fn server_binary_available_accepts_existing_path() {
+        let mut bin = tempfile::NamedTempFile::new().unwrap();
+        writeln!(bin, "fake whisper server").unwrap();
+        assert!(server_binary_available(bin.path()));
+    }
+
+    #[test]
+    fn server_binary_available_rejects_missing_path() {
+        let missing = PathBuf::from("/tmp/mori-missing-whisper-server-for-test");
+        assert!(!server_binary_available(&missing));
     }
 
     #[test]

@@ -21,8 +21,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use mori_core::transcribe_media::{
-    check_ffmpeg, has_supported_extension, transcribe_media_file, transcribe_paths,
-    TranscribeOpts, TranscribeResult,
+    check_ffmpeg, has_supported_extension, transcribe_media_file, transcribe_paths, TranscribeOpts,
+    TranscribeResult,
 };
 
 use crate::recording::{RecordedAudio, Recorder};
@@ -52,16 +52,21 @@ impl Default for MeetingState {
 /// 音檔/影片產出逐字稿」場景,送雲端 Groq Whisper 是不必要的網路 + 隱私風險。
 /// 想走雲端的 user 自己丟到 Groq playground 比較直接。
 fn get_local_provider(
+    language: Option<String>,
 ) -> Result<Arc<dyn mori_core::llm::transcribe::TranscriptionProvider>, String> {
-    let p = mori_core::llm::whisper_local::LocalWhisperProvider::from_config().map_err(|e| {
-        format!(
-            "whisper-local 未配置好:{e}\n\n\
+    let p =
+        mori_core::llm::whisper_local::LocalWhisperProvider::from_config_with_language_override(
+            language,
+        )
+        .map_err(|e| {
+            format!(
+                "whisper-local 未配置好:{e}\n\n\
              先確認:\n\
              1. ~/.mori/bin/whisper-server 存在(從 whisper.cpp release 解壓)\n\
              2. ~/.mori/models/ggml-small.bin 存在(從 HuggingFace 抓)\n\
              或在 Config tab 把 providers.whisper-local 路徑寫成你放的位置。"
-        )
-    })?;
+            )
+        })?;
     Ok(Arc::new(p))
 }
 
@@ -83,15 +88,16 @@ pub async fn transcribe_check_deps() -> TranscribeDepStatus {
         Ok(v) => (true, Some(v)),
         Err(_) => (false, None),
     };
-    let server_bin = mori_core::llm::whisper_local::default_server_binary();
-    let model_path = mori_core::llm::whisper_local::default_model_path();
+    let cfg = mori_core::llm::whisper_local::LocalWhisperProvider::resolved_config();
     TranscribeDepStatus {
         ffmpeg_ok,
         ffmpeg_version,
-        whisper_binary_ok: server_bin.exists(),
-        whisper_binary_path: server_bin.display().to_string(),
-        whisper_model_ok: model_path.exists(),
-        whisper_model_path: model_path.display().to_string(),
+        whisper_binary_ok: mori_core::llm::whisper_local::server_binary_available(
+            &cfg.server_binary,
+        ),
+        whisper_binary_path: cfg.server_binary.display().to_string(),
+        whisper_model_ok: cfg.model_path.exists(),
+        whisper_model_path: cfg.model_path.display().to_string(),
     }
 }
 
@@ -130,7 +136,7 @@ pub async fn transcribe_file_cmd(
     language: Option<String>,
 ) -> Result<TranscribeOutput, String> {
     let path_buf = PathBuf::from(&path);
-    let provider = get_local_provider()?;
+    let provider = get_local_provider(language.clone())?;
     let app_emit = app.clone();
     let progress = Arc::new(move |chunk: u32, total: u32, p: &std::path::Path| {
         let _ = app_emit.emit(
@@ -144,7 +150,7 @@ pub async fn transcribe_file_cmd(
     }) as mori_core::transcribe_media::ProgressFn;
 
     let opts = TranscribeOpts {
-        language,
+        language: None,
         chunk_seconds: None, // 走 default 300s
     };
 
@@ -183,7 +189,7 @@ pub async fn transcribe_paths_cmd(
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    let provider = get_local_provider()?;
+    let provider = get_local_provider(language.clone())?;
     let app_emit = app.clone();
     let file_progress = Arc::new(
         move |index: usize, total: usize, p: &std::path::Path, status: &str| {
@@ -197,8 +203,7 @@ pub async fn transcribe_paths_cmd(
                 },
             );
         },
-    )
-        as Arc<dyn Fn(usize, usize, &std::path::Path, &str) + Send + Sync>;
+    ) as Arc<dyn Fn(usize, usize, &std::path::Path, &str) + Send + Sync>;
 
     let app_emit2 = app.clone();
     let chunk_progress = Arc::new(move |chunk: u32, total: u32, p: &std::path::Path| {
@@ -214,7 +219,7 @@ pub async fn transcribe_paths_cmd(
 
     let input_paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     let opts = TranscribeOpts {
-        language,
+        language: None,
         chunk_seconds: None,
     };
 
@@ -265,8 +270,7 @@ pub struct FolderScanEntry {
 #[tauri::command]
 pub async fn transcribe_scan_folder(folder: String) -> Result<Vec<FolderScanEntry>, String> {
     let dir = PathBuf::from(&folder);
-    let read =
-        std::fs::read_dir(&dir).map_err(|e| format!("read_dir {}: {e}", dir.display()))?;
+    let read = std::fs::read_dir(&dir).map_err(|e| format!("read_dir {}: {e}", dir.display()))?;
     let mut out = Vec::new();
     for entry in read.flatten() {
         let path = entry.path();
@@ -385,7 +389,9 @@ pub async fn meeting_recording_stop(
     );
 
     // 2. 編碼成 WAV,寫到 ~/.mori/meetings/YYYYMMDD-HHMMSS.wav
-    let wav_bytes = audio.to_wav_bytes().map_err(|e| format!("encode WAV: {e:#}"))?;
+    let wav_bytes = audio
+        .to_wav_bytes()
+        .map_err(|e| format!("encode WAV: {e:#}"))?;
     let dir = mori_home_dir().join("meetings");
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -404,7 +410,7 @@ pub async fn meeting_recording_stop(
     let app_for_task = app.clone();
     let wav_for_task = wav_path.clone();
     tauri::async_runtime::spawn(async move {
-        let provider = match get_local_provider() {
+        let provider = match get_local_provider(language.clone()) {
             Ok(p) => p,
             Err(e) => {
                 let _ = app_for_task.emit(
@@ -434,28 +440,27 @@ pub async fn meeting_recording_stop(
         }) as mori_core::transcribe_media::ProgressFn;
 
         let opts = TranscribeOpts {
-            language,
+            language: None,
             chunk_seconds: None,
         };
 
-        let payload = match transcribe_media_file(&wav_for_task, provider, opts, Some(progress))
-            .await
-        {
-            Ok(r) => MeetingTranscribedPayload {
-                wav_path: wav_for_task.display().to_string(),
-                text: r.text,
-                duration_secs: r.duration_secs.max(duration_secs),
-                chunks: r.chunks,
-                error: None,
-            },
-            Err(e) => MeetingTranscribedPayload {
-                wav_path: wav_for_task.display().to_string(),
-                text: String::new(),
-                duration_secs,
-                chunks: 0,
-                error: Some(format!("{e:#}")),
-            },
-        };
+        let payload =
+            match transcribe_media_file(&wav_for_task, provider, opts, Some(progress)).await {
+                Ok(r) => MeetingTranscribedPayload {
+                    wav_path: wav_for_task.display().to_string(),
+                    text: r.text,
+                    duration_secs: r.duration_secs.max(duration_secs),
+                    chunks: r.chunks,
+                    error: None,
+                },
+                Err(e) => MeetingTranscribedPayload {
+                    wav_path: wav_for_task.display().to_string(),
+                    text: String::new(),
+                    duration_secs,
+                    chunks: 0,
+                    error: Some(format!("{e:#}")),
+                },
+            };
         let _ = app_for_task.emit("meeting-transcribed", payload);
     });
 
