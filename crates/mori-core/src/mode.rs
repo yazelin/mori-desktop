@@ -10,11 +10,15 @@
 //!   → `PasteController` 直接貼到游標。對應 Alt+N profile。永遠單輪，
 //!   不做動作，只做「字」。
 //! - `Background` — 休眠：mic 硬關，UI 隱藏。privacy-first。
+//! - `Listening` — Hey Mori 待命（Phase 3A 起）：mic 常開但只跑 wake-word
+//!   detector，聽到「Hey Mori」才開始錄音（走當前 Agent profile 的 pipeline）。
+//!   免熱鍵、hands-free 啟動。對應 Ctrl+Alt+W toggle。
 //!
 //! ## 鍵盤直覺
 //! - Alt+N         → VoiceInput profile（「我要輸入字」）
 //! - Ctrl+Alt+N    → Agent profile（「我要叫 Mori 做事」）
-//! - Ctrl+Alt+Space → toggle 錄音（兩個 mode 共用）
+//! - Ctrl+Alt+Space → toggle 錄音（Agent / VoiceInput 共用）
+//! - Ctrl+Alt+W    → toggle Listening（進/退 Hey Mori 待命）
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -30,6 +34,10 @@ pub enum Mode {
     VoiceInput,
     /// 休眠：麥克風完全關閉。
     Background,
+    /// Hey Mori 待命：mic 常開,wake-word detector(openWakeWord python
+    /// subprocess)跑 idle 偵測。聽到「Hey Mori」→ 觸發跟主熱鍵相同的
+    /// recording → STT → agent 流程。免熱鍵 hands-free。
+    Listening,
 }
 
 impl Mode {
@@ -38,12 +46,14 @@ impl Mode {
             Mode::Agent => "agent",
             Mode::VoiceInput => "voice_input",
             Mode::Background => "background",
+            Mode::Listening => "listening",
         }
     }
 
-    /// 麥克風能不能在這個 mode 下開。Agent / VoiceInput 都需要;Background 才硬關。
+    /// 麥克風能不能在這個 mode 下開。Agent / VoiceInput / Listening 都需要;
+    /// Background 才硬關。
     pub fn allows_mic(&self) -> bool {
-        matches!(self, Mode::Agent | Mode::VoiceInput)
+        matches!(self, Mode::Agent | Mode::VoiceInput | Mode::Listening)
     }
 }
 

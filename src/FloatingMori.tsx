@@ -23,7 +23,7 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
-type Mode = "agent" | "voice_input" | "background";
+type Mode = "agent" | "voice_input" | "background" | "listening";
 
 type Visual =
   | "sleeping"

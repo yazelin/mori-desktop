@@ -69,6 +69,7 @@ impl Skill for SetModeSkill {
             "agent" | "active" => Mode::Agent, // "active" 為 5G 前的 alias
             "voice_input" => Mode::VoiceInput,
             "background" => Mode::Background,
+            "listening" => Mode::Listening,
             other => return Err(anyhow!("invalid mode: {other}")),
         };
 
@@ -79,6 +80,7 @@ impl Skill for SetModeSkill {
                     Mode::Agent => "我醒著呢。".to_string(),
                     Mode::VoiceInput => "已經在輸入模式了。".to_string(),
                     Mode::Background => "我已經在休眠了。".to_string(),
+                    Mode::Listening => "已經在待命,等你喊我。".to_string(),
                 },
                 data: Some(serde_json::json!({
                     "mode": target.as_str(),
@@ -96,6 +98,7 @@ impl Skill for SetModeSkill {
             Mode::Agent => "醒了,我在這。".to_string(),
             Mode::VoiceInput => "切到輸入模式 — 接下來的話會直接貼到游標位置。".to_string(),
             Mode::Background => "好,我先閉眼,叫我就回來。".to_string(),
+            Mode::Listening => "我待命著,喊「Hey Mori」就找我。".to_string(),
         };
 
         Ok(SkillOutput {
