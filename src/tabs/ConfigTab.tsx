@@ -584,6 +584,240 @@ const ALL_SUBTAB_IDS: SubTabId[] = [
   "quick", "llm", "voice", "appearance", "hotkey", "x11", "annuli", "corrections", "raw",
 ];
 
+// ── Wake-ack 音效設定(Phase 3A.1.2)──────────────────────────────────────
+//
+// Listening mode 下 wake event 觸發後播的應答音。內建 5 個 bundled .wav 解壓到
+// `~/.mori/wakeword/sounds/wake-ack-alternates/`,user 可:
+//   - 點 [使用] 切換當前播的檔
+//   - 點 ▶ 試聽
+//   - 上傳自己錄的 .wav
+//   - toggle 全部關掉
+
+type WakeAckAlternate = {
+  filename: string;
+  size_bytes: number;
+  is_active: boolean;
+  is_bundled: boolean;
+};
+
+type WakeAckStatus = {
+  enabled: boolean;
+  active_filename: string | null;
+  custom_path: string | null;
+  alternates: WakeAckAlternate[];
+};
+
+function WakeAckSection() {
+  // i18n keys 之後補,目前 hardcode 中文(跟其他 hardcode 的 hint 一樣)
+  const [status, setStatus] = useState<WakeAckStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const refresh = async () => {
+    try {
+      const s = await invoke<WakeAckStatus>("wake_ack_status");
+      setStatus(s);
+    } catch (e) {
+      console.error("wake_ack_status", e);
+      setMsg(`讀失敗:${String(e)}`);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const flashMsg = (m: string) => {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 2500);
+  };
+
+  const onUse = async (filename: string) => {
+    setBusy(true);
+    try {
+      await invoke("wake_ack_set_active", { filename });
+      await refresh();
+      flashMsg(`已切換到 ${filename}`);
+    } catch (e) {
+      flashMsg(`切換失敗:${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onPreview = async (filename: string | null) => {
+    try {
+      await invoke("wake_ack_preview", { filename });
+    } catch (e) {
+      flashMsg(`試聽失敗:${String(e)}`);
+    }
+  };
+
+  const onDelete = async (filename: string) => {
+    if (!confirm(`刪除 ${filename}?(只能刪自己上傳的,內建檔不會被刪)`)) return;
+    setBusy(true);
+    try {
+      await invoke("wake_ack_delete_alternate", { filename });
+      await refresh();
+      flashMsg(`已刪除 ${filename}`);
+    } catch (e) {
+      flashMsg(`刪除失敗:${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToggleEnabled = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      await invoke("wake_ack_set_enabled", { enabled });
+      await refresh();
+    } catch (e) {
+      flashMsg(`儲存失敗:${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onUpload = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".wav")) {
+      flashMsg("只支援 .wav 檔");
+      return;
+    }
+    setBusy(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buf));
+      await invoke("wake_ack_upload", { filename: file.name, bytes });
+      await refresh();
+      flashMsg(`已上傳 ${file.name}`);
+    } catch (e) {
+      flashMsg(`上傳失敗:${String(e)}`);
+    } finally {
+      setBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  if (!status) {
+    return (
+      <Section title="Wake-ack 應答音(Hey Mori 後播的回應)">
+        <p style={{ opacity: 0.6, fontSize: 13 }}>載入中...</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section
+      title="Wake-ack 應答音"
+      hint="Listening mode 下,Hey Mori 被偵測到後播這個音檔(讓你知道可以開始說話)。先放完再開麥克風,避免被 mic 收回去污染 STT。"
+    >
+      <FormRow label="啟用" hint="關掉就完全靜音(只看 floating Mori 動畫提示)">
+        <input
+          type="checkbox"
+          checked={status.enabled}
+          disabled={busy}
+          onChange={(e) => onToggleEnabled(e.target.checked)}
+        />
+      </FormRow>
+
+      <FormRow label="目前播的檔" hint={`實際播放路徑:~/.mori/wakeword/sounds/wake-ack.wav。「使用」按鈕會把選的檔覆蓋到那個固定路徑。${status.custom_path ? `\n config 有 wake_ack_path override:${status.custom_path}` : ""}`}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "monospace", fontSize: 13 }}>
+            {status.active_filename ?? "(未指定 — 用 wake-ack.wav 預設)"}
+          </span>
+          <button
+            className="mori-btn small ghost"
+            onClick={() => onPreview(null)}
+            title="試聽當前播的檔"
+          >
+            ▶ 試聽
+          </button>
+        </div>
+      </FormRow>
+
+      <FormRow label="備選音檔" hint={`從這幾個 cp 過去 wake-ack.wav。內建檔不能刪,只能 override(可重新解壓)。自己錄/下載的 .wav 從下方上傳。`}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {status.alternates.length === 0 && (
+            <span style={{ opacity: 0.6, fontSize: 13 }}>(無備選 — 重啟 mori-tauri 會解壓 5 個內建)</span>
+          )}
+          {status.alternates.map((alt) => (
+            <div
+              key={alt.filename}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "4px 8px",
+                background: alt.is_active ? "var(--mori-accent-bg, rgba(120,180,140,0.15))" : "transparent",
+                borderRadius: 4,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 13,
+                  flex: 1,
+                  fontWeight: alt.is_active ? 600 : 400,
+                }}
+              >
+                {alt.is_active && "✓ "}
+                {alt.filename}
+                {alt.is_bundled && <span style={{ opacity: 0.5, fontSize: 11, marginLeft: 6 }}>內建</span>}
+              </span>
+              <span style={{ opacity: 0.5, fontSize: 11 }}>{(alt.size_bytes / 1024).toFixed(0)} KB</span>
+              <button
+                className="mori-btn small ghost"
+                onClick={() => onPreview(alt.filename)}
+                title="試聽"
+                disabled={busy}
+              >
+                ▶
+              </button>
+              <button
+                className="mori-btn small"
+                onClick={() => onUse(alt.filename)}
+                disabled={busy || alt.is_active}
+                title={alt.is_active ? "已經是當前" : "設為當前播的檔"}
+              >
+                {alt.is_active ? "使用中" : "使用"}
+              </button>
+              {!alt.is_bundled && (
+                <button
+                  className="mori-btn small ghost"
+                  onClick={() => onDelete(alt.filename)}
+                  disabled={busy}
+                  title="刪除(只能刪自己上傳的)"
+                  style={{ color: "var(--mori-danger, #c66)" }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </FormRow>
+
+      <FormRow label="上傳自錄" hint="自己錄一段 .wav 當應答音(建議 0.5-1.5 秒,-16 LUFS 左右音量)">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".wav,audio/wav,audio/x-wav"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onUpload(f);
+            }}
+          />
+          {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
+        </div>
+      </FormRow>
+    </Section>
+  );
+}
+
 function ConfigTab({
   pendingSubTab,
   onSubTabApplied,
@@ -1037,6 +1271,54 @@ function ConfigTab({
               />
             </FormRow>
           </Section>
+
+          {/* ── Listening mode 偵測設定(threshold + max_record_secs)── */}
+          <Section
+            title="Hey Mori 偵測設定"
+            hint="Listening mode 下 wake-word listener 的調參。預設 0.5 太敏感(光講「Mori」就觸發)→ 拉到 0.6~0.7 變嚴格。"
+          >
+            <FormRow
+              label="threshold"
+              hint="偵測門檻(0.05~0.95)。越高越嚴格(必須完整「Hey Mori」才觸發),越低越敏感(誤觸多)。預設 0.5。建議從 0.65 試起。"
+            >
+              <input
+                type="number"
+                min={0.05}
+                max={0.95}
+                step={0.05}
+                value={Number(cfg.listening_mode?.threshold ?? 0.5)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const lm = ensureSubObj(c, "listening_mode");
+                    const n = Number(e.target.value);
+                    lm.threshold = Number.isFinite(n) ? Math.max(0.05, Math.min(0.95, n)) : 0.5;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow
+              label="max_record_secs"
+              hint="wake-word 觸發錄音後最多錄幾秒(沒做 VAD silence-stop,固定時間 cap)。預設 6 秒。短指令短一點,長指令拉到 10+。"
+            >
+              <input
+                type="number"
+                min={2}
+                max={60}
+                step={1}
+                value={Number(cfg.listening_mode?.max_record_secs ?? 6)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const lm = ensureSubObj(c, "listening_mode");
+                    const n = Number(e.target.value);
+                    lm.max_record_secs = Number.isFinite(n) ? Math.max(2, Math.min(60, Math.round(n))) : 6;
+                  })
+                }
+              />
+            </FormRow>
+          </Section>
+
+          {/* Wake-ack 應答音(獨立 Section,Phase 3A.1.2)*/}
+          <WakeAckSection />
           </>}
 
           {/* ── Appearance ─────────────────────────────── */}
