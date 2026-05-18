@@ -2047,15 +2047,32 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                 audio.trim_silence_runs(0.01, min_ms);
                 let after_samples = audio.samples.len();
                 let after_secs = audio.duration_secs();
+                let trimmed_secs = before_secs - after_secs;
                 tracing::info!(
-                    before_secs = before_secs,
-                    after_secs = after_secs,
-                    trimmed_secs = before_secs - after_secs,
+                    before_secs,
+                    after_secs,
+                    trimmed_secs,
                     before_samples,
                     after_samples,
                     min_silence_ms = min_ms,
                     "applied silence-run trim before STT"
                 );
+                // 同樣寫進 event_log,讓 Logs tab / .jsonl 看得到 — tracing log
+                // 只走 stderr,session 一關就消失,user 沒辦法事後追「我那次到底
+                // 有沒有修剪、修剪掉多少」。寫進 event_log = audit trail。
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "silence_trim",
+                    "before_secs": before_secs,
+                    "after_secs": after_secs,
+                    "trimmed_secs": trimmed_secs,
+                    "min_silence_ms": min_ms,
+                }));
+            } else {
+                // 也記一筆「明確 OFF」,避免 user 看 log 以為 binary 沒帶 feature
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "silence_trim",
+                    "enabled": false,
+                }));
             }
             let duration = audio.duration_secs();
             let rms = if audio.samples.is_empty() {

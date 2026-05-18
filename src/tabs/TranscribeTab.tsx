@@ -14,6 +14,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { IconRefresh, IconClipboard, IconCheck, IconWarning, IconMic, IconStop } from "../icons";
+import { Select } from "../Select";
 
 // ─── shared types ───────────────────────────────────────────────────────
 
@@ -89,16 +90,16 @@ export default function TranscribeTab() {
 
         <div className="mori-transcribe-lang-picker">
           <label>{t("transcribe_tab.language_label")}</label>
-          <select
-            className="mori-input small"
+          <Select
             value={language}
-            onChange={(e) => setLanguage(e.target.value as Language)}
-          >
-            <option value="auto">{t("transcribe_tab.language_auto")}</option>
-            <option value="zh">{t("transcribe_tab.language_zh")}</option>
-            <option value="en">{t("transcribe_tab.language_en")}</option>
-            <option value="ja">{t("transcribe_tab.language_ja")}</option>
-          </select>
+            onChange={(v) => setLanguage(v as Language)}
+            options={[
+              { value: "auto", label: t("transcribe_tab.language_auto") },
+              { value: "zh", label: t("transcribe_tab.language_zh") },
+              { value: "en", label: t("transcribe_tab.language_en") },
+              { value: "ja", label: t("transcribe_tab.language_ja") },
+            ]}
+          />
         </div>
       </div>
 
