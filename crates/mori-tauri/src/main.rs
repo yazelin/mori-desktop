@@ -888,22 +888,53 @@ fn read_voice_trim_silence_threshold() -> f32 {
 }
 
 /// Listening mode 下,wake-word 觸發錄音後最多錄多久(秒)。
-/// Phase 3A 沒做 VAD-based 自動停,固定時間 cap。預設 6s — 對短指令
-/// (「Hey Mori 開瀏覽器」)夠用,長指令可在 config 拉高。
-/// 之後 Phase 3B 改成 silence-based stop。
-/// clamp 2~60 秒。
+/// Phase 3B 起這是「安全上限」— 正常情況 VAD 偵測到靜音就先自動停了,這個
+/// cap 是怕 VAD 沒 fire(例:背景持續有噪音、user 一直 ah 沒停)時的兜底。
+/// 預設 30s,clamp 2~120 秒。
 fn read_listening_max_record_secs() -> u32 {
     let path = mori_dir().join("config.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return 6;
+        return 30;
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return 6;
+        return 30;
     };
     json.pointer("/listening_mode/max_record_secs")
         .and_then(|v| v.as_u64())
-        .map(|v| v.clamp(2, 60) as u32)
-        .unwrap_or(6)
+        .map(|v| v.clamp(2, 120) as u32)
+        .unwrap_or(30)
+}
+
+/// Phase 3B:VAD silence-stop — 連續多久 silence 算 user 講完了。
+/// 預設 1.5s(讓 user 中間可以有思考停頓不被截)。clamp 0.3~10s。
+fn read_listening_silence_stop_secs() -> f32 {
+    let path = mori_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return 1.5;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return 1.5;
+    };
+    json.pointer("/listening_mode/silence_stop_secs")
+        .and_then(|v| v.as_f64())
+        .map(|v| v.clamp(0.3, 10.0) as f32)
+        .unwrap_or(1.5)
+}
+
+/// VAD silence threshold — Recorder.current_level() 在 0..=1 區間,低於此值算「靜音」。
+/// 預設 0.012(對齊 voice_input.min_audio_rms baseline)。clamp 0.001~0.2。
+fn read_listening_silence_threshold_rms() -> f32 {
+    let path = mori_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return 0.012;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return 0.012;
+    };
+    json.pointer("/listening_mode/silence_threshold_rms")
+        .and_then(|v| v.as_f64())
+        .map(|v| v.clamp(0.001, 0.2) as f32)
+        .unwrap_or(0.012)
 }
 
 /// 啟動時的預設 mode。讀 `~/.mori/config.json` 的 `startup_mode`(`"voice_input"`
@@ -2250,8 +2281,6 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let window_samples =
                 ((audio.sample_rate as usize) * (audio.channels.max(1) as usize)) / 10;
             let peak_rms = peak_rms_over_windows(&audio.samples, window_samples.max(1));
-            // 為 log 沿用 `rms` 欄位名(舊 grep / dashboards 不破),語意改成 peak。
-            let rms = peak_rms;
             tracing::info!(
                 duration_secs = duration,
                 samples = audio.samples.len(),
@@ -3944,6 +3973,10 @@ fn main() {
             // 從 binary 內嵌寫入,已存在不覆蓋(user 改過的 wake-ack.wav 保留)。
             wake_sound::ensure_files(&mori_dir());
 
+            // Phase 3B:ensure ~/.mori/wakeword/hey-mori.onnx 預設 wake-word model。
+            // Fresh user 不用先跑 mori-wake-train.py 就能用 Hey Mori。自訓過的不覆蓋。
+            wake_word::ensure_default_model(&mori_dir());
+
             // 啟動初始 floating visibility — update_floating_visibility 自己會看:
             //   - quickstart_completed (儀式還沒完成 → 強制隱藏)
             //   - floating.show_mode (always/recording/off)
@@ -4466,8 +4499,9 @@ fn main() {
             );
 
             // Phase 3A: wake-word 觸發 → 跟主熱鍵 Hold-press 等效(start_recording)。
-            // 沒 release event 的問題用 max_record_secs 計時 cap 解 — 到時間自動
-            // stop_and_transcribe。Phase 3B 換成 VAD-based silence-stop。
+            // Phase 3B 起改用 VAD silence-stop:即時 poll Recorder.level,user 講完
+            // (連續 N 秒 < silence_threshold)自動停。`max_record_secs` 留著當安全
+            // 上限,防 VAD 永遠不 fire(背景持續噪音、user 一直 ah 沒停)。
             let handle_wake = app.handle().clone();
             let state_for_wake = state_for_setup.clone();
             app.listen("wake-word-detected", move |_event| {
@@ -4485,17 +4519,93 @@ fn main() {
                     })
                     .await;
                     handle_hotkey_pressed(handle.clone(), state.clone());
+
+                    // 抓 Recorder.level Arc 給 VAD poll 用。理論上
+                    // handle_hotkey_pressed 同步,return 後 recorder 一定在 state。
+                    // 防禦性檢查:沒抓到 fallback 回固定 sleep。
+                    let level_arc = state
+                        .recorder
+                        .lock()
+                        .as_ref()
+                        .map(|r| r.level_arc());
+                    let Some(level) = level_arc else {
+                        tracing::warn!(
+                            "wake VAD: recorder missing after start_recording, falling back to fixed timer"
+                        );
+                        let max_secs = read_listening_max_record_secs();
+                        tokio::time::sleep(std::time::Duration::from_secs(max_secs as u64)).await;
+                        let still = matches!(*state.phase.lock(), Phase::Recording { .. });
+                        if still {
+                            stop_and_transcribe(handle, state);
+                        }
+                        return;
+                    };
+
                     let max_secs = read_listening_max_record_secs();
-                    tracing::info!(max_secs, "wake-triggered recording started, auto-stop timer armed");
-                    tokio::time::sleep(std::time::Duration::from_secs(max_secs as u64)).await;
-                    // 只有當 phase 還在 Recording 時 stop_and_transcribe — user 可能在
-                    // 這段期間自己手動取消(Ctrl+Alt+Esc)或熱鍵又 toggle 走了。
-                    let still_recording = matches!(
-                        *state.phase.lock(),
-                        Phase::Recording { .. }
+                    let silence_stop_secs = read_listening_silence_stop_secs();
+                    let silence_threshold = read_listening_silence_threshold_rms();
+                    tracing::info!(
+                        max_secs,
+                        silence_stop_secs,
+                        silence_threshold,
+                        "wake-triggered recording started — VAD silence-stop armed"
                     );
+
+                    // VAD loop:100ms poll level,state machine 追「user 開始講話了嗎 →
+                    // 講完了嗎」。
+                    let start = std::time::Instant::now();
+                    let mut speaking_started = false;
+                    let mut silence_began: Option<std::time::Instant> = None;
+                    let mut stop_reason: &'static str = "max_duration";
+                    let poll_interval = std::time::Duration::from_millis(100);
+
+                    loop {
+                        tokio::time::sleep(poll_interval).await;
+
+                        // User 取消 / phase 跳走 → 停 polling,不要 fire stop_and_transcribe
+                        // (state.recorder 已被別人 take 走了)
+                        if !matches!(*state.phase.lock(), Phase::Recording { .. }) {
+                            tracing::debug!("wake VAD: phase moved away from Recording, exit");
+                            return;
+                        }
+
+                        // Max duration ceiling — 怕 VAD 永遠 fire 不到
+                        if start.elapsed().as_secs() >= max_secs as u64 {
+                            break;
+                        }
+
+                        let rms = level.load(std::sync::atomic::Ordering::Relaxed) as f32
+                            / u16::MAX as f32;
+
+                        if rms >= silence_threshold {
+                            if !speaking_started {
+                                tracing::debug!(rms, "wake VAD: speech detected");
+                            }
+                            speaking_started = true;
+                            silence_began = None;
+                        } else if speaking_started {
+                            match silence_began {
+                                None => silence_began = Some(std::time::Instant::now()),
+                                Some(t) if t.elapsed().as_secs_f32() >= silence_stop_secs => {
+                                    stop_reason = "silence_detected";
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    tracing::info!(
+                        reason = stop_reason,
+                        elapsed_secs = start.elapsed().as_secs_f32(),
+                        "wake-triggered recording stopping"
+                    );
+
+                    // Re-check phase before firing stop_and_transcribe(user 可能在
+                    // 我們判斷完到實際 stop 之間 Ctrl+Alt+Esc 取消了)
+                    let still_recording =
+                        matches!(*state.phase.lock(), Phase::Recording { .. });
                     if still_recording {
-                        tracing::info!("wake-triggered recording reached max duration, stopping");
                         stop_and_transcribe(handle, state);
                     }
                 });

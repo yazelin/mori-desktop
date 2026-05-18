@@ -1272,10 +1272,10 @@ function ConfigTab({
             </FormRow>
           </Section>
 
-          {/* ── Listening mode 偵測設定(threshold + max_record_secs)── */}
+          {/* ── Listening mode 偵測 + VAD silence-stop 設定 ── */}
           <Section
-            title="Hey Mori 偵測設定"
-            hint="Listening mode 下 wake-word listener 的調參。預設 0.5 太敏感(光講「Mori」就觸發)→ 拉到 0.6~0.7 變嚴格。"
+            title="Hey Mori 偵測 + 錄音"
+            hint="Wake-word 偵測靈敏度 + Phase 3B 起的 VAD 自動停。預設 threshold 0.5 太敏感的話拉到 0.6~0.7。VAD 連續 silence_stop_secs 秒沒聲音自動停送 STT,max_record_secs 是安全兜底上限。"
           >
             <FormRow
               label="threshold"
@@ -1297,20 +1297,58 @@ function ConfigTab({
               />
             </FormRow>
             <FormRow
-              label="max_record_secs"
-              hint="wake-word 觸發錄音後最多錄幾秒(沒做 VAD silence-stop,固定時間 cap)。預設 6 秒。短指令短一點,長指令拉到 10+。"
+              label="silence_stop_secs"
+              hint="VAD 連續多久靜音算 user 講完了(自動 stop)。預設 1.5s。太短會打斷思考停頓,太長會空等。clamp 0.3~10s。"
             >
               <input
                 type="number"
-                min={2}
-                max={60}
-                step={1}
-                value={Number(cfg.listening_mode?.max_record_secs ?? 6)}
+                min={0.3}
+                max={10}
+                step={0.1}
+                value={Number(cfg.listening_mode?.silence_stop_secs ?? 1.5)}
                 onChange={(e) =>
                   applyPatch((c) => {
                     const lm = ensureSubObj(c, "listening_mode");
                     const n = Number(e.target.value);
-                    lm.max_record_secs = Number.isFinite(n) ? Math.max(2, Math.min(60, Math.round(n))) : 6;
+                    lm.silence_stop_secs = Number.isFinite(n) ? Math.max(0.3, Math.min(10, n)) : 1.5;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow
+              label="silence_threshold_rms"
+              hint="VAD 靜音判定 threshold(Recorder level 0~1)。低於此值算靜音。預設 0.012(對齊 voice_input.min_audio_rms)。背景吵就拉高到 0.02~0.05。"
+            >
+              <input
+                type="number"
+                min={0.001}
+                max={0.2}
+                step={0.005}
+                value={Number(cfg.listening_mode?.silence_threshold_rms ?? 0.012)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const lm = ensureSubObj(c, "listening_mode");
+                    const n = Number(e.target.value);
+                    lm.silence_threshold_rms = Number.isFinite(n) ? Math.max(0.001, Math.min(0.2, n)) : 0.012;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow
+              label="max_record_secs"
+              hint="安全上限(秒)— 正常 VAD 偵測到靜音就先停了,這只是 VAD 沒 fire 時的兜底(背景持續噪音 / user 一直「ah...」沒停)。預設 30 秒。clamp 2~120。"
+            >
+              <input
+                type="number"
+                min={2}
+                max={120}
+                step={1}
+                value={Number(cfg.listening_mode?.max_record_secs ?? 30)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const lm = ensureSubObj(c, "listening_mode");
+                    const n = Number(e.target.value);
+                    lm.max_record_secs = Number.isFinite(n) ? Math.max(2, Math.min(120, Math.round(n))) : 30;
                   })
                 }
               />

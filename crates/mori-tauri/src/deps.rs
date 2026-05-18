@@ -342,6 +342,48 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
         },
+        // Phase 3B:Hey Mori wake-word listener 的 Python runtime venv。
+        // 沒裝 → Listening mode 進去後 spawn python 失敗,Tray 開「Hey Mori 待命」
+        // 不會 work。
+        DepSpec {
+            id: "wake-listener-runtime",
+            name: "Hey Mori 偵測 runtime(Python venv)",
+            description: "Listening mode 用的 Python 環境 + openWakeWord。需要 Python 3.11+ \
+                          (uv 會自動處理)。沒裝就無法用「Hey Mori」喚醒。",
+            unlocks: "Listening mode + 對 mic 喊「Hey Mori」觸發 recording",
+            size_hint: Some("~150MB"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "Windows 一鍵安裝尚未實作(PowerShell 版 venv 路徑不一樣)— \
+                 暫時看 README.wake-train.md 手動設。",
+            ),
+            check: CheckSpec::File {
+                path_template: "$HOME/.mori/wake-venv/bin/python",
+            },
+            // Linux/macOS:有 uv 用 uv,沒 uv fallback system python3.11
+            install: InstallSpec::Shell {
+                script: "set -e; \
+                         VENV=\"$HOME/.mori/wake-venv\"; \
+                         if [ ! -d \"$VENV\" ]; then \
+                            if [ -x \"$HOME/.local/bin/uv\" ]; then \
+                                \"$HOME/.local/bin/uv\" venv \"$VENV\" --python 3.11; \
+                            else \
+                                python3.11 -m venv \"$VENV\" || python3 -m venv \"$VENV\"; \
+                            fi; \
+                         fi; \
+                         \"$VENV/bin/pip\" install --quiet openwakeword sounddevice numpy onnxruntime scikit-learn",
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows PowerShell(需先裝 Python 3.11):",
+                        "python -m venv %USERPROFILE%\\.mori\\wake-venv",
+                        "%USERPROFILE%\\.mori\\wake-venv\\Scripts\\pip install openwakeword sounddevice numpy onnxruntime scikit-learn",
+                    ],
+                }),
+            ],
+        },
     ]
 }
 
