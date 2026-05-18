@@ -51,6 +51,109 @@ impl RecordedAudio {
         Ok(cursor.into_inner())
     }
 
+    /// 修剪首尾靜音(不改 sample_rate/channels)。
+    /// `threshold` 用線性振幅(0.0~1.0),例如 0.01 ≈ -40 dBFS。
+    ///
+    /// 只會修剪「開頭與結尾」的靜音，不會動到中間停頓。
+    pub fn trim_silence(&mut self, threshold: f32) {
+        if self.samples.is_empty() {
+            return;
+        }
+        let th = threshold.clamp(0.0, 1.0) as f64;
+        if th <= 0.0 {
+            return;
+        }
+        let ch = self.channels.max(1) as usize;
+        let frames = self.samples.len() / ch;
+        if frames == 0 {
+            return;
+        }
+
+        let frame_rms = |fi: usize, data: &[i16]| -> f64 {
+            let base = fi * ch;
+            let mut sum = 0.0f64;
+            for c in 0..ch {
+                let n = data[base + c] as f64 / i16::MAX as f64;
+                sum += n * n;
+            }
+            (sum / ch as f64).sqrt()
+        };
+
+        let mut start = 0usize;
+        while start < frames && frame_rms(start, &self.samples) < th {
+            start += 1;
+        }
+        if start == frames {
+            self.samples.clear();
+            return;
+        }
+
+        let mut end = frames;
+        while end > start && frame_rms(end - 1, &self.samples) < th {
+            end -= 1;
+        }
+
+        let start_i = start * ch;
+        let end_i = end * ch;
+        if start_i == 0 && end_i == self.samples.len() {
+            return;
+        }
+        self.samples.drain(end_i..);
+        self.samples.drain(..start_i);
+    }
+
+    /// 移除整段音訊中「連續靜音 >= min_silence_ms」的區段(包含中間停頓)。
+    ///
+    /// 用 frame RMS 判定靜音；每個 frame = `channels` 個 sample。
+    pub fn trim_silence_runs(&mut self, threshold: f32, min_silence_ms: u32) {
+        if self.samples.is_empty() || min_silence_ms == 0 {
+            return;
+        }
+        let th = threshold.clamp(0.0, 1.0) as f64;
+        if th <= 0.0 {
+            return;
+        }
+        let ch = self.channels.max(1) as usize;
+        let sr = self.sample_rate.max(1) as usize;
+        let frames = self.samples.len() / ch;
+        if frames == 0 {
+            return;
+        }
+        let min_frames = ((min_silence_ms as usize * sr) / 1000).max(1);
+        let frame_rms = |fi: usize, data: &[i16]| -> f64 {
+            let base = fi * ch;
+            let mut sum = 0.0f64;
+            for c in 0..ch {
+                let n = data[base + c] as f64 / i16::MAX as f64;
+                sum += n * n;
+            }
+            (sum / ch as f64).sqrt()
+        };
+
+        let mut out: Vec<i16> = Vec::with_capacity(self.samples.len());
+        let mut i = 0usize;
+        while i < frames {
+            let silent = frame_rms(i, &self.samples) < th;
+            if !silent {
+                let base = i * ch;
+                out.extend_from_slice(&self.samples[base..base + ch]);
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < frames && frame_rms(i, &self.samples) < th {
+                i += 1;
+            }
+            let run = i - start;
+            if run < min_frames {
+                let s = start * ch;
+                let e = i * ch;
+                out.extend_from_slice(&self.samples[s..e]);
+            }
+        }
+        self.samples = out;
+    }
+
     /// 約略秒數(供 UI / log 顯示)。
     pub fn duration_secs(&self) -> f32 {
         let total_samples = self.samples.len() as f32;

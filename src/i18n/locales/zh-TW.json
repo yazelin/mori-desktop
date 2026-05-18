@@ -419,6 +419,8 @@
       "hint_llm_routing_agent": "agent loop 用哪個 provider(預設 = provider)",
       "hint_llm_routing_skills": "skill_name → provider(空 = 用 agent / provider)",
       "hint_voice_cleanup": "smart=LLM+程式 / minimal=只程式 / none=raw 直貼",
+      "hint_voice_trim_silence": "錄音送 STT 前先修剪首尾靜音（建議開啟）",
+      "hint_voice_trim_silence_min_ms": "靜音連續至少幾毫秒才修剪（也會套用到中間停頓）",
       "hint_voice_inject": "cleanup LLM 注入哪些 memory type 當校正詞庫(profile 沒設時的全域 default)",
       "hint_locale": "zh-TW / en。改完立即生效，同時寫進 config.json — 重啟也記得。",
       "floating_show_mode": "出現時機",

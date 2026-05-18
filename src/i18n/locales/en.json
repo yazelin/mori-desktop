@@ -419,6 +419,8 @@
       "hint_llm_routing_agent": "Which provider the agent loop uses (default = provider above)",
       "hint_llm_routing_skills": "skill_name → provider (empty = use agent / provider above)",
       "hint_voice_cleanup": "smart = LLM + programmatic / minimal = programmatic only / none = raw paste",
+      "hint_voice_trim_silence": "Trim leading/trailing silence before sending audio to STT (recommended on)",
+      "hint_voice_trim_silence_min_ms": "Minimum silence duration (ms) to trim, including pauses inside the recording",
       "hint_voice_inject": "Which memory types to inject into the cleanup LLM as a correction dictionary (global default when a profile doesn't set its own)",
       "hint_locale": "zh-TW / en. Applies immediately and is persisted to config.json — remembered across restarts.",
       "floating_show_mode": "Show when",
