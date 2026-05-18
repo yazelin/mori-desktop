@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { ProfileEditor } from "../ProfileEditor";
 import { IconVoiceMic, IconTree, IconClose } from "../icons";
 
-type ProfileEntry = { stem: string; display: string };
+type ProfileEntry = { stem: string; display: string; provider?: string | null };
 type Kind = "voice" | "agent";
 type StarterTemplate = { filename: string; lang: "zh" | "en"; display: string };
 type TokenEstimate = { gpt_oss: number; gemini: number };
@@ -208,6 +208,22 @@ function NewProfileButton({
  *  數字格式 `~512 / ~440` — 前 gpt-oss(o200k_harmony,Mori 預設 groq provider
  *  跑的)/ 後 Gemini Flash。啟發法,±10% 準確度。title 解釋 disclaimer。
  *  沒拿到估算(profile 不在磁碟 / 後端錯)就不渲染,不卡 row。 */
+/** Profile row 的 provider chip — 顯示 frontmatter `provider:` 值。
+ *  沒設(=走全域 routing)就顯示 "default" 的灰底樣式,方便一眼看出哪幾個 profile
+ *  是走預設 provider。 */
+function ProviderBadge({ provider }: { provider: string | null | undefined }) {
+  const isDefault = !provider;
+  const label = provider ?? "default";
+  return (
+    <span
+      className={`mori-profile-row-provider${isDefault ? " is-default" : ""}`}
+      title={isDefault ? "未指定 provider — 走全域預設" : `provider: ${provider}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function TokenBadge({ est }: { est: TokenEstimate | undefined }) {
   const { t } = useTranslation();
   if (!est) return null;
@@ -290,6 +306,7 @@ function ProfilesTab() {
               <div className="mori-profile-row-info">
                 <div className="mori-profile-row-line1">
                   <span className="mori-profile-row-name">{p.display}</span>
+                  <ProviderBadge provider={p.provider} />
                   <TokenBadge est={voiceTokens[p.stem]} />
                 </div>
                 <span className="mori-profile-row-stem">{p.stem}</span>
@@ -324,6 +341,7 @@ function ProfilesTab() {
               <div className="mori-profile-row-info">
                 <div className="mori-profile-row-line1">
                   <span className="mori-profile-row-name">{p.display}</span>
+                  <ProviderBadge provider={p.provider} />
                   <TokenBadge est={agentTokens[p.stem]} />
                 </div>
                 <span className="mori-profile-row-stem">{p.stem}</span>

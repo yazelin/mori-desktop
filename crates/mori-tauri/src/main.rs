@@ -24,6 +24,7 @@ mod selection;
 mod shell_skill;
 mod skill_server;
 mod theme;
+mod transcribe_cmds;
 
 use std::sync::Arc;
 
@@ -86,6 +87,9 @@ const MAX_HISTORY_PAIRS: usize = 10;
 pub struct AppState {
     pub phase: Mutex<Phase>,
     pub recorder: Mutex<Option<Recorder>>,
+    /// 轉錄頁的會議錄音(長錄音 + 結束自動轉錄)。跟 `recorder`(短錄/voice-input)
+    /// 分開,兩種互不踩。
+    pub meeting: crate::transcribe_cmds::MeetingState,
     /// 透過 GroqProvider::discover_api_key() 在啟動時嘗試取得;
     /// 若無,transcribe 階段會回 Error。
     pub groq_api_key: Mutex<Option<String>>,
@@ -1614,21 +1618,44 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
 struct ProfileEntry {
     stem: String,
     display: String,
+    /// frontmatter 的 `provider:` 值；沒設 → None(UI 顯示為 "default")。
+    /// 讀檔失敗也是 None,讓 list 不被個別壞檔擋下。
+    provider: Option<String>,
 }
 
 #[tauri::command]
 fn picker_list_voice_profiles() -> Vec<ProfileEntry> {
+    let dir = mori_dir().join("voice_input");
     mori_core::voice_input_profile::list_voice_profiles()
         .into_iter()
-        .map(|(stem, display)| ProfileEntry { stem, display })
+        .map(|(stem, display)| {
+            let provider = std::fs::read_to_string(dir.join(format!("{stem}.md")))
+                .ok()
+                .and_then(|content| {
+                    mori_core::voice_input_profile::parse_profile(&stem, &content)
+                        .frontmatter
+                        .provider
+                });
+            ProfileEntry { stem, display, provider }
+        })
         .collect()
 }
 
 #[tauri::command]
 fn picker_list_agent_profiles() -> Vec<ProfileEntry> {
+    let dir = mori_dir().join("agent");
     mori_core::agent_profile::list_agent_profiles()
         .into_iter()
-        .map(|(stem, display)| ProfileEntry { stem, display })
+        .map(|(stem, display)| {
+            let provider = std::fs::read_to_string(dir.join(format!("{stem}.md")))
+                .ok()
+                .and_then(|content| {
+                    mori_core::agent_profile::parse_agent_profile(&stem, &content)
+                        .frontmatter
+                        .provider
+                });
+            ProfileEntry { stem, display, provider }
+        })
         .collect()
 }
 
@@ -2014,11 +2041,19 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         let transcribe_result: anyhow::Result<String> = async {
             let mut audio = recorder.stop().context("stop recorder")?;
             if read_voice_trim_silence_enabled() {
-                let before = audio.samples.len();
-                audio.trim_silence_runs(0.01, read_voice_trim_silence_min_ms());
+                let before_samples = audio.samples.len();
+                let before_secs = audio.duration_secs();
+                let min_ms = read_voice_trim_silence_min_ms();
+                audio.trim_silence_runs(0.01, min_ms);
+                let after_samples = audio.samples.len();
+                let after_secs = audio.duration_secs();
                 tracing::info!(
-                    before_samples = before,
-                    after_samples = audio.samples.len(),
+                    before_secs = before_secs,
+                    after_secs = after_secs,
+                    trimmed_secs = before_secs - after_secs,
+                    before_samples,
+                    after_samples,
+                    min_silence_ms = min_ms,
                     "applied silence-run trim before STT"
                 );
             }
@@ -3381,6 +3416,7 @@ fn main() {
     let state = Arc::new(AppState {
         phase: Mutex::new(Phase::default()),
         recorder: Mutex::new(None),
+        meeting: crate::transcribe_cmds::MeetingState::default(),
         groq_api_key: Mutex::new(None),
         memory: parking_lot::RwLock::new(memory),
         annuli: parking_lot::RwLock::new(annuli_client),
@@ -3424,6 +3460,8 @@ fn main() {
         .manage(state.clone())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // 轉錄頁:native file/folder picker(WebView <input type=file> 給不到絕對路徑)
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             mori_version,
             mori_phase,
@@ -3496,6 +3534,14 @@ fn main() {
             character_sprite_data_url,
             character_dir,
             character_upgrade_pack_to_4x4,
+            transcribe_cmds::transcribe_check_deps,
+            transcribe_cmds::transcribe_file_cmd,
+            transcribe_cmds::transcribe_paths_cmd,
+            transcribe_cmds::transcribe_scan_folder,
+            transcribe_cmds::transcribe_save_alongside,
+            transcribe_cmds::meeting_recording_start,
+            transcribe_cmds::meeting_recording_stop,
+            transcribe_cmds::meeting_recording_status,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)

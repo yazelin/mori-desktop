@@ -339,6 +339,39 @@ export function IconTree(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 📝 Transcribe — 音波 + 文字行,對應「逐字稿」概念
+export function IconTranscribe(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 10 v4 M6 8 v8 M9 11 v2 M12 7 v10 M15 9 v6" />
+      <path d="M3 19 h10" />
+      <path d="M18 6 l4 0 M18 11 h4 M18 16 h4" />
+    </svg>
+  );
+}
+
+// 👁 Eye — 顯示密碼/key
+export function IconEye(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M2 12 s4-7 10-7 10 7 10 7 -4 7 -10 7 -10-7 -10-7 z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+// 👁‍🗨 Eye-off — 隱藏密碼/key(斜線劃過 eye)
+export function IconEyeOff(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 3 l18 18" />
+      <path d="M10.6 6.2 a10 10 0 0 1 1.4-0.2 c6 0 10 7 10 7 a17 17 0 0 1-2.5 3.3" />
+      <path d="M6.5 7.5 C3.7 9.5 2 12 2 12 s4 7 10 7 a10 10 0 0 0 3.5-0.6" />
+      <path d="M9.9 9.9 a3 3 0 0 0 4.2 4.2" />
+    </svg>
+  );
+}
+
 // 🎙 Voice profile mic w/ stand — 跟 IconMic 區分
 export function IconVoiceMic(props: SVGProps<SVGSVGElement>) {
   return (
