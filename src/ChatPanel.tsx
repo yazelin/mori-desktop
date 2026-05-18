@@ -44,7 +44,8 @@ type Phase =
 type Mode = "agent" | "voice_input" | "background";
 
 type ChatTurn = {
-  role: "user" | "assistant";
+  // voice_input = 語音 dictation 完成留下的紀錄(不送 LLM context),只是給 user 翻閱
+  role: "user" | "assistant" | "voice_input";
   content: string;
   tools_called: string[];
 };
@@ -84,6 +85,8 @@ import {
   IconWarning,
   IconWave,
   IconTool,
+  IconClipboard,
+  IconCheck,
 } from "./icons";
 import type { ComponentType, SVGProps } from "react";
 
@@ -410,9 +413,40 @@ function ChatPanel() {
 
 function ChatBubble({ turn }: { turn: ChatTurn }) {
   const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(turn.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.warn("copy failed", e);
+    }
+  };
+  const isVoice = turn.role === "voice_input";
+  const label = isVoice
+    ? t("chat_panel.role_voice_input")
+    : turn.role === "user"
+    ? t("chat_panel.role_user")
+    : "Mori";
   return (
     <div className={`mori-bubble ${turn.role}`}>
-      <span className="role-label">{turn.role === "user" ? t("chat_panel.role_user") : "Mori"}</span>
+      <span className="role-label">
+        {isVoice && <IconMic width={11} height={11} />} {label}
+      </span>
+      {/* 語音輸入 bubble 加右上角複製鈕 — user 之前抱怨「轉錄完就消失」,
+          這個讓他能事後 grab transcripts 再貼到別處用 */}
+      {isVoice && turn.content && (
+        <button
+          type="button"
+          className="bubble-copy-btn"
+          onClick={copy}
+          title={t("chat_panel.copy_voice_input")}
+          aria-label={t("chat_panel.copy_voice_input")}
+        >
+          {copied ? <IconCheck width={12} height={12} /> : <IconClipboard width={12} height={12} />}
+        </button>
+      )}
       <div className="bubble-body">
         <p>{turn.content || <span className="empty">{t("chat_panel.role_empty")}</span>}</p>
         {turn.tools_called.length > 0 && (

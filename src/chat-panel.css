@@ -113,6 +113,17 @@
 }
 .mori-bubble.user { align-self: flex-end; align-items: flex-end; }
 .mori-bubble.assistant { align-self: flex-start; align-items: flex-start; }
+/* voice_input = 語音輸入留下的紀錄(不是對話)— 置中、灰調、跟左右兩邊的對話 bubble 視覺區隔。
+   **寬度固定 90%** 不隨內容變 — log-style entry 對齊讓 user 一眼掃過去整齊,
+   不像 chat bubble 那種「短訊息窄、長訊息寬」shrink-wrap 排版。 */
+.mori-bubble.voice_input {
+  align-self: stretch;       /* 撐滿父層寬度(父層 .mori-thread 是 flex column) */
+  align-items: stretch;      /* bubble-body 也撐滿 */
+  width: auto;
+  max-width: none;
+  position: relative;        /* 子層 .bubble-copy-btn 用 absolute 定位 */
+  margin: 0 auto;
+}
 
 .mori-bubble .role-label {
   font-size: 10.5px;
@@ -163,6 +174,47 @@
   border-radius: 10px;
   font-size: 10.5px;
   color: var(--c-mono-color);
+}
+
+/* ── voice_input bubble:dictation 紀錄(灰、italic 內容、右上 copy 鈕) ── */
+.mori-bubble.voice_input .role-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-text-soft);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+.mori-bubble.voice_input .bubble-body {
+  background: var(--c-input-bg);
+  border: 1px dashed var(--c-border);
+  border-radius: 8px;
+  padding: 8px 36px 8px 12px;  /* 右多空間避開絕對定位的 copy 鈕 */
+}
+.mori-bubble.voice_input .bubble-body p {
+  color: var(--c-text-soft);
+  font-style: italic;
+  font-size: 12.5px;
+}
+.mori-bubble.voice_input .bubble-copy-btn {
+  position: absolute;
+  /* 對齊 bubble-body 內側上緣:role-label 約 14px + 4px gap + 8px bubble padding */
+  top: 24px;
+  right: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 5px;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+.mori-bubble.voice_input .bubble-copy-btn:hover {
+  background: var(--c-bg);
+  border-color: var(--c-border);
+  color: var(--c-text);
 }
 
 .mori-chat-error {

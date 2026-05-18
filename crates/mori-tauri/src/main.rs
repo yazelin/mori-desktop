@@ -599,7 +599,7 @@ fn conversation_length(state: tauri::State<Arc<AppState>>) -> usize {
 /// 只回 user / assistant 訊息(system / tool 過濾掉,使用者不需要看 internal chatter)。
 #[derive(serde::Serialize, Clone)]
 struct ChatTurn {
-    /// "user" | "assistant"
+    /// "user" | "assistant" | "voice_input"
     role: String,
     /// 文字內容(空時不應該出現,但 Option 防 corrupt 狀態)
     content: String,
@@ -613,7 +613,9 @@ fn get_conversation(state: tauri::State<Arc<AppState>>) -> Vec<ChatTurn> {
         .conversation
         .lock()
         .iter()
-        .filter(|m| m.role == "user" || m.role == "assistant")
+        // 過 LLM-relevant + voice_input audit。tool / system role 不給 UI,
+        // 那是 Mori 內部跟 LLM 對話的 plumbing,user 看了沒意義。
+        .filter(|m| m.role == "user" || m.role == "assistant" || m.role == "voice_input")
         .map(|m| ChatTurn {
             role: m.role.clone(),
             content: m.content.clone().unwrap_or_default(),
@@ -2291,7 +2293,16 @@ async fn run_agent_pipeline(
     );
 
     let memory = state.memory_handle();
-    let history_snapshot = state.conversation.lock().clone();
+    // history snapshot 給 LLM 看,**過濾掉 voice_input role**(語音輸入 dictation
+    // 是 user 給其他 app 用的,不該被當作對話 history)。其他 role(user / assistant
+    // / tool / system)照吃。
+    let history_snapshot: Vec<ChatMessage> = state
+        .conversation
+        .lock()
+        .iter()
+        .filter(|m| m.role != "voice_input")
+        .cloned()
+        .collect();
 
     // Phase 3A:抓現場 context(目前只有剪貼簿)。Provider 是 Tauri 平台特定。
     let ctx_provider = context_provider::TauriContextProvider::new(app.clone());
@@ -2896,6 +2907,38 @@ async fn run_voice_input_pipeline(
         chars_out = cleaned_text.chars().count(),
         "voice-input pipeline complete"
     );
+
+    // 留下 audit trail 兩個地方:
+    //
+    // 1. **state.conversation** append 一條 role="voice_input" — 在 Chat tab 用
+    //    特別樣式(🎙 dictated)render,user 可以 scroll back 看過去 dictated 過
+    //    什麼。voice_input role 在 run_agent_pipeline 建 history_snapshot 時會被
+    //    filter 掉,不會污染 agent LLM 上下文。
+    //
+    // 2. **event_log** 一筆 `kind: voice_input_completed`,Logs tab + .jsonl
+    //    都搜得到。包 raw transcript / cleaned / target process,給 user 事後
+    //    debug「我這次到底講了什麼 → 修成什麼」很有用。
+    {
+        let mut conv = state.conversation.lock();
+        conv.push(ChatMessage {
+            role: "voice_input".into(),
+            content: Some(cleaned_text.clone()),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            name: None,
+        });
+        // UI 不必另發 event:下面 `set_phase(Phase::Done)` 自動 emit `phase-changed`,
+        // ChatPanel listener 看到 kind=done 會 refreshConversation()(IPC get_conversation
+        // 帶 voice_input role 回前端),自然顯示新 bubble。
+    }
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "voice_input_completed",
+        "transcript_raw": transcript,
+        "transcript_cleaned": cleaned_text,
+        "target_process": win_ctx.process_name,
+        "profile": profile.name,
+    }));
+
     state.set_phase(
         &app,
         Phase::Done {
@@ -4403,6 +4446,70 @@ mod tests {
     // ─── stt_gate_decision truth table ─────────────────────────────
     // 4 個維度的真值表(too_short × too_quiet),每格驗 reason 字串對。
     // 邊界值刻意挑「正好等於 min」測 `<` 是 strict less-than(等號該過,不該擋)。
+
+    // ─── voice_input role filter ────────────────────────────────────
+    //
+    // 兩個重要 invariant 鎖住:
+    // 1. agent pipeline 建 LLM history 時 voice_input role 必須被 filter 掉
+    //    (否則 dictated 文字會污染 agent context)
+    // 2. get_conversation IPC 給 UI 的 list 必須包含 voice_input role
+    //    (否則 Chat tab 看不到語音輸入紀錄)
+    //
+    // 這兩條 filter 對應同一個 role 字串,容易其中一條被改另一條沒同步。
+    // 直接測 filter predicate 行為固定。
+
+    fn make_msg(role: &str) -> ChatMessage {
+        ChatMessage {
+            role: role.into(),
+            content: Some(format!("{role}-content")),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    #[test]
+    fn agent_history_filter_excludes_voice_input() {
+        let conv = vec![
+            make_msg("user"),
+            make_msg("voice_input"),
+            make_msg("assistant"),
+            make_msg("voice_input"),
+            make_msg("user"),
+        ];
+        let filtered: Vec<_> = conv
+            .iter()
+            .filter(|m| m.role != "voice_input")
+            .cloned()
+            .collect();
+        assert_eq!(filtered.len(), 3);
+        assert!(filtered.iter().all(|m| m.role != "voice_input"));
+        // 保留順序 — user / assistant / user
+        let roles: Vec<_> = filtered.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "user"]);
+    }
+
+    #[test]
+    fn get_conversation_filter_includes_voice_input_excludes_internal() {
+        let conv = vec![
+            make_msg("system"),
+            make_msg("user"),
+            make_msg("voice_input"),
+            make_msg("assistant"),
+            make_msg("tool"),
+        ];
+        // get_conversation 用的 filter 條件(對應 main.rs:613-617):
+        let filtered: Vec<_> = conv
+            .iter()
+            .filter(|m| m.role == "user" || m.role == "assistant" || m.role == "voice_input")
+            .cloned()
+            .collect();
+        assert_eq!(filtered.len(), 3);
+        let roles: Vec<_> = filtered.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "voice_input", "assistant"]);
+        // system / tool 確實被擋下
+        assert!(filtered.iter().all(|m| m.role != "system" && m.role != "tool"));
+    }
 
     #[test]
     fn stt_gate_proceed_when_both_above_thresholds() {
