@@ -51,9 +51,15 @@ def main():
         sys.exit(1)
     model_path = sys.argv[1]
     threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
+    # 第三個 arg(可選):custom verifier `.joblib` 路徑。傳了就用 base + verifier 兩階段
+    # 判定 — base 過(可放低 threshold)再 verifier 過(對 user 個人聲線 fine-tuned)。
+    verifier_path = sys.argv[3] if len(sys.argv) > 3 else None
 
     if not Path(model_path).exists():
         emit({"event": "error", "msg": f"model not found: {model_path}"})
+        sys.exit(2)
+    if verifier_path and not Path(verifier_path).exists():
+        emit({"event": "error", "msg": f"verifier not found: {verifier_path}"})
         sys.exit(2)
 
     try:
@@ -65,7 +71,14 @@ def main():
         sys.exit(3)
 
     try:
-        model = Model(wakeword_models=[model_path])
+        # openWakeWord 0.4+ API:kwarg 是 wakeword_model_paths(複數 + _paths 後綴)
+        kwargs = {"wakeword_model_paths": [model_path]}
+        if verifier_path:
+            # custom_verifier_models 的 key 對應 wake-word name(從 model filename stem 拿,
+            # 例 hey-mori.onnx → "hey-mori"),value 是 .joblib 路徑
+            ww_name = Path(model_path).stem
+            kwargs["custom_verifier_models"] = {ww_name: verifier_path}
+        model = Model(**kwargs)
     except Exception as e:
         emit({"event": "error", "msg": f"model load failed: {e}"})
         sys.exit(4)

@@ -59,6 +59,10 @@ pub struct WakeWordConfig {
     /// Detection threshold(0~1)— 越高越嚴格,越低越敏感(誤觸多)。
     /// 預設 0.5。
     pub threshold: f32,
+    /// Custom verifier `.joblib`(可選)— 用 user 自己錄音 fine-tune 過的二階段 model。
+    /// 有設且檔存在就用 base + verifier 兩階段判定,對個人聲線命中率高很多。
+    /// None / 檔不存在 → 只跑 base model。
+    pub verifier_path: Option<PathBuf>,
 }
 
 /// 從 Python stdout 解出來的 event。
@@ -115,8 +119,17 @@ impl WakeWordListener {
         let mut cmd = Command::new(&config.python);
         cmd.arg(&config.script_path)
             .arg(&config.model_path)
-            .arg(config.threshold.to_string())
-            .stdin(Stdio::null())
+            .arg(config.threshold.to_string());
+        // 第 3 positional arg(可選):verifier `.joblib` 路徑。listener.py 看
+        // sys.argv 長度判斷有沒有給。
+        if let Some(v) = &config.verifier_path {
+            if v.exists() {
+                cmd.arg(v);
+            } else {
+                tracing::warn!(path = %v.display(), "verifier path configured but file missing — falling back to base-only");
+            }
+        }
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null()); // stderr 吞掉避免污染 stdout protocol
 
@@ -239,11 +252,17 @@ pub fn config_from_disk(mori_dir: &Path) -> WakeWordConfig {
         .map(|v| v.clamp(0.05, 0.95) as f32)
         .unwrap_or(0.5);
 
+    let verifier_path = json
+        .pointer("/listening_mode/verifier_path")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from);
+
     WakeWordConfig {
         python,
         script_path,
         model_path,
         threshold,
+        verifier_path,
     }
 }
 
