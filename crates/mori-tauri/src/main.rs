@@ -25,6 +25,7 @@ mod shell_skill;
 mod skill_server;
 mod theme;
 mod transcribe_cmds;
+mod wake_word;
 
 use std::sync::Arc;
 
@@ -128,6 +129,9 @@ pub struct AppState {
     /// Ctrl+Alt+Esc 在 Phase::Transcribing / Responding 階段可以 abort 它,
     /// kill_on_drop 會把 claude / gemini / codex 子程序連帶 SIGKILL。
     pub pipeline_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    /// Phase 3A:Hey Mori wake-word listener。在 Mode::Listening 時 Some(running),
+    /// 切到別 mode 時 None(Drop 會 kill python subprocess)。
+    pub wake_word: Mutex<Option<wake_word::WakeWordListener>>,
     /// 5T: Toggle chord 的當前語意 — `Toggle`(一按切換)或 `Hold`(按住錄、放開停)。
     /// 啟動時從 `hotkey_config.toggle_mode` 讀入,`config_write` 寫完 disk 後同步
     /// 重讀更新 → 改完即時生效不必重啟。Listener 永遠掛 PRESSED + RELEASED,在
@@ -168,6 +172,81 @@ impl AppState {
         tracing::info!(?prev, ?new_mode, "mode change");
         if let Err(e) = app.emit("mode-changed", &new_mode) {
             tracing::warn!(?e, "failed to emit mode-changed");
+        }
+        // Phase 3A:Listening mode 進/退時 spawn/kill openWakeWord listener。
+        // 抽出 helper 是因為這條會被「config 改了 phrase / threshold」之類的
+        // hot-reload 路徑也用到。
+        update_wake_word_listener(self, app, prev, new_mode);
+    }
+}
+
+/// Mode 換到 Listening 時 spawn wake-word listener;退出時 kill。
+///
+/// Drop 機制本身就會 kill subprocess,所以「退出 Listening」只要 take() slot
+/// 然後 drop 即可。Spawn 失敗給 user-visible 錯誤 + revert mode 回 Agent
+/// (避免 user 卡在「在 Listening 但沒 listener」的死狀態)。
+fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new: Mode) {
+    use crate::wake_word::{config_from_disk, WakeEvent, WakeWordListener};
+
+    let entering = !matches!(prev, Mode::Listening) && matches!(new, Mode::Listening);
+    let leaving = matches!(prev, Mode::Listening) && !matches!(new, Mode::Listening);
+
+    if leaving {
+        // Drop kills subprocess
+        if state.wake_word.lock().take().is_some() {
+            tracing::info!("wake-word listener stopped (left Listening mode)");
+        }
+        return;
+    }
+
+    if entering {
+        let cfg = config_from_disk(&mori_dir());
+        let app_for_cb = app.clone();
+        let listener = WakeWordListener::spawn(cfg, move |ev| match ev {
+            WakeEvent::Wake { word, score } => {
+                tracing::info!(word, score, "wake-word detected — triggering recording");
+                let _ = app_for_cb.emit("wake-word-detected", serde_json::json!({
+                    "word": word,
+                    "score": score,
+                }));
+                // 觸發跟「user 按主熱鍵」相同的 recording 流程。透過 IPC 事件
+                // 而非直接呼叫,是因為 callback 跑在 reader thread,要 dispatch
+                // 回 tokio runtime。`wake-word-detected` 在 main setup 那邊被
+                // listen 到、轉成 handle_hotkey_pressed 呼叫。
+            }
+            WakeEvent::Ready { model } => {
+                tracing::info!(model, "wake-word listener ready");
+                let _ = app_for_cb.emit(
+                    "wake-word-status",
+                    serde_json::json!({ "kind": "ready", "model": model }),
+                );
+            }
+            WakeEvent::Error { msg } => {
+                tracing::error!(msg, "wake-word listener error");
+                let _ = app_for_cb.emit(
+                    "wake-word-status",
+                    serde_json::json!({ "kind": "error", "msg": msg }),
+                );
+            }
+        });
+
+        match listener {
+            Ok(l) => {
+                *state.wake_word.lock() = Some(l);
+                tracing::info!("wake-word listener spawned (entered Listening mode)");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to spawn wake-word listener");
+                let _ = app.emit(
+                    "wake-word-status",
+                    serde_json::json!({
+                        "kind": "spawn_failed",
+                        "msg": format!("{e:#}"),
+                    }),
+                );
+                // 不 revert mode — user 應該看到「我選了 Listening 但出錯」的
+                // 狀態,自己決定切回。silent revert 反而難 debug。
+            }
         }
     }
 }
@@ -805,6 +884,24 @@ fn read_voice_trim_silence_threshold() -> f32 {
         .and_then(|v| v.as_f64())
         .map(|v| v.clamp(0.001, 0.2) as f32)
         .unwrap_or(0.02)
+}
+
+/// Listening mode 下,wake-word 觸發錄音後最多錄多久(秒)。
+/// Phase 3A 沒做 VAD-based 自動停,固定時間 cap。預設 10s。
+/// 之後 Phase 3B 改成 silence-based stop。
+/// clamp 2~60 秒。
+fn read_listening_max_record_secs() -> u32 {
+    let path = mori_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return 10;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return 10;
+    };
+    json.pointer("/listening_mode/max_record_secs")
+        .and_then(|v| v.as_u64())
+        .map(|v| v.clamp(2, 60) as u32)
+        .unwrap_or(10)
 }
 
 /// 啟動時的預設 mode。讀 `~/.mori/config.json` 的 `startup_mode`(`"voice_input"`
@@ -2284,7 +2381,9 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             Mode::VoiceInput => {
                 run_voice_input_pipeline(app, state, transcript, routing).await;
             }
-            Mode::Agent | Mode::Background => {
+            // Listening 模式底下 wake 觸發後的 transcript 走 agent pipeline,
+            // 跟一般 agent 對話沒區別 — 唯一差別是「啟動」靠 wake word 不靠熱鍵。
+            Mode::Agent | Mode::Background | Mode::Listening => {
                 run_agent_pipeline(app, state, transcript, routing).await;
             }
         }
@@ -3565,11 +3664,12 @@ fn refresh_floating_toggle_label(item: &MenuItem<tauri::Wry>, show_mode: &str) {
     let _ = item.set_text(label);
 }
 
-/// 把 tray 三個 mode 選單上的 label 重畫,在當下 mode 那條前面打 ✓。
+/// 把 tray 四個 mode 選單上的 label 重畫,在當下 mode 那條前面打 ✓。
 fn refresh_mode_menu_labels(
     active: &MenuItem<tauri::Wry>,
     voice_input: &MenuItem<tauri::Wry>,
     background: &MenuItem<tauri::Wry>,
+    listening: &MenuItem<tauri::Wry>,
     current: Mode,
 ) {
     let mark = |is_current: bool, base: &str| -> String {
@@ -3582,6 +3682,7 @@ fn refresh_mode_menu_labels(
     let _ = active.set_text(mark(current == Mode::Agent, "對話模式"));
     let _ = voice_input.set_text(mark(current == Mode::VoiceInput, "語音輸入模式"));
     let _ = background.set_text(mark(current == Mode::Background, "休眠(關麥克風)"));
+    let _ = listening.set_text(mark(current == Mode::Listening, "Hey Mori 待命"));
 }
 
 // ─── main ───────────────────────────────────────────────────────────
@@ -3692,6 +3793,7 @@ fn main() {
         ollama_warmup: Mutex::new(None),
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
         pipeline_task: Mutex::new(None),
+        wake_word: Mutex::new(None),
         // 5T: 啟動先用 default(Toggle),setup 讀 ~/.mori/config.json 後覆寫成
         // 實際值(見下方 hotkey_config 載入處)。
         toggle_mode: Mutex::new(hotkey_config::ToggleMode::default()),
@@ -3851,6 +3953,8 @@ fn main() {
                 MenuItem::with_id(app, "mode_voice_input", "語音輸入模式", true, None::<&str>)?;
             let mode_background_item =
                 MenuItem::with_id(app, "mode_background", "休眠(關麥克風)", true, None::<&str>)?;
+            let mode_listening_item =
+                MenuItem::with_id(app, "mode_listening", "Hey Mori 待命", true, None::<&str>)?;
 
             // 5K-2: 掃 ~/.mori/voice_input + ~/.mori/agent 目錄,把所有 profile
             // 列成 tray 子選單(超過 Alt+0~9 / Ctrl+Alt+0~9 的也能點)。
@@ -3922,6 +4026,7 @@ fn main() {
                     &floating_toggle_item,
                     &mode_active_item,
                     &mode_voice_input_item,
+                    &mode_listening_item,
                     &mode_background_item,
                     &voice_submenu,
                     &agent_submenu,
@@ -3935,6 +4040,7 @@ fn main() {
                 mode_active_item.clone(),
                 mode_voice_input_item.clone(),
                 mode_background_item.clone(),
+                mode_listening_item.clone(),
             );
             let floating_toggle_item_for_handler = floating_toggle_item.clone();
             // 啟動時就把 ✓ 標到目前 mode 上
@@ -3942,6 +4048,7 @@ fn main() {
                 &mode_items_for_handler.0,
                 &mode_items_for_handler.1,
                 &mode_items_for_handler.2,
+                &mode_items_for_handler.3,
                 *state_for_tray.mode.lock(),
             );
             let _tray = TrayIconBuilder::new()
@@ -4014,6 +4121,7 @@ fn main() {
                     }
                     "mode_active" => state_for_tray.set_mode(app, Mode::Agent),
                     "mode_voice_input" => state_for_tray.set_mode(app, Mode::VoiceInput),
+                    "mode_listening" => state_for_tray.set_mode(app, Mode::Listening),
                     "mode_background" => state_for_tray.set_mode(app, Mode::Background),
                     id if id.starts_with("voice_profile:") => {
                         let stem = &id["voice_profile:".len()..];
@@ -4055,17 +4163,26 @@ fn main() {
 
             // tray labels 跟著 Mode 同步:任何來源(tray 點擊、IPC、skill)改了
             // Mode 都 emit "mode-changed",這裡統一接 → 把 ✓ 標到正確的 menu item。
-            let (active_item, voice_input_item, background_item) = mode_items_for_handler;
+            let (active_item, voice_input_item, background_item, listening_item) =
+                mode_items_for_handler;
             app.listen("mode-changed", move |event| {
                 let payload = event.payload();
                 let target = if payload.contains("\"voice_input\"") {
                     Mode::VoiceInput
                 } else if payload.contains("\"background\"") {
                     Mode::Background
+                } else if payload.contains("\"listening\"") {
+                    Mode::Listening
                 } else {
                     Mode::Agent
                 };
-                refresh_mode_menu_labels(&active_item, &voice_input_item, &background_item, target);
+                refresh_mode_menu_labels(
+                    &active_item,
+                    &voice_input_item,
+                    &background_item,
+                    &listening_item,
+                    target,
+                );
             });
 
             // ── Skill HTTP server(5D)─────────────────────────────
@@ -4335,6 +4452,34 @@ fn main() {
                 "hotkey toggle/hold listeners armed (mode={:?})",
                 *state_for_setup.toggle_mode.lock(),
             );
+
+            // Phase 3A: wake-word 觸發 → 跟主熱鍵 Hold-press 等效(start_recording)。
+            // 沒 release event 的問題用 max_record_secs 計時 cap 解 — 到時間自動
+            // stop_and_transcribe。Phase 3B 換成 VAD-based silence-stop。
+            let handle_wake = app.handle().clone();
+            let state_for_wake = state_for_setup.clone();
+            app.listen("wake-word-detected", move |_event| {
+                let handle = handle_wake.clone();
+                let state = state_for_wake.clone();
+                // 不在 listener thread 裡呼叫 handle_hotkey_pressed — 它會 lock
+                // state.phase 等等,跑長一點怕擋住 Tauri event 派發。spawn 走。
+                tauri::async_runtime::spawn(async move {
+                    handle_hotkey_pressed(handle.clone(), state.clone());
+                    let max_secs = read_listening_max_record_secs();
+                    tracing::info!(max_secs, "wake-triggered recording started, auto-stop timer armed");
+                    tokio::time::sleep(std::time::Duration::from_secs(max_secs as u64)).await;
+                    // 只有當 phase 還在 Recording 時 stop_and_transcribe — user 可能在
+                    // 這段期間自己手動取消(Ctrl+Alt+Esc)或熱鍵又 toggle 走了。
+                    let still_recording = matches!(
+                        *state.phase.lock(),
+                        Phase::Recording { .. }
+                    );
+                    if still_recording {
+                        tracing::info!("wake-triggered recording reached max duration, stopping");
+                        stop_and_transcribe(handle, state);
+                    }
+                });
+            });
 
             // 5J: Ctrl+Alt+Esc — 全域中斷
             // - Phase::Recording → 停錄音 + 丟掉音檔不送 STT

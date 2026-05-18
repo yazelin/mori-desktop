@@ -41,7 +41,7 @@ type Phase =
     }
   | { kind: "error"; message: string };
 
-type Mode = "agent" | "voice_input" | "background";
+type Mode = "agent" | "voice_input" | "background" | "listening";
 
 type ChatTurn = {
   // voice_input = 語音 dictation 完成留下的紀錄(不送 LLM context),只是給 user 翻閱
@@ -95,6 +95,9 @@ const MODE_LABEL: Record<Mode, { Icon: ComponentType<SVGProps<SVGSVGElement>>; l
   agent: { Icon: IconBubble, label: "Agent" },
   voice_input: { Icon: IconKeyboard, label: "VoiceInput" },
   background: { Icon: IconSleep, label: "Sleep" },
+  // Listening:Hey Mori 待命中(Phase 3A)。用耳朵 icon 表示「在聽」 — 跟 mic 圖示
+  // 區分:mic 暗示「正在錄」,耳朵暗示「等被喚醒」
+  listening: { Icon: IconWave, label: "Listening" },
 };
 
 function ChatPanel() {
