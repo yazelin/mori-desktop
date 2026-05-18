@@ -21,7 +21,7 @@ Idempotent — 已下載 dataset / 已 clone repo / 已 generate clips 都會 sk
     piper-sample-generator/  ← TTS clone(產合成「Hey Mori」音檔)
     datasets/                ← 持久 dataset(只下載一次)
       mit_rirs/                  房間脈衝響應 ~100 MB
-      audioset_16k/              背景音(AudioSet bal_train09)~7 GB
+      background_audio/          背景音(ESC-50 環境聲)~600 MB
       fma/                       FMA small music dataset ~7 GB
       openwakeword_features_ACAV100M_2000_hrs_16bit.npy  pre-computed features ~6 GB
       validation_set_features.npy                        ~1 GB
@@ -58,9 +58,10 @@ WAKEWORD_DIR = MORI_DIR / "wakeword"
 VENV_PYTHON = MORI_DIR / "wake-train-venv" / "bin" / "python"
 
 # ── Datasets URLs(對齊 notebook cells 8-10) ─────────────────────────
-AUDIOSET_URL = (
-    "https://huggingface.co/datasets/agkphysics/AudioSet/resolve/main/data/bal_train09.tar"
-)
+# 原 notebook 用 agkphysics/AudioSet(HF gated,要登入接受 terms)— 改用 ESC-50,
+# 公開無 auth、600 MB(vs AudioSet 7 GB)、2000 wav files 50 環境音類。對 openWakeWord
+# 的 background noise augmentation 用途已夠(ACAV features 才是訓練主力 6 GB)。
+ESC50_URL = "https://github.com/karoldvl/ESC-50/archive/master.zip"
 ACAV_FEATURES_URL = (
     "https://huggingface.co/datasets/davidscripka/openwakeword_features/resolve/main/"
     "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
@@ -155,33 +156,45 @@ print('done', flush=True)
     run([sys.executable, "-c", snippet])
 
 
-def ensure_audioset(force: bool = False) -> None:
-    """AudioSet bal_train09.tar(~7 GB)+ 轉 16kHz wav(notebook cell 9 上半段)。"""
-    tarpath = DATASETS_DIR / "audioset" / "bal_train09.tar"
-    audio16k = DATASETS_DIR / "audioset_16k"
-    if audio16k.is_dir() and any(audio16k.glob("*.wav")) and not force:
-        log(f"skip:audioset_16k 已存在({sum(1 for _ in audio16k.glob('*.wav'))} files)")
+def ensure_background_audio(force: bool = False) -> None:
+    """ESC-50 環境音 dataset(2000 wav, 600 MB)→ 解到 datasets/background_audio/。
+
+    取代原 notebook 的 AudioSet bal_train09(~7 GB,HF gated 要登入)。ESC-50 公開
+    無 auth,寬度足夠給 openWakeWord 的 background augmentation 用 — model 訓練
+    主力是 ACAV100M precomputed features(6 GB),background_paths 只是疊一層
+    額外噪音多樣性。
+    """
+    zip_path = DATASETS_DIR / "ESC-50.zip"
+    extracted = DATASETS_DIR / "ESC-50-master" / "audio"
+    out_dir = DATASETS_DIR / "background_audio"
+    if out_dir.is_dir() and any(out_dir.glob("*.wav")) and not force:
+        log(f"skip:background_audio 已存在({sum(1 for _ in out_dir.glob('*.wav'))} files)")
         return
 
-    download(AUDIOSET_URL, tarpath, force=force)
-    log("extracting bal_train09.tar")
-    run(["tar", "-xf", tarpath.name], cwd=tarpath.parent)
+    download(ESC50_URL, zip_path, force=force)
+    log("extracting ESC-50.zip")
+    run(["unzip", "-q", "-o", str(zip_path), "-d", str(DATASETS_DIR)])
 
-    log("converting AudioSet flac → 16kHz wav")
+    # ESC-50 wav 全部已是 44.1 kHz,要轉 16 kHz 給 openWakeWord 用
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log("resampling ESC-50 wav → 16 kHz")
     snippet = f"""
-import datasets, scipy.io.wavfile, numpy as np, os
+import os, scipy.io.wavfile, scipy.signal, numpy as np
 from pathlib import Path
-audioset_dir = {str(tarpath.parent)!r}
-out_dir = {str(audio16k)!r}
-os.makedirs(out_dir, exist_ok=True)
-files = list(Path(audioset_dir).glob('audio/**/*.flac'))
-print(f'found {{len(files)}} flac', flush=True)
-ds = datasets.Dataset.from_dict({{'audio': [str(f) for f in files]}})
-ds = ds.cast_column('audio', datasets.Audio(sampling_rate=16000))
-for i, row in enumerate(ds):
-    name = row['audio']['path'].split('/')[-1].replace('.flac', '.wav')
-    scipy.io.wavfile.write(os.path.join(out_dir, name), 16000, (row['audio']['array']*32767).astype(np.int16))
-    if i % 100 == 0:
+src_dir = {str(extracted)!r}
+out_dir = {str(out_dir)!r}
+files = sorted(Path(src_dir).glob('*.wav'))
+print(f'found {{len(files)}} wav', flush=True)
+for i, f in enumerate(files):
+    sr, audio = scipy.io.wavfile.read(f)
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1).astype(audio.dtype)
+    if sr != 16000:
+        ratio = 16000 / sr
+        new_len = int(len(audio) * ratio)
+        audio = scipy.signal.resample(audio, new_len).astype(np.int16)
+    scipy.io.wavfile.write(os.path.join(out_dir, f.name), 16000, audio)
+    if i % 200 == 0:
         print(f'  {{i}} done', flush=True)
 print('done', flush=True)
 """
@@ -219,7 +232,7 @@ output_dir: "{run_dir}"
 rir_paths:
   - "{DATASETS_DIR / 'mit_rirs'}"
 background_paths:
-  - "{DATASETS_DIR / 'audioset_16k'}"
+  - "{DATASETS_DIR / 'background_audio'}"
 background_paths_duplication_rate:
   - 1
 false_positive_validation_data_path: "{DATASETS_DIR / 'validation_set_features.npy'}"
@@ -242,8 +255,14 @@ target_false_positives_per_hour: 0.2
     return cfg_path
 
 
-def run_train(cfg: Path, flag: str) -> None:
-    """跑 openWakeWord/openwakeword/train.py 一個 phase。flag = generate_clips / augment_clips / train_model"""
+def run_train(cfg: Path, flag: str, *, expected_output: Path | None = None) -> None:
+    """跑 openWakeWord/openwakeword/train.py 一個 phase。flag = generate_clips / augment_clips / train_model
+
+    `expected_output`:如果指定且該檔在 train.py exit 後存在,即使 train.py 回非零 exit code
+    也視為成功。用在 train_model phase — upstream train.py 不論有沒有 `--convert_to_tflite`
+    都會跑 tflite 轉檔,沒裝 `onnx_tf` 就 exit 1。但 ONNX export 已完成的情況下,tflite
+    失敗 不該 fail 整個 pipeline。
+    """
     train_py = OWAKE_DIR / "openwakeword" / "train.py"
     if not train_py.exists():
         log(f"train.py 不存在:{train_py}", "err")
@@ -253,11 +272,19 @@ def run_train(cfg: Path, flag: str) -> None:
     # 加 piper-sample-generator path 進 PYTHONPATH,讓 train.py 內 import piper_train work
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PIPER_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    run(
-        [sys.executable, str(train_py), "--training_config", str(cfg), f"--{flag}"],
-        cwd=OWAKE_DIR,
-        env=env,
-    )
+    cmd = [sys.executable, str(train_py), "--training_config", str(cfg), f"--{flag}"]
+    log(f"$ {' '.join(str(c) for c in cmd)}  (cwd={OWAKE_DIR})")
+    try:
+        subprocess.check_call(cmd, cwd=OWAKE_DIR, env=env)
+    except subprocess.CalledProcessError as e:
+        if expected_output is not None and expected_output.exists():
+            log(
+                f"train.py exited {e.returncode} but expected output exists — treating as success: "
+                f"{expected_output}",
+                "warn",
+            )
+        else:
+            raise
     log(f"=== phase {flag} took {time.time() - t0:.0f}s ===")
 
 
@@ -293,7 +320,7 @@ def main() -> None:
     if not args.skip_setup:
         log("[1/4] checking / downloading datasets")
         ensure_mit_rirs(force=args.force_datasets)
-        ensure_audioset(force=args.force_datasets)
+        ensure_background_audio(force=args.force_datasets)
         ensure_features(force=args.force_datasets)
     else:
         log("[1/4] skipped (--skip-setup)")
@@ -325,10 +352,12 @@ def main() -> None:
     run_train(cfg, "augment_clips")
 
     log("[4/4] training model")
-    run_train(cfg, "train_model")
+    # train.py 把 ONNX 存到 `<output_dir>/<model_name>.onnx`(平層,沒 model_name 子目錄)。
+    # 餵給 run_train 當 expected_output 讓 tflite 轉檔失敗時 ONNX 已存即視為成功。
+    src_onnx = run_dir / "my_model.onnx"
+    run_train(cfg, "train_model", expected_output=src_onnx)
 
     # ── 4. Copy .onnx → ~/.mori/wakeword/ ──────────────────────────
-    src_onnx = run_dir / "my_model" / "my_model.onnx"
     if not src_onnx.exists():
         log(f"trained model not found at {src_onnx}", "err")
         sys.exit(6)
