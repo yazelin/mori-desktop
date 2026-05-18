@@ -178,7 +178,14 @@ npm run tauri dev</code></pre>
 ├── logs/                    <span class="auto-tag">[auto] v0.4.0+ JSONL event log(每日 rotate mori-YYYY-MM-DD.jsonl)</span>
 ├── installed-apps.<i>&lt;platform&gt;</i>.json  <span class="auto-tag">[lazy] v0.5.0+ open_app catalog(active profile 啟用 open_app 時 scan)</span>
 ├── runtime.json             <span class="auto-tag">[auto] skill HTTP server port + 其他 runtime state</span>
-└── models/                  <span class="user-tag">[opt] whisper-local 模型放這(Deps tab 一鍵下載)</span></div>
+├── models/                  <span class="user-tag">[opt] whisper-local 模型放這(Deps tab 一鍵下載)</span>
+├── wakeword/                <span class="auto-tag">[auto] v0.6.0+ Hey Mori 喚醒</span>
+│   ├── hey-mori.onnx        <span class="auto-tag">  bundled TTS-only generic 預設 model(自訓過不覆寫)</span>
+│   ├── hey-mori.verifier.joblib <span class="user-tag">  [opt] 跑 mori-wake-verifier.py 訓出的個人聲線 二階段 model</span>
+│   └── sounds/              <span class="auto-tag">  wake-ack 應答音</span>
+│       ├── wake-ack.wav     <span class="auto-tag">    [auto] 當前播的 ack 檔(預設 leda-嗯我在聽)</span>
+│       └── wake-ack-alternates/ <span class="auto-tag">  5 個 bundled voice + user 自錄的 wav</span>
+└── wake-venv/               <span class="user-tag">[opt] Listening mode 用的 Python venv(Deps tab 一鍵裝 openwakeword)</span></div>
 
 <p>
   <strong>說明</strong>:

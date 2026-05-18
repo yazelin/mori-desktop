@@ -6,6 +6,114 @@
 
 ---
 
+## v0.6.0 — Phase 3 Hey Mori 喚醒生態(Mode::Listening + wake-word + wake-ack + VAD)(2026-05-18)
+
+從 v0.5.2(Docs sync)以來累積一整條 **Phase 3** 線:user 不用按熱鍵,直接對麥克風喊「Hey Mori」就觸發錄音 + STT + agent。這版把整條 pipeline 端到端做完並 ship 預設可用版 — fresh install 不用任何外部下載就有基本「Hey Mori」能力。
+
+也順手解了從 v0.3.2 起就 stale 的 `tauri.conf.json` 版號(0.3.2 → 0.6.0,過去 6 個 release 都沒同步,影響 Windows .msi 版本標籤)。
+
+### 主要 feature
+
+#### 1. Mode::Listening — 第 3 個獨立模式(PR #34)
+
+Mori 原本兩條手按 hotkey 軸(Alt+N voice dictation / Ctrl+Alt+N agent),這版加 **第 3 條被動軸**:`Listening`。
+
+- Tray menu 多「Hey Mori 待命」項目,點下進入 Listening mode
+- 進入後 `mori-tauri` spawn 一個 Python subprocess(`examples/scripts/mori-wake-listener.py`)持續吃麥克風跑 openWakeWord 偵測
+- 偵測到 wake phrase → stdout 印 JSON event → Rust 端讀進來 → 觸發跟主熱鍵 Hold-press 等效的 recording 流程
+- 退出 Listening mode → drop listener → subprocess 自動收掉(kill_on_drop)
+
+跟 Alt+N / Ctrl+Alt+N **完全獨立** — 你可以隨時切換 Hey Mori 待命跟 manual hotkey 用法。
+
+#### 2. 自訓 wake-word CLI + 個人聲線 verifier(PR #35)
+
+`examples/scripts/mori-wake-train.py` — 全自動訓練 pipeline,把任意 phrase 訓成 openWakeWord ONNX model。3 phase:
+1. **TTS 變體生成** — Piper TTS 用幾十種口音 / 語速 / 性別合成幾千條「Hey Mori」變體
+2. **環境噪音 augment** — MIT RIRs 模擬不同房間 + ESC-50 / ACAV100M 當 negative samples
+3. **DNN 訓練** — PyTorch + CUDA(RTX 4060 Mobile 約 25-60 min)→ ONNX export
+
+第一次跑下載 ~18 GB datasets(留著之後重訓不再下),總 setup 約 30-50 GB 磁碟、~150 MB 訓練 venv + ~5-7 GB CUDA torch。
+
+`examples/scripts/mori-wake-verifier.py` — 互動式 **個人聲線 fine-tune**。TTS 訓出的 base model 對 user 實際口音常命中率低(分數卡在 0.001-0.3 過不了 threshold)。這份 script:
+1. 引導 user 錄 ~15 條 positive(「Hey Mori」自己各種念法)+ ~15 條 negative(隨便講不含 wake phrase 的話)
+2. 訓 scikit-learn `LogisticRegression` 二階段 verifier(`.joblib`)
+3. 推論時 base + verifier 兩階段判定,對個人聲線命中率大幅提高
+
+> ⚠ 訓練流程**目前 Linux only**(piper-phonemize Windows wheel 不齊;macOS 沒 CUDA 訓 3-6 小時 CPU 不實際)。Windows / macOS user 用 v0.6.0 bundled 預設 ONNX(下一段)。
+
+#### 3. Bundled hey-mori.onnx + 一鍵 listener runtime(PR #38)
+
+兩個 onboarding 痛點補完:
+
+- **`hey-mori.onnx` 預設打包進 binary**(205 KB,TTS-only generic 訓練版,英文「Hey Mori」普遍適用)。`wake_word::ensure_default_model()` 開機解壓到 `~/.mori/wakeword/`,user 自訓過的不覆寫。**Fresh user 不用先跑 mori-wake-train.py 就能用。**
+- **DepsTab 加 `wake-listener-runtime` 條目**:detect `~/.mori/wake-venv/bin/python` 存在,沒裝 → 一鍵 `uv venv + pip install openwakeword sounddevice numpy onnxruntime scikit-learn`(~150 MB,Linux/macOS)。Windows 留 Manual 指令(PowerShell 路徑不同,暫時手動 setup)。
+
+#### 4. Wake-ack 應答音 — 不用盯畫面也知道 Mori 在聽(PR #36)
+
+Wake event 觸發後,**先播一段 Mori 的應答音(「嗯,我在聽」之類),讓 user 不用盯 floating sprite 就知道可以下指令了**。先播完 ack 才開麥克風,避免從喇叭出來的聲音被 mic 收回污染 STT。
+
+- 5 個 bundled voice preset(Gemini 2.5 Flash TTS bake,~1.2 MB embedded in binary):
+  - `leda-嗯我在聽.wav`(預設,最自然童言童語向)
+  - `v5-erinome-嗯.wav`、`v6-嗯.wav`、`v8a-嗨.wav`、`v9d-嗨.wav`(備選)
+- 開機 `wake_sound::ensure_files()` 解壓全部到 `~/.mori/wakeword/sounds/wake-ack-alternates/`,user 改過的 `wake-ack.wav` 不覆寫
+- Settings UI(ConfigTab Voice subtab)新「Wake-ack 應答音」section:
+  - Toggle enabled / disabled
+  - 切當前 voice(按「使用」一鍵 cp alternate → wake-ack.wav)
+  - ▶ 試聽任一備選
+  - 上傳自錄 .wav(自動跑 WAV header 驗證,內建檔不能刪只能 override)
+- `examples/scripts/mori-tts-bake.py` — dev / power user 自己 bake 新音檔的腳本(用 Gemini TTS,內嵌 30 voice 性別表對齊 ching-tech-os/extends/voice/voice_tts.py 避免推男聲給女性精靈 Mori)
+
+選 voice / phrase 過程詳見 commit 史 — 我們踩了一堆雷(Gemini voice character label 不直接對應性別、中文 long style prompt 會讓模型走 chat 模式不回 audio、短語助詞 token 太少容易 OTHER finish_reason 失敗、Callirrhoe 拼錯成 Callirhoe HTTP 400 持續 fail 一陣子)。
+
+#### 5. VAD silence-stop — 講完自動停,不再 6 秒 cap(PR #38)
+
+Phase 3A 為了快速 ship 用 fixed `max_record_secs=6` cap。問題:長指令(「Hey Mori, 幫我查一下台北明天天氣會不會下雨,還有提醒我下午 3 點要開會」)會被截。
+
+這版改 **即時 VAD silence-stop**:
+- Wake event 開錄音後,100ms poll `Recorder.level`(已有的 `Arc<AtomicU16>`)
+- State machine:WaitingForSpeech(等 user 開口)→ Speaking(追 silence run)→ silence 連續 `silence_stop_secs` 秒就 auto-stop 送 STT
+- `max_record_secs` 預設拉到 30s,只當「VAD 沒 fire」(背景持續噪音 / user 一直「ah...」)的安全兜底
+
+新 config:
+- `listening_mode.silence_stop_secs`(預設 1.5s,clamp 0.3~10)
+- `listening_mode.silence_threshold_rms`(預設 0.012,對齊 `voice_input.min_audio_rms`)
+
+UI 也補在 ConfigTab Voice subtab「Hey Mori 偵測 + 錄音」section,user 不用 raw JSON 編。
+
+#### 6. Settings UI 完整(PR #36)
+
+過去 `listening_mode.*` 只有 raw JSON 編,這版前端做 typed UI:
+
+| 欄位 | 範圍 | hint |
+|---|---|---|
+| `threshold` | 0.05~0.95 | 偵測門檻,越高越嚴格(光講「Mori」就觸發 → 拉到 0.65) |
+| `silence_stop_secs` | 0.3~10 | VAD 多久靜音算 user 講完(預設 1.5s) |
+| `silence_threshold_rms` | 0.001~0.2 | VAD 靜音判定 RMS(背景吵就拉到 0.02~0.05) |
+| `max_record_secs` | 2~120 | 安全上限(預設 30s) |
+| Wake-ack 啟用 | bool | 完全關掉就只靠畫面提示 |
+| 當前播檔 / 備選列表 | — | 切換 / 試聽 / 刪 / 上傳完整 UI |
+
+### 順帶 ship(v0.5.2 之後合進來但未獨立 release)
+
+- **PR #31** — Chat tab 留下 dictation 紀錄 + 複製鈕(過去 Alt+N 講完內容只送出沒紀錄)
+- **PR #33** — 預設 `startup_mode` 改 `voice_input`(過去預設 `agent` 對非 dev user 過重)+ config knob 可改 + 小 bubble width fix
+
+### 工程細節
+
+- **Wake handler 改 async/spawn_blocking** — rodio 播放 ack 用 `tokio::task::spawn_blocking` 跑(rodio `sleep_until_end` 是 blocking 不能直接在 async runtime 等),不擋其他 task
+- **Squash-merge induced conflicts** — PR #36 + #38 連環 stack,#36 squash merge 後 #38 base 被刪,rebase 時兩個檔(`main.rs` / `ConfigTab.tsx`)conflict。Resolve 一律 `--ours`(我們是 superset)
+- **Recorder.level Arc share** — VAD task 透過 `level_arc()` 直接讀 `Arc<AtomicU16>`,免每次經過 `&self` lock。已有的 UI level push 也用同 atomic,免 fork
+- **新增 deps**:rodio 0.19 wav-only + rand 0.8
+
+### 留 v0.6.x
+
+- **Custom wake-word UI**(Phase 3A.2)— user 想叫「Hey Hermes」/「Hey 小綠」可以在 UI 訓,目前只有 CLI + Linux only。未實作
+- **TTS speak-back(Mori 真的講話)**(Phase 3D)— quota 顧慮(Gemini free 100/day 一聊就破),要做需配 edge-tts 免費 fallback + 開關 + cache 策略
+- **CLI detect + profile preflight** — fresh install 用 Gemini API key 但 default profile 寫死 `provider: claude-bash` 會炸。預計 v0.6.1 修
+- **Phase 3C LLM evaluator / ask-back** — Mori 自動判斷「這是指令 / 閒聊 / 不完整需反問」,先 defer
+
+---
+
 ## v0.5.2 — Docs sync(把 v0.4.0~v0.5.1 沒同步的內容補進手冊)(2026-05-15)
 
 v0.4.0 到 v0.5.1 連續 6 個 release(Windows 開箱即用 / 觀測層 / 隱私 redact / Quickstart polish / EN starter / 範本管理 UI / OS theme 自動偵測 / token 估算 chip / Config hint 大掃除 / installed apps catalog / STT corrections baseline / Context anti-injection)累積下來,`docs/*.html` 全 stale — 每次 release 我都跳過 doc 更新留下版,結果 8 個 HTML 沒人對到當前功能。

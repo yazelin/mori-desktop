@@ -117,11 +117,25 @@ Mori 還不能開口說話。要補:
 - 角色化語氣:每個 agent / voice profile 自己的聲音 + 嘴型 + 個性
 - 接 Annuli 的 persona — Mori 講話時 LLM 在 system prompt 看得到當前 persona
 
-### 林之耳 — Wake Word
+### 林之耳 — Wake Word ✅ v0.6.0 done(部分)
 
-不用按熱鍵,叫名字喚醒(「Mori」/「森」等)。需離線 wake-word detection
-(`openwakeword` / `Porcupine`)+ 隱私邊界設計(預設 off,要 user 自己 enable
-+ 視覺指示 sprite 在「聆聽」狀態)。
+**v0.6.0 已 ship**(Phase 3A + 3A.1 + 3A.1.2 + 3B):
+- Mode::Listening 第 3 個 mode(Tray menu 切換,跟 Alt+N / Ctrl+Alt+N 獨立)
+- 離線 wake-word 偵測(`openwakeword`)— 跟隱私邊界對齊(預設 mic 不開,只在
+  Listening mode 進入時 spawn Python listener subprocess)
+- Bundled `hey-mori.onnx` 預設 model(fresh install 開箱即用)
+- 自訓 CLI(`mori-wake-train.py` / `mori-wake-verifier.py`)— 想換 phrase 或對
+  個人聲線 fine-tune 都可,Linux only(piper-phonemize Windows wheel 不齊)
+- Wake-ack 應答音 — 偵測到後播一段 Mori 的回應(5 個 bundled voice + 自錄上傳)
+- VAD silence-stop — 講完自動停送 STT,不用按熱鍵也不用固定錄滿
+- DepsTab 一鍵裝 Python listener runtime(`wake-venv`)
+
+**留 v0.6.x**:
+- Phase 3A.2 — Custom wake-word phrase UI(目前只有 CLI 訓練,要 UI 化 + Windows
+  piper-phonemize 跨平台修)
+- Phase 3C — LLM evaluator / ask-back(Mori 自動判斷「這是指令 / 閒聊 / 不完整」+ 反問)
+- Phase 3D — TTS speak-back(Mori 真的講話。Gemini TTS quota 受限,要配 edge-tts
+  免費 fallback + 開關)
 
 ### 多界橋樑 — IM Bot 整合(Telegram / Discord / LINE / Slack)
 
