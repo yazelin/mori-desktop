@@ -384,6 +384,45 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
         },
+        // Phase 3D:edge-tts(Mori 講話)— 跟 wake-listener 共用 wake-venv,
+        // 安裝小(~10MB),detect 看 edge-tts import 得起來。
+        DepSpec {
+            id: "tts-runtime",
+            name: "Mori 講話 runtime(edge-tts)",
+            description: "Phase 3D TTS speak-back 用的 Python edge-tts。借 Microsoft Edge \
+                          瀏覽器 TTS endpoint,免費 + native zh-TW 女聲。沒裝 → Config tab \
+                          開 tts.enabled 也不會講話(只 log warn)。跟 wake-listener 共用 \
+                          wake-venv,沒裝 wake-listener-runtime 的話先裝那個。",
+            unlocks: "tts.enabled=true 時 Mori 用聲音回答你",
+            size_hint: Some("~10MB"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
+            check: CheckSpec::CommandStdoutContains {
+                cmd: "sh",
+                args: &[
+                    "-c",
+                    "$HOME/.mori/wake-venv/bin/python -c 'import edge_tts; print(\"ok\")' 2>&1",
+                ],
+                needle: "ok",
+            },
+            install: InstallSpec::Shell {
+                script: "set -e; \
+                         VENV=\"$HOME/.mori/wake-venv\"; \
+                         if [ ! -x \"$VENV/bin/pip\" ]; then \
+                            echo 'wake-venv 沒裝,先裝 wake-listener-runtime'; exit 2; \
+                         fi; \
+                         \"$VENV/bin/pip\" install --quiet edge-tts",
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows PowerShell(需先有 wake-venv):",
+                        "%USERPROFILE%\\.mori\\wake-venv\\Scripts\\pip install edge-tts",
+                    ],
+                }),
+            ],
+        },
     ]
 }
 

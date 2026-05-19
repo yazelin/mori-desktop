@@ -1357,6 +1357,61 @@ function ConfigTab({
 
           {/* Wake-ack 應答音(獨立 Section,Phase 3A.1.2)*/}
           <WakeAckSection />
+
+          {/* ── Phase 3D: Mori 講話(edge-tts speak-back)── */}
+          <Section
+            title="Mori 講話(TTS,Phase 3D)"
+            hint="Agent 回應完成後,讓 Mori 用聲音念出來。預設 OFF。用 Microsoft Edge 免費 TTS(無 quota、native zh-TW)。需先在 Deps 頁裝「Mori 講話 runtime(edge-tts)」。"
+          >
+            <FormRow label="enabled" hint="OFF → Mori 只在 ChatPanel 顯示文字(目前行為)。ON → 同時用聲音念。長回應 TTS 會講久,可能 5-15 秒,中途無法打斷(後續版本加 stop 鈕)。">
+              <input
+                type="checkbox"
+                checked={Boolean(cfg.tts?.enabled)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const t = ensureSubObj(c, "tts");
+                    t.enabled = e.target.checked;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="voice" hint="Microsoft Edge TTS 的 zh-TW voice。HsiaoYu 偏年輕清亮(預設,配 Mori 精靈少女形象),HsiaoChen 較成熟標準。換其他語言請查 `edge-tts --list-voices`。">
+              <Select
+                value={cfg.tts?.voice ?? "zh-TW-HsiaoYuNeural"}
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    const t = ensureSubObj(c, "tts");
+                    t.voice = v;
+                  })
+                }
+                options={[
+                  { value: "zh-TW-HsiaoYuNeural", label: "zh-TW-HsiaoYuNeural(女,年輕清亮,預設)" },
+                  { value: "zh-TW-HsiaoChenNeural", label: "zh-TW-HsiaoChenNeural(女,標準)" },
+                  { value: "zh-TW-YunJheNeural", label: "zh-TW-YunJheNeural(男)" },
+                  { value: "zh-CN-XiaoxiaoNeural", label: "zh-CN-XiaoxiaoNeural(女,大陸口音)" },
+                  { value: "en-US-JennyNeural", label: "en-US-JennyNeural(英文女)" },
+                  { value: "ja-JP-NanamiNeural", label: "ja-JP-NanamiNeural(日文女)" },
+                ]}
+              />
+            </FormRow>
+            <FormRow label="" hint="試聽當前 voice。會 spawn Python edge-tts 子進程,有點延遲(2-5 秒)是正常。">
+              <button
+                className="mori-btn"
+                onClick={async () => {
+                  try {
+                    await invoke("tts_preview", {
+                      text: "嗨,我是 Mori。試聽聲音這樣 OK 嗎?",
+                      voice: cfg.tts?.voice ?? null,
+                    });
+                  } catch (e) {
+                    alert(`試聽失敗:${String(e)}`);
+                  }
+                }}
+              >
+                ▶ 試聽
+              </button>
+            </FormRow>
+          </Section>
           </>}
 
           {/* ── Appearance ─────────────────────────────── */}

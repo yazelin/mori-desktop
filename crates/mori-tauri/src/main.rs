@@ -25,6 +25,7 @@ mod shell_skill;
 mod skill_server;
 mod theme;
 mod transcribe_cmds;
+mod tts;
 mod wake_sound;
 mod wake_word;
 
@@ -2757,6 +2758,11 @@ async fn run_agent_pipeline(
                 });
             }
 
+            // Phase 3D:agent response 完成 → 若 tts.enabled,背景 spawn edge-tts
+            // 念出 response。預設 OFF,user 在 Config tab 主動 enable 才會講話。
+            // 不擋 UI update — speak_async 立刻 return,實際合成 + 播放在 tokio task。
+            tts::speak_async(response.clone(), app.clone());
+
             state.set_phase(
                 &app,
                 Phase::Done {
@@ -3947,6 +3953,7 @@ fn main() {
             wake_sound::wake_ack_preview,
             wake_sound::wake_ack_upload,
             wake_sound::wake_ack_delete_alternate,
+            tts::tts_preview,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -3976,6 +3983,10 @@ fn main() {
             // Phase 3B:ensure ~/.mori/wakeword/hey-mori.onnx 預設 wake-word model。
             // Fresh user 不用先跑 mori-wake-train.py 就能用 Hey Mori。自訓過的不覆蓋。
             wake_word::ensure_default_model(&mori_dir());
+
+            // Phase 3D:deploy ~/.mori/bin/mori-tts-edge.py(edge-tts bridge script)。
+            // TTS speak-back 預設 OFF,user enable 才會用到。但 script 先 deploy 不影響。
+            tts::ensure_script_deployed(&mori_dir());
 
             // 啟動初始 floating visibility — update_floating_visibility 自己會看:
             //   - quickstart_completed (儀式還沒完成 → 強制隱藏)
