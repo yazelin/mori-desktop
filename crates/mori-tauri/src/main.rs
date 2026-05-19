@@ -534,6 +534,7 @@ fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
     let routing = mori_core::llm::read_routing_config();
     let stt = mori_core::llm::transcribe::active_transcribe_snapshot();
     let warmup = *state.ollama_warmup.lock();
+    let binary_status = check_provider_binary(&snap.name);
     serde_json::json!({
         "name": snap.name,
         "model": snap.model,
@@ -544,7 +545,69 @@ fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
             "model": stt.model,
             "language": stt.language,
         },
+        "binary": binary_status,
     })
+}
+
+/// Phase 6 polish A:provider preflight — 看 provider 對應 binary 存在嗎。
+///
+/// CLI-flavor provider(`*-bash` / `*-cli`)需要本機裝對應 binary。沒裝 →
+/// agent loop spawn 就炸。這個 helper 在 ChatPanel topbar 預先檢測,讓 user
+/// 看到紅 chip + 建議改 API provider。
+///
+/// 純 API provider(`gemini` / `groq` / `ollama` / 自訂 OpenAI-compat)沒 binary
+/// 需求,return `requires_binary: false`。
+///
+/// **跨平台:用 `which::which()`(純 Rust)而非 spawn `which` / `where` subprocess**
+/// — Windows 沒 `which` binary(系統用 `where`)。`which::which()` 自己掃 PATH,
+/// 結果一致。
+fn check_provider_binary(provider_name: &str) -> serde_json::Value {
+    let Some(bin) = provider_binary_for(provider_name) else {
+        // 純 API provider,不需 binary
+        return serde_json::json!({
+            "requires_binary": false,
+        });
+    };
+    let available = which::which(bin).is_ok();
+    serde_json::json!({
+        "requires_binary": true,
+        "binary": bin,
+        "available": available,
+        "suggested_api": suggested_api_fallback(bin),
+        "install_hint": install_hint_for(bin),
+    })
+}
+
+/// Provider name → 對應 CLI binary。Pure API provider 回 None。
+fn provider_binary_for(provider_name: &str) -> Option<&'static str> {
+    match provider_name {
+        "claude-bash" | "claude-cli" => Some("claude"),
+        "gemini-bash" | "gemini-cli" => Some("gemini"),
+        "codex-bash" | "codex-cli" => Some("codex"),
+        _ => None,
+    }
+}
+
+/// 給 binary,建議的 API fallback。為什麼這樣 mapping:
+/// - claude → gemini(Mori 內建沒 Anthropic API,Gemini 最易上手)
+/// - gemini → gemini(同名純 API 路徑就在)
+/// - codex → groq(沒內建 OpenAI API,Groq 是 oss-120b 免費 quota 大)
+fn suggested_api_fallback(bin: &str) -> &'static str {
+    match bin {
+        "claude" => "gemini",
+        "gemini" => "gemini",
+        "codex" => "groq",
+        _ => "gemini",
+    }
+}
+
+fn install_hint_for(bin: &str) -> &'static str {
+    match bin {
+        "claude" => "npm install -g @anthropic-ai/claude-code(+ claude login)",
+        "gemini" => "npm install -g @google/gemini-cli",
+        "codex" => "npm install -g @openai/codex(+ codex login)",
+        _ => "",
+    }
 }
 
 #[tauri::command]
@@ -5143,6 +5206,73 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Phase 6 polish A: check_provider_binary ─────────────────────
+    // 驗 provider name → binary mapping + 各 helper return 結構。
+    // 注意:`available` 欄位視測試機器 PATH 而定,不在 unit test 驗(integration
+    // 才測)。這裡專注於「pure logic 對不對」。
+
+    #[test]
+    fn check_provider_binary_pure_api_no_binary_required() {
+        for name in ["gemini", "groq", "ollama", "azure_openai_custom"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], false, "{name} should be pure API");
+            assert!(v.get("binary").is_none(), "{name} should omit binary field");
+        }
+    }
+
+    #[test]
+    fn check_provider_binary_claude_variants_map_to_claude() {
+        for name in ["claude-bash", "claude-cli"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], true);
+            assert_eq!(v["binary"], "claude");
+            assert_eq!(v["suggested_api"], "gemini");
+            assert!(v["install_hint"].as_str().unwrap().contains("@anthropic-ai/claude-code"));
+        }
+    }
+
+    #[test]
+    fn check_provider_binary_gemini_variants_map_to_gemini() {
+        for name in ["gemini-bash", "gemini-cli"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], true);
+            assert_eq!(v["binary"], "gemini");
+            assert!(v["install_hint"].as_str().unwrap().contains("@google/gemini-cli"));
+        }
+    }
+
+    #[test]
+    fn check_provider_binary_codex_variants_map_to_codex() {
+        for name in ["codex-bash", "codex-cli"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], true);
+            assert_eq!(v["binary"], "codex");
+            assert_eq!(v["suggested_api"], "groq");
+            assert!(v["install_hint"].as_str().unwrap().contains("@openai/codex"));
+        }
+    }
+
+    #[test]
+    fn provider_binary_for_unknown_returns_none() {
+        assert_eq!(provider_binary_for("groq"), None);
+        assert_eq!(provider_binary_for("gemini"), None);
+        assert_eq!(provider_binary_for("ollama"), None);
+        assert_eq!(provider_binary_for("totally_made_up_xyz"), None);
+    }
+
+    #[test]
+    fn install_hint_includes_npm_command() {
+        for (bin, expected_pkg) in &[
+            ("claude", "@anthropic-ai/claude-code"),
+            ("gemini", "@google/gemini-cli"),
+            ("codex", "@openai/codex"),
+        ] {
+            let hint = install_hint_for(bin);
+            assert!(hint.starts_with("npm install"), "{bin} hint should start with npm");
+            assert!(hint.contains(expected_pkg), "{bin} hint should mention {expected_pkg}");
+        }
+    }
 
     // ─── stt_gate_decision truth table ─────────────────────────────
     // 4 個維度的真值表(too_short × too_quiet),每格驗 reason 字串對。

@@ -49,6 +49,9 @@ hound = "3.5"
 rodio = { version = "0.19", default-features = false, features = ["wav", "mp3"] }
 # 隨機選 wake-ack 短句
 rand = "0.8"
+# Phase 6 polish A:profile preflight 用 `which::which()` 偵測 PATH 上 binary
+# 是否存在(跨平台,不用 spawn `which` / `where` subprocess)
+which = "6"
 # Lock-free shared state for the audio callback path
 parking_lot = "0.12"
 # Async stream utilities — needed to consume ashpd's GlobalShortcuts signal stream.
