@@ -1745,6 +1745,21 @@ function ConfigTab({
                 }
               />
             </FormRow>
+            <FormRow
+              label="ask_back_enabled"
+              hint="LLM 判 unclear(半截話 / 模糊起頭)時,讓 Mori 用 TTS 反問(例「然後呢?」)而不是強跑 agent。預設 ON — 啟用 evaluator 通常就想要這個分流。OFF → unclear 當 address_mori 走 agent(舊行為)。即使 TTS 沒開,反問句也會在 ChatPanel 顯示。"
+            >
+              <input
+                type="checkbox"
+                checked={cfg.evaluator?.ask_back_enabled !== false}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const ev = ensureSubObj(c, "evaluator");
+                    ev.ask_back_enabled = e.target.checked;
+                  })
+                }
+              />
+            </FormRow>
           </Section>
 
           {/* ── Phase 3D: Mori 講話(edge-tts speak-back)── */}

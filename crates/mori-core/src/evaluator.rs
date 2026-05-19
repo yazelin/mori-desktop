@@ -9,7 +9,9 @@
 //!   叫 Mori,是自言自語 / 跟別人講話被 mic 收到。
 //!   → 直接 skip agent dispatch,emit `noise_rejected` event 給 UI 顯示
 //! - [`Intent::Unclear`] — 模糊,可能是斷句不完整 / 半截話。
-//!   → 走 agent 但加 hint 提示「user 句子不完整,可禮貌反問」
+//!   → **不**走 agent,而是讓 Mori 直接反問 user(ask-back),透過 TTS 念
+//!   出 clarifying question + 在 ChatPanel 顯示。User 下一次 wake 才會再
+//!   走完整 agent。
 //!
 //! ## 為什麼有這個
 //!
@@ -45,7 +47,7 @@ pub enum Intent {
     Unclear,
 }
 
-/// Evaluator output。`intent` 必填,`reason` / `confidence` 可選。
+/// Evaluator output。`intent` 必填,其他可選。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluationResult {
     pub intent: Intent,
@@ -55,6 +57,10 @@ pub struct EvaluationResult {
     /// 0.0..=1.0 信心值(LLM 自評,別太當真 — 主要看 intent)
     #[serde(default)]
     pub confidence: f32,
+    /// 當 `intent == Unclear` 時,Mori 可以拿這句話反問 user(ask-back)。
+    /// 短句、口語、不超過 20 字。LLM 沒提供時,呼叫端應用預設句兜底。
+    #[serde(default)]
+    pub clarifying_question: Option<String>,
 }
 
 const EVALUATOR_SYSTEM_PROMPT: &str = r#"你是 Mori(桌面 AI 同伴)的 wake-word evaluator。每個 wake event 觸發後,user 的語音轉成 transcript 給你。你**只**判斷一件事:user 是不是在跟 Mori 講話?
@@ -62,18 +68,25 @@ const EVALUATOR_SYSTEM_PROMPT: &str = r#"你是 Mori(桌面 AI 同伴)的 wake-w
 三種輸出:
 - `address_mori`:user 在跟 Mori 講話(指令 / 對話 / 問問題 / 閒聊)。明確或合理推斷都算。
 - `background_noise`:wake-word false positive — user 在跟別人講話、自言自語、看影片唸出來、隨口提到「Mori」這個詞。**不是**在跟 Mori 互動。
-- `unclear`:模糊 — 句子半截 / 內容空泛無上下文 / 像在思考但沒講完。
+- `unclear`:模糊 — 句子半截 / 內容空泛無上下文 / 像在思考但沒講完,但**像是**在對 Mori 起頭。
 
 判準:
 - 短指令「打開瀏覽器」「Mori 來幫我」「Hey Mori 查一下」→ address_mori
 - 完整對話「Mori 你今天好嗎」「我想問你一件事」→ address_mori
 - 自言自語「奇怪我剛剛在做什麼」「啊好煩」→ background_noise(沒提到 Mori 也沒指示)
 - 別人對話「他剛剛在玩什麼遊戲」「等下要吃什麼」→ background_noise
-- 半截話「然後...」「嗯...那個...」→ unclear
+- 半截話「Mori 我想...」「然後...」「嗯...那個...」→ unclear
 - 看 YouTube 念稿「主持人說很多 AI 助手像 Siri 或 Mori」→ background_noise(只是提及)
 
+當 intent = unclear 時,**額外**提供 `clarifying_question`:一句短的、口語、像森林精靈會說的反問句(中文,不超過 20 字,符合 transcript 的 context)。例:
+- transcript「然後...」→ clarifying_question「然後呢?」
+- transcript「Mori 我想...」→ clarifying_question「你想做什麼?跟我說」
+- transcript「嗯那個...」→ clarifying_question「我在聽,你說」
+
+其他 intent 不需要 clarifying_question。
+
 回 JSON,format:
-{"intent":"address_mori|background_noise|unclear","reason":"<10字內理由>","confidence":0.0-1.0}
+{"intent":"address_mori|background_noise|unclear","reason":"<10字內理由>","confidence":0.0-1.0,"clarifying_question":"<unclear 時填,其他 null>"}
 
 不要加 markdown fence,不要加說明,純 JSON。"#;
 
@@ -110,6 +123,7 @@ pub async fn evaluate(
                 intent: Intent::AddressMori,
                 reason: "parse_failed".into(),
                 confidence: 0.0,
+                clarifying_question: None,
             })
         }
     }
@@ -186,5 +200,21 @@ mod tests {
     fn parse_invalid_intent_fails() {
         let raw = r#"{"intent":"foo","reason":"x","confidence":1.0}"#;
         assert!(parse_evaluation(raw).is_err());
+    }
+
+    #[test]
+    fn parse_with_clarifying_question() {
+        let raw = r#"{"intent":"unclear","reason":"半截話","confidence":0.6,"clarifying_question":"然後呢?"}"#;
+        let r = parse_evaluation(raw).unwrap();
+        assert_eq!(r.intent, Intent::Unclear);
+        assert_eq!(r.clarifying_question.as_deref(), Some("然後呢?"));
+    }
+
+    #[test]
+    fn parse_clarifying_question_absent_defaults_none() {
+        let raw = r#"{"intent":"unclear","reason":"半截話","confidence":0.6}"#;
+        let r = parse_evaluation(raw).unwrap();
+        assert_eq!(r.intent, Intent::Unclear);
+        assert!(r.clarifying_question.is_none());
     }
 }

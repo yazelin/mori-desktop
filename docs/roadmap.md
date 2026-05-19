@@ -138,7 +138,9 @@ Mori 還不能開口說話。要補:
 **留 v0.6.x**:
 - Phase 3A.2 — Custom wake-word phrase UI(目前只有 CLI 訓練,要 UI 化 + Windows
   piper-phonemize 跨平台修)
-- Phase 3C.2 — Ask-back UI(Intent::Unclear 時 Mori 反問 + 自動重進 Listening)
+- ✅ Phase 3C.2 — Ask-back(Intent::Unclear → Mori 用 TTS 反問 + 寫進
+  conversation 給下次 wake 當 context)— v0.6.3。**自動**重進 Listening 留到
+  下個迭代(目前 user 需手動再 wake)
 - TTS 中斷支援(Ctrl+Alt+Esc 停 sink)+ sentence streaming
 - Speaker enrollment 進度 real-time UI(目前 modal 是純 JS 倒數,Python 已 emit JSON event 待 Rust forward)
 

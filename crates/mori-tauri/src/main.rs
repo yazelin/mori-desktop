@@ -2641,12 +2641,26 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     *state_for_handle.pipeline_task.lock() = Some(task);
 }
 
-/// Phase 3C — evaluator gate 的回傳。`skip=true` 代表判定 background noise,
-/// 呼叫端應跳過 agent;`skip=false` → 走正常 agent。`reason` 給 UI / log 用。
-struct EvaluatorOutcome {
-    skip: bool,
-    reason: String,
+/// Phase 3C — evaluator gate 的回傳。
+///
+/// - `Proceed` → user 在跟 Mori 講話,走 agent。`reason` 給 log / 偵錯。
+/// - `Skip` → background noise,直接結束。`reason` 用來顯示「(背景噪音 — ...)」。
+/// - `AskBack` → user 開頭模糊 / 半截話,Mori 用 `question` 反問,**不**走 agent。
+enum EvaluatorOutcome {
+    Proceed {
+        reason: String,
+    },
+    Skip {
+        reason: String,
+    },
+    AskBack {
+        reason: String,
+        question: String,
+    },
 }
+
+/// Ask-back 預設兜底句:LLM 沒給 clarifying_question 時用這句。
+const DEFAULT_ASK_BACK_QUESTION: &str = "可以再說清楚一點嗎?";
 
 /// 讀 `~/.mori/config.json` `evaluator.*` config,跑 evaluator LLM,回 outcome。
 /// 任何環節失敗 → return None(等同 disabled,呼叫端走正常 agent flow)。
@@ -2680,6 +2694,12 @@ async fn evaluator_gate(transcript: &str) -> Option<EvaluatorOutcome> {
         .and_then(|v| v.as_f64())
         .map(|v| v.clamp(0.0, 1.0) as f32)
         .unwrap_or(0.85);
+    // Phase 3C.2:ask-back 開關。預設 true — evaluator 啟用代表 user 想要
+    // intent 分流,把 unclear 當 ask-back 才合邏輯。User 不想被反問可以單獨關。
+    let ask_back_enabled = json
+        .pointer("/evaluator/ask_back_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     // Build provider
     let provider = match mori_core::llm::build_named_provider(&provider_name, None) {
@@ -2697,49 +2717,75 @@ async fn evaluator_gate(transcript: &str) -> Option<EvaluatorOutcome> {
     // Run evaluator
     match evaluate(transcript, provider).await {
         Ok(result) => {
-            // Confidence gate:reject 路徑(BackgroundNoise)在 confidence
-            // < threshold 時不 skip(LLM 不夠確定就不應該擋掉 user 真指令)。
-            let skip = if matches!(result.intent, Intent::BackgroundNoise) {
-                if result.confidence < confidence_threshold {
-                    tracing::info!(
-                        intent = ?result.intent,
-                        reason = %result.reason,
-                        confidence = result.confidence,
-                        threshold = confidence_threshold,
-                        "evaluator: confidence too low to skip — fallthrough to agent",
-                    );
-                    false
-                } else {
-                    true
+            // 三種 intent 分流:
+            // - BackgroundNoise + confidence >= threshold → Skip
+            // - BackgroundNoise + confidence < threshold → 不夠確定,Proceed
+            // - Unclear + ask_back_enabled → AskBack(用 LLM 給的 question,沒有兜底)
+            // - Unclear + ask_back_disabled → Proceed(舊行為)
+            // - AddressMori → Proceed
+            let outcome = match result.intent {
+                Intent::BackgroundNoise => {
+                    if result.confidence < confidence_threshold {
+                        tracing::info!(
+                            intent = ?result.intent,
+                            reason = %result.reason,
+                            confidence = result.confidence,
+                            threshold = confidence_threshold,
+                            "evaluator: confidence too low to skip — fallthrough to agent",
+                        );
+                        EvaluatorOutcome::Proceed {
+                            reason: result.reason.clone(),
+                        }
+                    } else {
+                        EvaluatorOutcome::Skip {
+                            reason: format!("{}(confidence {:.2})", result.reason, result.confidence),
+                        }
+                    }
                 }
-            } else {
-                false
+                Intent::Unclear if ask_back_enabled => {
+                    let question = result
+                        .clarifying_question
+                        .clone()
+                        .filter(|q| !q.trim().is_empty())
+                        .unwrap_or_else(|| DEFAULT_ASK_BACK_QUESTION.to_string());
+                    EvaluatorOutcome::AskBack {
+                        reason: result.reason.clone(),
+                        question,
+                    }
+                }
+                Intent::Unclear | Intent::AddressMori => EvaluatorOutcome::Proceed {
+                    reason: result.reason.clone(),
+                },
+            };
+            let outcome_kind = match &outcome {
+                EvaluatorOutcome::Proceed { .. } => "proceed",
+                EvaluatorOutcome::Skip { .. } => "skip",
+                EvaluatorOutcome::AskBack { .. } => "ask_back",
             };
             tracing::info!(
                 intent = ?result.intent,
                 reason = %result.reason,
                 confidence = result.confidence,
-                skip,
+                outcome = outcome_kind,
                 "evaluator: result",
             );
             // Phase 6 event log:evaluator 每次判斷都記 — 給 Logs tab filter
             // 「給我看所有 evaluator skip 但 confidence 不高的」之類 query。
-            mori_core::event_log::append(serde_json::json!({
+            let mut entry = serde_json::json!({
                 "kind": "evaluator_decision",
                 "intent": format!("{:?}", result.intent),
                 "reason": result.reason,
                 "confidence": result.confidence,
                 "confidence_threshold": confidence_threshold,
-                "skip": skip,
-            }));
-            Some(EvaluatorOutcome {
-                skip,
-                reason: if skip {
-                    format!("{}(confidence {:.2})", result.reason, result.confidence)
-                } else {
-                    result.reason
-                },
-            })
+                "outcome": outcome_kind,
+                // backward-compat:舊版 Logs UI 還在用 skip:bool。Skip outcome 才是 true。
+                "skip": matches!(outcome, EvaluatorOutcome::Skip { .. }),
+            });
+            if let EvaluatorOutcome::AskBack { question, .. } = &outcome {
+                entry["clarifying_question"] = serde_json::Value::String(question.clone());
+            }
+            mori_core::event_log::append(entry);
+            Some(outcome)
         }
         Err(e) => {
             tracing::warn!(error = %e, "evaluator: evaluate() failed — skipping gate");
@@ -2761,23 +2807,33 @@ async fn run_agent_pipeline(
     routing: Arc<mori_core::llm::Routing>,
 ) {
     // Phase 3C:evaluator pre-gate — config 開啟時,先過 fast LLM 判 user 是不是
-    // 在跟 Mori 講話。Background noise → 直接 skip agent + 進 Done(空 response)。
-    // AddressMori / Unclear → 走原本 agent flow。
+    // 在跟 Mori 講話。三種 outcome:
+    //   Skip    → background noise,直接 Phase::Done(`(背景噪音 — ...)`)。
+    //   AskBack → Unclear,Mori 用 clarifying_question 反問 + TTS 念,**不**走 agent。
+    //   Proceed → AddressMori / 不夠確定的 noise / ask-back 關時的 Unclear,走 agent。
     let evaluator_t0 = std::time::Instant::now();
-    if let Some(EvaluatorOutcome { skip, reason }) = evaluator_gate(&transcript).await {
+    let evaluator_outcome = evaluator_gate(&transcript).await;
+    if let Some(outcome) = &evaluator_outcome {
         let evaluator_ms = evaluator_t0.elapsed().as_millis() as u64;
+        let (reason, skipped) = match outcome {
+            EvaluatorOutcome::Proceed { reason } => (reason.clone(), false),
+            EvaluatorOutcome::Skip { reason } => (reason.clone(), true),
+            EvaluatorOutcome::AskBack { reason, .. } => (reason.clone(), true),
+        };
         // Phase B:record evaluator timing + result snapshot
         if let Some(rec) = state.recording_session.lock().as_mut() {
             rec.add_evaluator_ms(evaluator_ms);
             rec.set_evaluator(recordings::EvaluatorSnapshot {
                 enabled: true,
                 intent: None, // 細節在 reason 內,簡化先不細拆
-                reason: Some(reason.clone()),
+                reason: Some(reason),
                 confidence: None,
-                skipped: skip,
+                skipped,
             });
         }
-        if skip {
+    }
+    match evaluator_outcome {
+        Some(EvaluatorOutcome::Skip { reason }) => {
             tracing::info!(reason, "evaluator: background noise — skipping agent");
             let _ = app.emit(
                 "evaluator-rejected",
@@ -2802,6 +2858,51 @@ async fn run_agent_pipeline(
                 },
             );
             return;
+        }
+        Some(EvaluatorOutcome::AskBack { reason, question }) => {
+            tracing::info!(reason, question, "evaluator: unclear — Mori asks back");
+            // 把反問句也寫進 conversation history(以 assistant 身份)— 下次
+            // user 再 wake 講「我是想說...」時,agent 看得到上下文。
+            {
+                let mut conv = state.conversation.lock();
+                conv.push(ChatMessage::user(transcript.clone()));
+                conv.push(ChatMessage::assistant_with_tool_calls(
+                    Some(question.clone()),
+                    Vec::new(),
+                ));
+                let max_msgs = MAX_HISTORY_PAIRS * 2;
+                while conv.len() > max_msgs {
+                    conv.remove(0);
+                }
+            }
+            let _ = app.emit(
+                "evaluator-ask-back",
+                serde_json::json!({
+                    "transcript": transcript,
+                    "question": question,
+                    "reason": reason,
+                }),
+            );
+            // TTS 念出反問句(若 tts.enabled,否則 silent — UI 仍會顯示)。
+            tts::speak_async(question.clone(), app.clone());
+            // Phase B:finalize session(ask-back path)— response 用 question 兜
+            if let Some(rec) = state.recording_session.lock().take() {
+                let mut rec = rec;
+                rec.set_response(question.clone());
+                rec.finalize();
+            }
+            state.set_phase(
+                &app,
+                Phase::Done {
+                    transcript,
+                    response: question,
+                    skill_calls: vec![],
+                },
+            );
+            return;
+        }
+        Some(EvaluatorOutcome::Proceed { .. }) | None => {
+            // fallthrough 給 agent
         }
     }
 
