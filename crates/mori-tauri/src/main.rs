@@ -2435,6 +2435,24 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             }
         };
 
+        // Phase 3E + STT-skip:空 transcript 一律不送下游。可能原因:
+        // 1. Speaker_id reject(別人聲音,silent skip)
+        // 2. STT gate skip(audio too quiet / too short)
+        // 3. Whisper 真的回空(理論上不該,但守一道)
+        // 直接 Phase::Done + return,不浪費 agent / LLM call。
+        if transcript.trim().is_empty() {
+            tracing::info!("empty transcript — skipping downstream agent pipeline");
+            state.set_phase(
+                &app,
+                Phase::Done {
+                    transcript: String::new(),
+                    response: String::new(),
+                    skill_calls: vec![],
+                },
+            );
+            return;
+        }
+
         // Stage 2: routing 拆 agent + per-skill provider(5A-3)。STT 一定走 Groq
         // Whisper(stage 1),但 chat 跟 skill 各自的 provider 由 routing 決定。
         let routing =

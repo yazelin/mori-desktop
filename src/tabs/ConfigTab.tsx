@@ -864,9 +864,18 @@ function SpeakerIdSection({ cfg, applyPatch }: SpeakerIdSectionProps) {
   };
 
   const onEnroll = async () => {
-    if (!confirm("錄音 30 秒註冊聲紋。請在安靜環境連續講話(讀文章 / 自我介紹 / 多句不同 prosody)。按確定開始。")) return;
+    const sample = `嗨,我是 Mori 的使用者,我在錄音註冊我的聲音。
+Hey Mori,你好嗎?今天天氣不錯,我喜歡咖啡跟茶。
+我來念幾種不同語氣的句子:這是平常講話,這是問句嗎?
+還有強調的時候!Hey Mori,辨識完成。`;
+    if (
+      !confirm(
+        `錄音 30 秒註冊聲紋。\n\n按下確定後,請以「自然語氣」念以下內容(或自由發揮類似長度):\n\n${sample}\n\n要點:\n• 自然語速,不要朗讀腔\n• 中間不要長停頓\n• 跟實際叫 Mori 時同麥克風距離\n• 多種語氣(平淡 / 問句 / 強調)`
+      )
+    )
+      return;
     setEnrolling(true);
-    setMsg("錄音中... 30 秒(請持續講話)");
+    setMsg("錄音中... 30 秒(請按上方提示連續講話)");
     try {
       await invoke("speaker_id_enroll", { seconds: 30 });
       await refresh();
@@ -922,6 +931,38 @@ function SpeakerIdSection({ cfg, applyPatch }: SpeakerIdSectionProps) {
           }
         />
       </FormRow>
+      {!status?.enrolled && (
+        <div
+          style={{
+            margin: "8px 12px",
+            padding: 10,
+            background: "var(--mori-accent-bg, rgba(120,180,140,0.08))",
+            borderLeft: "3px solid var(--mori-forest, #6a8c5a)",
+            borderRadius: 4,
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <strong>📖 30 秒讀稿範本</strong>(按開始後唸這段,或自由發揮類似長度):
+          <pre
+            style={{
+              margin: "6px 0 4px 0",
+              padding: 8,
+              background: "rgba(0,0,0,0.05)",
+              borderRadius: 3,
+              whiteSpace: "pre-wrap",
+              fontFamily: "inherit",
+              fontSize: 12,
+            }}
+          >
+{`嗨,我是 Mori 的使用者,我在錄音註冊我的聲音。
+Hey Mori,你好嗎?今天天氣不錯,我喜歡咖啡跟茶。
+我來念幾種不同語氣的句子:這是平常講話,這是問句嗎?
+還有強調的時候!Hey Mori,辨識完成。`}
+          </pre>
+          <strong>準確訣竅:</strong>自然語速 / 中間別長停頓 / 跟實際叫 Mori 同麥克風距離 / 含「平淡 + 問句 + 強調」多種語氣。
+        </div>
+      )}
       <FormRow label="" hint={status?.enrolled ? `已註冊:${status.path}(${status.size_bytes} bytes)` : "尚未註冊 — 按下方錄音 30 秒"}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button
