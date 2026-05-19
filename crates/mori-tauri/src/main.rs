@@ -23,6 +23,7 @@ mod x11_shape;
 mod selection;
 mod shell_skill;
 mod skill_server;
+mod speaker_id;
 mod theme;
 mod transcribe_cmds;
 mod tts;
@@ -2224,6 +2225,61 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         // provider 就 100% Groq-free)。
         let transcribe_result: anyhow::Result<String> = async {
             let mut audio = recorder.stop().context("stop recorder")?;
+
+            // Phase 3E:speaker verification 用 **raw audio**(silence-trim 前)。
+            // resemblyzer 內建 VAD 會自己抓有聲段,我們不該 double-trim — 之前
+            // 用 trimmed audio 把 4.65s 砍到 0.39s,resemblyzer 在 < 1 秒上
+            // embedding 不穩(同一人 score 從 0.75 掉到 0.55 誤拒)。
+            //
+            // 先寫一份 raw WAV 給 speaker_id 用,後面再 trim + STT。
+            let raw_wav = audio.to_wav_bytes().context("encode raw WAV")?;
+            let raw_path = std::env::temp_dir().join("mori-last-recording-raw.wav");
+            let _ = std::fs::write(&raw_path, &raw_wav);
+            let verify_path = raw_path.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                speaker_id::verify_audio_file(&verify_path)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("speaker_id join: {e}"))?;
+            match &outcome {
+                speaker_id::VerifyOutcome::Verified(r) if !r.pass => {
+                    tracing::info!(
+                        score = r.score,
+                        threshold = r.threshold,
+                        raw_duration_secs = audio.duration_secs(),
+                        "speaker_id: rejected — not enrolled user"
+                    );
+                    mori_core::event_log::append(serde_json::json!({
+                        "kind": "speaker_id_rejected",
+                        "score": r.score,
+                        "threshold": r.threshold,
+                    }));
+                    let _ = app_for_provider.emit(
+                        "speaker-id-rejected",
+                        serde_json::json!({
+                            "score": r.score,
+                            "threshold": r.threshold,
+                        }),
+                    );
+                    return Ok(String::new());
+                }
+                speaker_id::VerifyOutcome::Verified(r) => {
+                    tracing::info!(
+                        score = r.score,
+                        threshold = r.threshold,
+                        raw_duration_secs = audio.duration_secs(),
+                        "speaker_id: pass"
+                    );
+                }
+                speaker_id::VerifyOutcome::NotEnrolled => {
+                    tracing::info!("speaker_id: skipped (user not enrolled)");
+                }
+                speaker_id::VerifyOutcome::Disabled => {}
+                speaker_id::VerifyOutcome::Error(e) => {
+                    tracing::warn!(error = %e, "speaker_id: error — passing through");
+                }
+            }
+
             if read_voice_trim_silence_enabled() {
                 let before_samples = audio.samples.len();
                 let before_secs = audio.duration_secs();
@@ -2340,6 +2396,10 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let _ = std::fs::write(&debug_path, &wav);
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
+            // Phase 3E speaker verification 已在 silence-trim 前用 raw audio 跑完
+            // (見 fn 上方 transcribe_result 開頭)— 不再在此處跑,避免短 audio
+            // embedding 不穩誤拒 user 本人。
+
             // 5F: VoiceInput mode 時，profile 可用 stt_provider 覆蓋全域 STT 設定
             let stt_override: Option<String> = if matches!(*state.mode.lock(), Mode::VoiceInput) {
                 mori_core::voice_input_profile::load_active_profile()
@@ -2386,6 +2446,24 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                 return;
             }
         };
+
+        // Phase 3E + STT-skip:空 transcript 一律不送下游。可能原因:
+        // 1. Speaker_id reject(別人聲音,silent skip)
+        // 2. STT gate skip(audio too quiet / too short)
+        // 3. Whisper 真的回空(理論上不該,但守一道)
+        // 直接 Phase::Done + return,不浪費 agent / LLM call。
+        if transcript.trim().is_empty() {
+            tracing::info!("empty transcript — skipping downstream agent pipeline");
+            state.set_phase(
+                &app,
+                Phase::Done {
+                    transcript: String::new(),
+                    response: String::new(),
+                    skill_calls: vec![],
+                },
+            );
+            return;
+        }
 
         // Stage 2: routing 拆 agent + per-skill provider(5A-3)。STT 一定走 Groq
         // Whisper(stage 1),但 chat 跟 skill 各自的 provider 由 routing 決定。
@@ -4045,6 +4123,9 @@ fn main() {
             wake_sound::wake_ack_upload,
             wake_sound::wake_ack_delete_alternate,
             tts::tts_preview,
+            speaker_id::speaker_id_status,
+            speaker_id::speaker_id_enroll,
+            speaker_id::speaker_id_clear,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -4078,6 +4159,10 @@ fn main() {
             // Phase 3D:deploy ~/.mori/bin/mori-tts-edge.py(edge-tts bridge script)。
             // TTS speak-back 預設 OFF,user enable 才會用到。但 script 先 deploy 不影響。
             tts::ensure_script_deployed(&mori_dir());
+
+            // Phase 3E:deploy ~/.mori/bin/mori-voice-enroll.py + mori-voice-verify.py。
+            // Speaker verification 預設 OFF。
+            speaker_id::ensure_scripts_deployed(&mori_dir());
 
             // 啟動初始 floating visibility — update_floating_visibility 自己會看:
             //   - quickstart_completed (儀式還沒完成 → 強制隱藏)

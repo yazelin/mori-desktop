@@ -459,6 +459,56 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
         },
+        // Phase 3E:resemblyzer 聲紋辨識 — 共用 wake-venv,~100MB(含 80MB pretrained
+        // VoiceEncoder + librosa + numpy deps)。預設 OFF,user 開啟才會 gate。
+        DepSpec {
+            id: "speaker-id-runtime",
+            name: "聲紋辨識 runtime(resemblyzer)",
+            description: "Phase 3E speaker verification 用的 Python resemblyzer(VoxCeleb \
+                          pretrained voice encoder)。沒裝 → Config 開 speaker_id.enabled \
+                          也不會 gate(只 log)。跟 wake-listener / edge-tts 共用 wake-venv。",
+            unlocks: "speaker_id.enabled=true 時擋下別人聲音,只有 enrolled user 能叫 Mori",
+            size_hint: Some("~100MB(含 pretrained model)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
+            check: CheckSpec::CommandStdoutContains {
+                cmd: "sh",
+                args: &[
+                    "-c",
+                    "$HOME/.mori/wake-venv/bin/python -c 'import resemblyzer; print(\"ok\")' 2>&1",
+                ],
+                needle: "ok",
+            },
+            install: InstallSpec::Shell {
+                script: "set -e; \
+                         VENV=\"$HOME/.mori/wake-venv\"; \
+                         UV=\"$HOME/.local/bin/uv\"; \
+                         if [ ! -x \"$VENV/bin/python\" ]; then \
+                            echo '⚠ wake-venv 不存在 — 先裝 wake-listener-runtime'; exit 2; \
+                         fi; \
+                         if [ -x \"$UV\" ]; then \
+                            echo '用 uv pip install resemblyzer...'; \
+                            \"$UV\" pip install --python \"$VENV/bin/python\" resemblyzer; \
+                         elif [ -x \"$VENV/bin/pip\" ]; then \
+                            echo '用 venv pip...'; \
+                            \"$VENV/bin/pip\" install resemblyzer; \
+                         else \
+                            echo '用 ensurepip bootstrap...'; \
+                            \"$VENV/bin/python\" -m ensurepip --upgrade; \
+                            \"$VENV/bin/python\" -m pip install resemblyzer; \
+                         fi; \
+                         echo '✓ resemblyzer 裝好了。第一次跑 enrollment 會自動下載 80MB pretrained model。'",
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows PowerShell(需先有 wake-venv):",
+                        "uv pip install --python %USERPROFILE%\\.mori\\wake-venv\\Scripts\\python.exe resemblyzer",
+                    ],
+                }),
+            ],
+        },
     ]
 }
 

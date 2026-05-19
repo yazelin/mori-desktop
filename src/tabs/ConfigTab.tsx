@@ -607,7 +607,15 @@ type WakeAckStatus = {
   alternates: WakeAckAlternate[];
 };
 
-function WakeAckSection() {
+// WakeAckSection 需要 cfg + applyPatch 才能讓「啟用」toggle 走 form 的 dirty
+// tracking(不然 toggle 不會 enable 儲存按鈕)。其他檔案操作(set_active /
+// upload / delete)仍走 IPC,因為它們牽涉檔案系統。
+type WakeAckSectionProps = {
+  cfg: AnyObj;
+  applyPatch: (mutator: (c: AnyObj) => void) => void;
+};
+
+function WakeAckSection({ cfg, applyPatch }: WakeAckSectionProps) {
   // i18n keys 之後補,目前 hardcode 中文(跟其他 hardcode 的 hint 一樣)
   const [status, setStatus] = useState<WakeAckStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -668,16 +676,13 @@ function WakeAckSection() {
     }
   };
 
-  const onToggleEnabled = async (enabled: boolean) => {
-    setBusy(true);
-    try {
-      await invoke("wake_ack_set_enabled", { enabled });
-      await refresh();
-    } catch (e) {
-      flashMsg(`儲存失敗:${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
+  // 「啟用」改走 applyPatch — 跟其他 form 欄位一致,動到會 enable 儲存按鈕。
+  // (不再 call wake_ack_set_enabled IPC,Save 統一寫 config.json)
+  const onToggleEnabled = (enabled: boolean) => {
+    applyPatch((c) => {
+      const lm = ensureSubObj(c, "listening_mode");
+      lm.wake_ack_enabled = enabled;
+    });
   };
 
   const onUpload = async (file: File) => {
@@ -713,11 +718,10 @@ function WakeAckSection() {
       title="Wake-ack 應答音"
       hint="Listening mode 下,Hey Mori 被偵測到後播這個音檔(讓你知道可以開始說話)。先放完再開麥克風,避免被 mic 收回去污染 STT。"
     >
-      <FormRow label="啟用" hint="關掉就完全靜音(只看 floating Mori 動畫提示)">
+      <FormRow label="啟用" hint="關掉就完全靜音(只看 floating Mori 動畫提示)。改動後按上方「儲存」才寫入 config.json。">
         <input
           type="checkbox"
-          checked={status.enabled}
-          disabled={busy}
+          checked={Boolean((cfg.listening_mode?.wake_ack_enabled) ?? true)}
           onChange={(e) => onToggleEnabled(e.target.checked)}
         />
       </FormRow>
@@ -815,6 +819,305 @@ function WakeAckSection() {
         </div>
       </FormRow>
     </Section>
+  );
+}
+
+// ── Phase 3E:聲紋辨識(Speaker verification)──────────────────────────
+//
+// 啟用後 wake event 觸發 + STT 前先過 voice embedding 比對,別人聲音 silent
+// reject。需先「錄音註冊我的聲音」(~30s) + DepsTab 裝 resemblyzer。
+
+type SpeakerIdStatus = {
+  enrolled: boolean;
+  path: string;
+  size_bytes: number;
+  enabled: boolean;
+  threshold: number;
+};
+
+type SpeakerIdSectionProps = {
+  cfg: AnyObj;
+  applyPatch: (mutator: (c: AnyObj) => void) => void;
+};
+
+const ENROLL_SAMPLE_TEXT = `嗨,我是 Mori 的使用者,我在錄音註冊我的聲音,讓 Mori 認得我。
+Hey Mori,你今天好嗎?今天天氣不錯,陽光很好,我喜歡咖啡跟茶。
+我來念幾種不同語氣的句子:這是平常講話,這是問句嗎?還有強調的時候!
+最後 Hey Mori,我念完了。如果還沒到 30 秒,我就繼續隨便聊一下今天做了什麼,
+工作如何,有沒有遇到什麼好玩的事,或者就重複念剛剛那段都可以,重點是別停。`;
+const ENROLL_SECONDS = 30;
+
+/** Recording modal with pulsing red dot + countdown + progress bar.
+ *  純 JS 計時(SetInterval),不依賴後端 event。recording 實際在 Python 子進程
+ *  跑,30 秒固定,modal 跟著計時一起跑,結束關閉。 */
+function EnrollmentModal({
+  open,
+  onCancel,
+}: {
+  open: boolean;
+  onCancel?: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!open) {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const t = setInterval(() => {
+      setElapsed(Math.min(ENROLL_SECONDS, (Date.now() - start) / 1000));
+    }, 100);
+    return () => clearInterval(t);
+  }, [open]);
+  if (!open) return null;
+  const pct = (elapsed / ENROLL_SECONDS) * 100;
+  const remaining = Math.max(0, ENROLL_SECONDS - elapsed);
+  return createPortal(
+    <div className="mori-modal-backdrop">
+      <style>{`
+        @keyframes mori-rec-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.95; box-shadow: 0 0 0 0 rgba(220,60,60,0.7); }
+          50% { transform: scale(1.18); opacity: 1; box-shadow: 0 0 0 16px rgba(220,60,60,0); }
+        }
+        .mori-enroll-modal {
+          width: min(92%, 640px);
+          background: var(--c-surface-bg);
+          color: var(--c-text);
+          border: 1px solid var(--c-border-strong);
+          border-radius: 12px;
+          padding: 22px 24px;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+        }
+        .mori-enroll-header {
+          display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+        }
+        .mori-enroll-rec-dot {
+          width: 16px; height: 16px; background: #dc3c3c; border-radius: 50%;
+          animation: mori-rec-pulse 1.2s ease-in-out infinite;
+        }
+        .mori-enroll-title { margin: 0; font-size: 17px; color: var(--c-text); }
+        .mori-enroll-script {
+          padding: 12px 14px;
+          background: var(--c-input-bg);
+          color: var(--c-text);
+          border: 1px solid var(--c-border);
+          border-radius: 6px;
+          font-size: 14px;
+          line-height: 1.85;
+          white-space: pre-wrap;
+          margin-bottom: 14px;
+          max-height: 220px;
+          overflow-y: auto;
+        }
+        .mori-enroll-progress-text {
+          display: flex; justify-content: space-between;
+          font-size: 13px; color: var(--c-text); margin-bottom: 6px;
+        }
+        .mori-enroll-progress-track {
+          height: 8px;
+          background: var(--c-input-bg);
+          border: 1px solid var(--c-border);
+          border-radius: 4px;
+          overflow: hidden;
+          margin-bottom: 12px;
+        }
+        .mori-enroll-progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--c-forest, #6a8c5a) 0%, var(--c-forest-light, #8db077) 100%);
+          transition: width 0.1s linear;
+        }
+        .mori-enroll-hint {
+          font-size: 12px;
+          color: var(--c-text-muted);
+          line-height: 1.6;
+          margin: 0 0 12px 0;
+        }
+        .mori-enroll-footer { text-align: right; }
+      `}</style>
+      <div className="mori-enroll-modal">
+        <div className="mori-enroll-header">
+          <div className="mori-enroll-rec-dot" />
+          <h3 className="mori-enroll-title">錄音中 — 請念出下方文字</h3>
+        </div>
+
+        <div className="mori-enroll-script">{ENROLL_SAMPLE_TEXT}</div>
+
+        <div className="mori-enroll-progress-text">
+          <span>已錄 <strong>{elapsed.toFixed(1)}s</strong> / {ENROLL_SECONDS}s</span>
+          <span>剩餘 <strong>{remaining.toFixed(1)}s</strong></span>
+        </div>
+        <div className="mori-enroll-progress-track">
+          <div className="mori-enroll-progress-fill" style={{ width: `${pct}%` }} />
+        </div>
+
+        <p className="mori-enroll-hint">
+          💡 念完還沒滿就<strong>繼續隨意聊</strong>(今天 / 工作 / 任何)或重複範本。
+          <strong>別停</strong>。中間靜音會被 VAD 砍掉,降低 embedding 品質。
+        </p>
+
+        {onCancel && elapsed < ENROLL_SECONDS && (
+          <div className="mori-enroll-footer">
+            <button className="mori-btn small ghost" onClick={onCancel}>
+              取消(放棄這次)
+            </button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function SpeakerIdSection({ cfg, applyPatch }: SpeakerIdSectionProps) {
+  const [status, setStatus] = useState<SpeakerIdStatus | null>(null);
+  const [enrolling, setEnrolling] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      const s = await invoke<SpeakerIdStatus>("speaker_id_status");
+      setStatus(s);
+    } catch (e) {
+      console.error("speaker_id_status", e);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const flashMsg = (m: string) => {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  const onEnroll = async () => {
+    if (
+      !confirm(
+        `準備錄音 30 秒註冊聲紋。\n\n按下確定後會跳出讀稿視窗,跟著念就好。\n\n要點:\n• 自然語速,不要朗讀腔\n• 念完還沒 30 秒 → 繼續隨意聊或重複範本(別停)\n• 跟實際叫 Mori 時同麥克風距離\n• 多種語氣(平淡 / 問句 / 強調)`
+      )
+    )
+      return;
+    setEnrolling(true);
+    try {
+      await invoke("speaker_id_enroll", { seconds: 30 });
+      await refresh();
+      flashMsg("✓ 聲紋註冊完成");
+    } catch (e) {
+      flashMsg(`註冊失敗:${String(e)}`);
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const onClear = async () => {
+    if (!confirm("清除已註冊的聲紋?清除後 wake event 不會 gate(任何人都能叫 Mori)。")) return;
+    try {
+      await invoke("speaker_id_clear");
+      await refresh();
+      flashMsg("✓ 已清除");
+    } catch (e) {
+      flashMsg(`清除失敗:${String(e)}`);
+    }
+  };
+
+  return (
+    <>
+    <EnrollmentModal open={enrolling} />
+    <Section
+      title="聲紋辨識(只認你,Phase 3E)"
+      hint="啟用後 wake event 觸發、user 講完之後,先用 resemblyzer 比對聲紋。只有 enrolled user 的聲音通過,別人 silent reject。需先在 Deps 頁裝「聲紋辨識 runtime」(~100MB)+ 點下方錄音註冊一次。預設 OFF。"
+    >
+      <FormRow label="enabled" hint="OFF → 任何人都能叫 Mori(現有行為)。ON → 只認你。沒 enrolled 就 ON 也不會 gate(避免鎖死)。每次 wake 多 ~200-500ms 延遲跑 embedding 比對。">
+        <input
+          type="checkbox"
+          checked={Boolean(cfg.speaker_id?.enabled)}
+          onChange={(e) =>
+            applyPatch((c) => {
+              const s = ensureSubObj(c, "speaker_id");
+              s.enabled = e.target.checked;
+            })
+          }
+        />
+      </FormRow>
+      <FormRow label="threshold" hint="Cosine similarity 0~1,越高越嚴(只認跟 enrollment 高度相似的聲音)。預設 0.7。同一人不同日 / 感冒 / 距離 mic 不同會掉到 0.65-0.75,設太高容易擋掉自己。設太低(<0.55)別人也通過。建議從 0.7 開始,實測微調。">
+        <input
+          type="number"
+          min={0.3}
+          max={0.99}
+          step={0.05}
+          value={Number(cfg.speaker_id?.threshold ?? 0.7)}
+          onChange={(e) =>
+            applyPatch((c) => {
+              const s = ensureSubObj(c, "speaker_id");
+              const n = Number(e.target.value);
+              s.threshold = Number.isFinite(n) ? Math.max(0.3, Math.min(0.99, n)) : 0.7;
+            })
+          }
+        />
+      </FormRow>
+      {!status?.enrolled && (
+        <div
+          style={{
+            margin: "8px 12px",
+            padding: 10,
+            background: "var(--mori-accent-bg, rgba(120,180,140,0.08))",
+            borderLeft: "3px solid var(--mori-forest, #6a8c5a)",
+            borderRadius: 4,
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <strong>📖 30 秒讀稿範本</strong>(按開始後唸這段,或自由發揮類似長度):
+          <pre
+            style={{
+              margin: "6px 0 4px 0",
+              padding: 8,
+              background: "rgba(0,0,0,0.05)",
+              borderRadius: 3,
+              whiteSpace: "pre-wrap",
+              fontFamily: "inherit",
+              fontSize: 12,
+            }}
+          >
+{`嗨,我是 Mori 的使用者,我在錄音註冊我的聲音。
+Hey Mori,你好嗎?今天天氣不錯,我喜歡咖啡跟茶。
+我來念幾種不同語氣的句子:這是平常講話,這是問句嗎?
+還有強調的時候!Hey Mori,辨識完成。`}
+          </pre>
+          <strong>準確訣竅:</strong>自然語速 / 中間別長停頓 / 跟實際叫 Mori 同麥克風距離 / 含「平淡 + 問句 + 強調」多種語氣。
+        </div>
+      )}
+      <FormRow label="" hint={status?.enrolled ? `已註冊:${status.path}(${status.size_bytes} bytes)` : "尚未註冊 — 按下方錄音 30 秒"}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            className="mori-btn"
+            onClick={onEnroll}
+            disabled={enrolling}
+            title="錄 30 秒講話,抽聲紋當作識別基準"
+          >
+            {enrolling ? "錄音中..." : status?.enrolled ? "🎙 重新註冊" : "🎙 錄音註冊我的聲音"}
+          </button>
+          {status?.enrolled && (
+            <button
+              className="mori-btn small ghost"
+              onClick={onClear}
+              disabled={enrolling}
+              style={{ color: "var(--mori-danger, #c66)" }}
+            >
+              ✕ 清除
+            </button>
+          )}
+          {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
+        </div>
+      </FormRow>
+      {!status?.enrolled && cfg.speaker_id?.enabled && (
+        <p style={{ fontSize: 12, opacity: 0.7, padding: "4px 12px", color: "var(--mori-warn, #d80)" }}>
+          ⚠ enabled 但還沒 enrolled — wake event 不會 gate(任何人都能用)。先按上方錄音註冊。
+        </p>
+      )}
+    </Section>
+    </>
   );
 }
 
@@ -1279,19 +1582,19 @@ function ConfigTab({
           >
             <FormRow
               label="threshold"
-              hint="偵測門檻(0.05~0.95)。越高越嚴格(必須完整「Hey Mori」才觸發),越低越敏感(誤觸多)。預設 0.5。建議從 0.65 試起。"
+              hint="偵測門檻(0.05~0.95)。越高越嚴格,越低越敏感(誤觸多)。預設 0.7。下游有 speaker_id + evaluator 兩層 filter 擋誤觸,wake 不必設太嚴(0.9+ 會漏掉輕聲 / 不清楚的「Hey Mori」)。"
             >
               <input
                 type="number"
                 min={0.05}
                 max={0.95}
                 step={0.05}
-                value={Number(cfg.listening_mode?.threshold ?? 0.5)}
+                value={Number(cfg.listening_mode?.threshold ?? 0.7)}
                 onChange={(e) =>
                   applyPatch((c) => {
                     const lm = ensureSubObj(c, "listening_mode");
                     const n = Number(e.target.value);
-                    lm.threshold = Number.isFinite(n) ? Math.max(0.05, Math.min(0.95, n)) : 0.5;
+                    lm.threshold = Number.isFinite(n) ? Math.max(0.05, Math.min(0.95, n)) : 0.7;
                   })
                 }
               />
@@ -1356,7 +1659,10 @@ function ConfigTab({
           </Section>
 
           {/* Wake-ack 應答音(獨立 Section,Phase 3A.1.2)*/}
-          <WakeAckSection />
+          <WakeAckSection cfg={cfg} applyPatch={applyPatch} />
+
+          {/* ── Phase 3E: 聲紋辨識(Speaker verification)── */}
+          <SpeakerIdSection cfg={cfg} applyPatch={applyPatch} />
 
           {/* ── Phase 3C: Wake-event evaluator(背景噪音過濾)── */}
           <Section
