@@ -4405,6 +4405,11 @@ fn main() {
             speaker_id::speaker_id_status,
             speaker_id::speaker_id_enroll,
             speaker_id::speaker_id_clear,
+            recordings::recordings_list,
+            recordings::recordings_session_detail,
+            recordings::recordings_audio_bytes,
+            recordings::recordings_delete_session,
+            recordings::recordings_stats,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
