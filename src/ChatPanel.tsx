@@ -132,6 +132,11 @@ function ChatPanel() {
   // 5A-3b: fallback chain 觸發時 backend 推 system message,渲染在 thread 內。
   // 每次 recording / transcribing 重置(新 pipeline 開始時清舊訊息)。
   const [systemMessages, setSystemMessages] = useState<FallbackSystemMessage[]>([]);
+  // Phase 3C.2:ask-back chip — 收 evaluator-ask-back event 時把 question 文字
+  // 記下,ChatBubble 跟 conv[i].content 比對就能標 chip。
+  // 不 dedup / 不 cap 因為單次 session 內 ask-back 不會多;page reload 清空也可接受
+  //(過去 turn 失去 chip 但內容仍在)。
+  const [askBackQuestions, setAskBackQuestions] = useState<Set<string>>(() => new Set());
 
   const threadRef = useRef<HTMLDivElement | null>(null);
 
@@ -191,6 +196,18 @@ function ChatPanel() {
     const unlistenSys = listen<FallbackSystemMessage>("chat-system-message", (e) => {
       setSystemMessages((prev) => [...prev, e.payload]);
     });
+    // Phase 3C.2:evaluator 判 Unclear → 後端 emit `evaluator-ask-back`,
+    // 把 clarifying question 文字記下來,ChatBubble 拿來 match conv[i].content 標 chip。
+    const unlistenAskBack = listen<{ question: string }>("evaluator-ask-back", (e) => {
+      const q = e.payload?.question?.trim();
+      if (!q) return;
+      setAskBackQuestions((prev) => {
+        if (prev.has(q)) return prev;
+        const next = new Set(prev);
+        next.add(q);
+        return next;
+      });
+    });
 
     return () => {
       unlistenPhase.then((f) => f());
@@ -200,6 +217,7 @@ function ChatPanel() {
       unlistenCtx.then((f) => f());
       unlistenSys.then((f) => f());
       unlistenProfileSwitched.then((f) => f());
+      unlistenAskBack.then((f) => f());
     };
   }, []);
 
@@ -325,9 +343,13 @@ function ChatPanel() {
           </div>
         )}
         {conv.map((turn, i) => (
-          <ChatBubble key={i} turn={turn} />
+          <ChatBubble
+            key={i}
+            turn={turn}
+            isAskBack={turn.role === "assistant" && askBackQuestions.has(turn.content.trim())}
+          />
         ))}
-        {inProgress && <ChatBubble turn={inProgress} />}
+        {inProgress && <ChatBubble turn={inProgress} isAskBack={false} />}
         {/* 5A-3b: fallback chain 觸發時的提示行(每次 pipeline 開始清空) */}
         {systemMessages.map((sm, i) => (
           <div key={`sys-${i}`} className="mori-chat-system">
@@ -444,7 +466,7 @@ function ChatPanel() {
   );
 }
 
-function ChatBubble({ turn }: { turn: ChatTurn }) {
+function ChatBubble({ turn, isAskBack = false }: { turn: ChatTurn; isAskBack?: boolean }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -463,9 +485,14 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
     ? t("chat_panel.role_user")
     : "Mori";
   return (
-    <div className={`mori-bubble ${turn.role}`}>
+    <div className={`mori-bubble ${turn.role}${isAskBack ? " askback" : ""}`}>
       <span className="role-label">
         {isVoice && <IconMic width={11} height={11} />} {label}
+        {isAskBack && (
+          <span className="askback-chip" title={t("chat_panel.askback_chip_title")}>
+            ✦ {t("chat_panel.askback_chip_label")}
+          </span>
+        )}
       </span>
       {/* 語音輸入 bubble 加右上角複製鈕 — user 之前抱怨「轉錄完就消失」,
           這個讓他能事後 grab transcripts 再貼到別處用 */}

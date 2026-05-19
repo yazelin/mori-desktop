@@ -177,6 +177,28 @@
   color: var(--c-mono-color);
 }
 
+/* Phase 3C.2:ask-back chip — Mori 判 user 話不完整時用 TTS 反問,
+   chat bubble 標個小 chip 讓 user 一眼看出「這是反問,不是普通回答」。
+   用 warning token(yellow tint),不是 danger(紅 = 真錯誤)。 */
+.mori-bubble .askback-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--c-warning-bg);
+  border: 1px solid var(--c-warning-border);
+  color: var(--c-warning-text);
+  font-size: 9.5px;
+  letter-spacing: 0.2px;
+  cursor: help;
+}
+/* 連 bubble-body 也輕微染色提示,但比 chip 淡很多 — 不搶眼 */
+.mori-bubble.assistant.askback .bubble-body {
+  border-color: var(--c-warning-border);
+}
+
 /* ── voice_input bubble:dictation 紀錄(灰、italic 內容、右上 copy 鈕) ── */
 .mori-bubble.voice_input .role-label {
   display: inline-flex;

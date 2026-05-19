@@ -190,6 +190,8 @@
     "role_voice_input": "語音輸入",
     "role_empty": "(空)",
     "copy_voice_input": "複製這筆語音輸入內容",
+    "askback_chip_label": "反問",
+    "askback_chip_title": "Mori 認為你的話不完整,在請你說清楚一點(evaluator: Intent::Unclear)",
     "session_path_x11": "x11 · 走 tauri-plugin-global-shortcut",
     "session_path_wayland": "wayland · 走 xdg-desktop-portal",
     "session_path_linux_other": "linux (tty / 未設) · 全域熱鍵失效，UI 按鈕仍可用",
