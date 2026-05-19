@@ -130,12 +130,17 @@ Mori 還不能開口說話。要補:
 - VAD silence-stop — 講完自動停送 STT,不用按熱鍵也不用固定錄滿
 - DepsTab 一鍵裝 Python listener runtime(`wake-venv`)
 
+**v0.6.1 加上**(Phase 3C/3D/3E done):
+- ✅ Phase 3C — LLM evaluator(語意層過濾 background noise / 自言自語)
+- ✅ Phase 3D — TTS speak-back(edge-tts 免費 + native zh-TW + UI 開關)
+- ✅ Phase 3E — Speaker verification(resemblyzer 聲紋,只認 enrolled user)
+
 **留 v0.6.x**:
 - Phase 3A.2 — Custom wake-word phrase UI(目前只有 CLI 訓練,要 UI 化 + Windows
   piper-phonemize 跨平台修)
-- Phase 3C — LLM evaluator / ask-back(Mori 自動判斷「這是指令 / 閒聊 / 不完整」+ 反問)
-- Phase 3D — TTS speak-back(Mori 真的講話。Gemini TTS quota 受限,要配 edge-tts
-  免費 fallback + 開關)
+- Phase 3C.2 — Ask-back UI(Intent::Unclear 時 Mori 反問 + 自動重進 Listening)
+- TTS 中斷支援(Ctrl+Alt+Esc 停 sink)+ sentence streaming
+- Speaker enrollment 進度 real-time UI(目前 modal 是純 JS 倒數,Python 已 emit JSON event 待 Rust forward)
 
 ### 多界橋樑 — IM Bot 整合(Telegram / Discord / LINE / Slack)
 
