@@ -534,6 +534,111 @@ pub fn recordings_stats() -> RecordingsStats {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct CleanupResult {
+    pub removed: usize,
+    pub kept: usize,
+    pub retention_days: u32,
+}
+
+/// IPC — 立刻跑一次 cleanup,**不**受 `CLEANUP_RAN_THIS_SESSION` gate 限制。
+/// 給 RecordingsTab 的「一鍵清舊」按鈕用。
+/// `retention_days=0` 時不刪任何東西(同 auto cleanup 邏輯),只回 stats。
+#[tauri::command]
+pub fn recordings_cleanup_now() -> CleanupResult {
+    let cfg = read_config();
+    let root = recordings_root();
+    let mut removed = 0usize;
+    let mut kept = 0usize;
+    if cfg.retention_days == 0 {
+        // 不刪;直接 count 所有 dir 當 kept 回報
+        if let Ok(entries) = fs::read_dir(&root) {
+            for e in entries.flatten() {
+                if e.path().is_dir() {
+                    kept += 1;
+                }
+            }
+        }
+        return CleanupResult {
+            removed,
+            kept,
+            retention_days: 0,
+        };
+    }
+    let Ok(entries) = fs::read_dir(&root) else {
+        return CleanupResult {
+            removed,
+            kept,
+            retention_days: cfg.retention_days,
+        };
+    };
+    let cutoff = SystemTime::now()
+        - std::time::Duration::from_secs(cfg.retention_days as u64 * 24 * 3600);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        if modified >= cutoff {
+            kept += 1;
+            continue;
+        }
+        match fs::remove_dir_all(&path) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!(
+                error = %e,
+                dir = %path.display(),
+                "recordings: cleanup_now remove failed",
+            ),
+        }
+    }
+    tracing::info!(
+        removed,
+        kept,
+        retention_days = cfg.retention_days,
+        "recordings_cleanup_now",
+    );
+    CleanupResult {
+        removed,
+        kept,
+        retention_days: cfg.retention_days,
+    }
+}
+
+/// IPC — 寫 `recordings.retention_days` 進 `~/.mori/config.json`(設 0 = 不清)。
+/// 寫完不自動跑 cleanup(讓 user 自己決定何時清),只更新 config。
+#[tauri::command]
+pub fn recordings_set_retention_days(days: u32) -> Result<(), String> {
+    let path = mori_dir().join("config.json");
+    // 讀原本的 config(找不到就空 object 起步)
+    let mut json: serde_json::Value = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let rec = json
+        .as_object_mut()
+        .ok_or_else(|| "config.json 不是 object".to_string())?
+        .entry("recordings".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let rec_obj = rec
+        .as_object_mut()
+        .ok_or_else(|| "config.json /recordings 不是 object".to_string())?;
+    rec_obj.insert("retention_days".to_string(), serde_json::json!(days));
+    fs::create_dir_all(mori_dir())
+        .map_err(|e| format!("mkdir ~/.mori: {e}"))?;
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?,
+    )
+    .map_err(|e| format!("write {}: {e}", path.display()))?;
+    tracing::info!(days, "recordings_set_retention_days saved");
+    Ok(())
+}
+
 /// 防 path traversal — timestamp 只能是 dir name format,不能含 `/` / `..` / abs path。
 fn sanitize_timestamp(ts: &str) -> Result<String, String> {
     if ts.is_empty() || ts.contains('/') || ts.contains('\\') || ts.starts_with('.') || ts.contains("..") {
