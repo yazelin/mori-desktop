@@ -2531,6 +2531,15 @@ async fn evaluator_gate(transcript: &str) -> Option<EvaluatorOutcome> {
         .and_then(|v| v.as_str())
         .unwrap_or("groq")
         .to_string();
+    // Phase 3C polish:confidence threshold gate。LLM intent 判 BackgroundNoise
+    // 但 confidence < threshold(預設 0.85)→ 不夠確定,不 skip user 可能真
+    // 講的指令,fallthrough 給 agent。反之 AddressMori 但 confidence 太低也
+    // 不確定 — 但這 case 已經 fallthrough,所以只 gate reject path。
+    let confidence_threshold = json
+        .pointer("/evaluator/confidence_threshold")
+        .and_then(|v| v.as_f64())
+        .map(|v| v.clamp(0.0, 1.0) as f32)
+        .unwrap_or(0.85);
 
     // Build provider
     let provider = match mori_core::llm::build_named_provider(&provider_name, None) {
@@ -2548,16 +2557,38 @@ async fn evaluator_gate(transcript: &str) -> Option<EvaluatorOutcome> {
     // Run evaluator
     match evaluate(transcript, provider).await {
         Ok(result) => {
+            // Confidence gate:reject 路徑(BackgroundNoise)在 confidence
+            // < threshold 時不 skip(LLM 不夠確定就不應該擋掉 user 真指令)。
+            let skip = if matches!(result.intent, Intent::BackgroundNoise) {
+                if result.confidence < confidence_threshold {
+                    tracing::info!(
+                        intent = ?result.intent,
+                        reason = %result.reason,
+                        confidence = result.confidence,
+                        threshold = confidence_threshold,
+                        "evaluator: confidence too low to skip — fallthrough to agent",
+                    );
+                    false
+                } else {
+                    true
+                }
+            } else {
+                false
+            };
             tracing::info!(
                 intent = ?result.intent,
                 reason = %result.reason,
                 confidence = result.confidence,
+                skip,
                 "evaluator: result",
             );
-            let skip = matches!(result.intent, Intent::BackgroundNoise);
             Some(EvaluatorOutcome {
                 skip,
-                reason: result.reason,
+                reason: if skip {
+                    format!("{}(confidence {:.2})", result.reason, result.confidence)
+                } else {
+                    result.reason
+                },
             })
         }
         Err(e) => {
