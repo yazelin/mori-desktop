@@ -23,6 +23,7 @@ mod x11_shape;
 mod selection;
 mod shell_skill;
 mod skill_server;
+mod recordings;
 mod speaker_id;
 mod theme;
 mod transcribe_cmds;
@@ -135,6 +136,9 @@ pub struct AppState {
     /// Phase 3A:Hey Mori wake-word listener。在 Mode::Listening 時 Some(running),
     /// 切到別 mode 時 None(Drop 會 kill python subprocess)。
     pub wake_word: Mutex<Option<wake_word::WakeWordListener>>,
+    /// Phase B(per-pipeline artifacts):當前 voice pipeline run 的 session 記錄
+    /// 累積器。start_recording 時 Some(new),finalize 在 Phase::Done 或 Error 時。
+    pub recording_session: Mutex<Option<recordings::SessionRecord>>,
     /// 5T: Toggle chord 的當前語意 — `Toggle`(一按切換)或 `Hold`(按住錄、放開停)。
     /// 啟動時從 `hotkey_config.toggle_mode` 讀入,`config_write` 寫完 disk 後同步
     /// 重讀更新 → 改完即時生效不必重啟。Listener 永遠掛 PRESSED + RELEASED,在
@@ -2145,6 +2149,19 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) {
             let level_handle = rec.level_arc();
             *state.recorder.lock() = Some(rec);
             let now_ms = chrono::Utc::now().timestamp_millis();
+
+            // Phase B:per-pipeline recordings archive — 新一輪 voice pipeline 開始,
+            // 建 SessionRecord 累積這次的 audio / transcript / metadata,Phase::Done 時 finalize。
+            // 若上輪 session 沒被 finalize(error 路徑漏 hook)→ 嘗試 finalize 保存它。
+            let mode_label = format!("{:?}", *state.mode.lock());
+            let mut session_slot = state.recording_session.lock();
+            if let Some(old) = session_slot.take() {
+                tracing::debug!("recordings: previous session orphaned, finalizing");
+                old.finalize();
+            }
+            *session_slot = Some(recordings::SessionRecord::new(&mode_label));
+            drop(session_slot);
+
             state.set_phase(
                 app,
                 Phase::Recording {
@@ -2235,12 +2252,44 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let raw_wav = audio.to_wav_bytes().context("encode raw WAV")?;
             let raw_path = std::env::temp_dir().join("mori-last-recording-raw.wav");
             let _ = std::fs::write(&raw_path, &raw_wav);
+            // Phase B:store raw audio in session record(in-memory clone,finalize 寫到
+            // ~/.mori/recordings/<ts>/audio-raw.wav)。raw_wav 後續沒用到,move 進去最省。
+            if let Some(rec) = state.recording_session.lock().as_mut() {
+                rec.set_audio_raw(raw_wav.clone());
+            }
             let verify_path = raw_path.clone();
+            let speaker_id_t0 = std::time::Instant::now();
             let outcome = tokio::task::spawn_blocking(move || {
                 speaker_id::verify_audio_file(&verify_path)
             })
             .await
             .map_err(|e| anyhow::anyhow!("speaker_id join: {e}"))?;
+            let speaker_id_ms = speaker_id_t0.elapsed().as_millis() as u64;
+            // Phase B:record speaker_id outcome
+            if let Some(rec) = state.recording_session.lock().as_mut() {
+                rec.add_speaker_id_ms(speaker_id_ms);
+                let snap = match &outcome {
+                    speaker_id::VerifyOutcome::Verified(r) => recordings::SpeakerIdSnapshot {
+                        enabled: true,
+                        score: Some(r.score),
+                        threshold: Some(r.threshold),
+                        pass: Some(r.pass),
+                    },
+                    speaker_id::VerifyOutcome::NotEnrolled => recordings::SpeakerIdSnapshot {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                    speaker_id::VerifyOutcome::Disabled => recordings::SpeakerIdSnapshot {
+                        enabled: false,
+                        ..Default::default()
+                    },
+                    speaker_id::VerifyOutcome::Error(_) => recordings::SpeakerIdSnapshot {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                };
+                rec.set_speaker_id(snap);
+            }
             match &outcome {
                 speaker_id::VerifyOutcome::Verified(r) if !r.pass => {
                     tracing::info!(
@@ -2395,6 +2444,10 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let debug_path = std::env::temp_dir().join("mori-last-recording.wav");
             let _ = std::fs::write(&debug_path, &wav);
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
+            // Phase B:store trimmed audio in session record
+            if let Some(rec) = state.recording_session.lock().as_mut() {
+                rec.set_audio_trimmed(wav.clone());
+            }
 
             // Phase 3E speaker verification 已在 silence-trim 前用 raw audio 跑完
             // (見 fn 上方 transcribe_result 開頭)— 不再在此處跑,避免短 audio
@@ -2420,15 +2473,22 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                 ))
                 .context("build transcription provider")?,
             };
+            let stt_t0 = std::time::Instant::now();
             let transcript = stt
                 .transcribe(wav)
                 .await
                 .with_context(|| format!("{} transcribe", stt.name()))?;
+            let stt_ms = stt_t0.elapsed().as_millis() as u64;
             tracing::info!(
                 provider = stt.name(),
                 chars = transcript.chars().count(),
                 "transcribed"
             );
+            // Phase B:store transcript + stt timing in session
+            if let Some(rec) = state.recording_session.lock().as_mut() {
+                rec.set_transcript(transcript.clone());
+                rec.add_stt_ms(stt_ms);
+            }
             Ok(transcript)
         }
         .await;
@@ -2454,6 +2514,10 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         // 直接 Phase::Done + return,不浪費 agent / LLM call。
         if transcript.trim().is_empty() {
             tracing::info!("empty transcript — skipping downstream agent pipeline");
+            // Phase B:finalize session(可能是 speaker_id reject 或 STT skip)
+            if let Some(rec) = state.recording_session.lock().take() {
+                rec.finalize();
+            }
             state.set_phase(
                 &app,
                 Phase::Done {
@@ -2613,7 +2677,20 @@ async fn run_agent_pipeline(
     // Phase 3C:evaluator pre-gate — config 開啟時,先過 fast LLM 判 user 是不是
     // 在跟 Mori 講話。Background noise → 直接 skip agent + 進 Done(空 response)。
     // AddressMori / Unclear → 走原本 agent flow。
+    let evaluator_t0 = std::time::Instant::now();
     if let Some(EvaluatorOutcome { skip, reason }) = evaluator_gate(&transcript).await {
+        let evaluator_ms = evaluator_t0.elapsed().as_millis() as u64;
+        // Phase B:record evaluator timing + result snapshot
+        if let Some(rec) = state.recording_session.lock().as_mut() {
+            rec.add_evaluator_ms(evaluator_ms);
+            rec.set_evaluator(recordings::EvaluatorSnapshot {
+                enabled: true,
+                intent: None, // 細節在 reason 內,簡化先不細拆
+                reason: Some(reason.clone()),
+                confidence: None,
+                skipped: skip,
+            });
+        }
         if skip {
             tracing::info!(reason, "evaluator: background noise — skipping agent");
             let _ = app.emit(
@@ -2623,11 +2700,18 @@ async fn run_agent_pipeline(
                     "reason": reason,
                 }),
             );
+            // Phase B:finalize session(evaluator reject path)
+            let response = format!("(背景噪音 — {reason})");
+            if let Some(rec) = state.recording_session.lock().take() {
+                let mut rec = rec;
+                rec.set_response(response.clone());
+                rec.finalize();
+            }
             state.set_phase(
                 &app,
                 Phase::Done {
                     transcript,
-                    response: format!("(背景噪音 — {reason})"),
+                    response,
                     skill_calls: vec![],
                 },
             );
@@ -2963,6 +3047,25 @@ async fn run_agent_pipeline(
             // 不擋 UI update — speak_async 立刻 return,實際合成 + 播放在 tokio task。
             tts::speak_async(response.clone(), app.clone());
 
+            // Phase B:finalize session — 把 response / skill_calls / profile / provider
+            // 都灌進 SessionRecord 後寫到 ~/.mori/recordings/<ts>/。
+            if let Some(rec) = state.recording_session.lock().take() {
+                let mut rec = rec;
+                rec.set_response(response.clone());
+                rec.set_profile(agent_profile.name.clone());
+                rec.set_provider(
+                    agent_profile
+                        .frontmatter
+                        .provider
+                        .clone()
+                        .unwrap_or_else(|| "default".into()),
+                );
+                if let Ok(skill_json) = serde_json::to_value(&skill_calls) {
+                    rec.set_skill_calls(skill_json);
+                }
+                rec.finalize();
+            }
+
             state.set_phase(
                 &app,
                 Phase::Done {
@@ -3293,6 +3396,21 @@ async fn run_voice_input_pipeline(
         "target_process": win_ctx.process_name,
         "profile": profile.name,
     }));
+
+    // Phase B:finalize session for voice_input pipeline
+    if let Some(rec) = state.recording_session.lock().take() {
+        let mut rec = rec;
+        rec.set_response(cleaned_text.clone());
+        rec.set_profile(profile.name.clone());
+        rec.set_provider(
+            profile
+                .frontmatter
+                .stt_provider
+                .clone()
+                .unwrap_or_else(|| "default".into()),
+        );
+        rec.finalize();
+    }
 
     state.set_phase(
         &app,
@@ -4031,6 +4149,7 @@ fn main() {
         hotkey_window_context: Mutex::new(HotkeyWindowContext::default()),
         pipeline_task: Mutex::new(None),
         wake_word: Mutex::new(None),
+        recording_session: Mutex::new(None),
         // 5T: 啟動先用 default(Toggle),setup 讀 ~/.mori/config.json 後覆寫成
         // 實際值(見下方 hotkey_config 載入處)。
         toggle_mode: Mutex::new(hotkey_config::ToggleMode::default()),
@@ -4194,6 +4313,10 @@ fn main() {
             // Phase 3E:deploy ~/.mori/bin/mori-voice-enroll.py + mori-voice-verify.py。
             // Speaker verification 預設 OFF。
             speaker_id::ensure_scripts_deployed(&mori_dir());
+
+            // Phase B per-pipeline artifacts:開機清掉超過 retention_days 的舊 recording
+            // session(預設 14 天)。setup-time 跑,不擋啟動。
+            recordings::cleanup_old_if_needed();
 
             // 啟動初始 floating visibility — update_floating_visibility 自己會看:
             //   - quickstart_completed (儀式還沒完成 → 強制隱藏)
