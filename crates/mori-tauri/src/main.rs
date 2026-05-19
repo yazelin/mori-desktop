@@ -2423,6 +2423,72 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
     *state_for_handle.pipeline_task.lock() = Some(task);
 }
 
+/// Phase 3C — evaluator gate 的回傳。`skip=true` 代表判定 background noise,
+/// 呼叫端應跳過 agent;`skip=false` → 走正常 agent。`reason` 給 UI / log 用。
+struct EvaluatorOutcome {
+    skip: bool,
+    reason: String,
+}
+
+/// 讀 `~/.mori/config.json` `evaluator.*` config,跑 evaluator LLM,回 outcome。
+/// 任何環節失敗 → return None(等同 disabled,呼叫端走正常 agent flow)。
+async fn evaluator_gate(transcript: &str) -> Option<EvaluatorOutcome> {
+    use mori_core::evaluator::{evaluate, Intent};
+
+    // Read config
+    let path = mori_dir().join("config.json");
+    let json: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let enabled = json
+        .pointer("/evaluator/enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let provider_name = json
+        .pointer("/evaluator/provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("groq")
+        .to_string();
+
+    // Build provider
+    let provider = match mori_core::llm::build_named_provider(&provider_name, None) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                provider = provider_name,
+                "evaluator: build_named_provider failed — skipping gate",
+            );
+            return None;
+        }
+    };
+
+    // Run evaluator
+    match evaluate(transcript, provider).await {
+        Ok(result) => {
+            tracing::info!(
+                intent = ?result.intent,
+                reason = %result.reason,
+                confidence = result.confidence,
+                "evaluator: result",
+            );
+            let skip = matches!(result.intent, Intent::BackgroundNoise);
+            Some(EvaluatorOutcome {
+                skip,
+                reason: result.reason,
+            })
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "evaluator: evaluate() failed — skipping gate");
+            None
+        }
+    }
+}
+
 /// 共用的 chat pipeline:給定 transcript + provider,進 Phase::Responding,
 /// 呼叫 Agent,把結果回 UI、append 進 conversation history。
 ///
@@ -2435,6 +2501,31 @@ async fn run_agent_pipeline(
     transcript: String,
     routing: Arc<mori_core::llm::Routing>,
 ) {
+    // Phase 3C:evaluator pre-gate — config 開啟時,先過 fast LLM 判 user 是不是
+    // 在跟 Mori 講話。Background noise → 直接 skip agent + 進 Done(空 response)。
+    // AddressMori / Unclear → 走原本 agent flow。
+    if let Some(EvaluatorOutcome { skip, reason }) = evaluator_gate(&transcript).await {
+        if skip {
+            tracing::info!(reason, "evaluator: background noise — skipping agent");
+            let _ = app.emit(
+                "evaluator-rejected",
+                serde_json::json!({
+                    "transcript": transcript,
+                    "reason": reason,
+                }),
+            );
+            state.set_phase(
+                &app,
+                Phase::Done {
+                    transcript,
+                    response: format!("(背景噪音 — {reason})"),
+                    skill_calls: vec![],
+                },
+            );
+            return;
+        }
+    }
+
     state.set_phase(
         &app,
         Phase::Responding {

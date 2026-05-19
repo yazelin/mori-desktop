@@ -1358,6 +1358,41 @@ function ConfigTab({
           {/* Wake-ack 應答音(獨立 Section,Phase 3A.1.2)*/}
           <WakeAckSection />
 
+          {/* ── Phase 3C: Wake-event evaluator(背景噪音過濾)── */}
+          <Section
+            title="Wake-event 過濾(Evaluator,Phase 3C)"
+            hint="Hey Mori 觸發後,STT 出來的 transcript 先過一輪 fast LLM 判斷:user 是不是真的在跟 Mori 講話?是 → 走正常 agent。否(自言自語 / 跟別人講話 / 念稿提到「Mori」)→ skip,不浪費 agent 跑無關內容。每次 wake 多 1 個 LLM call(~200ms,Groq 免費)。預設 OFF。"
+          >
+            <FormRow label="enabled" hint="OFF → 既有行為(直接進 agent)。ON → 多一層意圖判斷,過濾 wake-word false positive。建議 threshold 設低(0.35-0.5)但 evaluator ON,捕捉率 + 訊號比都高。">
+              <input
+                type="checkbox"
+                checked={Boolean(cfg.evaluator?.enabled)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const ev = ensureSubObj(c, "evaluator");
+                    ev.enabled = e.target.checked;
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow label="provider" hint="跑 evaluator 用的 LLM provider。預設 groq(快、便宜、免費 quota 大)。模型走該 provider 的 model 設定(`providers.groq.model`)。Gemini API key 有的話也行,但 quota 更精貴不推薦。">
+              <Select
+                value={cfg.evaluator?.provider ?? "groq"}
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    const ev = ensureSubObj(c, "evaluator");
+                    ev.provider = v;
+                  })
+                }
+                options={[
+                  { value: "groq", label: "groq(預設,gpt-oss-120b 快又便宜)" },
+                  { value: "gemini", label: "gemini API(會吃 Gemini quota)" },
+                  { value: "ollama", label: "ollama(本地,需自架)" },
+                ]}
+              />
+            </FormRow>
+          </Section>
+
           {/* ── Phase 3D: Mori 講話(edge-tts speak-back)── */}
           <Section
             title="Mori 講話(TTS,Phase 3D)"
