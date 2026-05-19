@@ -266,7 +266,8 @@ function ChatPanel() {
               · {chatProvider.name} · {chatProvider.model}
             </span>
           )}
-          {/* Phase 6 polish A:provider preflight 警告 — CLI binary 沒裝紅 chip */}
+          {/* Phase 6 polish A:provider preflight 警告 — CLI binary 沒裝紅 chip。
+              用 --c-danger-* theme token,跟主視窗 light/dark 主題對齊。 */}
           {chatProvider?.binary?.requires_binary && chatProvider.binary.available === false && (
             <span
               className="mori-chat-mode-provider"
@@ -274,8 +275,9 @@ function ChatPanel() {
               style={{
                 marginLeft: 6,
                 padding: "2px 8px",
-                background: "rgba(220, 60, 60, 0.18)",
-                color: "#dc3c3c",
+                background: "var(--c-danger-bg)",
+                color: "var(--c-danger-text)",
+                border: "1px solid var(--c-danger-border)",
                 borderRadius: 4,
                 fontSize: 11,
                 fontWeight: 600,
