@@ -253,7 +253,11 @@ impl Drop for WakeWordListener {
 // ─── Config readers ────────────────────────────────────────────────────
 
 /// 從 `~/.mori/config.json` `listening_mode.*` 區塊讀 WakeWordConfig。
-/// 預設值對齊 Phase 3A 設計 — phrase = Hey Mori, threshold 0.5。
+/// 預設值對齊 Phase 3E pipeline 設計 — phrase = Hey Mori, threshold **0.7**。
+///
+/// 為什麼 0.7 不是更高(0.9+):下游有 Phase 3E speaker verification + Phase 3C
+/// evaluator 兩層 filter,wake 可以放寬;反而要避免 0.9+ 漏掉 user 輕聲 /
+/// 不完整發音的「Hey Mori」(recall ↓)。0.7 是 wake-word 主流 operating point。
 pub fn config_from_disk(mori_dir: &Path) -> WakeWordConfig {
     let cfg_text = std::fs::read_to_string(mori_dir.join("config.json")).ok();
     let json: serde_json::Value = cfg_text
@@ -283,7 +287,7 @@ pub fn config_from_disk(mori_dir: &Path) -> WakeWordConfig {
         .pointer("/listening_mode/threshold")
         .and_then(|v| v.as_f64())
         .map(|v| v.clamp(0.05, 0.95) as f32)
-        .unwrap_or(0.5);
+        .unwrap_or(0.7);
 
     let verifier_path = json
         .pointer("/listening_mode/verifier_path")
@@ -339,7 +343,7 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let cfg = config_from_disk(&tmp);
         assert_eq!(cfg.python, PathBuf::from("python3"));
-        assert_eq!(cfg.threshold, 0.5);
+        assert_eq!(cfg.threshold, 0.7);
         assert!(cfg.model_path.ends_with("wakeword/hey-mori.onnx"));
         let _ = std::fs::remove_dir_all(&tmp);
     }

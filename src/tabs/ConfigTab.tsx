@@ -1582,19 +1582,19 @@ function ConfigTab({
           >
             <FormRow
               label="threshold"
-              hint="偵測門檻(0.05~0.95)。越高越嚴格(必須完整「Hey Mori」才觸發),越低越敏感(誤觸多)。預設 0.5。建議從 0.65 試起。"
+              hint="偵測門檻(0.05~0.95)。越高越嚴格,越低越敏感(誤觸多)。預設 0.7。下游有 speaker_id + evaluator 兩層 filter 擋誤觸,wake 不必設太嚴(0.9+ 會漏掉輕聲 / 不清楚的「Hey Mori」)。"
             >
               <input
                 type="number"
                 min={0.05}
                 max={0.95}
                 step={0.05}
-                value={Number(cfg.listening_mode?.threshold ?? 0.5)}
+                value={Number(cfg.listening_mode?.threshold ?? 0.7)}
                 onChange={(e) =>
                   applyPatch((c) => {
                     const lm = ensureSubObj(c, "listening_mode");
                     const n = Number(e.target.value);
-                    lm.threshold = Number.isFinite(n) ? Math.max(0.05, Math.min(0.95, n)) : 0.5;
+                    lm.threshold = Number.isFinite(n) ? Math.max(0.05, Math.min(0.95, n)) : 0.7;
                   })
                 }
               />
