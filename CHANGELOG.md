@@ -6,6 +6,103 @@
 
 ---
 
+## v0.6.2 — Phase 3 polish + 完整 per-pipeline observability(2026-05-19)
+
+v0.6.1 ship 完 Phase 3 全 7 layer 後,user 實測一輪驗 4 個邊緣 case 都對:
+- ✓ Wake → 認對自己人 → evaluator skip 自言自語 → 真指令通過 → agent + skill
+- ✓ Speaker_id 短音檔誤拒(score 0.55 vs 真實 0.85)→ 用 raw audio 修
+- ✓ 「Mori 在嗎」這種 meta 對話被 evaluator 擋(意圖偵測 work)
+
+3 個 PR 收尾 + 觀測層全套補完。
+
+### Phase 3 polish
+
+**Evaluator confidence threshold gate**(PR #45)— LLM 判 `BackgroundNoise` 但 confidence < threshold(預設 0.85)→ 不擋,fallthrough 給 agent。寧可一輪浪費 LLM 也不要 silent drop user 真指令。Config:`evaluator.confidence_threshold`。
+
+**Speaker enrollment real-time progress**(PR #45)— 之前 modal 用純 JS setInterval 估算進度,Python script 已 emit JSON event 但 Rust 沒 forward。改 `spawn` + `BufReader::lines` 即時讀 stdout,Tauri `emit("speaker-id-enroll-progress")` → 前端 modal 真實進度 + phase 切換顯示「錄音中 / 計算聲紋中 / ✓ 完成」。
+
+### CLI 整合 + onboarding 修
+
+**DepsTab 偵測 claude / gemini / codex 3 個 CLI**(PR #46)— 各家 Manual install 指令(npm + login)。Description 寫明「**只用 API**(`provider=gemini`)**不需要**這個 CLI」避免 user 誤裝。
+
+**Default agent profile 不寫死 `provider: claude-bash`**(PR #46)— 過去 fresh install user 設 Gemini API key 但預設 AGENT.md 寫死 `provider: claude-bash` → 沒裝 claude CLI 立刻炸。改成 `provider:` line **註解掉**(留 comment 教學),profile 沒指定 → fallthrough config.json 的全域 `provider`。純 API(gemini / groq / ollama)即可,fresh install 不需要 CLI。
+
+`DEFAULT_AGENT_MD`(內嵌)+ `examples/agent/AGENT.md`(starter)+ `examples/agent/AGENT-05.聽我指令.md` 三個 template 都改。
+
+**Codex 整合驗證** — `codex-bash` / `codex-cli` provider 在 `llm/mod.rs` 早就存在(line 106 / 139),這版實測「`provider: codex-bash` + Listening 喊「打開寶哥的粉絲團」→ codex 透過 skill_server HTTP 拿 skill list → dispatch open_url → 開啟 facebook.com/will.fans」整條 chain pass。Phase 3 stack 跟 Codex CLI 兼容。
+
+### Per-pipeline recordings archive(終於做)
+
+從 v0.5.2 留 v0.5.3+ backlog,**5 個 release 都寫「留下版」**沒做,終於 ship(PR #47)。
+
+每次完整 voice pipeline run(wake → record → STT → speaker_id → evaluator → agent → response,或 voice_input 短路徑)存一個 session 資料夾:
+
+```
+~/.mori/recordings/2026-05-19T17-12-34-123/
+├── audio-raw.wav          錄音原檔(silence-trim 前)
+├── audio-trimmed.wav      送 STT 的版本
+├── transcript.txt         STT 出來的文字
+├── response.txt           Mori final response
+├── system-prompt.txt      組好給 LLM 的完整 prompt(persona + memory + context + skill rules)
+├── context.json           clipboard / selection / active window / urls / installed_apps catalog 指針
+├── history.json           chat history 條數 + role+chars
+└── meta.json              timing 軸 + scores + profile + provider + skill_calls
+```
+
+**用途**:
+- Whisper fine-tune dataset(user 累積「真實場景 + transcript」對 → 訓 personal-voice STT)
+- Debug 單一事件(score 高但 evaluator 擋?哪個 skill 沒對到?直接 retrieve session dir 看)
+- 隱私自管(user 知道 Mori 收了什麼,自己刪,不上雲)
+
+Config:`recordings.enabled`(預設 true)+ `recordings.retention_days`(預設 14;0 = 永不清)。
+
+### Event log 詳細化(對齊 recordings)
+
+過去 event log 偏「失敗 / 跳過」紀錄(`stt_skipped` / `speaker_id_rejected` / `fallback` / `error` / `silence_trim`),沒記「成功路徑」的關鍵 step。Logs tab 看不到 Wake 觸發了沒、Speaker_id 通過了、Evaluator 判什麼。
+
+加 4 個新 event kind(PR #47):
+
+| kind | 觸發點 | 欄位 |
+|---|---|---|
+| `wake_word_event` | wake-word listener 偵測到 | word, score |
+| `speaker_id_pass` | speaker_id 通過(過去只記 reject) | score, threshold, audio_secs |
+| `evaluator_decision` | evaluator LLM 每次判斷 | intent, reason, confidence, confidence_threshold, skip |
+| `agent_completed` | agent loop 跑完 | profile, provider, response_chars, skill_calls |
+
+對齊 recordings 內 meta.json,**但只記 summary 給 Logs tab filter 用**。Full content(audio / prompt / clipboard)在 recordings;event log 走 summary。
+
+### 工程修
+
+- **Speaker_id 用 raw audio**(silence-trim 前)— 修「同人短音檔誤拒」(score 0.55 → 0.85 穩定)
+- **空 transcript 守 gate**:speaker_id reject / STT skip / Whisper 空回應一律 Phase::Done + return,不送 agent,不浪費 LLM
+- **WakeAckSection UI dirty tracking 修**:toggle 之前繞過 form state 害儲存按鈕灰色,改走 `applyPatch`
+- **Threshold defaults 統一 0.7**:`wake_word.threshold` 0.5 → 0.7,`speaker_id.threshold` 留 0.7 — Phase 3 多層 filter 設計,wake 嚴會漏 user 真喊
+- **Recordings 把 system prompt + context.json 也存**(user 反映 meta.json 不夠細時補的)
+
+### Phase 3 完整 stack(v0.6.2 確認 7 layer 全 work)
+
+| Layer | 預設 | v0.6.2 觀察 |
+|---|:-:|---|
+| 1. Wake-word ONNX | ✅ | score 0.90-0.96 |
+| 2. User-voice verifier | optional | |
+| 3. Speaker verification(3E)| ❌ | user 0.84-0.92,別人 0.55 |
+| 4. STT(Whisper)| ✅ | Groq ~600ms |
+| 5. Evaluator(3C)| ❌ | confidence 0.78-0.99,gate 0.85 |
+| 6. Agent loop | ✅ | claude-bash / codex-bash / 各家 API 都 work |
+| 7. TTS speak-back(3D)| ❌ | edge-tts native zh-TW |
+
+### 留 v0.6.x+
+
+- WakeAck / SpeakerId / TTS / Evaluator Section i18n keys(busy work,~120 strings)
+- Profile preflight UI(provider 沒對應 binary 時 UI 紅字)
+- Recordings UI:Logs tab 列表 + audio 播放
+- Ask-back UI(`Intent::Unclear` Mori 反問 + 自動重進 Listening)
+- TTS 中斷支援 + sentence streaming
+- Custom wake-word phrase UI(目前只 CLI)
+- macOS 平台殼 + Windows 安裝自動化
+
+---
+
 ## v0.6.1 — Phase 3C/3D/3E:Evaluator + edge-tts speak-back + Speaker verification(2026-05-19)
 
 v0.6.0 ship 完基礎喚醒生態(wake-word / wake-ack / VAD / 自訓 CLI)後,Phase 3 還剩 3 個 layer 沒做。這版一次補完 — Mori 從「會被喚醒」進化成「會分辨誰、會判斷意圖、會講話」。
