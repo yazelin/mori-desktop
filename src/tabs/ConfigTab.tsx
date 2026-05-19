@@ -1375,9 +1375,9 @@ function ConfigTab({
                 }
               />
             </FormRow>
-            <FormRow label="voice" hint="Microsoft Edge TTS 的 zh-TW voice。HsiaoYu 偏年輕清亮(預設,配 Mori 精靈少女形象),HsiaoChen 較成熟標準。換其他語言請查 `edge-tts --list-voices`。">
+            <FormRow label="voice" hint="Microsoft Edge TTS 的 zh-TW voice。HsiaoChen 偏年輕清亮(預設,配 Mori 精靈少女形象),HsiaoYu 較成熟標準。換其他語言請查 `edge-tts --list-voices`。">
               <Select
-                value={cfg.tts?.voice ?? "zh-TW-HsiaoYuNeural"}
+                value={cfg.tts?.voice ?? "zh-TW-HsiaoChenNeural"}
                 onChange={(v) =>
                   applyPatch((c) => {
                     const t = ensureSubObj(c, "tts");
@@ -1385,12 +1385,22 @@ function ConfigTab({
                   })
                 }
                 options={[
-                  { value: "zh-TW-HsiaoYuNeural", label: "zh-TW-HsiaoYuNeural(女,年輕清亮,預設)" },
-                  { value: "zh-TW-HsiaoChenNeural", label: "zh-TW-HsiaoChenNeural(女,標準)" },
-                  { value: "zh-TW-YunJheNeural", label: "zh-TW-YunJheNeural(男)" },
-                  { value: "zh-CN-XiaoxiaoNeural", label: "zh-CN-XiaoxiaoNeural(女,大陸口音)" },
-                  { value: "en-US-JennyNeural", label: "en-US-JennyNeural(英文女)" },
-                  { value: "ja-JP-NanamiNeural", label: "ja-JP-NanamiNeural(日文女)" },
+                  // zh-TW(台灣腔)
+                  { value: "zh-TW-HsiaoChenNeural", label: "🇹🇼 zh-TW-HsiaoChenNeural(女,年輕清亮,預設)" },
+                  { value: "zh-TW-HsiaoYuNeural", label: "🇹🇼 zh-TW-HsiaoYuNeural(女,較成熟標準)" },
+                  { value: "zh-TW-YunJheNeural", label: "🇹🇼 zh-TW-YunJheNeural(男)" },
+                  // zh-CN(大陸腔)— Xiaoyi Lively 元氣感對 Mori 形象很合
+                  { value: "zh-CN-XiaoyiNeural", label: "🇨🇳 zh-CN-XiaoyiNeural(女,活潑元氣)" },
+                  { value: "zh-CN-XiaoxiaoNeural", label: "🇨🇳 zh-CN-XiaoxiaoNeural(女,溫暖)" },
+                  { value: "zh-CN-liaoning-XiaobeiNeural", label: "🇨🇳 zh-CN-liaoning-XiaobeiNeural(女,東北腔幽默)" },
+                  { value: "zh-CN-shaanxi-XiaoniNeural", label: "🇨🇳 zh-CN-shaanxi-XiaoniNeural(女,陝西腔明亮)" },
+                  // zh-HK(粵語)
+                  { value: "zh-HK-HiuGaaiNeural", label: "🇭🇰 zh-HK-HiuGaaiNeural(女,粵語)" },
+                  { value: "zh-HK-HiuMaanNeural", label: "🇭🇰 zh-HK-HiuMaanNeural(女,粵語)" },
+                  // 其他語言
+                  { value: "ja-JP-NanamiNeural", label: "🇯🇵 ja-JP-NanamiNeural(日文女)" },
+                  { value: "en-US-JennyNeural", label: "🇺🇸 en-US-JennyNeural(英文女)" },
+                  { value: "en-US-AriaNeural", label: "🇺🇸 en-US-AriaNeural(英文女,活潑)" },
                 ]}
               />
             </FormRow>

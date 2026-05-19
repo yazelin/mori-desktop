@@ -78,7 +78,7 @@ fn default_python() -> PathBuf {
 }
 
 /// 預設 voice — Mori 形象偏年輕女精靈,HsiaoYu 比 HsiaoChen 偏年輕清亮。
-const DEFAULT_VOICE: &str = "zh-TW-HsiaoYuNeural";
+const DEFAULT_VOICE: &str = "zh-TW-HsiaoChenNeural";
 
 /// 默認 TTS bridge script(deploy 到 ~/.mori/bin/mori-tts-edge.py 或 repo
 /// examples/scripts/ 直接跑都可)。

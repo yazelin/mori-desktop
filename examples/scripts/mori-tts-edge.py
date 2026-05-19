@@ -46,7 +46,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
+DEFAULT_VOICE = "zh-TW-HsiaoChenNeural"
 
 
 async def synth(text: str, voice: str, out_path: Path) -> None:
