@@ -303,6 +303,136 @@ pub fn config_from_disk(mori_dir: &Path) -> WakeWordConfig {
     }
 }
 
+// ─── IPC commands(給 ConfigTab Hey Mori section 的 model picker 用)──────
+
+#[derive(Debug, serde::Serialize)]
+pub struct WakeModelInfo {
+    /// `~/.mori/wakeword/` 下的 .onnx 完整 path。
+    pub path: String,
+    /// 不含副檔名的 slug(顯示用,例 `hey-mori` / `mori-起床`)。
+    pub slug: String,
+    /// 檔案 bytes(顯示用,讓 user 看出 bundled 205KB vs 自訓 ~1-5MB)。
+    pub size_bytes: u64,
+    /// Modified UNIX seconds(顯示用,自訓新 model 排上面)。
+    pub modified_secs: u64,
+    /// 是否為當前 active model(config.json `/listening_mode/model_path`)。
+    pub is_active: bool,
+}
+
+/// 掃 `~/.mori/wakeword/*.onnx`(不遞迴),回 list 給 UI dropdown。
+/// 失敗(目錄不存在 / 讀取出錯)回空 vec — UI 會顯示「沒可選 model」。
+#[tauri::command]
+pub fn wake_word_list_models() -> Vec<WakeModelInfo> {
+    let mori = crate::mori_dir();
+    let dir = mori.join("wakeword");
+    let active = config_from_disk(&mori).model_path;
+    let mut out: Vec<WakeModelInfo> = std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|x| x.eq_ignore_ascii_case("onnx"))
+                .unwrap_or(false)
+        })
+        .filter_map(|e| {
+            let path = e.path();
+            let meta = e.metadata().ok()?;
+            let slug = path.file_stem()?.to_string_lossy().into_owned();
+            let modified_secs = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Some(WakeModelInfo {
+                is_active: path == active,
+                path: path.to_string_lossy().into_owned(),
+                slug,
+                size_bytes: meta.len(),
+                modified_secs,
+            })
+        })
+        .collect();
+    // newest first
+    out.sort_by(|a, b| b.modified_secs.cmp(&a.modified_secs));
+    out
+}
+
+/// 切換 active wake-word model。寫 config 後**不**自動重啟 listener — 呼叫端
+/// 再決定要不要呼 `wake_word_restart_listener`(在 Listening mode 時才重啟)。
+#[tauri::command]
+pub fn wake_word_set_model(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !target.exists() {
+        return Err(format!("model 檔不存在:{path}"));
+    }
+    if target
+        .extension()
+        .map(|e| !e.eq_ignore_ascii_case("onnx"))
+        .unwrap_or(true)
+    {
+        return Err("只接受 .onnx 副檔名".into());
+    }
+    let mori = crate::mori_dir();
+    let cfg_path = mori.join("config.json");
+    let mut json: serde_json::Value = std::fs::read_to_string(&cfg_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let lm = json
+        .as_object_mut()
+        .ok_or_else(|| "config.json 不是 object".to_string())?
+        .entry("listening_mode".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let lm_obj = lm
+        .as_object_mut()
+        .ok_or_else(|| "config.json /listening_mode 不是 object".to_string())?;
+    lm_obj.insert("model_path".to_string(), serde_json::json!(path));
+    std::fs::create_dir_all(&mori).map_err(|e| format!("mkdir ~/.mori: {e}"))?;
+    std::fs::write(
+        &cfg_path,
+        serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?,
+    )
+    .map_err(|e| format!("write {}: {e}", cfg_path.display()))?;
+    tracing::info!(path, "wake_word_set_model saved");
+    Ok(())
+}
+
+/// 給 UI 顯示「複製這行到 terminal 跑」用 — 不在 UI 內 spawn 訓練(訓練 30-50
+/// 分鐘 + 需要 ~10GB datasets,不適合 UI inline streaming)。Linux only,
+/// Windows 因 piper-phonemize wheel 不全暫無法本機訓。
+#[tauri::command]
+pub fn wake_word_train_command(phrase: String) -> Result<String, String> {
+    let phrase = phrase.trim();
+    if phrase.is_empty() {
+        return Err("phrase 不能空".into());
+    }
+    if phrase.len() > 60 {
+        return Err("phrase 太長(>60 字元)".into());
+    }
+    // 簡單 shell-escape — 只允許單引號 wrap,內含單引號 → 用 '\'' 接;
+    // 不允許控制字元(避免 user 貼進 newline 之類)。
+    if phrase
+        .chars()
+        .any(|c| c.is_control())
+    {
+        return Err("phrase 不能含控制字元".into());
+    }
+    let escaped = phrase.replace('\'', "'\\''");
+    let mori = crate::mori_dir();
+    let venv_py = mori.join("wake-train-venv").join("bin").join("python");
+    let script = mori.join("bin").join("mori-wake-train.py");
+    Ok(format!(
+        "{} {} '{}'",
+        venv_py.display(),
+        script.display(),
+        escaped
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
