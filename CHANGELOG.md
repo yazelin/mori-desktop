@@ -6,6 +6,97 @@
 
 ---
 
+## v0.6.1 — Phase 3C/3D/3E:Evaluator + edge-tts speak-back + Speaker verification(2026-05-19)
+
+v0.6.0 ship 完基礎喚醒生態(wake-word / wake-ack / VAD / 自訓 CLI)後,Phase 3 還剩 3 個 layer 沒做。這版一次補完 — Mori 從「會被喚醒」進化成「會分辨誰、會判斷意圖、會講話」。
+
+### 三個 Phase 同步上線(全部預設 OFF,user 主動啟用)
+
+#### Phase 3C — Wake-event evaluator(背景噪音語意過濾)
+
+**問題**:Wake-word ONNX 只看「聲音像 Hey Mori 嗎」(phoneme acoustic),user 自言自語、念稿提到「Mori」、跟旁人講話被 mic 收到都會觸發。沒過濾 → agent loop 跑 1-3 round LLM + skill dispatch,浪費 quota + 體感怪。
+
+**解法**:STT transcript 拿到後,先過一輪 **fast LLM**(預設 Groq `openai/gpt-oss-120b`,~200ms)做語意分流:
+
+| Intent | 行為 |
+|---|---|
+| `address_mori` | 走正常 agent(no change) |
+| `background_noise` | skip agent + emit `evaluator-rejected` event |
+| `unclear` | 暫時當 `address_mori`(ask-back 留 Phase 3C.2) |
+
+Config:`evaluator.enabled` + `evaluator.provider`(預設 groq)。
+
+#### Phase 3D — edge-tts speak-back(Mori 真的講話)
+
+過去 Mori 只在 ChatPanel 顯示文字,hands-free 體驗不完整。這版加 TTS,**預設 OFF**,user 啟用後 agent 回應完成自動講出來。
+
+為什麼 edge-tts 不是 Gemini TTS:**免費 + native zh-TW 沒口音**。Gemini free tier 100/day,Mori 對答幾句就破;edge-tts 借 MS Edge 瀏覽器 endpoint,實質無限。
+
+UI 12 個常用 voice(zh-TW HsiaoChen 預設年輕清亮 / HsiaoYu 標準 / zh-CN Xiaoyi 活潑 / ja-JP Nanami / 等)+ 試聽鈕。共用 wake-venv,DepsTab `tts-runtime` 條目一鍵裝(~10MB)。
+
+#### Phase 3E — Speaker verification(只認 enrolled user 的聲音)
+
+User 實測「家人 / 同事也能叫 Mori」— 前幾 layer 都不是聲紋識別。加第 4 層:
+
+- **`resemblyzer`**(VoxCeleb pretrained VoiceEncoder)抽 256-dim 聲紋向量
+- Wake event 後比對 cosine similarity,score < threshold 別人聲音 silent reject
+- Enrollment 一次性:point click「🎙 錄音註冊我的聲音」→ 30 秒讀稿 modal(紅點脈衝 + 倒數計時 + 進度條 + 讀稿同畫面)→ `~/.mori/voiceid/user_embedding.npy`
+
+實測 score 分布:自己 0.84-0.92,別人 0.55,threshold 0.7 切點清楚。
+
+Config:`speaker_id.enabled` + `speaker_id.threshold`(預設 0.7)。DepsTab `speaker-id-runtime` 條目(~100MB 含 80MB pretrained model)。
+
+### Threshold 預設統一 0.7
+
+實測完 Phase 3 全 stack 後重訂 — `wake_word.threshold` 從 0.5 → **0.7**,`speaker_id.threshold` 留 **0.7**。
+
+**為什麼不更高(0.9+)**:Phase 3 是**多層 filter 設計**,不是每層都嚴。Wake 嚴會漏 user 真喊(recall ↓)— 後面 layer 才需嚴(precision)。
+
+| Layer | 角色 | 嚴格度 |
+|---|---|---|
+| Wake | 寬撈,寧可多觸發 | 0.7 |
+| Speaker_id | 認人,擋不是 user | 0.7 |
+| Evaluator | 看內容,擋自言自語 | LLM 判斷 |
+
+### 工程細節
+
+- **Pipeline reorder**:speaker_id 必須用 **silence-trim 前**的 raw audio(resemblyzer 在 < 1s 短音檔上 embedding 不穩,user 實測同人 score 從 0.75 掉到 0.55 誤拒)。fix:先寫 raw WAV 給 speaker_id → silence-trim → STT
+- **空 transcript 守 gate**:speaker_id reject / STT skip / Whisper 空回應一律 Phase::Done + return,不送 agent
+- **WakeAckSection UI dirty tracking 修**:`wake_ack_enabled` toggle 之前繞過 form 的 dirty state,改完儲存按鈕灰色不能按;改走 `applyPatch` 跟其他 form 欄位一致
+- **CHANGELOG @mention escape**:`@native` / `@google` / `@openai` 在 v0.5.2 / v0.4.3 release body 被 GitHub auto-link 成 user mention,Contributors 列表掛上 `@Native`(Native Labs org)等不相關 user。CHANGELOG 跟 GitHub release body 都包 backtick `@xxx` 修
+- **uv venv pip module 修**:`uv venv` 建的 venv **沒 pip 模組**(uv 用自己的 `uv pip install`),install script 3 段 fallback:`uv pip` → `venv/bin/pip` → `python -m ensurepip` bootstrap。修 `wake-listener-runtime` + 新加 `tts-runtime` / `speaker-id-runtime`
+
+### 預設 UI 行為
+
+3 個新 layer 預設 OFF — fresh install 行為跟 v0.6.0 一樣。要啟用 user 自己進 **Config tab → Voice subtab** 開:
+
+- 「Wake-event 過濾(Evaluator,Phase 3C)」
+- 「Mori 講話(TTS,Phase 3D)」
+- 「聲紋辨識(只認你,Phase 3E)」
+
+### Phase 3 完整圖(v0.6.1 後 7 layer)
+
+| Layer | 做什麼 | 預設 |
+|---|---|:-:|
+| 1. Wake-word ONNX | acoustic「像 Hey Mori」嗎 | ✅ |
+| 2. User-voice verifier | 提高 user 命中(非 exclusion) | optional |
+| 3. **Speaker verification(3E)** | 生物識別:就是這個人嗎 | ❌ |
+| 4. STT(Whisper) | 音 → 文字 | ✅ |
+| 5. **Evaluator(3C)** | 文字真的對 Mori 講話嗎 | ❌ |
+| 6. Agent loop | dispatch skills | ✅ |
+| 7. **TTS speak-back(3D)** | Mori 用聲音回答 | ❌ |
+
+### 留 v0.6.x+
+
+- **Phase 3C.2** — Ask-back UI:`Intent::Unclear` 時 Mori 反問 user(用 3D TTS 講)+ 自動重進 Listening
+- **Custom wake-word phrase UI**(Phase 3A.2)— 目前只 CLI 訓
+- **TTS 中斷支援**(Ctrl+Alt+Esc 停 sink)+ sentence-by-sentence streaming
+- **Confidence threshold gate**(evaluator < 0.85 視為 unclear)
+- **Speaker enrollment 進度 real-time**(Python script 已 emit JSON event,Rust forward 給 UI)
+- **CLI detect + profile preflight**(fresh install 用 Gemini API key 但 default profile 寫死 `provider: claude-bash` 會炸 — 在那台機器 reproduce 再修)
+
+---
+
 ## v0.6.0 — Phase 3 Hey Mori 喚醒生態(Mode::Listening + wake-word + wake-ack + VAD)(2026-05-19)
 
 從 v0.5.2(Docs sync)以來累積一整條 **Phase 3** 線:user 不用按熱鍵,直接對麥克風喊「Hey Mori」就觸發錄音 + STT + agent。這版把整條 pipeline 端到端做完並 ship 預設可用版 — fresh install 不用任何外部下載就有基本「Hey Mori」能力。
