@@ -534,6 +534,7 @@ fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
     let routing = mori_core::llm::read_routing_config();
     let stt = mori_core::llm::transcribe::active_transcribe_snapshot();
     let warmup = *state.ollama_warmup.lock();
+    let binary_status = check_provider_binary(&snap.name);
     serde_json::json!({
         "name": snap.name,
         "model": snap.model,
@@ -544,6 +545,55 @@ fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
             "model": stt.model,
             "language": stt.language,
         },
+        "binary": binary_status,
+    })
+}
+
+/// Phase 6 polish A:provider preflight — 看 provider 對應 binary 存在嗎。
+///
+/// CLI-flavor provider(`*-bash` / `*-cli`)需要本機裝對應 binary。沒裝 →
+/// agent loop spawn 就炸。這個 helper 在 ChatPanel topbar 預先檢測,讓 user
+/// 看到紅 chip + 建議改 API provider。
+///
+/// 純 API provider(`gemini` / `groq` / `ollama` / 自訂 OpenAI-compat)沒 binary
+/// 需求,return `requires_binary: false`。
+fn check_provider_binary(provider_name: &str) -> serde_json::Value {
+    let binary = match provider_name {
+        "claude-bash" | "claude-cli" => Some("claude"),
+        "gemini-bash" | "gemini-cli" => Some("gemini"),
+        "codex-bash" | "codex-cli" => Some("codex"),
+        _ => None,
+    };
+    let Some(bin) = binary else {
+        // 純 API provider,不需 binary
+        return serde_json::json!({
+            "requires_binary": false,
+        });
+    };
+    let available = std::process::Command::new("which")
+        .arg(bin)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    // 建議的替代 — 若 binary 沒裝,建議 user 改用 純 API 或裝對應 CLI
+    let suggested_api = match bin {
+        "claude" => "gemini",   // Claude API 沒在 Mori 內建,推薦 gemini
+        "gemini" => "gemini",   // 同 CLI 名字但純 API 路徑
+        "codex" => "groq",      // codex API 沒在 Mori,推 groq
+        _ => "gemini",
+    };
+    let install_hint = match bin {
+        "claude" => "npm install -g @anthropic-ai/claude-code(+ claude login)",
+        "gemini" => "npm install -g @google/gemini-cli",
+        "codex" => "npm install -g @openai/codex(+ codex login)",
+        _ => "",
+    };
+    serde_json::json!({
+        "requires_binary": true,
+        "binary": bin,
+        "available": available,
+        "suggested_api": suggested_api,
+        "install_hint": install_hint,
     })
 }
 
