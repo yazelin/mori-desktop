@@ -873,97 +873,91 @@ function EnrollmentModal({
   const pct = (elapsed / ENROLL_SECONDS) * 100;
   const remaining = Math.max(0, ENROLL_SECONDS - elapsed);
   return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.55)",
-        zIndex: 10000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <div className="mori-modal-backdrop">
       <style>{`
         @keyframes mori-rec-pulse {
           0%, 100% { transform: scale(1); opacity: 0.95; box-shadow: 0 0 0 0 rgba(220,60,60,0.7); }
           50% { transform: scale(1.18); opacity: 1; box-shadow: 0 0 0 16px rgba(220,60,60,0); }
         }
+        .mori-enroll-modal {
+          width: min(92%, 640px);
+          background: var(--c-surface-bg);
+          color: var(--c-text);
+          border: 1px solid var(--c-border-strong);
+          border-radius: 12px;
+          padding: 22px 24px;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+        }
+        .mori-enroll-header {
+          display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+        }
+        .mori-enroll-rec-dot {
+          width: 16px; height: 16px; background: #dc3c3c; border-radius: 50%;
+          animation: mori-rec-pulse 1.2s ease-in-out infinite;
+        }
+        .mori-enroll-title { margin: 0; font-size: 17px; color: var(--c-text); }
+        .mori-enroll-script {
+          padding: 12px 14px;
+          background: var(--c-input-bg);
+          color: var(--c-text);
+          border: 1px solid var(--c-border);
+          border-radius: 6px;
+          font-size: 14px;
+          line-height: 1.85;
+          white-space: pre-wrap;
+          margin-bottom: 14px;
+          max-height: 220px;
+          overflow-y: auto;
+        }
+        .mori-enroll-progress-text {
+          display: flex; justify-content: space-between;
+          font-size: 13px; color: var(--c-text); margin-bottom: 6px;
+        }
+        .mori-enroll-progress-track {
+          height: 8px;
+          background: var(--c-input-bg);
+          border: 1px solid var(--c-border);
+          border-radius: 4px;
+          overflow: hidden;
+          margin-bottom: 12px;
+        }
+        .mori-enroll-progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--c-forest, #6a8c5a) 0%, var(--c-forest-light, #8db077) 100%);
+          transition: width 0.1s linear;
+        }
+        .mori-enroll-hint {
+          font-size: 12px;
+          color: var(--c-text-muted);
+          line-height: 1.6;
+          margin: 0 0 12px 0;
+        }
+        .mori-enroll-footer { text-align: right; }
       `}</style>
-      <div
-        style={{
-          background: "var(--mori-bg, #fff)",
-          padding: 28,
-          borderRadius: 12,
-          maxWidth: 600,
-          width: "92%",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-          <div
-            style={{
-              width: 18,
-              height: 18,
-              background: "#dc3c3c",
-              borderRadius: "50%",
-              animation: "mori-rec-pulse 1.2s ease-in-out infinite",
-            }}
-          />
-          <h3 style={{ margin: 0, fontSize: 18 }}>錄音中 — 請念出下方文字</h3>
+      <div className="mori-enroll-modal">
+        <div className="mori-enroll-header">
+          <div className="mori-enroll-rec-dot" />
+          <h3 className="mori-enroll-title">錄音中 — 請念出下方文字</h3>
         </div>
 
-        <div
-          style={{
-            padding: 14,
-            background: "rgba(0,0,0,0.04)",
-            borderRadius: 6,
-            fontSize: 14,
-            lineHeight: 1.85,
-            whiteSpace: "pre-wrap",
-            marginBottom: 18,
-            maxHeight: 200,
-            overflowY: "auto",
-          }}
-        >
-          {ENROLL_SAMPLE_TEXT}
-        </div>
+        <div className="mori-enroll-script">{ENROLL_SAMPLE_TEXT}</div>
 
-        <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+        <div className="mori-enroll-progress-text">
           <span>已錄 <strong>{elapsed.toFixed(1)}s</strong> / {ENROLL_SECONDS}s</span>
           <span>剩餘 <strong>{remaining.toFixed(1)}s</strong></span>
         </div>
-        <div
-          style={{
-            height: 8,
-            background: "rgba(0,0,0,0.08)",
-            borderRadius: 4,
-            overflow: "hidden",
-            marginBottom: 14,
-          }}
-        >
-          <div
-            style={{
-              width: `${pct}%`,
-              height: "100%",
-              background: "linear-gradient(90deg, #6a8c5a 0%, #8db077 100%)",
-              transition: "width 0.1s linear",
-            }}
-          />
+        <div className="mori-enroll-progress-track">
+          <div className="mori-enroll-progress-fill" style={{ width: `${pct}%` }} />
         </div>
 
-        <p style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.6, margin: "0 0 14px 0" }}>
+        <p className="mori-enroll-hint">
           💡 念完還沒滿就<strong>繼續隨意聊</strong>(今天 / 工作 / 任何)或重複範本。
           <strong>別停</strong>。中間靜音會被 VAD 砍掉,降低 embedding 品質。
         </p>
 
         {onCancel && elapsed < ENROLL_SECONDS && (
-          <div style={{ textAlign: "right" }}>
-            <button
-              className="mori-btn small ghost"
-              onClick={onCancel}
-              style={{ color: "var(--mori-danger, #c66)" }}
-            >
+          <div className="mori-enroll-footer">
+            <button className="mori-btn small ghost" onClick={onCancel}>
               取消(放棄這次)
             </button>
           </div>
