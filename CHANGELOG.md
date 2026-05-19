@@ -6,6 +6,34 @@
 
 ---
 
+## v0.6.3 — Ask-back(Mori 反問)+ Phase 3C 收尾(2026-05-19)
+
+Phase 3C 的「未盡之事」— evaluator 過去把 `unclear`(半截話 / 模糊起頭)當 `address_mori` 強跑 agent,Mori 拿到「然後...」也照樣亂回。這版改成讓 Mori 直接反問。
+
+### Ask-back
+
+**Intent::Unclear → Mori 用 TTS 反問,不走 agent**(PR #51)。
+
+LLM 判 `unclear` 時除了 intent 還要產 `clarifying_question`(短句、口語、20 字內,例「然後呢?」「你想做什麼?跟我說」)。Pipeline 接到 `EvaluatorOutcome::AskBack` 時:
+
+- 在 ChatPanel 顯示反問句(以 Mori 身份)
+- 若 `tts.enabled` 開了 → 同步 TTS 念出來
+- 把 `transcript`(原半截話)+ 反問句寫進 conversation history,user 下次 wake 再講「我是想說...」時,agent 看得到上下文
+- emit `evaluator-ask-back` event 給未來 UI 加 chip 用
+- event log 多一條 `evaluator_decision` with `outcome:"ask_back"` + `clarifying_question`
+
+Config:`evaluator.ask_back_enabled`(預設 ON,evaluator 開了通常就想要這個分流;OFF → 退回舊行為,unclear 當 address_mori 跑 agent)。
+
+### Evaluator internals refactor
+
+`EvaluatorOutcome` 從 `struct { skip: bool, reason }` 重構成 `enum { Proceed, Skip, AskBack }` — 三種 intent 路徑各自顯式,加新 outcome 不用拆 bool。`EvaluationResult` 新增 `clarifying_question: Option<String>` field,LLM 不給時 fallback 預設句「可以再說清楚一點嗎?」。
+
+### Migration
+
+無 breaking change。既有 `evaluator.enabled = false` 行為完全不變;`evaluator.enabled = true` 預設啟用 ask-back,不想要可單獨關 `ask_back_enabled = false`。
+
+---
+
 ## v0.6.2 — Phase 3 polish + 完整 per-pipeline observability(2026-05-19)
 
 v0.6.1 ship 完 Phase 3 全 7 layer 後,user 實測一輪驗 4 個邊緣 case 都對:
