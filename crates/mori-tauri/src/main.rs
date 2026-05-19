@@ -212,6 +212,12 @@ fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new:
         let listener = WakeWordListener::spawn(cfg, move |ev| match ev {
             WakeEvent::Wake { word, score } => {
                 tracing::info!(word, score, "wake-word detected — triggering recording");
+                // Phase 6:event log 詳細化 — wake event 也記一筆(對齊 recordings 的 wake_score)
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "wake_word_event",
+                    "word": word,
+                    "score": score,
+                }));
                 let _ = app_for_cb.emit("wake-word-detected", serde_json::json!({
                     "word": word,
                     "score": score,
@@ -2319,6 +2325,13 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
                         raw_duration_secs = audio.duration_secs(),
                         "speaker_id: pass"
                     );
+                    // Phase 6 event log:speaker_id 通過時也記(過去只記 reject)
+                    mori_core::event_log::append(serde_json::json!({
+                        "kind": "speaker_id_pass",
+                        "score": r.score,
+                        "threshold": r.threshold,
+                        "audio_secs": audio.duration_secs(),
+                    }));
                 }
                 speaker_id::VerifyOutcome::NotEnrolled => {
                     tracing::info!("speaker_id: skipped (user not enrolled)");
@@ -2646,6 +2659,16 @@ async fn evaluator_gate(transcript: &str) -> Option<EvaluatorOutcome> {
                 skip,
                 "evaluator: result",
             );
+            // Phase 6 event log:evaluator 每次判斷都記 — 給 Logs tab filter
+            // 「給我看所有 evaluator skip 但 confidence 不高的」之類 query。
+            mori_core::event_log::append(serde_json::json!({
+                "kind": "evaluator_decision",
+                "intent": format!("{:?}", result.intent),
+                "reason": result.reason,
+                "confidence": result.confidence,
+                "confidence_threshold": confidence_threshold,
+                "skip": skip,
+            }));
             Some(EvaluatorOutcome {
                 skip,
                 reason: if skip {
@@ -3031,6 +3054,14 @@ async fn run_agent_pipeline(
     match chat_result {
         Ok((response, skill_calls)) => {
             tracing::info!(chars = response.chars().count(), "Mori responded");
+            // Phase 6 event log:agent 跑完一筆 summary
+            mori_core::event_log::append(serde_json::json!({
+                "kind": "agent_completed",
+                "profile": agent_profile.name,
+                "provider": agent_profile.frontmatter.provider.clone().unwrap_or_else(|| "default".into()),
+                "response_chars": response.chars().count(),
+                "skill_calls": skill_calls.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+            }));
 
             // Append 到 conversation history,trim 到 cap
             {
