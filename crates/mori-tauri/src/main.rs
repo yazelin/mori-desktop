@@ -23,6 +23,7 @@ mod x11_shape;
 mod selection;
 mod shell_skill;
 mod skill_server;
+mod speaker_id;
 mod theme;
 mod transcribe_cmds;
 mod tts;
@@ -2340,6 +2341,53 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let _ = std::fs::write(&debug_path, &wav);
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
+            // Phase 3E:speaker verification gate(config 開啟才跑)。
+            // 把 WAV 路徑丟給 Python resemblyzer 算 embedding + cosine 比對,
+            // score < threshold(預設 0.7)→ 別人聲音,silent reject。
+            // spawn_blocking 包 Python subprocess,~100-500ms。
+            let verify_path = debug_path.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                speaker_id::verify_audio_file(&verify_path)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("speaker_id join: {e}"))?;
+            match &outcome {
+                speaker_id::VerifyOutcome::Verified(r) if !r.pass => {
+                    tracing::info!(
+                        score = r.score,
+                        threshold = r.threshold,
+                        "speaker_id: rejected — not enrolled user"
+                    );
+                    mori_core::event_log::append(serde_json::json!({
+                        "kind": "speaker_id_rejected",
+                        "score": r.score,
+                        "threshold": r.threshold,
+                    }));
+                    let _ = app_for_provider.emit(
+                        "speaker-id-rejected",
+                        serde_json::json!({
+                            "score": r.score,
+                            "threshold": r.threshold,
+                        }),
+                    );
+                    return Ok(String::new());
+                }
+                speaker_id::VerifyOutcome::Verified(r) => {
+                    tracing::info!(
+                        score = r.score,
+                        threshold = r.threshold,
+                        "speaker_id: pass"
+                    );
+                }
+                speaker_id::VerifyOutcome::NotEnrolled => {
+                    tracing::info!("speaker_id: skipped (user not enrolled)");
+                }
+                speaker_id::VerifyOutcome::Disabled => {} // 沒 log 太吵
+                speaker_id::VerifyOutcome::Error(e) => {
+                    tracing::warn!(error = %e, "speaker_id: error — passing through");
+                }
+            }
+
             // 5F: VoiceInput mode 時，profile 可用 stt_provider 覆蓋全域 STT 設定
             let stt_override: Option<String> = if matches!(*state.mode.lock(), Mode::VoiceInput) {
                 mori_core::voice_input_profile::load_active_profile()
@@ -4045,6 +4093,9 @@ fn main() {
             wake_sound::wake_ack_upload,
             wake_sound::wake_ack_delete_alternate,
             tts::tts_preview,
+            speaker_id::speaker_id_status,
+            speaker_id::speaker_id_enroll,
+            speaker_id::speaker_id_clear,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -4078,6 +4129,10 @@ fn main() {
             // Phase 3D:deploy ~/.mori/bin/mori-tts-edge.py(edge-tts bridge script)。
             // TTS speak-back 預設 OFF,user enable 才會用到。但 script 先 deploy 不影響。
             tts::ensure_script_deployed(&mori_dir());
+
+            // Phase 3E:deploy ~/.mori/bin/mori-voice-enroll.py + mori-voice-verify.py。
+            // Speaker verification 預設 OFF。
+            speaker_id::ensure_scripts_deployed(&mori_dir());
 
             // 啟動初始 floating visibility — update_floating_visibility 自己會看:
             //   - quickstart_completed (儀式還沒完成 → 強制隱藏)

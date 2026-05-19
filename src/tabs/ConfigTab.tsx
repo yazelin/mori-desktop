@@ -607,7 +607,15 @@ type WakeAckStatus = {
   alternates: WakeAckAlternate[];
 };
 
-function WakeAckSection() {
+// WakeAckSection 需要 cfg + applyPatch 才能讓「啟用」toggle 走 form 的 dirty
+// tracking(不然 toggle 不會 enable 儲存按鈕)。其他檔案操作(set_active /
+// upload / delete)仍走 IPC,因為它們牽涉檔案系統。
+type WakeAckSectionProps = {
+  cfg: AnyObj;
+  applyPatch: (mutator: (c: AnyObj) => void) => void;
+};
+
+function WakeAckSection({ cfg, applyPatch }: WakeAckSectionProps) {
   // i18n keys 之後補,目前 hardcode 中文(跟其他 hardcode 的 hint 一樣)
   const [status, setStatus] = useState<WakeAckStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -668,16 +676,13 @@ function WakeAckSection() {
     }
   };
 
-  const onToggleEnabled = async (enabled: boolean) => {
-    setBusy(true);
-    try {
-      await invoke("wake_ack_set_enabled", { enabled });
-      await refresh();
-    } catch (e) {
-      flashMsg(`儲存失敗:${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
+  // 「啟用」改走 applyPatch — 跟其他 form 欄位一致,動到會 enable 儲存按鈕。
+  // (不再 call wake_ack_set_enabled IPC,Save 統一寫 config.json)
+  const onToggleEnabled = (enabled: boolean) => {
+    applyPatch((c) => {
+      const lm = ensureSubObj(c, "listening_mode");
+      lm.wake_ack_enabled = enabled;
+    });
   };
 
   const onUpload = async (file: File) => {
@@ -713,11 +718,10 @@ function WakeAckSection() {
       title="Wake-ack 應答音"
       hint="Listening mode 下,Hey Mori 被偵測到後播這個音檔(讓你知道可以開始說話)。先放完再開麥克風,避免被 mic 收回去污染 STT。"
     >
-      <FormRow label="啟用" hint="關掉就完全靜音(只看 floating Mori 動畫提示)">
+      <FormRow label="啟用" hint="關掉就完全靜音(只看 floating Mori 動畫提示)。改動後按上方「儲存」才寫入 config.json。">
         <input
           type="checkbox"
-          checked={status.enabled}
-          disabled={busy}
+          checked={Boolean((cfg.listening_mode?.wake_ack_enabled) ?? true)}
           onChange={(e) => onToggleEnabled(e.target.checked)}
         />
       </FormRow>
@@ -814,6 +818,138 @@ function WakeAckSection() {
           {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
         </div>
       </FormRow>
+    </Section>
+  );
+}
+
+// ── Phase 3E:聲紋辨識(Speaker verification)──────────────────────────
+//
+// 啟用後 wake event 觸發 + STT 前先過 voice embedding 比對,別人聲音 silent
+// reject。需先「錄音註冊我的聲音」(~30s) + DepsTab 裝 resemblyzer。
+
+type SpeakerIdStatus = {
+  enrolled: boolean;
+  path: string;
+  size_bytes: number;
+  enabled: boolean;
+  threshold: number;
+};
+
+type SpeakerIdSectionProps = {
+  cfg: AnyObj;
+  applyPatch: (mutator: (c: AnyObj) => void) => void;
+};
+
+function SpeakerIdSection({ cfg, applyPatch }: SpeakerIdSectionProps) {
+  const [status, setStatus] = useState<SpeakerIdStatus | null>(null);
+  const [enrolling, setEnrolling] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      const s = await invoke<SpeakerIdStatus>("speaker_id_status");
+      setStatus(s);
+    } catch (e) {
+      console.error("speaker_id_status", e);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const flashMsg = (m: string) => {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  const onEnroll = async () => {
+    if (!confirm("錄音 30 秒註冊聲紋。請在安靜環境連續講話(讀文章 / 自我介紹 / 多句不同 prosody)。按確定開始。")) return;
+    setEnrolling(true);
+    setMsg("錄音中... 30 秒(請持續講話)");
+    try {
+      await invoke("speaker_id_enroll", { seconds: 30 });
+      await refresh();
+      flashMsg("✓ 聲紋註冊完成");
+    } catch (e) {
+      flashMsg(`註冊失敗:${String(e)}`);
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const onClear = async () => {
+    if (!confirm("清除已註冊的聲紋?清除後 wake event 不會 gate(任何人都能叫 Mori)。")) return;
+    try {
+      await invoke("speaker_id_clear");
+      await refresh();
+      flashMsg("✓ 已清除");
+    } catch (e) {
+      flashMsg(`清除失敗:${String(e)}`);
+    }
+  };
+
+  return (
+    <Section
+      title="聲紋辨識(只認你,Phase 3E)"
+      hint="啟用後 wake event 觸發、user 講完之後,先用 resemblyzer 比對聲紋。只有 enrolled user 的聲音通過,別人 silent reject。需先在 Deps 頁裝「聲紋辨識 runtime」(~100MB)+ 點下方錄音註冊一次。預設 OFF。"
+    >
+      <FormRow label="enabled" hint="OFF → 任何人都能叫 Mori(現有行為)。ON → 只認你。沒 enrolled 就 ON 也不會 gate(避免鎖死)。每次 wake 多 ~200-500ms 延遲跑 embedding 比對。">
+        <input
+          type="checkbox"
+          checked={Boolean(cfg.speaker_id?.enabled)}
+          onChange={(e) =>
+            applyPatch((c) => {
+              const s = ensureSubObj(c, "speaker_id");
+              s.enabled = e.target.checked;
+            })
+          }
+        />
+      </FormRow>
+      <FormRow label="threshold" hint="Cosine similarity 0~1,越高越嚴(只認跟 enrollment 高度相似的聲音)。預設 0.7。同一人不同日 / 感冒 / 距離 mic 不同會掉到 0.65-0.75,設太高容易擋掉自己。設太低(<0.55)別人也通過。建議從 0.7 開始,實測微調。">
+        <input
+          type="number"
+          min={0.3}
+          max={0.99}
+          step={0.05}
+          value={Number(cfg.speaker_id?.threshold ?? 0.7)}
+          onChange={(e) =>
+            applyPatch((c) => {
+              const s = ensureSubObj(c, "speaker_id");
+              const n = Number(e.target.value);
+              s.threshold = Number.isFinite(n) ? Math.max(0.3, Math.min(0.99, n)) : 0.7;
+            })
+          }
+        />
+      </FormRow>
+      <FormRow label="" hint={status?.enrolled ? `已註冊:${status.path}(${status.size_bytes} bytes)` : "尚未註冊 — 按下方錄音 30 秒"}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            className="mori-btn"
+            onClick={onEnroll}
+            disabled={enrolling}
+            title="錄 30 秒講話,抽聲紋當作識別基準"
+          >
+            {enrolling ? "錄音中..." : status?.enrolled ? "🎙 重新註冊" : "🎙 錄音註冊我的聲音"}
+          </button>
+          {status?.enrolled && (
+            <button
+              className="mori-btn small ghost"
+              onClick={onClear}
+              disabled={enrolling}
+              style={{ color: "var(--mori-danger, #c66)" }}
+            >
+              ✕ 清除
+            </button>
+          )}
+          {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
+        </div>
+      </FormRow>
+      {!status?.enrolled && cfg.speaker_id?.enabled && (
+        <p style={{ fontSize: 12, opacity: 0.7, padding: "4px 12px", color: "var(--mori-warn, #d80)" }}>
+          ⚠ enabled 但還沒 enrolled — wake event 不會 gate(任何人都能用)。先按上方錄音註冊。
+        </p>
+      )}
     </Section>
   );
 }
@@ -1356,7 +1492,10 @@ function ConfigTab({
           </Section>
 
           {/* Wake-ack 應答音(獨立 Section,Phase 3A.1.2)*/}
-          <WakeAckSection />
+          <WakeAckSection cfg={cfg} applyPatch={applyPatch} />
+
+          {/* ── Phase 3E: 聲紋辨識(Speaker verification)── */}
+          <SpeakerIdSection cfg={cfg} applyPatch={applyPatch} />
 
           {/* ── Phase 3C: Wake-event evaluator(背景噪音過濾)── */}
           <Section
