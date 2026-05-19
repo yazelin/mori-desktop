@@ -840,6 +840,140 @@ type SpeakerIdSectionProps = {
   applyPatch: (mutator: (c: AnyObj) => void) => void;
 };
 
+const ENROLL_SAMPLE_TEXT = `嗨,我是 Mori 的使用者,我在錄音註冊我的聲音,讓 Mori 認得我。
+Hey Mori,你今天好嗎?今天天氣不錯,陽光很好,我喜歡咖啡跟茶。
+我來念幾種不同語氣的句子:這是平常講話,這是問句嗎?還有強調的時候!
+最後 Hey Mori,我念完了。如果還沒到 30 秒,我就繼續隨便聊一下今天做了什麼,
+工作如何,有沒有遇到什麼好玩的事,或者就重複念剛剛那段都可以,重點是別停。`;
+const ENROLL_SECONDS = 30;
+
+/** Recording modal with pulsing red dot + countdown + progress bar.
+ *  純 JS 計時(SetInterval),不依賴後端 event。recording 實際在 Python 子進程
+ *  跑,30 秒固定,modal 跟著計時一起跑,結束關閉。 */
+function EnrollmentModal({
+  open,
+  onCancel,
+}: {
+  open: boolean;
+  onCancel?: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!open) {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const t = setInterval(() => {
+      setElapsed(Math.min(ENROLL_SECONDS, (Date.now() - start) / 1000));
+    }, 100);
+    return () => clearInterval(t);
+  }, [open]);
+  if (!open) return null;
+  const pct = (elapsed / ENROLL_SECONDS) * 100;
+  const remaining = Math.max(0, ENROLL_SECONDS - elapsed);
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        zIndex: 10000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <style>{`
+        @keyframes mori-rec-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.95; box-shadow: 0 0 0 0 rgba(220,60,60,0.7); }
+          50% { transform: scale(1.18); opacity: 1; box-shadow: 0 0 0 16px rgba(220,60,60,0); }
+        }
+      `}</style>
+      <div
+        style={{
+          background: "var(--mori-bg, #fff)",
+          padding: 28,
+          borderRadius: 12,
+          maxWidth: 600,
+          width: "92%",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+          <div
+            style={{
+              width: 18,
+              height: 18,
+              background: "#dc3c3c",
+              borderRadius: "50%",
+              animation: "mori-rec-pulse 1.2s ease-in-out infinite",
+            }}
+          />
+          <h3 style={{ margin: 0, fontSize: 18 }}>錄音中 — 請念出下方文字</h3>
+        </div>
+
+        <div
+          style={{
+            padding: 14,
+            background: "rgba(0,0,0,0.04)",
+            borderRadius: 6,
+            fontSize: 14,
+            lineHeight: 1.85,
+            whiteSpace: "pre-wrap",
+            marginBottom: 18,
+            maxHeight: 200,
+            overflowY: "auto",
+          }}
+        >
+          {ENROLL_SAMPLE_TEXT}
+        </div>
+
+        <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+          <span>已錄 <strong>{elapsed.toFixed(1)}s</strong> / {ENROLL_SECONDS}s</span>
+          <span>剩餘 <strong>{remaining.toFixed(1)}s</strong></span>
+        </div>
+        <div
+          style={{
+            height: 8,
+            background: "rgba(0,0,0,0.08)",
+            borderRadius: 4,
+            overflow: "hidden",
+            marginBottom: 14,
+          }}
+        >
+          <div
+            style={{
+              width: `${pct}%`,
+              height: "100%",
+              background: "linear-gradient(90deg, #6a8c5a 0%, #8db077 100%)",
+              transition: "width 0.1s linear",
+            }}
+          />
+        </div>
+
+        <p style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.6, margin: "0 0 14px 0" }}>
+          💡 念完還沒滿就<strong>繼續隨意聊</strong>(今天 / 工作 / 任何)或重複範本。
+          <strong>別停</strong>。中間靜音會被 VAD 砍掉,降低 embedding 品質。
+        </p>
+
+        {onCancel && elapsed < ENROLL_SECONDS && (
+          <div style={{ textAlign: "right" }}>
+            <button
+              className="mori-btn small ghost"
+              onClick={onCancel}
+              style={{ color: "var(--mori-danger, #c66)" }}
+            >
+              取消(放棄這次)
+            </button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function SpeakerIdSection({ cfg, applyPatch }: SpeakerIdSectionProps) {
   const [status, setStatus] = useState<SpeakerIdStatus | null>(null);
   const [enrolling, setEnrolling] = useState(false);
@@ -864,18 +998,13 @@ function SpeakerIdSection({ cfg, applyPatch }: SpeakerIdSectionProps) {
   };
 
   const onEnroll = async () => {
-    const sample = `嗨,我是 Mori 的使用者,我在錄音註冊我的聲音。
-Hey Mori,你好嗎?今天天氣不錯,我喜歡咖啡跟茶。
-我來念幾種不同語氣的句子:這是平常講話,這是問句嗎?
-還有強調的時候!Hey Mori,辨識完成。`;
     if (
       !confirm(
-        `錄音 30 秒註冊聲紋。\n\n按下確定後,請以「自然語氣」念以下內容(或自由發揮類似長度):\n\n${sample}\n\n要點:\n• 自然語速,不要朗讀腔\n• 中間不要長停頓\n• 跟實際叫 Mori 時同麥克風距離\n• 多種語氣(平淡 / 問句 / 強調)`
+        `準備錄音 30 秒註冊聲紋。\n\n按下確定後會跳出讀稿視窗,跟著念就好。\n\n要點:\n• 自然語速,不要朗讀腔\n• 念完還沒 30 秒 → 繼續隨意聊或重複範本(別停)\n• 跟實際叫 Mori 時同麥克風距離\n• 多種語氣(平淡 / 問句 / 強調)`
       )
     )
       return;
     setEnrolling(true);
-    setMsg("錄音中... 30 秒(請按上方提示連續講話)");
     try {
       await invoke("speaker_id_enroll", { seconds: 30 });
       await refresh();
@@ -899,6 +1028,8 @@ Hey Mori,你好嗎?今天天氣不錯,我喜歡咖啡跟茶。
   };
 
   return (
+    <>
+    <EnrollmentModal open={enrolling} />
     <Section
       title="聲紋辨識(只認你,Phase 3E)"
       hint="啟用後 wake event 觸發、user 講完之後,先用 resemblyzer 比對聲紋。只有 enrolled user 的聲音通過,別人 silent reject。需先在 Deps 頁裝「聲紋辨識 runtime」(~100MB)+ 點下方錄音註冊一次。預設 OFF。"
@@ -992,6 +1123,7 @@ Hey Mori,你好嗎?今天天氣不錯,我喜歡咖啡跟茶。
         </p>
       )}
     </Section>
+    </>
   );
 }
 
