@@ -612,9 +612,19 @@ fn read_inline(
 
 pub const DEFAULT_AGENT_MD: &str = r#"---
 # 預設 Mori — Ctrl+Alt+0 啟動
-# 5I 起 claude-bash / gemini-bash / codex-bash 也都看得到 action_skill 和
-# shell_skill（skill_server 已動態化）。可改成任何支援工具呼叫的 provider。
-provider: claude-bash
+#
+# provider 留空 → 跟 config.json 的 `provider` 走(Quickstart 時 user 設的)。
+# 純 API(gemini / groq / ollama)即可,fresh install 只要設一個 API key 就能跑,
+# 不需要先裝 CLI。
+#
+# 進階 user 想用「外部 AI CLI 當 agent loop」(更強的 tool use):
+#   - 裝 Claude Code:`npm i -g @anthropic-ai/claude-code` → provider: claude-bash
+#   - 裝 Gemini CLI:`npm i -g @google/generative-ai-cli` → provider: gemini-bash
+#   - 裝 Codex CLI:`npm i -g @openai/codex` → provider: codex-bash
+# Phase 3I 起 claude-bash / gemini-bash / codex-bash 都看得到 action_skill 跟
+# shell_skill(skill_server 已動態化)。
+
+# provider: claude-bash    # 進階:有裝 Claude Code 才打開
 enable_read: true   # 啟用 #file: 預處理（讓 body 能引用 ~/.mori/corrections.md）
 
 # enabled_skills 留空 = 全 built-in skill 都可用（包含 open_url / open_app

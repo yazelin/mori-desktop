@@ -16,9 +16,14 @@
 # - 鍵盤動作 → send_keys
 # - 把東西貼到當前游標 → paste_selection_back
 #
-# 用 claude-bash 因為 multi-step 推理(該開哪個 + 怎麼包 args)穩定;
-# 想省 quota 改 `provider: groq`,但 tool calling 在簡單意圖 OK,複雜的失敗率較高。
-provider: claude-bash
+# Provider 留空 → 跟 config.json 預設 `provider` 走(純 API 即可,不需 CLI)。
+# 進階要更穩定的 multi-step 工具呼叫,有裝對應 CLI 才開:
+#   - provider: claude-bash   # Claude Code(`npm i -g @anthropic-ai/claude-code`)
+#   - provider: gemini-bash   # Gemini CLI(`npm i -g @google/gemini-cli`)
+#   - provider: codex-bash    # Codex CLI(`npm i -g @openai/codex`)
+# 純 API(`gemini` / `groq` / `ollama`)tool calling 在簡單意圖 OK,複雜的失敗率較高。
+
+# provider: claude-bash    # 進階:有裝 Claude Code 才打開
 enable_read: true
 enabled_skills:
   - ask_gemini
