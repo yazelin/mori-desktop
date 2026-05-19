@@ -4511,6 +4511,8 @@ fn main() {
             recordings::recordings_audio_bytes,
             recordings::recordings_delete_session,
             recordings::recordings_stats,
+            recordings::recordings_cleanup_now,
+            recordings::recordings_set_retention_days,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)

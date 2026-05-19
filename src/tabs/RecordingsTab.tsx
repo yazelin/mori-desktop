@@ -77,6 +77,10 @@ function RecordingsTab() {
   const [modeFilter, setModeFilter] = useState<string>("all");
   const [providerFilter, setProviderFilter] = useState<string>("all");
   const [msg, setMsg] = useState<string | null>(null);
+  // 編輯 retention_days 的 local draft;按「儲存」才寫進 config。0 = 永不清。
+  const [retentionDraft, setRetentionDraft] = useState<string>("");
+  const [savingRetention, setSavingRetention] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -87,10 +91,54 @@ function RecordingsTab() {
       ]);
       setSessions(list);
       setStats(st);
+      // 從 stats 同步 draft 預設值(若 user 沒在改)
+      setRetentionDraft((prev) => (prev === "" ? String(st.retention_days) : prev));
     } catch (e) {
       console.error("recordings list", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveRetention = async () => {
+    const n = Number(retentionDraft);
+    if (!Number.isFinite(n) || n < 0 || n > 3650) {
+      flashMsg("retention_days 必須是 0–3650 的整數(0 = 永不清)");
+      return;
+    }
+    setSavingRetention(true);
+    try {
+      await invoke("recordings_set_retention_days", { days: Math.floor(n) });
+      flashMsg(`✓ retention_days 設成 ${Math.floor(n)} 天`);
+      // 重抓 stats 反映更新
+      const st = await invoke<RecordingsStats>("recordings_stats");
+      setStats(st);
+    } catch (e) {
+      console.error("set retention", e);
+      flashMsg(`儲存失敗:${e}`);
+    } finally {
+      setSavingRetention(false);
+    }
+  };
+
+  const cleanupNow = async () => {
+    if (!confirm("立刻清掉超過 retention_days 的 session?不可復原。")) return;
+    setCleaningUp(true);
+    try {
+      const r = await invoke<{ removed: number; kept: number; retention_days: number }>(
+        "recordings_cleanup_now",
+      );
+      if (r.retention_days === 0) {
+        flashMsg(`retention_days = 0,不清 — 保留全部 ${r.kept} 筆`);
+      } else {
+        flashMsg(`✓ 已清掉 ${r.removed} 筆(保留 ${r.kept} 筆)`);
+      }
+      await refresh();
+    } catch (e) {
+      console.error("cleanup_now", e);
+      flashMsg(`清理失敗:${e}`);
+    } finally {
+      setCleaningUp(false);
     }
   };
 
@@ -203,8 +251,58 @@ function RecordingsTab() {
           <span>
             <strong>{formatBytes(stats.total_bytes)}</strong> disk
           </span>
-          <span style={{ color: "var(--c-text-muted)" }}>
-            retention <strong>{stats.retention_days}</strong> days
+          <span
+            style={{
+              color: "var(--c-text-muted)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            title="0 = 永不清。改完按儲存。修改後不會自動清,要清按「清舊」。"
+          >
+            retention
+            <input
+              type="number"
+              min={0}
+              max={3650}
+              step={1}
+              value={retentionDraft}
+              onChange={(e) => setRetentionDraft(e.target.value)}
+              style={{
+                width: 60,
+                padding: "2px 4px",
+                background: "var(--c-input-bg)",
+                color: "var(--c-text)",
+                border: "1px solid var(--c-border)",
+                borderRadius: 4,
+              }}
+            />
+            days
+            <button
+              className="mori-btn small ghost"
+              onClick={saveRetention}
+              disabled={
+                savingRetention ||
+                retentionDraft === "" ||
+                Number(retentionDraft) === stats.retention_days
+              }
+              style={{ marginLeft: 4 }}
+            >
+              {savingRetention ? "儲存中…" : "儲存"}
+            </button>
+            <button
+              className="mori-btn small ghost"
+              onClick={cleanupNow}
+              disabled={cleaningUp || stats.session_count === 0}
+              style={{ marginLeft: 4 }}
+              title={
+                stats.retention_days === 0
+                  ? "retention_days=0,不清"
+                  : `立刻刪除超過 ${stats.retention_days} 天的 session`
+              }
+            >
+              {cleaningUp ? "清理中…" : "清舊"}
+            </button>
             {!stats.enabled && (
               <span style={{ marginLeft: 8, color: "var(--c-danger-text)" }}>(recordings disabled)</span>
             )}
