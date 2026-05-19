@@ -54,6 +54,14 @@ pub struct SessionRecord {
     speaker_id: Option<SpeakerIdSnapshot>,
     evaluator: Option<EvaluatorSnapshot>,
     timings_ms: TimingsSnapshot,
+    /// 組好給 LLM 的完整 system prompt(persona + memory index + context section
+    /// + skill rules)。可能 5-50KB,寫獨立 system-prompt.txt 不塞 meta.json。
+    system_prompt: Option<String>,
+    /// 「按熱鍵那一瞬間」的環境快照(clipboard / selection / active window / URLs)。
+    /// 寫獨立 context.json 結構化保存。
+    context_snapshot: Option<serde_json::Value>,
+    /// History snapshot — LLM 看到的對話歷史條目數 + token 大概值。
+    history_summary: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -136,6 +144,15 @@ impl SessionRecord {
     pub fn add_agent_ms(&mut self, ms: u64) {
         self.timings_ms.agent_ms = Some(ms);
     }
+    pub fn set_system_prompt(&mut self, p: String) {
+        self.system_prompt = Some(p);
+    }
+    pub fn set_context_snapshot(&mut self, v: serde_json::Value) {
+        self.context_snapshot = Some(v);
+    }
+    pub fn set_history_summary(&mut self, v: serde_json::Value) {
+        self.history_summary = Some(v);
+    }
 
     /// 寫進 `~/.mori/recordings/<timestamp>/`。
     ///
@@ -177,6 +194,21 @@ impl SessionRecord {
         }
         if let Some(r) = self.response.as_deref() {
             write_file(&dir.join("response.txt"), r.as_bytes(), "response.txt");
+        }
+        // System prompt(可能 5-50KB,獨立檔)
+        if let Some(p) = self.system_prompt.as_deref() {
+            write_file(&dir.join("system-prompt.txt"), p.as_bytes(), "system-prompt.txt");
+        }
+        // Context snapshot — clipboard / selection / window / urls,結構化
+        if let Some(ctx) = &self.context_snapshot {
+            if let Ok(text) = serde_json::to_string_pretty(ctx) {
+                write_file(&dir.join("context.json"), text.as_bytes(), "context.json");
+            }
+        }
+        if let Some(hist) = &self.history_summary {
+            if let Ok(text) = serde_json::to_string_pretty(hist) {
+                write_file(&dir.join("history.json"), text.as_bytes(), "history.json");
+            }
         }
 
         // meta.json

@@ -2809,6 +2809,41 @@ async fn run_agent_pipeline(
             "calling agent"
         );
 
+        // Phase B:capture system prompt + context snapshot 進 recording session
+        if let Some(rec) = state.recording_session.lock().as_mut() {
+            rec.set_system_prompt(system_prompt.clone());
+            rec.set_context_snapshot(serde_json::json!({
+                "hotkey_window": {
+                    "process_name": win_ctx_snapshot.process_name,
+                    "window_title": win_ctx_snapshot.window_title,
+                    "selected_text_chars": win_ctx_snapshot.selected_text.chars().count(),
+                    "selected_text": win_ctx_snapshot.selected_text,
+                },
+                "context": {
+                    "clipboard_chars": ctx.clipboard.as_deref().map(|s| s.chars().count()),
+                    "clipboard": ctx.clipboard,
+                    "selected_text": ctx.selected_text,
+                    "active_window_title": ctx.active_window_title,
+                    "active_app": ctx.active_app,
+                    "urls_detected": ctx.urls_detected,
+                    "cursor_position": ctx.cursor_position,
+                },
+                "memory_index_chars": memory_index.chars().count(),
+                "memory_index": memory_index,
+                "installed_apps_ref": {
+                    // 不重複存全部 app(每次重 14KB),只指 catalog 路徑 + 抓時戳
+                    "catalog_path": format!("~/.mori/installed-apps.{}.json", std::env::consts::OS),
+                },
+            }));
+            rec.set_history_summary(serde_json::json!({
+                "history_msgs": history_snapshot.len(),
+                "history": history_snapshot.iter().map(|m| serde_json::json!({
+                    "role": m.role,
+                    "content_chars": m.content.as_deref().map(|s| s.chars().count()).unwrap_or(0),
+                })).collect::<Vec<_>>(),
+            }));
+        }
+
         // 宿靈儀式第三幕跳過 → agent_disabled = true → chat-only,沒 skill / tool / agent loop。
         // 對應「Mori 還沒分到靈力,動不了手」的狀態。從 config.json 直接讀,不另外做 struct。
         let agent_disabled = {
