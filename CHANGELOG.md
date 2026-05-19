@@ -125,7 +125,7 @@ v0.4.0 到 v0.5.1 連續 6 個 release(Windows 開箱即用 / 觀測層 / 隱私
 | 檔 | 補了什麼 |
 |---|---|
 | `getting-started.html` | 平台支援改成 Linux / Windows / macOS 並列(Windows v0.4.0 起 first-class);system requirements 拆 3 平台;tab 數量 6 → 8(含 Annuli + Logs);`~/.mori/` 結構列出 v0.4.1+ 6 個 voice + 6 個 agent starter + corrections.md;新增宿靈儀式 vs Direct setup 兩模式說明;第一次按熱鍵改成「先看 Logs tab」除錯;下一步連結補 tokenizer-comparison.md |
-| `providers.html` | 新 note block 解釋 v0.4.0 Windows 短名 binary 自動探 `.cmd` shim(`cli_command()` helper)+ Codex Windows 限制(@native variant 不支援,需 v0.130+ JS 版)|
+| `providers.html` | 新 note block 解釋 v0.4.0 Windows 短名 binary 自動探 `.cmd` shim(`cli_command()` helper)+ Codex Windows 限制(`@native` variant 不支援,需 v0.130+ JS 版)|
 | `troubleshooting.html` | 新 section `logs-tab`(除錯第一站,看 `~/.mori/logs/`)+ `windows-bash-cli`(v0.4.0 修好的 batch file CVE 問題 + 短名推薦做法)+ bug report 更新到「附 logs jsonl 摘錄」而不是「`~/.mori/log` 最後幾行」|
 | `dwelling-rite.html` | 新增「兩個模式(儀式 / Direct setup)」說明、自動偵測 OS env var(Groq / Gemini / OpenAI 各自 banner)、starter 範本語系 picker(中英取捨 + token 對比連結)|
 | `desktop-ui.html` | Sidebar tab 表格從 6 個補到 8 個(加 Annuli + Logs)、Profiles tab 多了 token 估算 chip / 加入範本 / 開啟資料夾 按鈕、Chat topbar 多 active profile 顯示 |
@@ -327,7 +327,7 @@ Config hint 大掃除:每個 LLM provider 的 binary hint 從「PATH 上的 X bi
 `gemini` provider 的 top hint(`hint_llm_gemini_key`)— v0.4.2 暫修過,這版再 polish:含 aistudio.google.com 申請連結、`\n` 換行、明說「(1)Quick 分頁(2)env var」兩條 path、`model` / `api_base` 預設值說明。
 
 新加 2 條共用 top hint(`hint_llm_bash_proxy` / `hint_llm_chat_proxy`),套到 `claude-bash` / `gemini-bash` / `codex-bash` / `claude-cli` / `gemini-cli` / `codex-cli` 6 個 provider:
-- **`-bash` 系列**:解釋這是「本地裝的 AI CLI 當主 agent loop」走法,列出各家前置條件(Claude Code OAuth / npm i -g @google/gemini-cli / @openai/codex 等)+ Win 限制(codex native variant 不支援)
+- **`-bash` 系列**:解釋這是「本地裝的 AI CLI 當主 agent loop」走法,列出各家前置條件(Claude Code OAuth / npm i -g `@google/gemini-cli` / `@openai/codex` 等)+ Win 限制(codex native variant 不支援)
 - **`-cli` 系列**:解釋這是「同 *-bash 但省略 Bash agent loop」(純文字 in/out,給 skill 內部 LLM 用)
 
 binary 欄位 hint 從「PATH 上的 X binary 名稱」改「通常填 \`X\`」,刪掉過時的 Windows .cmd 警告(v0.4.0 已自動 detect),改加 codex-bash 對 Windows 版本要求(v0.130+ JS 版)的提醒。
