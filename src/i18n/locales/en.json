@@ -191,6 +191,8 @@
     "role_voice_input": "Voice input",
     "role_empty": "(empty)",
     "copy_voice_input": "Copy this voice input",
+    "askback_chip_label": "ask-back",
+    "askback_chip_title": "Mori thought your message was incomplete and is asking you to clarify (evaluator: Intent::Unclear)",
     "session_path_x11": "x11 · via tauri-plugin-global-shortcut",
     "session_path_wayland": "wayland · via xdg-desktop-portal",
     "session_path_linux_other": "linux (tty / unset) · global hotkey unavailable, UI buttons still work",
