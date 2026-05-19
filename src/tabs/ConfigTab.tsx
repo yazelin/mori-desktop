@@ -11,7 +11,7 @@
 import React, { useEffect, useMemo, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
@@ -858,19 +858,47 @@ function EnrollmentModal({
   onCancel?: () => void;
 }) {
   const [elapsed, setElapsed] = useState(0);
+  // Phase 3 polish A2:接 Python script 真實 JSON event 給 modal 走精確進度,
+  // setInterval 只當 fallback(Python 還沒開錄就先有畫面)。
+  const [phase, setPhase] = useState<"recording" | "embedding" | "done">("recording");
+
   useEffect(() => {
     if (!open) {
       setElapsed(0);
+      setPhase("recording");
       return;
     }
     const start = Date.now();
+    // Fallback 計時器:Python event 還沒來時,先用秒數估
     const t = setInterval(() => {
-      setElapsed(Math.min(ENROLL_SECONDS, (Date.now() - start) / 1000));
-    }, 100);
-    return () => clearInterval(t);
+      setElapsed((prev) => {
+        const tick = (Date.now() - start) / 1000;
+        // 若 event 已經給了較高 elapsed,don't regress
+        return Math.max(prev, Math.min(ENROLL_SECONDS, tick));
+      });
+    }, 200);
+    // 接 Tauri event:Python script 真實 progress
+    const unlistenPromise = listen<{ event?: string; elapsed?: number }>(
+      "speaker-id-enroll-progress",
+      (e) => {
+        const ev = e.payload.event;
+        if (ev === "recording_progress" && typeof e.payload.elapsed === "number") {
+          setElapsed(Math.min(ENROLL_SECONDS, e.payload.elapsed));
+        } else if (ev === "recording_done") {
+          setElapsed(ENROLL_SECONDS);
+          setPhase("embedding");
+        } else if (ev === "embedding_done") {
+          setPhase("done");
+        }
+      },
+    );
+    return () => {
+      clearInterval(t);
+      unlistenPromise.then((fn) => fn()).catch(() => {});
+    };
   }, [open]);
   if (!open) return null;
-  const pct = (elapsed / ENROLL_SECONDS) * 100;
+  const pct = phase === "embedding" ? 100 : (elapsed / ENROLL_SECONDS) * 100;
   const remaining = Math.max(0, ENROLL_SECONDS - elapsed);
   return createPortal(
     <div className="mori-modal-backdrop">
@@ -937,7 +965,11 @@ function EnrollmentModal({
       <div className="mori-enroll-modal">
         <div className="mori-enroll-header">
           <div className="mori-enroll-rec-dot" />
-          <h3 className="mori-enroll-title">錄音中 — 請念出下方文字</h3>
+          <h3 className="mori-enroll-title">
+            {phase === "recording" && "錄音中 — 請念出下方文字"}
+            {phase === "embedding" && "錄音完成 — 計算聲紋中..."}
+            {phase === "done" && "✓ 聲紋註冊完成"}
+          </h3>
         </div>
 
         <div className="mori-enroll-script">{ENROLL_SAMPLE_TEXT}</div>
@@ -1695,6 +1727,22 @@ function ConfigTab({
                   { value: "gemini", label: "gemini API(會吃 Gemini quota)" },
                   { value: "ollama", label: "ollama(本地,需自架)" },
                 ]}
+              />
+            </FormRow>
+            <FormRow label="confidence_threshold" hint="LLM 判 background_noise 但 confidence 低於這值 → 不擋(避免 LLM 不確定時誤殺 user 真指令)。預設 0.85。設高 → 寬鬆,只擋 LLM 很確定的雜訊;設低 → 嚴格,LLM 略有懷疑就擋。0.5-0.95 都合理。">
+              <input
+                type="number"
+                min={0.0}
+                max={1.0}
+                step={0.05}
+                value={Number(cfg.evaluator?.confidence_threshold ?? 0.85)}
+                onChange={(e) =>
+                  applyPatch((c) => {
+                    const ev = ensureSubObj(c, "evaluator");
+                    const n = Number(e.target.value);
+                    ev.confidence_threshold = Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.85;
+                  })
+                }
               />
             </FormRow>
           </Section>

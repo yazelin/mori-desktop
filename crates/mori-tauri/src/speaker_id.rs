@@ -244,9 +244,18 @@ pub fn speaker_id_status() -> EnrollmentStatus {
 /// IPC command — UI 點「錄音註冊我的聲音」觸發。Blocking ~30s。
 ///
 /// 跑 Python enrollment script,output 寫到 `~/.mori/voiceid/user_embedding.npy`。
-/// 失敗回 Err,UI 顯示錯誤訊息。
+///
+/// **Phase 3 polish A2**:讀 Python stdout line-by-line,JSON event 用
+/// Tauri `app.emit("speaker-id-enroll-progress", json)` forward 到前端,
+/// modal 用真實進度(non setInterval 估算)。
 #[tauri::command]
-pub async fn speaker_id_enroll(seconds: Option<f32>) -> Result<EnrollmentStatus, String> {
+pub async fn speaker_id_enroll(
+    app: tauri::AppHandle,
+    seconds: Option<f32>,
+) -> Result<EnrollmentStatus, String> {
+    use std::io::{BufRead, BufReader};
+    use tauri::Emitter;
+
     let cfg = read_config();
     let script = enroll_script_path();
     if !script.exists() {
@@ -268,8 +277,9 @@ pub async fn speaker_id_enroll(seconds: Option<f32>) -> Result<EnrollmentStatus,
     }
 
     let python = cfg.python.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        Command::new(&python)
+    let app_for_thread = app.clone();
+    let exit_status = tokio::task::spawn_blocking(move || -> Result<std::process::ExitStatus, String> {
+        let mut child = Command::new(&python)
             .arg(&script)
             .arg(&out_path)
             .arg("--seconds")
@@ -277,21 +287,40 @@ pub async fn speaker_id_enroll(seconds: Option<f32>) -> Result<EnrollmentStatus,
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
+            .spawn()
+            .map_err(|e| format!("spawn python: {e}"))?;
+
+        // Stream stdout — 每行解析 JSON,有 event 欄位就 emit 給前端
+        if let Some(stdout) = child.stdout.take() {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                let Ok(line) = line else { continue };
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+                    if value.get("event").is_some() {
+                        let _ = app_for_thread.emit("speaker-id-enroll-progress", &value);
+                    }
+                } else {
+                    tracing::debug!(line, "enroll: non-JSON stdout line");
+                }
+            }
+        }
+
+        // Stream done — wait for exit
+        let status = child
+            .wait()
+            .map_err(|e| format!("wait python: {e}"))?;
+        Ok(status)
     })
     .await
     .map_err(|e| format!("join: {e}"))?
-    .map_err(|e| format!("spawn python: {e}"))?;
+    .map_err(|e| e)?;
 
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr).into_owned();
-        let stdout = String::from_utf8_lossy(&result.stdout).into_owned();
-        return Err(format!(
-            "enrollment exit {}: stderr={} stdout-tail={}",
-            result.status,
-            stderr.trim(),
-            stdout.lines().last().unwrap_or("").trim()
-        ));
+    if !exit_status.success() {
+        return Err(format!("enrollment exited with {exit_status}"));
     }
 
     Ok(speaker_id_status())
