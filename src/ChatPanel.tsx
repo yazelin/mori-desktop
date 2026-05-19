@@ -65,6 +65,15 @@ type ChatProviderInfo = {
   model: string;
   warmup: WarmupState | null;
   stt: SttInfo;
+  // Phase 6 polish A:provider preflight。Pure API → requires_binary=false。
+  // CLI-flavor provider(*-bash / *-cli)→ requires_binary=true,available 看 binary 在不在 PATH。
+  binary?: {
+    requires_binary: boolean;
+    binary?: string;
+    available?: boolean;
+    suggested_api?: string;
+    install_hint?: string;
+  };
 };
 
 type ActiveProfiles = {
@@ -255,6 +264,27 @@ function ChatPanel() {
           {chatProvider && (
             <span className="mori-chat-mode-provider">
               · {chatProvider.name} · {chatProvider.model}
+            </span>
+          )}
+          {/* Phase 6 polish A:provider preflight 警告 — CLI binary 沒裝紅 chip。
+              用 --c-danger-* theme token,跟主視窗 light/dark 主題對齊。 */}
+          {chatProvider?.binary?.requires_binary && chatProvider.binary.available === false && (
+            <span
+              className="mori-chat-mode-provider"
+              title={`Provider 「${chatProvider.name}」需要 「${chatProvider.binary.binary}」 CLI,但 PATH 找不到。\n安裝:${chatProvider.binary.install_hint}\n或 Config tab 改 provider 成 「${chatProvider.binary.suggested_api}」(純 API,不需 CLI)。`}
+              style={{
+                marginLeft: 6,
+                padding: "2px 8px",
+                background: "var(--c-danger-bg)",
+                color: "var(--c-danger-text)",
+                border: "1px solid var(--c-danger-border)",
+                borderRadius: 4,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "help",
+              }}
+            >
+              ⚠ {chatProvider.binary.binary} 未安裝
             </span>
           )}
         </div>
