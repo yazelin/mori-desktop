@@ -39,6 +39,7 @@
     "date_label": "Date",
     "kind_label": "Kind",
     "provider_label": "Provider",
+    "outcome_label": "Outcome",
     "refresh_title": "Reload",
     "loading": "Loading…",
     "empty_title": "No logs yet",

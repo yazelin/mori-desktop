@@ -23,7 +23,24 @@ type LogEntry = {
   [k: string]: unknown;
 };
 
-const KIND_FILTERS = ["all", "llm_call", "spawn_error", "skill_dispatch", "transcribe", "error"];
+const KIND_FILTERS = [
+  "all",
+  "llm_call",
+  "spawn_error",
+  "skill_dispatch",
+  "transcribe",
+  "error",
+  // Phase 3 events
+  "evaluator_decision",
+  "wake_word_event",
+  "speaker_id_pass",
+  "speaker_id_reject",
+  "agent_completed",
+];
+
+/// `evaluator_decision` 的 `outcome` 欄位三種值。selected kind = evaluator_decision
+/// 時才顯示這個 sub-filter。`skip` 跟舊 `skip:bool` field 是 backward-compat 對應的。
+const OUTCOME_FILTERS = ["all", "proceed", "skip", "ask_back"];
 
 function formatTs(ts: string | undefined): string {
   if (!ts) return "";
@@ -54,6 +71,7 @@ function LogsTab() {
   const [loading, setLoading] = useState(true);
   const [kindFilter, setKindFilter] = useState<string>("all");
   const [providerFilter, setProviderFilter] = useState<string>("all");
+  const [outcomeFilter, setOutcomeFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const loadDates = useCallback(async () => {
@@ -107,9 +125,17 @@ function LogsTab() {
     return entries.filter((e) => {
       if (kindFilter !== "all" && e.kind !== kindFilter) return false;
       if (providerFilter !== "all" && e.provider !== providerFilter) return false;
+      // outcome filter 只在 kind=evaluator_decision 時有意義。其他 kind 永遠通過。
+      if (
+        outcomeFilter !== "all" &&
+        kindFilter === "evaluator_decision" &&
+        e.outcome !== outcomeFilter
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [entries, kindFilter, providerFilter]);
+  }, [entries, kindFilter, providerFilter, outcomeFilter]);
 
   const refresh = () => {
     loadDates();
@@ -157,6 +183,16 @@ function LogsTab() {
             options={providers.map((p) => ({ value: p, label: p }))}
           />
         </label>
+        {kindFilter === "evaluator_decision" && (
+          <label className="mori-logs-toolbar-field">
+            <span>{t("logs_tab.outcome_label")}</span>
+            <Select
+              value={outcomeFilter}
+              onChange={setOutcomeFilter}
+              options={OUTCOME_FILTERS.map((o) => ({ value: o, label: o }))}
+            />
+          </label>
+        )}
         <button className="mori-btn" onClick={refresh} title={t("logs_tab.refresh_title")}>
           <IconRefresh width={13} height={13} />
         </button>
@@ -186,6 +222,10 @@ function LogsTab() {
                 <div className="mori-logs-row-head">
                   <span className="mori-logs-ts">{formatTs(e.ts)}</span>
                   <span className="mori-logs-kind">{e.kind ?? "—"}</span>
+                  {/* evaluator_decision 多 outcome chip,跟 kind 連著看一眼就懂 */}
+                  {e.kind === "evaluator_decision" && typeof e.outcome === "string" && (
+                    <span className={`mori-logs-outcome ${e.outcome}`}>{e.outcome}</span>
+                  )}
                   {e.provider && <span className="mori-logs-provider">{e.provider}</span>}
                   {e.model && <span className="mori-logs-model">{e.model}</span>}
                   {e.latency_ms != null && (
