@@ -292,6 +292,81 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
         },
+        // Phase 3 polish B:三個 AI CLI 偵測 — claude-bash / gemini-bash / codex-bash
+        // 這幾個 provider 需要對應 binary 在 PATH 才能跑。fresh install 沒裝
+        // 時 agent profile 用了會炸 spawn,DepsTab 顯示 ✗ 提示去裝。
+        //
+        // 全部用 Manual install — 各家 CLI 官方安裝都很多步(npm / brew / installer),
+        // 我們不冒險跑自動腳本。
+        DepSpec {
+            id: "claude-code-cli",
+            name: "Claude Code CLI",
+            description: "Anthropic 官方 AI coding CLI。Mori provider `claude-bash` / \
+                          `claude-cli` 需要這個 binary。",
+            unlocks: "provider=claude-bash / claude-cli 啟動 Claude Code 當 agent loop",
+            size_hint: Some("~100MB(Node.js based)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
+            check: CheckSpec::Which { bin: "claude" },
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# 官方安裝(需先有 Node.js 18+):",
+                    "npm install -g @anthropic-ai/claude-code",
+                    "# 安裝完跑 `claude login` 完成 OAuth 認證(用 Anthropic 帳號)",
+                    "# 詳見 https://docs.anthropic.com/claude/docs/claude-code",
+                ],
+            },
+            install_overrides: &[],
+        },
+        DepSpec {
+            id: "gemini-cli",
+            name: "Gemini CLI",
+            description: "Google 官方 Gemini CLI。Mori provider `gemini-bash` / \
+                          `gemini-cli` 需要這個 binary。\
+                          \n\n注意:**只用 Gemini API**(`provider: gemini`)的話 \
+                          **不需要**這個 CLI,直接設 API key 就能跑。",
+            unlocks: "provider=gemini-bash / gemini-cli 啟動 Gemini CLI 當 agent loop",
+            size_hint: Some("~50MB(Node.js based)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
+            check: CheckSpec::Which { bin: "gemini" },
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# 官方安裝(需先有 Node.js 18+):",
+                    "npm install -g @google/gemini-cli",
+                    "# 安裝完跑 `gemini config set api_key <your-key>` 或 GEMINI_API_KEY env",
+                    "# 詳見 https://github.com/google-gemini/gemini-cli",
+                ],
+            },
+            install_overrides: &[],
+        },
+        DepSpec {
+            id: "codex-cli",
+            name: "OpenAI Codex CLI",
+            description: "OpenAI 官方 Codex CLI(AI coding helper)。Mori provider \
+                          `codex-bash` / `codex-cli` 需要這個 binary。\
+                          \n\nWindows 注意:v0.130 起才有純 JS 版,native variant 不支援 Win。",
+            unlocks: "provider=codex-bash / codex-cli 啟動 Codex 當 agent loop",
+            size_hint: Some("~30MB(Node.js based)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "Windows 需要 v0.130+(JS 版),舊 native variant 不支援。",
+            ),
+            check: CheckSpec::Which { bin: "codex" },
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# 官方安裝(需先有 Node.js 18+):",
+                    "npm install -g @openai/codex",
+                    "# 安裝完跑 `codex login` 完成 OAuth 認證(用 ChatGPT 帳號)",
+                    "# 或 `OPENAI_API_KEY` env",
+                    "# 詳見 https://github.com/openai/codex",
+                ],
+            },
+            install_overrides: &[],
+        },
         DepSpec {
             id: "ollama",
             name: "ollama",

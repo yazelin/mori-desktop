@@ -1,9 +1,13 @@
 ---
 # 預設 Mori — Ctrl+Alt+0 啟動
 # 跟 crates/mori-core/src/agent_profile.rs::DEFAULT_AGENT_MD 對齊。
-# 5I 起 claude-bash / gemini-bash / codex-bash 也都看得到 action_skill 和
-# shell_skill(skill_server 已動態化)。可改成任何支援工具呼叫的 provider。
-provider: claude-bash
+#
+# provider 留空 → 跟 config.json 的 `provider` 走(Quickstart 設的)。純 API
+# (gemini / groq / ollama)即可,不需先裝 CLI。進階要用外部 AI CLI 當 agent
+# loop 才打開 `provider: claude-bash` / `gemini-bash` / `codex-bash`(需各自裝
+# Claude Code / Gemini CLI / Codex CLI)。
+
+# provider: claude-bash   # 進階:有裝 Claude Code 才打開
 enable_read: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)
 
 # enabled_skills 留空 = 全 built-in skill 都可用(包含 open_url / open_app
