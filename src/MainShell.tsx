@@ -21,10 +21,11 @@ import AnnuliTab from "./tabs/AnnuliTab";
 import SkillsTab from "./tabs/SkillsTab";
 import DepsTab from "./tabs/DepsTab";
 import LogsTab from "./tabs/LogsTab";
+import RecordingsTab from "./tabs/RecordingsTab";
 import TranscribeTab from "./tabs/TranscribeTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
-  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe,
+  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { setLocale, nextLocale } from "./i18n";
@@ -32,7 +33,7 @@ import { Quickstart, shouldShowQuickstart } from "./Quickstart";
 
 type NavPayload = { tab: TabId; subTab?: string };
 
-type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs" | "transcribe";
+type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs" | "transcribe" | "recordings";
 
 type TabDef = {
   id: TabId;
@@ -51,6 +52,7 @@ const TABS: TabDef[] = [
   { id: "transcribe", Icon: IconTranscribe, key: "transcribe" },
   { id: "deps",     Icon: IconDeps,     key: "deps" },
   { id: "logs",     Icon: IconHelp,     key: "logs" },
+  { id: "recordings", Icon: IconMic,    key: "recordings" },
 ];
 
 function MainShell() {
@@ -181,6 +183,7 @@ function MainShell() {
         {tab === "transcribe" && <TranscribeTab />}
         {tab === "deps" && <DepsTab />}
         {tab === "logs" && <LogsTab />}
+        {tab === "recordings" && <RecordingsTab />}
       </main>
       {quickstartOpen && <Quickstart onDone={() => setQuickstartOpen(false)} />}
     </div>

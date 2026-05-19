@@ -354,3 +354,190 @@ pub fn cleanup_old_if_needed() {
         );
     }
 }
+
+// ── IPC commands(給 RecordingsTab UI)─────────────────────────────────────
+
+/// 列表 summary — 一筆 per session,給 UI 列表顯示。詳細內容 lazy load 另一條 IPC。
+#[derive(Debug, Serialize)]
+pub struct SessionSummary {
+    pub timestamp: String,           // dir name(已 url-safe)
+    pub iso_time: String,            // ISO 8601(從 meta.json 讀,fallback dir name)
+    pub mode: Option<String>,
+    pub profile: Option<String>,
+    pub provider: Option<String>,
+    pub transcript_preview: Option<String>, // 前 60 字
+    pub response_preview: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub size_bytes: u64,             // 整個 dir 大小
+}
+
+/// List 全部 session(newest first)。給 RecordingsTab mount + refresh 用。
+#[tauri::command]
+pub fn recordings_list() -> Vec<SessionSummary> {
+    let root = recordings_root();
+    let Ok(entries) = fs::read_dir(&root) else {
+        return vec![];
+    };
+    let mut out: Vec<SessionSummary> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let path = e.path();
+            let timestamp = path.file_name()?.to_string_lossy().to_string();
+            let summary = build_session_summary(&path, &timestamp);
+            Some(summary)
+        })
+        .collect();
+    // Newest first(dir name 是 ISO 字典序,直接 reverse 排)
+    out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    out
+}
+
+fn build_session_summary(dir: &Path, timestamp: &str) -> SessionSummary {
+    let meta_text = fs::read_to_string(dir.join("meta.json")).unwrap_or_default();
+    let meta: serde_json::Value = serde_json::from_str(&meta_text).unwrap_or(serde_json::Value::Null);
+    let transcript = fs::read_to_string(dir.join("transcript.txt")).ok();
+    let response = fs::read_to_string(dir.join("response.txt")).ok();
+    let size_bytes = dir_size(dir);
+    SessionSummary {
+        timestamp: timestamp.to_string(),
+        iso_time: meta
+            .pointer("/timestamp")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| timestamp.to_string()),
+        mode: meta.pointer("/mode").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        profile: meta.pointer("/profile").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        provider: meta.pointer("/provider").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        transcript_preview: transcript.as_ref().map(|s| preview(s, 60)),
+        response_preview: response.as_ref().map(|s| preview(s, 60)),
+        duration_ms: meta.pointer("/timings_ms/total_ms").and_then(|v| v.as_u64()),
+        size_bytes,
+    }
+}
+
+fn dir_size(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.metadata().ok())
+                .map(|m| m.len())
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+fn preview(s: &str, max_chars: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}...", s.chars().take(max_chars).collect::<String>())
+    }
+}
+
+/// 完整 session 細節 — meta / context / history / transcript / response。
+#[derive(Debug, Serialize, Default)]
+pub struct SessionDetail {
+    pub timestamp: String,
+    pub meta: Option<serde_json::Value>,
+    pub context: Option<serde_json::Value>,
+    pub history: Option<serde_json::Value>,
+    pub transcript: Option<String>,
+    pub response: Option<String>,
+    pub system_prompt: Option<String>,
+    pub has_audio_raw: bool,
+    pub has_audio_trimmed: bool,
+}
+
+#[tauri::command]
+pub fn recordings_session_detail(timestamp: String) -> Result<SessionDetail, String> {
+    let dir = recordings_root().join(sanitize_timestamp(&timestamp)?);
+    if !dir.is_dir() {
+        return Err(format!("session not found: {timestamp}"));
+    }
+    let read_json = |name: &str| -> Option<serde_json::Value> {
+        fs::read_to_string(dir.join(name))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+    };
+    let read_text = |name: &str| -> Option<String> { fs::read_to_string(dir.join(name)).ok() };
+    Ok(SessionDetail {
+        timestamp,
+        meta: read_json("meta.json"),
+        context: read_json("context.json"),
+        history: read_json("history.json"),
+        transcript: read_text("transcript.txt"),
+        response: read_text("response.txt"),
+        system_prompt: read_text("system-prompt.txt"),
+        has_audio_raw: dir.join("audio-raw.wav").exists(),
+        has_audio_trimmed: dir.join("audio-trimmed.wav").exists(),
+    })
+}
+
+/// 回 audio bytes — UI 用 blob URL 播放。
+/// `which`: "raw" or "trimmed"
+#[tauri::command]
+pub fn recordings_audio_bytes(timestamp: String, which: String) -> Result<Vec<u8>, String> {
+    let file = match which.as_str() {
+        "raw" => "audio-raw.wav",
+        "trimmed" => "audio-trimmed.wav",
+        _ => return Err(format!("unknown audio variant: {which}(只接 raw/trimmed)")),
+    };
+    let dir = recordings_root().join(sanitize_timestamp(&timestamp)?);
+    let path = dir.join(file);
+    fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))
+}
+
+#[tauri::command]
+pub fn recordings_delete_session(timestamp: String) -> Result<(), String> {
+    let dir = recordings_root().join(sanitize_timestamp(&timestamp)?);
+    if !dir.is_dir() {
+        return Err(format!("not a session dir: {timestamp}"));
+    }
+    fs::remove_dir_all(&dir).map_err(|e| format!("rm -rf {}: {e}", dir.display()))
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecordingsStats {
+    pub session_count: usize,
+    pub total_bytes: u64,
+    pub retention_days: u32,
+    pub enabled: bool,
+}
+
+#[tauri::command]
+pub fn recordings_stats() -> RecordingsStats {
+    let cfg = read_config();
+    let root = recordings_root();
+    let (session_count, total_bytes) = fs::read_dir(&root)
+        .ok()
+        .map(|entries| {
+            let mut count = 0usize;
+            let mut bytes = 0u64;
+            for e in entries.flatten() {
+                if e.path().is_dir() {
+                    count += 1;
+                    bytes += dir_size(&e.path());
+                }
+            }
+            (count, bytes)
+        })
+        .unwrap_or((0, 0));
+    RecordingsStats {
+        session_count,
+        total_bytes,
+        retention_days: cfg.retention_days,
+        enabled: cfg.enabled,
+    }
+}
+
+/// 防 path traversal — timestamp 只能是 dir name format,不能含 `/` / `..` / abs path。
+fn sanitize_timestamp(ts: &str) -> Result<String, String> {
+    if ts.is_empty() || ts.contains('/') || ts.contains('\\') || ts.starts_with('.') || ts.contains("..") {
+        return Err(format!("invalid timestamp: {ts}"));
+    }
+    Ok(ts.to_string())
+}

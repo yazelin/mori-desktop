@@ -29,7 +29,9 @@
     "deps": "Deps",
     "deps_sub": "Optional tools",
     "logs": "Logs",
-    "logs_sub": "Events / debug"
+    "logs_sub": "Events / debug",
+    "recordings": "Recordings",
+    "recordings_sub": "Voice session replay"
   },
   "logs_tab": {
     "title": "Logs",

@@ -29,7 +29,9 @@
     "deps": "Deps",
     "deps_sub": "選用工具",
     "logs": "Logs",
-    "logs_sub": "事件 / 除錯"
+    "logs_sub": "事件 / 除錯",
+    "recordings": "Recordings",
+    "recordings_sub": "語音 session 回顧"
   },
   "logs_tab": {
     "title": "Logs",
