@@ -362,17 +362,34 @@ pub fn registry() -> Vec<DepSpec> {
                 path_template: "$HOME/.mori/wake-venv/bin/python",
             },
             // Linux/macOS:有 uv 用 uv,沒 uv fallback system python3.11
+            // ⚠ uv venv 建的 venv **沒 pip 模組** — 必須用 `uv pip install` 或先
+            // `python -m ensurepip` 補 pip 才能用。
             install: InstallSpec::Shell {
                 script: "set -e; \
                          VENV=\"$HOME/.mori/wake-venv\"; \
+                         UV=\"$HOME/.local/bin/uv\"; \
                          if [ ! -d \"$VENV\" ]; then \
-                            if [ -x \"$HOME/.local/bin/uv\" ]; then \
-                                \"$HOME/.local/bin/uv\" venv \"$VENV\" --python 3.11; \
+                            if [ -x \"$UV\" ]; then \
+                                echo '用 uv 建 venv...'; \
+                                \"$UV\" venv \"$VENV\" --python 3.11; \
                             else \
+                                echo '用 python -m venv...'; \
                                 python3.11 -m venv \"$VENV\" || python3 -m venv \"$VENV\"; \
                             fi; \
                          fi; \
-                         \"$VENV/bin/pip\" install --quiet openwakeword sounddevice numpy onnxruntime scikit-learn",
+                         PACKAGES='openwakeword sounddevice numpy onnxruntime scikit-learn'; \
+                         if [ -x \"$UV\" ]; then \
+                            echo '用 uv pip install...'; \
+                            \"$UV\" pip install --python \"$VENV/bin/python\" $PACKAGES; \
+                         elif [ -x \"$VENV/bin/pip\" ]; then \
+                            echo '用 venv pip...'; \
+                            \"$VENV/bin/pip\" install $PACKAGES; \
+                         else \
+                            echo '用 ensurepip bootstrap...'; \
+                            \"$VENV/bin/python\" -m ensurepip --upgrade; \
+                            \"$VENV/bin/python\" -m pip install $PACKAGES; \
+                         fi; \
+                         echo '✓ wake-venv + openwakeword 裝好了'",
             },
             install_overrides: &[
                 ("windows", InstallSpec::Manual {
@@ -380,6 +397,64 @@ pub fn registry() -> Vec<DepSpec> {
                         "# Windows PowerShell(需先裝 Python 3.11):",
                         "python -m venv %USERPROFILE%\\.mori\\wake-venv",
                         "%USERPROFILE%\\.mori\\wake-venv\\Scripts\\pip install openwakeword sounddevice numpy onnxruntime scikit-learn",
+                    ],
+                }),
+            ],
+        },
+        // Phase 3D:edge-tts(Mori 講話)— 跟 wake-listener 共用 wake-venv,
+        // 安裝小(~10MB),detect 看 edge-tts import 得起來。
+        //
+        // ⚠ wake-venv 多半是 uv 建的(`uv venv ...`),內部沒 pip 模組 — uv 走自己的
+        // `uv pip install --python <venv-py>`。所以 install script 優先用 uv,失敗才
+        // fallback 到 `python -m ensurepip` 補 pip 後再裝。
+        DepSpec {
+            id: "tts-runtime",
+            name: "Mori 講話 runtime(edge-tts)",
+            description: "Phase 3D TTS speak-back 用的 Python edge-tts。借 Microsoft Edge \
+                          瀏覽器 TTS endpoint,免費 + native zh-TW 女聲。沒裝 → Config tab \
+                          開 tts.enabled 也不會講話(只 log warn)。跟 wake-listener 共用 \
+                          wake-venv,沒裝 wake-listener-runtime 的話先裝那個。",
+            unlocks: "tts.enabled=true 時 Mori 用聲音回答你",
+            size_hint: Some("~10MB"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
+            check: CheckSpec::CommandStdoutContains {
+                cmd: "sh",
+                args: &[
+                    "-c",
+                    "$HOME/.mori/wake-venv/bin/python -c 'import edge_tts; print(\"ok\")' 2>&1",
+                ],
+                needle: "ok",
+            },
+            install: InstallSpec::Shell {
+                script: "set -e; \
+                         VENV=\"$HOME/.mori/wake-venv\"; \
+                         UV=\"$HOME/.local/bin/uv\"; \
+                         if [ ! -x \"$VENV/bin/python\" ]; then \
+                            echo '⚠ wake-venv 不存在 — 先裝 wake-listener-runtime'; exit 2; \
+                         fi; \
+                         if [ -x \"$UV\" ]; then \
+                            echo '用 uv pip install...'; \
+                            \"$UV\" pip install --python \"$VENV/bin/python\" edge-tts; \
+                         elif [ -x \"$VENV/bin/pip\" ]; then \
+                            echo '用 venv pip...'; \
+                            \"$VENV/bin/pip\" install edge-tts; \
+                         else \
+                            echo '用 ensurepip bootstrap...'; \
+                            \"$VENV/bin/python\" -m ensurepip --upgrade; \
+                            \"$VENV/bin/python\" -m pip install edge-tts; \
+                         fi; \
+                         echo '✓ edge-tts 裝好了'",
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows PowerShell(需先有 wake-venv):",
+                        "# 優先用 uv:",
+                        "uv pip install --python %USERPROFILE%\\.mori\\wake-venv\\Scripts\\python.exe edge-tts",
+                        "# 或用 venv 內 pip(如果 venv 是 python -m venv 建的):",
+                        "%USERPROFILE%\\.mori\\wake-venv\\Scripts\\pip install edge-tts",
                     ],
                 }),
             ],
