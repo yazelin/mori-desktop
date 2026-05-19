@@ -57,6 +57,10 @@ Windows v0.2 已上線,設計上 mori-core 跟其他平台完全共用,加 macOS
 
 ### 林間心跳 — 接 Annuli scheduler
 
+> **Ship day checklist** 在 [`design/annuli-wave3-integration.md`](design/annuli-wave3-integration.md) —
+> mori-desktop 端 client / supervisor / Config UI 全建好,卡在 annuli wave 2 重構;
+> 那邊 ship 後對著 checklist 跑一輪即可連線。
+
 Annuli 那邊**已經有完整的背景循環系統**(APScheduler 跑 4 條任務:
 explore / learn / study / post)。mori-desktop 不重做,改成**前端 + Annuli 控制台**:
 

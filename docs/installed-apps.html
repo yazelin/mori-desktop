@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Installed Apps Catalog</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 靜靜記得你經過的痕跡">
+<meta property="og:description" content="Mori 開機時掃一輪本機 .desktop / Start Menu / Applications,寫進 installed-apps catalog。open_app skill 拿到「打開 Slack」就照表查到 exec,不亂猜 binary 名。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — Installed Apps">
+<meta name="twitter:description" content="開機掃 .desktop / Start Menu 寫成 catalog,open_app skill 不亂猜">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="dwelling-rite.html">宿靈儀式</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html">~/.mori/</a>
+    <a href="profile-examples.html">Profile 範本</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Installed Apps Catalog</h1>
+<div class="page-subtitle">PHASE C · OPEN_APP 不亂猜</div>
+
+<p>Mori 想幫你「打開 Slack」前,要先知道 Slack 在哪。早期版本 <code>open_app</code> 是 LLM 猜 binary 名(<code>slack</code> / <code>Slack</code> / <code>com.tinyspeck.slackmacgap</code>?),經常猜錯。Phase C 改成:Mori 開機掃本機已裝的 app,寫進 <strong>installed-apps catalog</strong>,LLM 拿到「Slack」就照表查 exec。</p>
+
+<h2 id="layout">檔案位置</h2>
+
+<pre><code>~/.mori/installed-apps.linux.json    # Linux
+~/.mori/installed-apps.windows.json  # Windows
+~/.mori/installed-apps.macos.json    # macOS(未支援)
+</code></pre>
+
+<p>檔名帶 OS 後綴是因為 Mori 可能跨多機(同 vault sync),catalog 跟本機綁。</p>
+
+<h2 id="scan-sources">掃描來源</h2>
+
+<table style="border-collapse: collapse; margin: 12px 0;">
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <th style="text-align: left; padding: 6px 12px;">OS</th>
+    <th style="text-align: left; padding: 6px 12px;">掃哪些路徑</th>
+  </tr>
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <td style="padding: 6px 12px;">Linux</td>
+    <td style="padding: 6px 12px;">
+      <code>/usr/share/applications/</code><br>
+      <code>/usr/local/share/applications/</code><br>
+      <code>~/.local/share/applications/</code><br>
+      <code>/var/lib/flatpak/exports/share/applications/</code>(Flatpak)<br>
+      <code>~/.local/share/flatpak/exports/share/applications/</code>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding: 6px 12px;">Windows</td>
+    <td style="padding: 6px 12px;">
+      <code>%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs</code><br>
+      <code>%APPDATA%\Microsoft\Windows\Start Menu\Programs</code><br>
+      遞迴掃 <code>.lnk</code> shortcut 抓 target
+    </td>
+  </tr>
+</table>
+
+<h2 id="schema">Catalog 結構</h2>
+
+<pre><code>{
+  "os": "linux",
+  "scanned_at": "2026-05-19T08:00:00Z",
+  "apps": [
+    {
+      "name": "Slack",
+      "exec": "/usr/bin/slack",
+      "aliases": ["slack"],
+      "categories": ["Network", "InstantMessaging"]
+    },
+    {
+      "name": "Firefox Web Browser",
+      "exec": "/usr/bin/firefox",
+      "aliases": ["firefox", "Firefox"],
+      "categories": ["Network", "WebBrowser"]
+    }
+  ]
+}
+</code></pre>
+
+<p><code>aliases</code> 含 .desktop 的 <code>X-AppName</code> / GenericName / 中文名等多種寫法,LLM 拿到使用者口語(「火狐」/「FF」)有更大機會 match。</p>
+
+<h2 id="rescan">重新掃描</h2>
+
+<p>三種觸發:</p>
+
+<ul>
+  <li><strong>開機自動</strong> — mori-tauri 啟動時跑一次,失敗只 log warn 不擋啟動</li>
+  <li><strong>裝完新 app 後</strong> — catalog 沒更新前,Mori 不會看到新 app。手動 rescan:刪掉 catalog file Mori 下次開機重掃</li>
+  <li><strong>每 24h 自動</strong> — 若 catalog 太舊(<code>scanned_at</code> 超過 24h),下次開機重掃</li>
+</ul>
+
+<h2 id="open-app-skill">open_app skill 怎麼用 catalog</h2>
+
+<p>LLM 看到使用者說「打開 Slack」,呼叫 <code>open_app(name: "Slack")</code>。skill 內部:</p>
+
+<ol>
+  <li>讀 catalog 找名稱 / alias match(含 fuzzy)</li>
+  <li>找到 → 用平台 API 啟動(Linux <code>xdg-open</code> / Windows <code>ShellExecuteExW</code>)</li>
+  <li>找不到 → 回 LLM「Mori 沒看到這個 app,要不要先裝?」,不亂猜 binary</li>
+</ol>
+
+<h2 id="privacy">隱私</h2>
+
+<p>Catalog 是純本機檔,Mori 不會上傳。LLM 看到的是 catalog snippet 不是全部資料 — system prompt 只塞「app 名 + 是否安裝」,不塞 exec 路徑(那會洩漏系統結構)。</p>
+
+<p>不想 Mori 知道某個 app → 手動編輯 catalog 刪掉那行(下次開機可能重新加回來,要永久排除可加到 <code>~/.mori/installed-apps.ignore</code>,一行一個正則,catalog 規劃中)。</p>
+
+</body>
+</html>

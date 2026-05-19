@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Logs</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 靜靜記得你經過的痕跡">
+<meta property="og:description" content="Mori 把每一輪 voice pipeline / agent call 拆 7 層各自寫一條 event log,~/.mori/logs/ 是 append-only JSONL。Logs tab 可篩 kind / outcome / provider。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — Logs">
+<meta name="twitter:description" content="觀測 7 層 voice pipeline + filter / outcome / event 結構">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="dwelling-rite.html">宿靈儀式</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html">~/.mori/</a>
+    <a href="profile-examples.html">Profile 範本</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Logs</h1>
+<div class="page-subtitle">EVENT LOG · 7-LAYER OBSERVABILITY</div>
+
+<p>Mori 把每一輪 voice pipeline / agent call 拆成 <strong>7 個 layer</strong>,每層做完寫一條 JSONL event 到 <code>~/.mori/logs/mori-YYYY-MM-DD.jsonl</code>。Append-only、一天一檔、明文 JSON,不需要 DB。</p>
+
+<h2 id="layers">7 個 layer</h2>
+
+<p>從 wake event 觸發到 Mori 回應完成,事件鏈大致是:</p>
+
+<ol>
+  <li><code>wake_word_event</code> — Hey Mori 偵測到,score / threshold</li>
+  <li><code>speaker_id_pass</code> / <code>speaker_id_reject</code> — 聲紋比對(若 <code>speaker_id.enabled</code>)</li>
+  <li><code>transcribe</code> — Whisper STT 出 transcript</li>
+  <li><code>evaluator_decision</code> — 過 fast LLM 判 intent(若 <code>evaluator.enabled</code>)</li>
+  <li><code>llm_call</code> — agent 跑時主 LLM call,可能多輪(tool calls)</li>
+  <li><code>skill_dispatch</code> — agent 呼叫某個 skill(translate / polish / shell skill / 動作 skill 等)</li>
+  <li><code>agent_completed</code> — 該輪 agent loop 全部 done,寫 response_chars + skill_calls list</li>
+</ol>
+
+<p>另外還有獨立事件:<code>spawn_error</code>(CLI provider 啟動失敗)、<code>error</code>(雜項)。</p>
+
+<h2 id="logs-tab">Logs tab</h2>
+
+<p>主視窗左側 sidebar 「Logs」 tab:</p>
+
+<ul>
+  <li><strong>日期</strong> — 預設今天,可選任一有 log 的日期</li>
+  <li><strong>Kind</strong> — 篩特定 layer 的 event,例 <code>evaluator_decision</code> 看所有意圖判斷</li>
+  <li><strong>Provider</strong> — 篩特定 LLM provider(<code>groq</code> / <code>gemini</code> / <code>claude-bash</code> 等)</li>
+  <li><strong>Outcome</strong> — 只有當 Kind = <code>evaluator_decision</code> 時顯示;可篩 <code>proceed</code>(走 agent)/ <code>skip</code>(背景噪音)/ <code>ask_back</code>(Mori 反問)</li>
+</ul>
+
+<p>每筆 row 點開 → 看完整 JSON。Evaluator row 額外顯示三色 outcome chip(綠 = proceed,灰 = skip,黃 = ask_back),不展開也看得出該輪走哪條路。</p>
+
+<h2 id="schema-evaluator">Schema 範例 — evaluator_decision</h2>
+
+<pre><code>{
+  "ts": "2026-05-19T15:30:42.123Z",
+  "kind": "evaluator_decision",
+  "intent": "Unclear",
+  "reason": "半截話",
+  "confidence": 0.68,
+  "confidence_threshold": 0.85,
+  "outcome": "ask_back",
+  "skip": true,
+  "clarifying_question": "然後呢?"
+}</code></pre>
+
+<p>Intent 三種:<code>AddressMori</code> / <code>BackgroundNoise</code> / <code>Unclear</code>。Outcome 三種:<code>proceed</code> / <code>skip</code> / <code>ask_back</code>。<code>clarifying_question</code> 只在 <code>outcome=ask_back</code> 時出現。</p>
+
+<h2 id="schema-llm">Schema 範例 — llm_call</h2>
+
+<pre><code>{
+  "ts": "2026-05-19T15:30:43.456Z",
+  "kind": "llm_call",
+  "provider": "gemini",
+  "model": "gemini-2.5-flash",
+  "latency_ms": 1340,
+  "ok": true,
+  "output_chars": 280,
+  "tool_calls": ["translate"]
+}</code></pre>
+
+<h2 id="vs-recordings">Logs vs Recordings</h2>
+
+<p>兩個系統互補:</p>
+
+<table style="border-collapse: collapse; margin: 12px 0;">
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <th style="text-align: left; padding: 6px 12px;">系統</th>
+    <th style="text-align: left; padding: 6px 12px;">用途</th>
+    <th style="text-align: left; padding: 6px 12px;">大小</th>
+  </tr>
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <td style="padding: 6px 12px;"><code>~/.mori/logs/</code></td>
+    <td style="padding: 6px 12px;">事件摘要 — filter / 統計 / 找 pattern</td>
+    <td style="padding: 6px 12px;">輕(~KB / 天)</td>
+  </tr>
+  <tr>
+    <td style="padding: 6px 12px;"><code>~/.mori/recordings/</code></td>
+    <td style="padding: 6px 12px;">每輪完整 I/O(audio / transcript / prompt / context)— 重播、訓資料、debug</td>
+    <td style="padding: 6px 12px;">重(~MB / session)</td>
+  </tr>
+</table>
+
+<p>Logs 永遠開啟、留 30+ 天無壓力。Recordings 預設保留 14 天可調(Recordings tab → retention)。</p>
+
+<h2 id="privacy">隱私</h2>
+
+<p>兩個目錄都 100% 本機,Mori 不會上傳到任何雲端。要刪自己刪:</p>
+
+<pre><code>rm -rf ~/.mori/logs/
+rm -rf ~/.mori/recordings/
+</code></pre>
+
+<p>Logs tab 沒提供 UI 刪除單筆 — 因為 logs 是 append-only diagnostic data,刪單筆失去意義。Recordings tab 有 per-session 刪 + retention 自動清。</p>
+
+</body>
+</html>
