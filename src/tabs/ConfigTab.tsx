@@ -1688,6 +1688,7 @@ function ConfigTab({
                 }
               />
             </FormRow>
+            <WakeWordModelPicker />
           </Section>
 
           {/* Wake-ack 應答音(獨立 Section,Phase 3A.1.2)*/}
@@ -2275,6 +2276,223 @@ function ConfigTab({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Wake-word model picker(Phase 3A.2)─────────────────────────────
+//
+// 列 ~/.mori/wakeword/*.onnx 給 user 選,套用後若在 Listening mode 自動 restart
+// listener。訓練本身 30-50 分鐘 + 需 ~10GB datasets,不適合 UI inline —
+// 給「複製 CLI 指令到 terminal 跑」按鈕 + 訓完按 refresh 重抓 model list。
+
+type WakeModelInfo = {
+  path: string;
+  slug: string;
+  size_bytes: number;
+  modified_secs: number;
+  is_active: boolean;
+};
+
+function formatModelSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function WakeWordModelPicker() {
+  const [models, setModels] = useState<WakeModelInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [trainPhrase, setTrainPhrase] = useState("");
+  const [trainCmd, setTrainCmd] = useState("");
+  const [showTrainHelper, setShowTrainHelper] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const list = await invoke<WakeModelInfo[]>("wake_word_list_models");
+      setModels(list);
+    } catch (e) {
+      console.error("wake_word_list_models", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const flash = (m: string) => {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 3000);
+  };
+
+  const applyModel = async (path: string) => {
+    try {
+      await invoke("wake_word_set_model", { path });
+      const restarted = await invoke<boolean>("wake_word_restart_listener");
+      flash(
+        restarted
+          ? "✓ 已套用 + 重啟 listener(Listening mode)"
+          : "✓ 已套用(下次進 Listening mode 生效)",
+      );
+      await refresh();
+    } catch (e) {
+      flash(`套用失敗:${String(e)}`);
+    }
+  };
+
+  const genTrainCmd = async () => {
+    setTrainCmd("");
+    try {
+      const cmd = await invoke<string>("wake_word_train_command", { phrase: trainPhrase });
+      setTrainCmd(cmd);
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
+  const copyCmd = async () => {
+    try {
+      await navigator.clipboard.writeText(trainCmd);
+      flash("✓ 已複製到剪貼簿,貼到 terminal 跑");
+    } catch (e) {
+      flash(`copy failed: ${String(e)}`);
+    }
+  };
+
+  return (
+    <FormRow
+      label="custom model"
+      hint="切換 wake-word 模型(`~/.mori/wakeword/*.onnx`)。bundled hey-mori.onnx 是 TTS-only 通用版,訓練自己的 phrase / 對自己聲線 fine-tune 命中率高很多。訓練流程見 examples/scripts/README.wake-train.md(30-50 分鐘 + ~10GB datasets,Linux only)。"
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {loading ? (
+            <span style={{ fontSize: 12, color: "var(--c-text-muted)" }}>讀取中...</span>
+          ) : models.length === 0 ? (
+            <span style={{ fontSize: 12, color: "var(--c-text-muted)" }}>
+              ~/.mori/wakeword/ 沒任何 .onnx — 開機應該會放 bundled 進去,確認跑過 Mori 一次
+            </span>
+          ) : (
+            models.map((m) => (
+              <button
+                key={m.path}
+                onClick={() => !m.is_active && applyModel(m.path)}
+                disabled={m.is_active}
+                title={`${m.path}\n${formatModelSize(m.size_bytes)} · modified ${new Date(m.modified_secs * 1000).toLocaleString()}`}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  cursor: m.is_active ? "default" : "pointer",
+                  background: m.is_active ? "var(--c-active-bg)" : "var(--c-input-bg)",
+                  border: m.is_active
+                    ? "1px solid var(--c-active-border)"
+                    : "1px solid var(--c-border)",
+                  color: m.is_active ? "var(--c-icon-active)" : "var(--c-text)",
+                }}
+              >
+                {m.is_active && "● "}
+                {m.slug}
+                <span style={{ marginLeft: 6, fontSize: 10, color: "var(--c-text-muted)" }}>
+                  {formatModelSize(m.size_bytes)}
+                </span>
+              </button>
+            ))
+          )}
+          <button
+            className="mori-btn small ghost"
+            onClick={refresh}
+            style={{ fontSize: 11, marginLeft: 6 }}
+          >
+            ↻
+          </button>
+          <button
+            className="mori-btn small ghost"
+            onClick={() => setShowTrainHelper((v) => !v)}
+            style={{ fontSize: 11 }}
+          >
+            {showTrainHelper ? "收起訓練" : "訓練新 phrase"}
+          </button>
+        </div>
+        {msg && (
+          <span style={{ fontSize: 11, color: "var(--c-text-muted)" }}>{msg}</span>
+        )}
+        {showTrainHelper && (
+          <div
+            style={{
+              marginTop: 4,
+              padding: 10,
+              background: "var(--c-input-bg)",
+              border: "1px solid var(--c-border)",
+              borderRadius: 6,
+              fontSize: 12,
+              color: "var(--c-text)",
+            }}
+          >
+            <p style={{ margin: "0 0 6px", color: "var(--c-text-muted)" }}>
+              訓練在 terminal 跑(30-50 分鐘,Linux only)。
+              先依照 <code>examples/scripts/README.wake-train.md</code> 做一次性 setup,
+              然後輸入 phrase 產生指令貼到 terminal 跑。完成後按 ↻ refresh 抓新 model。
+            </p>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                type="text"
+                placeholder='例:"Hey Mori" / "嘿 小森"'
+                value={trainPhrase}
+                onChange={(e) => setTrainPhrase(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "4px 8px",
+                  fontSize: 12,
+                  background: "var(--c-surface-bg)",
+                  color: "var(--c-text)",
+                  border: "1px solid var(--c-border)",
+                  borderRadius: 4,
+                }}
+              />
+              <button
+                className="mori-btn small ghost"
+                onClick={genTrainCmd}
+                disabled={!trainPhrase.trim()}
+              >
+                產生指令
+              </button>
+            </div>
+            {trainCmd && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: 8,
+                  background: "var(--c-surface-bg)",
+                  border: "1px solid var(--c-border)",
+                  borderRadius: 4,
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 11,
+                  color: "var(--c-mono-color)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <code style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  {trainCmd}
+                </code>
+                <button
+                  className="mori-btn small ghost"
+                  onClick={copyCmd}
+                  style={{ fontSize: 11, flexShrink: 0 }}
+                >
+                  複製
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </FormRow>
   );
 }
 

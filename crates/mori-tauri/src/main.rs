@@ -271,6 +271,27 @@ fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new:
     }
 }
 
+/// IPC — 在 Listening mode 時 drop + 重 spawn wake-word listener,
+/// 拿到新 config(例 user 剛 switch model 後)。其他 mode → noop。
+/// 回 `true` 代表真的 restart;`false` 代表 not in Listening mode。
+#[tauri::command]
+fn wake_word_restart_listener(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> bool {
+    let mode = *state.mode.lock();
+    if !matches!(mode, Mode::Listening) {
+        tracing::info!(?mode, "wake_word_restart_listener: not in Listening, skip");
+        return false;
+    }
+    // 假裝離開後重進 Listening 把 listener 重啟 — 利用既有
+    // update_wake_word_listener 的 entering/leaving 分支邏輯。
+    update_wake_word_listener(&state, &app, Mode::Listening, Mode::Agent);
+    update_wake_word_listener(&state, &app, Mode::Agent, Mode::Listening);
+    tracing::info!("wake_word_restart_listener: drop + respawn done");
+    true
+}
+
 /// `ModeController` 實作給 mori-core 的 `SetModeSkill` 用 — 這樣 skill
 /// 在 mori-core 不依賴 Tauri,也能改 Mode。
 struct StateModeController {
@@ -4522,6 +4543,10 @@ fn main() {
             recordings::recordings_stats,
             recordings::recordings_cleanup_now,
             recordings::recordings_set_retention_days,
+            wake_word::wake_word_list_models,
+            wake_word::wake_word_set_model,
+            wake_word::wake_word_train_command,
+            wake_word_restart_listener,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
