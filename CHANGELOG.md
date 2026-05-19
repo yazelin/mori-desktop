@@ -6,6 +6,54 @@
 
 ---
 
+## v0.6.5 — Wake-word custom phrase UI + 文件補完(2026-05-20)
+
+接著 v0.6.4 的 voice UX polish,這版做 Phase 3A.2 — 讓 wake-word phrase 切換變成 UI 一鍵動作,不必再手動編輯 config.json + 切 mode 來回。同步補 v0.5.2 release 留的 3 頁 onboarding 文件 + annuli wave 3 整合 ship-day checklist。
+
+### Wake-word custom phrase UI(PR #58)
+
+過去要換 wake-word phrase / model 必須:
+1. 自己跑 `examples/scripts/mori-wake-train.py` 產 .onnx(30-50 分鐘 + ~10GB datasets,沒 UI 化空間)
+2. 手動編輯 `~/.mori/config.json` 改 `listening_mode.model_path`(易打錯)
+3. 切走 Listening mode 再切回讓 listener 重啟(常忘)
+
+這版 UI 解決步驟 2+3,步驟 1 留訓練指令 helper。
+
+**4 個新 IPC**:
+- `wake_word_list_models` — 掃 `~/.mori/wakeword/*.onnx` 回 list,標 active
+- `wake_word_set_model(path)` — 寫 config.json
+- `wake_word_restart_listener` — 若在 Listening mode → drop + 重 spawn(其他 mode noop)
+- `wake_word_train_command(phrase)` — 回 shell-escape 過的 CLI 指令字串
+
+**UI**:ConfigTab > 「Hey Mori 偵測 + 錄音」section 多 `custom model` row,model chip 列(active 標 ●,點未 active → 套用 + restart),↻ refresh / 「訓練新 phrase」展開 input + 產生指令 + 複製按鈕。全用 `--c-*` token,light/dark 一致。
+
+Linux only(piper-phonemize Windows wheel 不全),Windows 可顯示 UI 但「訓練新 phrase」實際跑會 fail。
+
+### 文件補完
+
+**3 頁 onboarding 文件**(PR #57)— 補 v0.5.2 release notes 提到但沒寫的:
+
+- `docs/logs.html` — 7 層 event log 結構 + Logs tab kind/outcome/provider filter + outcome chip 設計
+- `docs/installed-apps.html` — Phase C catalog,`open_app` skill 不亂猜 binary
+- `docs/prompt-engineering.html` — 怎麼寫 AGENT.md / USER.md · system prompt 三層結構 · anti-injection · profile vs memory
+
+**Annuli Wave 3 整合 ship-day checklist**(PR #59)— `docs/design/annuli-wave3-integration.md`:
+
+- 現況 status table(7 元件全 done,annuli wave 2 in progress)
+- 9 個 endpoint × client method 對應表
+- 5 步驗證 checklist
+- 4 個已知問題(CORS / SOUL.md token / vault bootstrap / 異步失敗 fallback)
+- 對 spirit vault 的 3 條承諾
+- 不在 Wave 3 範圍的 Wave 5+ 項目
+
+mori-desktop 端的 client / supervisor / Config UI 在 v0.5+ 早就 ship 完,卡的是 annuli wave 2 重構。那邊 ship 後對著 checklist 跑一輪就連線,不必再研究一遍。
+
+### Migration
+
+無 breaking change。
+
+---
+
 ## v0.6.4 — Voice UX polish 收尾(2026-05-20)
 
 v0.6.3 ship ask-back 後留了 4 個觀測 / 互動的 visual gap,這版一次收齊。各自獨立 PR、互不相干、合起來是「Voice UX 第一個迭代完整版」。
