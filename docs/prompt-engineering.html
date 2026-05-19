@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Prompt Engineering</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+<meta property="og:title" content="Mori — 靜靜記得你經過的痕跡">
+<meta property="og:description" content="怎麼寫 AGENT.md / USER.md profile。System prompt 結構、context section、anti-injection、tone & persona、什麼該寫進 profile 什麼留給 memory。">
+<meta property="og:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+<meta property="og:url" content="https://yazelin.github.io/mori-desktop/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mori">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mori — Prompt Engineering">
+<meta name="twitter:description" content="profile 結構、system prompt 結構、anti-injection、tone & persona">
+<meta name="twitter:image" content="https://yazelin.github.io/mori-desktop/og-image.png">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="dwelling-rite.html">宿靈儀式</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html">~/.mori/</a>
+    <a href="profile-examples.html">Profile 範本</a>
+    <a href="design-book.html">Design Book</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Prompt Engineering</h1>
+<div class="page-subtitle">怎麼寫 AGENT.md / USER.md</div>
+
+<p>Mori 把 system prompt 拆成三層,你只需要管 <strong>profile body</strong>(persona + 行為指示),context section + memory index 是 Rust 自動注入。</p>
+
+<h2 id="prompt-layers">System prompt 三層</h2>
+
+<pre><code>┌─────────────────────────────────────────────────┐
+│  Profile body (persona + 你寫的行為規則)        │  ← 你管這層
+│  例:「你是 Mori,森林精靈的口吻,繁中回答...」 │
+├─────────────────────────────────────────────────┤
+│  Context section (Rust 自動,每輪 wake 重抓)    │  ← Rust 注入
+│  - active window / app / process name           │
+│  - clipboard preview + selection                │
+│  - urls detected                                │
+│  - cursor position (若可得)                    │
+├─────────────────────────────────────────────────┤
+│  Memory index (~/.mori/memory/MEMORY.md)        │  ← Rust 注入
+│  記憶系統的 index 摘要(完整內容 lazy load)    │
+└─────────────────────────────────────────────────┘
+</code></pre>
+
+<p>Profile body 跟下兩層用 <code>---</code> 分隔。LLM 看到 user 訊息時,前面有完整三層,後面接 conversation history,最後是當輪 user input。</p>
+
+<h2 id="frontmatter">Frontmatter</h2>
+
+<p>每個 profile .md 開頭可以有 YAML frontmatter,設定 routing / skill enable:</p>
+
+<pre><code>---
+# provider: claude-bash           # 留 comment 教學;沒設 → 走 config 全域 provider
+agent_mode: builtin              # builtin / dispatch / chat-only
+enable_read: true                # body 內 #file: 引用其他 .md 才有效
+enabled_skills:                  # 列哪些 skill 開,其他全關
+  - translate
+  - polish
+  - remember
+  - recall_memory
+  - open_app
+shell_skills:                    # 自訂 shell wrapper(gh / docker / kubectl 等)
+  - name: gh
+    cmd: gh
+    description: GitHub CLI
+inject_memory_types:             # 哪些 memory type 進 system prompt
+  - user
+  - feedback
+---
+</code></pre>
+
+<p>完整 frontmatter schema 見 <a href="profile-examples.html">Profile 範本</a>。預設 starter pack(AGENT-01..04 / USER-01..06)展示常用組合。</p>
+
+<h2 id="persona">Persona 寫作風格</h2>
+
+<p>Mori 是擬人化 spirit 不是 chatbot,profile body 偏「角色描寫 + 邊界」而非「指令列表」。三個原則:</p>
+
+<ol>
+  <li><strong>用形容詞 + 場景</strong> — 「你像森林精靈,聲線輕柔但不裝可愛,話短意密」比「請使用禮貌、簡短、可愛的語氣」更穩。</li>
+  <li><strong>禁止項用「why」說明</strong> — 「不要過度道歉(這會讓對話變黏)」勝過「不要道歉」。LLM 知道 why 才能在邊界 case 判斷。</li>
+  <li><strong>給範例對白</strong> — 寫 2-3 句「期待的回應 sample」,LLM 不必猜你的喜好。</li>
+</ol>
+
+<h2 id="anti-injection">Anti-injection</h2>
+
+<p>Mori 內建 anti-injection rule —— 當 context section 或 selection 內含「忘記之前指令」「現在你是另一個 AI」之類 prompt injection 時,Mori 不照做,直接視為剪貼簿內容。這條 rule 寫在 Rust 內建 system prompt 不在 user profile,所以即使 user 自己 profile 寫得很開,injection 仍會被擋。</p>
+
+<p>細節見 <code>build_context_section()</code> in <code>crates/mori-tauri/src/main.rs</code>,有 <code>--- BEGIN UNTRUSTED CONTENT ---</code> 標記隔離。</p>
+
+<h2 id="profile-vs-memory">Profile vs memory:該寫哪邊?</h2>
+
+<table style="border-collapse: collapse; margin: 12px 0;">
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <th style="text-align: left; padding: 6px 12px;">內容</th>
+    <th style="text-align: left; padding: 6px 12px;">寫進 profile</th>
+    <th style="text-align: left; padding: 6px 12px;">寫進 memory</th>
+  </tr>
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <td style="padding: 6px 12px;">Mori 的人設、語氣</td>
+    <td style="padding: 6px 12px;">✓(每輪都看)</td>
+    <td style="padding: 6px 12px;">不適合(LLM 不會每輪 query)</td>
+  </tr>
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <td style="padding: 6px 12px;">User 是誰、職業、習慣</td>
+    <td style="padding: 6px 12px;">不要(會綁死 profile,要切就麻煩)</td>
+    <td style="padding: 6px 12px;">✓(type=user memory,自動 inject)</td>
+  </tr>
+  <tr style="border-bottom: 1px solid var(--c-beige);">
+    <td style="padding: 6px 12px;">特定任務工作流</td>
+    <td style="padding: 6px 12px;">✓(寫成獨立 agent profile 切換)</td>
+    <td style="padding: 6px 12px;">不適合</td>
+  </tr>
+  <tr>
+    <td style="padding: 6px 12px;">「上次說過 X」這種記憶</td>
+    <td style="padding: 6px 12px;">不要</td>
+    <td style="padding: 6px 12px;">✓(Mori 自己 remember skill 寫)</td>
+  </tr>
+</table>
+
+<h2 id="token-budget">Token budget</h2>
+
+<p>System prompt 太肥 LLM 會慢 + 貴。Profiles tab 右上角有 token 估算 chip,把 profile body + memory index 加起來估值:</p>
+
+<ul>
+  <li><strong>gpt-oss-120b (o200k_harmony)</strong> — 完整估算</li>
+  <li><strong>Gemini Flash</strong> — 估算(略不準,Gemini tokenizer 跟 OpenAI 差)</li>
+</ul>
+
+<p>建議 system prompt 控在 <strong>2000 tokens 以下</strong>(profile body 加上 context 加 memory index)。超過會明顯慢。</p>
+
+<h2 id="iteration">迭代 prompt 的 SOP</h2>
+
+<ol>
+  <li>跑一輪正常對話</li>
+  <li>到 Recordings tab 點開那次 session</li>
+  <li>看 <code>system-prompt.txt</code>(完整三層 prompt LLM 看的)</li>
+  <li>看 <code>response.txt</code> 不對勁的地方</li>
+  <li>改 profile body 對應 section</li>
+  <li>Profiles tab 按「切換」(下一輪 hotkey 即時生效,不必重啟 Mori)</li>
+</ol>
+
+<p>Recordings 是觀測 prompt 的金牌工具 — 看見完整 prompt 比靠想像 debug 強 10 倍。</p>
+
+</body>
+</html>
