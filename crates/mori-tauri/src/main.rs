@@ -144,6 +144,13 @@ pub struct AppState {
     /// 重讀更新 → 改完即時生效不必重啟。Listener 永遠掛 PRESSED + RELEASED,在
     /// handler 內讀這個 mutex 決定 dispatch。
     pub toggle_mode: Mutex<hotkey_config::ToggleMode>,
+    /// Phase 3D.2:當前正在播的 TTS sink。`speak_async` 把 Sink 包 Arc 存進這裡,
+    /// `synth_and_play` 跑完(或被 stop)後清回 None。Ctrl+Alt+Esc abort handler
+    /// 在 phase 跟 recording / pipeline 都沒事時,take + stop() 中斷 TTS 播放。
+    /// `Sink` 透過內部 `Arc<Mutex<…>>` 是 Send+Sync,所以可跨 task 共享。
+    /// 外層用 `Arc<Mutex<…>>` 是為了讓 `speak_async` 可以 clone 出去帶進
+    /// spawn_blocking。
+    pub tts_sink: Arc<Mutex<Option<Arc<rodio::Sink>>>>,
 }
 
 impl AppState {
@@ -2884,7 +2891,7 @@ async fn run_agent_pipeline(
                 }),
             );
             // TTS 念出反問句(若 tts.enabled,否則 silent — UI 仍會顯示)。
-            tts::speak_async(question.clone(), app.clone());
+            tts::speak_async(question.clone(), app.clone(), state.tts_sink.clone());
             // Phase B:finalize session(ask-back path)— response 用 question 兜
             if let Some(rec) = state.recording_session.lock().take() {
                 let mut rec = rec;
@@ -3275,7 +3282,7 @@ async fn run_agent_pipeline(
             // Phase 3D:agent response 完成 → 若 tts.enabled,背景 spawn edge-tts
             // 念出 response。預設 OFF,user 在 Config tab 主動 enable 才會講話。
             // 不擋 UI update — speak_async 立刻 return,實際合成 + 播放在 tokio task。
-            tts::speak_async(response.clone(), app.clone());
+            tts::speak_async(response.clone(), app.clone(), state.tts_sink.clone());
 
             // Phase B:finalize session — 把 response / skill_calls / profile / provider
             // 都灌進 SessionRecord 後寫到 ~/.mori/recordings/<ts>/。
@@ -4383,6 +4390,7 @@ fn main() {
         // 5T: 啟動先用 default(Toggle),setup 讀 ~/.mori/config.json 後覆寫成
         // 實際值(見下方 hotkey_config 載入處)。
         toggle_mode: Mutex::new(hotkey_config::ToggleMode::default()),
+        tts_sink: Arc::new(Mutex::new(None)),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -4503,6 +4511,7 @@ fn main() {
             wake_sound::wake_ack_upload,
             wake_sound::wake_ack_delete_alternate,
             tts::tts_preview,
+            tts::tts_stop,
             speaker_id::speaker_id_status,
             speaker_id::speaker_id_enroll,
             speaker_id::speaker_id_clear,
@@ -4511,6 +4520,8 @@ fn main() {
             recordings::recordings_audio_bytes,
             recordings::recordings_delete_session,
             recordings::recordings_stats,
+            recordings::recordings_cleanup_now,
+            recordings::recordings_set_retention_days,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -5188,6 +5199,8 @@ fn main() {
             });
 
             // 5J: Ctrl+Alt+Esc — 全域中斷
+            // - 第一階段:正在播 TTS → 停 sink(Phase 已是 Done,所以這條走在 phase
+            //   match 之前不影響其他邏輯)
             // - Phase::Recording → 停錄音 + 丟掉音檔不送 STT
             // - Phase::Transcribing / Responding → abort pipeline task,
             //   kill_on_drop 讓 claude / gemini / codex 子程序連帶 SIGKILL
@@ -5195,6 +5208,20 @@ fn main() {
             let handle_cancel = app.handle().clone();
             let state_for_cancel = state_for_setup.clone();
             app.listen(hotkey_config::PORTAL_CANCEL_EVENT, move |_event| {
+                // Phase 3D.2:先嘗試 stop TTS(任何 phase 都可能正在播 — speak_async
+                // 是 fire-and-forget tokio task,Phase 已是 Done 後 sink 還在跑)
+                let tts_stopped = {
+                    let taken = state_for_cancel.tts_sink.lock().take();
+                    match taken {
+                        Some(sink) => {
+                            sink.stop();
+                            tracing::info!("Ctrl+Alt+Esc — TTS sink stopped");
+                            true
+                        }
+                        None => false,
+                    }
+                };
+
                 let phase = state_for_cancel.phase.lock().clone();
                 match phase {
                     Phase::Recording { .. } => {
@@ -5227,7 +5254,9 @@ fn main() {
                         state_for_cancel.set_phase(&handle_cancel, Phase::Idle);
                     }
                     _ => {
-                        tracing::debug!(?phase, "Ctrl+Alt+Esc fired but no in-flight work — ignored");
+                        if !tts_stopped {
+                            tracing::debug!(?phase, "Ctrl+Alt+Esc fired but no in-flight work — ignored");
+                        }
                     }
                 }
             });

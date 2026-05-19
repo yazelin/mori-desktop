@@ -6,6 +6,32 @@
 
 ---
 
+## v0.6.4 — Voice UX polish 收尾(2026-05-20)
+
+v0.6.3 ship ask-back 後留了 4 個觀測 / 互動的 visual gap,這版一次收齊。各自獨立 PR、互不相干、合起來是「Voice UX 第一個迭代完整版」。
+
+### Ask-back chip(PR #52)
+
+v0.6.3 backend 已 emit `evaluator-ask-back` event 但 ChatPanel 沒 listen,user 在 chat 看不出哪句是反問。這版補上:Mori bubble 在反問時標小 chip「✦ 反問」,用 `--c-warning-*` token(yellow tint,light/dark 都對)。frontend-only,記憶在 `askBackQuestions` Set,page reload 重置可接受。
+
+### TTS 中斷(PR #53)
+
+長 response 念到一半沒法停 — 第一個體感最大的痛點。`AppState::tts_sink: Arc<Mutex<Option<Arc<Sink>>>>` 共享 slot,`synth_and_play` 建 Sink 後塞 slot,sleep_until_end 後清回 None。**Ctrl+Alt+Esc** abort handler 在 phase match 之前先 stop TTS,所以一個 hotkey 同時管「停 TTS / 取消錄音 / abort pipeline」三件事。順手加 IPC `tts_stop` 給未來 UI 「停止講話」按鈕。
+
+### Logs outcome filter(PR #54)
+
+v0.6.3 加了 `outcome` 欄位但 Logs tab 沒消費。這版 KIND_FILTERS 補進 5 個 Phase 3 event(`evaluator_decision` / `wake_word_event` / `speaker_id_pass` / `speaker_id_reject` / `agent_completed`),加 `outcomeFilter` dropdown(只在 kind=evaluator_decision 時顯示),log row 多三色 outcome chip(綠=proceed,灰=skip,黃=ask_back),不展開也看得出該輪走哪條。
+
+### Recordings retention UI(PR #55)
+
+Recordings tab 過去只能「看」session — retention_days 是純文字,要改要去 Config tab 找,清舊只能等開機自動 gate。這版加兩個 IPC(`recordings_set_retention_days` / `recordings_cleanup_now`),stats bar 把 retention 改成 number input + 「儲存」+「清舊」雙按鈕,清舊會 confirm + flash「✓ 已清掉 N 筆」。
+
+### Migration
+
+無 breaking change。所有改動向後相容。`evaluator.enabled = false` 行為完全不變。`tts.enabled = false` 也完全不變,TTS slot 邏輯只有 TTS 開了才會碰到。
+
+---
+
 ## v0.6.3 — Ask-back(Mori 反問)+ Phase 3C 收尾(2026-05-19)
 
 Phase 3C 的「未盡之事」— evaluator 過去把 `unclear`(半截話 / 模糊起頭)當 `address_mori` 強跑 agent,Mori 拿到「然後...」也照樣亂回。這版改成讓 Mori 直接反問。

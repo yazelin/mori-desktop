@@ -1444,6 +1444,29 @@
 }
 .mori-logs-status.ok { color: var(--c-success-text); }
 .mori-logs-status.err { color: var(--c-danger-text); }
+/* evaluator_decision outcome chip — 三色對應三種 path */
+.mori-logs-outcome {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  border: 1px solid var(--c-border);
+}
+.mori-logs-outcome.proceed {
+  background: var(--c-success-bg);
+  color: var(--c-success-text);
+  border-color: var(--c-border-strong);
+}
+.mori-logs-outcome.skip {
+  background: var(--c-input-bg);
+  color: var(--c-text-muted);
+}
+.mori-logs-outcome.ask_back {
+  background: var(--c-warning-bg);
+  color: var(--c-warning-text);
+  border-color: var(--c-warning-border);
+}
 .mori-logs-error {
   margin-top: 4px;
   font-size: 11px;

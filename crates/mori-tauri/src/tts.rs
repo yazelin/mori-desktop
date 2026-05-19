@@ -19,19 +19,25 @@
 //!
 //! ## 中斷
 //!
-//! 暫時不支援中斷正在播的 TTS(後續可加 `Mutex<Option<Sink>>` 共享 state
-//! + Ctrl+Alt+Esc handler 呼叫 sink.stop)。目前 TTS 開始就會放完。
+//! `speak_async` 把 `Sink` 包 `Arc` 存進 `AppState::tts_sink` slot,Ctrl+Alt+Esc
+//! 全域 abort handler 在 Phase 跟 recording / pipeline 都沒事時,take +
+//! `sink.stop()` 中斷正在播的 TTS。Sink 內部是 `Arc<Mutex<…>>`,Send+Sync 安全。
 
 use std::fs;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::SystemTime;
 
+use parking_lot::Mutex;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use tauri::AppHandle;
 
 use crate::mori_dir;
+
+/// 共享 `Sink` slot 的型別 alias — `AppState::tts_sink` 用。
+pub type TtsSinkSlot = Arc<Mutex<Option<Arc<Sink>>>>;
 
 /// Bundled mori-tts-edge.py(Phase 3D)— Python edge-tts bridge script。
 /// `ensure_script_deployed` 在 user dir 沒檔時寫一份過去當預設,user 可覆寫。
@@ -142,9 +148,9 @@ fn read_config() -> TtsConfig {
 /// 公開入口 — agent response 完成時呼叫。立刻 return,實際合成 + 播放在
 /// tokio task 內背景跑。失敗只 log warn,不影響 Phase::Done UI 更新。
 ///
-/// `_app` 目前沒用上,保留 signature 給未來「emit tts-started / tts-finished
-/// event 讓 UI 顯示 "Mori 在講話" 」用。
-pub fn speak_async(text: String, _app: AppHandle) {
+/// `sink_slot` — 共享的 `AppState::tts_sink`。synth_and_play 會把當前 Sink 塞
+/// 進去,Ctrl+Alt+Esc abort handler 拿到後就能 stop。
+pub fn speak_async(text: String, _app: AppHandle, sink_slot: TtsSinkSlot) {
     let cfg = read_config();
     if !cfg.enabled {
         return;
@@ -168,13 +174,15 @@ pub fn speak_async(text: String, _app: AppHandle) {
     }
 
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = synth_and_play(&cfg, &text) {
+        if let Err(e) = synth_and_play(&cfg, &text, &sink_slot) {
             tracing::warn!(error = %e, "tts: synth_and_play failed");
         }
+        // 跑完(或 stop 後 sleep_until_end 返回)把 slot 清空,給下一輪 TTS 用
+        *sink_slot.lock() = None;
     });
 }
 
-fn synth_and_play(cfg: &TtsConfig, text: &str) -> anyhow::Result<()> {
+fn synth_and_play(cfg: &TtsConfig, text: &str, sink_slot: &TtsSinkSlot) -> anyhow::Result<()> {
     // 用 timestamp 避免並發 collision。/tmp 上 OS 開機重啟自動清。
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -229,9 +237,15 @@ fn synth_and_play(cfg: &TtsConfig, text: &str) -> anyhow::Result<()> {
 
     let (_stream, handle) =
         OutputStream::try_default().map_err(|e| anyhow::anyhow!("no audio output: {e}"))?;
-    let sink = Sink::try_new(&handle).map_err(|e| anyhow::anyhow!("sink create: {e}"))?;
+    let sink = Arc::new(Sink::try_new(&handle).map_err(|e| anyhow::anyhow!("sink create: {e}"))?);
     sink.append(source.convert_samples::<i16>());
+    // 把 sink 放進共享 slot,abort handler 可以 stop。先放再 sleep,確保
+    // 即使 sleep 一開始就被 stop(極短音檔)也能正確返回。
+    *sink_slot.lock() = Some(sink.clone());
     sink.sleep_until_end();
+    // sleep 返回後不管是自然結束或 stop() 都把 slot 拿掉(speak_async 那邊也會
+    // 兜底清,雙保險)。
+    *sink_slot.lock() = None;
 
     // 3. cleanup
     let _ = fs::remove_file(&out_mp3);
@@ -240,8 +254,14 @@ fn synth_and_play(cfg: &TtsConfig, text: &str) -> anyhow::Result<()> {
 }
 
 /// IPC command — 試聽 voice。給 ConfigTab UI 用。
+///
+/// Preview 走的 sink 也塞共享 slot,所以 Ctrl+Alt+Esc 也能中斷預覽。
 #[tauri::command]
-pub async fn tts_preview(text: Option<String>, voice: Option<String>) -> Result<(), String> {
+pub async fn tts_preview(
+    state: tauri::State<'_, std::sync::Arc<crate::AppState>>,
+    text: Option<String>,
+    voice: Option<String>,
+) -> Result<(), String> {
     let mut cfg = read_config();
     if let Some(v) = voice {
         cfg.voice = v;
@@ -261,9 +281,25 @@ pub async fn tts_preview(text: Option<String>, voice: Option<String>) -> Result<
             cfg.script_path.display()
         ));
     }
-    tokio::task::spawn_blocking(move || synth_and_play(&cfg, &sample_text))
+    let sink_slot = state.tts_sink.clone();
+    tokio::task::spawn_blocking(move || synth_and_play(&cfg, &sample_text, &sink_slot))
         .await
         .map_err(|e| format!("join: {e}"))?
         .map_err(|e| format!("synth/play: {e}"))?;
     Ok(())
+}
+
+/// IPC command — 立刻中斷正在播的 TTS(若有)。回 `true` 表示有 sink 被 stop。
+/// Ctrl+Alt+Esc abort handler 跟未來 UI 「停止講話」按鈕都呼這個。
+#[tauri::command]
+pub fn tts_stop(state: tauri::State<'_, std::sync::Arc<crate::AppState>>) -> bool {
+    let taken = state.tts_sink.lock().take();
+    match taken {
+        Some(sink) => {
+            sink.stop();
+            tracing::info!("tts: sink stopped via tts_stop");
+            true
+        }
+        None => false,
+    }
 }
