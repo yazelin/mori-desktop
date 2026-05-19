@@ -2225,6 +2225,61 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
         // provider 就 100% Groq-free)。
         let transcribe_result: anyhow::Result<String> = async {
             let mut audio = recorder.stop().context("stop recorder")?;
+
+            // Phase 3E:speaker verification 用 **raw audio**(silence-trim 前)。
+            // resemblyzer 內建 VAD 會自己抓有聲段,我們不該 double-trim — 之前
+            // 用 trimmed audio 把 4.65s 砍到 0.39s,resemblyzer 在 < 1 秒上
+            // embedding 不穩(同一人 score 從 0.75 掉到 0.55 誤拒)。
+            //
+            // 先寫一份 raw WAV 給 speaker_id 用,後面再 trim + STT。
+            let raw_wav = audio.to_wav_bytes().context("encode raw WAV")?;
+            let raw_path = std::env::temp_dir().join("mori-last-recording-raw.wav");
+            let _ = std::fs::write(&raw_path, &raw_wav);
+            let verify_path = raw_path.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                speaker_id::verify_audio_file(&verify_path)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("speaker_id join: {e}"))?;
+            match &outcome {
+                speaker_id::VerifyOutcome::Verified(r) if !r.pass => {
+                    tracing::info!(
+                        score = r.score,
+                        threshold = r.threshold,
+                        raw_duration_secs = audio.duration_secs(),
+                        "speaker_id: rejected — not enrolled user"
+                    );
+                    mori_core::event_log::append(serde_json::json!({
+                        "kind": "speaker_id_rejected",
+                        "score": r.score,
+                        "threshold": r.threshold,
+                    }));
+                    let _ = app_for_provider.emit(
+                        "speaker-id-rejected",
+                        serde_json::json!({
+                            "score": r.score,
+                            "threshold": r.threshold,
+                        }),
+                    );
+                    return Ok(String::new());
+                }
+                speaker_id::VerifyOutcome::Verified(r) => {
+                    tracing::info!(
+                        score = r.score,
+                        threshold = r.threshold,
+                        raw_duration_secs = audio.duration_secs(),
+                        "speaker_id: pass"
+                    );
+                }
+                speaker_id::VerifyOutcome::NotEnrolled => {
+                    tracing::info!("speaker_id: skipped (user not enrolled)");
+                }
+                speaker_id::VerifyOutcome::Disabled => {}
+                speaker_id::VerifyOutcome::Error(e) => {
+                    tracing::warn!(error = %e, "speaker_id: error — passing through");
+                }
+            }
+
             if read_voice_trim_silence_enabled() {
                 let before_samples = audio.samples.len();
                 let before_secs = audio.duration_secs();
@@ -2341,52 +2396,9 @@ fn stop_and_transcribe(app: AppHandle, state: Arc<AppState>) {
             let _ = std::fs::write(&debug_path, &wav);
             tracing::info!(path = %debug_path.display(), "wrote debug WAV");
 
-            // Phase 3E:speaker verification gate(config 開啟才跑)。
-            // 把 WAV 路徑丟給 Python resemblyzer 算 embedding + cosine 比對,
-            // score < threshold(預設 0.7)→ 別人聲音,silent reject。
-            // spawn_blocking 包 Python subprocess,~100-500ms。
-            let verify_path = debug_path.clone();
-            let outcome = tokio::task::spawn_blocking(move || {
-                speaker_id::verify_audio_file(&verify_path)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("speaker_id join: {e}"))?;
-            match &outcome {
-                speaker_id::VerifyOutcome::Verified(r) if !r.pass => {
-                    tracing::info!(
-                        score = r.score,
-                        threshold = r.threshold,
-                        "speaker_id: rejected — not enrolled user"
-                    );
-                    mori_core::event_log::append(serde_json::json!({
-                        "kind": "speaker_id_rejected",
-                        "score": r.score,
-                        "threshold": r.threshold,
-                    }));
-                    let _ = app_for_provider.emit(
-                        "speaker-id-rejected",
-                        serde_json::json!({
-                            "score": r.score,
-                            "threshold": r.threshold,
-                        }),
-                    );
-                    return Ok(String::new());
-                }
-                speaker_id::VerifyOutcome::Verified(r) => {
-                    tracing::info!(
-                        score = r.score,
-                        threshold = r.threshold,
-                        "speaker_id: pass"
-                    );
-                }
-                speaker_id::VerifyOutcome::NotEnrolled => {
-                    tracing::info!("speaker_id: skipped (user not enrolled)");
-                }
-                speaker_id::VerifyOutcome::Disabled => {} // 沒 log 太吵
-                speaker_id::VerifyOutcome::Error(e) => {
-                    tracing::warn!(error = %e, "speaker_id: error — passing through");
-                }
-            }
+            // Phase 3E speaker verification 已在 silence-trim 前用 raw audio 跑完
+            // (見 fn 上方 transcribe_result 開頭)— 不再在此處跑,避免短 audio
+            // embedding 不穩誤拒 user 本人。
 
             // 5F: VoiceInput mode 時，profile 可用 stt_provider 覆蓋全域 STT 設定
             let stt_override: Option<String> = if matches!(*state.mode.lock(), Mode::VoiceInput) {
