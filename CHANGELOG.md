@@ -6,6 +6,41 @@
 
 ---
 
+## v0.6.6 — Annuli transparent setup + Mori 召喚師身分 + Quickstart returning UX(2026-05-20)
+
+繼 v0.6.5 之後三個 PR 收尾 annuli 整合的「沒人按按鈕也會 work」目標 + 兩個 user 抓到的 UX bug。
+
+### Annuli runtime DepsTab entry(#61)
+
+Deps tab 多「Annuli 反思服務 runtime」一鍵裝(`git clone yazelin/annuli` + `uv venv` + `pip install -e .`)。Linux/macOS Shell 自動,Windows Manual。`install_caveat` 講明 annuli Wave 4 還在進行中。
+
+### Annuli 一鍵啟用(#62)
+
+AnnuliTab unconfigured 偵測 runtime 在 → 顯示「✨ 一鍵啟用 Annuli」按鈕。按下:
+- 自動寫 `annuli.enabled = true` + 預設 endpoint / spirit / user_id 到 config.json
+- swap AnnuliClient + AnnuliMemoryStore 進 state
+- supervisor maybe_spawn 接手 spawn `python main.py admin --port 5000`
+- 2 秒後 UI 自動 refresh
+
+兩個新 IPC:`annuli_runtime_installed`、`annuli_quick_enable`。
+
+### Annuli transparent setup(#63 — 大 PR,7 個改動)
+
+回 user 提問:「不能更自動?」「啟用/停用會 spawn/kill annuli 嗎?」「Quickstart 名字對不上 annuli user_id?」「為 X 而存在?」「Direct mode 跳過按鈕對 returning 不合理」
+
+1. **`sync_supervisor_to_config` helper** — `annuli_reload` 接管 supervisor 生命週期:enable→啟動、disable→殺我們 spawn 的 child(external annuli 不動)
+2. **Startup auto-detect** — config 從沒設過 annuli + runtime 在 `~/mori-universe/annuli/` → 自動寫 sane defaults + 啟用(0 click)
+3. **ConfigTab `AnnuliStatusBanner`** — Annuli subtab 頂三色狀態:綠 Connected / 黃 Unreachable / 灰 Disabled,30s 自動 polling
+4. **`cfg.user.name` 對齊 `annuli.user_id`** — Quickstart 召喚師之名 自動同步 vault id,不再有「yazelin」對上 OS user「ct」的 split identity
+5. **Sidebar 顯示「召喚師 yazelin」** — 過去 Quickstart 寫進 config 後完全沒回顯,user 沒看過自己名字
+6. **Lore fix** — 「為 X 而存在」改「召喚師 X」(world-tree/lore/the-forest.md 法則 #1 精靈不是工具,Mori 是「召喚師 yazelin 的契約者」)
+7. **Returning user Quickstart UX** — `quickstart_completed=true` 時:預設 direct mode + dismiss 按鈕從「先離開(Mori 仍會沉睡)」/「跳過」改成「回主畫面」(narrative 不再矛盾)
+
+### Migration
+
+無 breaking change。Quickstart `quickstart_completed` flag 早就在,本次只多讀。
+
+---
 ## v0.6.5 — Wake-word custom phrase UI + 文件補完(2026-05-20)
 
 接著 v0.6.4 的 voice UX polish,這版做 Phase 3A.2 — 讓 wake-word phrase 切換變成 UI 一鍵動作,不必再手動編輯 config.json + 切 mode 來回。同步補 v0.5.2 release 留的 3 頁 onboarding 文件 + annuli wave 3 整合 ship-day checklist。
