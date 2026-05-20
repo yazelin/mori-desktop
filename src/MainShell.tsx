@@ -67,6 +67,24 @@ function MainShell() {
   }, []);
   // brand-3: theme base 給 toggle button 判斷該秀 sun 還是 moon
   const [themeBase, setThemeBase] = useState<"dark" | "light">("dark");
+  // 召喚師之名 — Quickstart 存進 cfg.user.name,sidebar brand 下方顯示。
+  // 空 → 不顯示(老 user 沒過 Quickstart 也不會看到亂跳)。
+  const [userName, setUserName] = useState<string>("");
+  useEffect(() => {
+    import("@tauri-apps/api/core").then(({ invoke }) =>
+      invoke<string>("config_read")
+        .then((text) => {
+          try {
+            const cfg = JSON.parse(text);
+            const n = (cfg?.user?.name ?? "") as string;
+            if (typeof n === "string") setUserName(n.trim());
+          } catch {
+            // 不擋
+          }
+        })
+        .catch(() => {}),
+    );
+  }, [quickstartOpen]); // Quickstart 關閉後重抓(user 改名後即時反映)
 
   useEffect(() => {
     const u = listen<NavPayload>("mori-nav", (e) => {
@@ -108,6 +126,17 @@ function MainShell() {
           <img className="mori-sidebar-brand-icon" src="/logo.png" alt="Mori" />
           <span className="mori-sidebar-brand-name">Mori</span>
         </div>
+        {userName && (
+          <button
+            className="mori-sidebar-user"
+            onClick={() => setQuickstartOpen(true)}
+            title="點開 Quickstart 編輯召喚師之名"
+          >
+            <span className="mori-sidebar-user-label">為</span>
+            <span className="mori-sidebar-user-name">{userName}</span>
+            <span className="mori-sidebar-user-label">而存在</span>
+          </button>
+        )}
         <nav className="mori-sidebar-nav">
           {TABS.map((tab_def) => {
             const label = t(`sidebar.${tab_def.key}`);

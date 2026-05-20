@@ -310,6 +310,17 @@ export function Quickstart({ onDone }: QuickstartProps) {
       // 召喚師之名 → user.name
       cfg.user.name = summonerName.trim();
 
+      // 同步 annuli.user_id(若 annuli 已存在但 user_id 還沒設,寫進去 — 對齊 vault identity)。
+      // 沒 cfg.annuli → 不建,startup auto-detect 偵測 runtime 時會自己拿 user.name 當 default。
+      // 已設過 user_id(非空)→ 尊重不覆蓋(可能是 user 在 Config tab 改過)。
+      if (cfg.annuli && typeof cfg.annuli === "object") {
+        const annuli = cfg.annuli as Record<string, unknown>;
+        const curUid = typeof annuli.user_id === "string" ? annuli.user_id.trim() : "";
+        if (!curUid) {
+          annuli.user_id = summonerName.trim();
+        }
+      }
+
       // 靈氣 → providers.groq.api_key (STT)
       // 維持寫進 providers.groq.api_key — Mori-core groq.rs discover_api_key 兩處都讀,
       // 但這條 inline path 是 Groq 主要存放位置(模型/STT model 也在 providers.groq.*)

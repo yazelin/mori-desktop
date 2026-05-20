@@ -1742,6 +1742,32 @@ fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String>
 ///   state.annuli_handle() 拿 snapshot,所以 swap 完下一次 invoke 自動拿到新 store。
 /// - 既有 in-flight 請求(例如 AnnuliMemoryStore 正在 POST /memory/section)持有
 ///   舊 client 的 Arc,會跑完才 drop — 不會中斷。
+/// 決定 annuli `user_id` 預設值的順序:
+/// 1. `cfg.user.name`(Quickstart 召喚師之名,user 真正取的名)
+/// 2. `$USER` / `$USERNAME` env(OS user 兜底,例如 `ct` / `Administrator`)
+/// 3. `"user"` 字串硬兜底
+///
+/// 給 `annuli_quick_enable` + startup auto-detect 共用,讓 Quickstart 名跟
+/// annuli vault id 自動對齊 — 不會出現 Quickstart「yazelin」但 vault 寫成 `ct` 的 split identity。
+fn pick_annuli_user_id_default(config_path: &std::path::Path) -> String {
+    let from_user_name = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.pointer("/user/name")
+                .and_then(|x| x.as_str())
+                .map(String::from)
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(name) = from_user_name {
+        return name;
+    }
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".into())
+}
+
 /// 把 supervisor 狀態對齊 config — enable / disable 對稱。
 ///
 /// - 想 enabled,supervisor 不是 healthy → drop + maybe_spawn(內部 health-check
@@ -1858,10 +1884,10 @@ async fn annuli_quick_enable(
         a.insert("spirit_name".to_string(), serde_json::json!("mori"));
     }
     if str_empty(a, "user_id") {
-        let default_uid = std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "user".into());
-        a.insert("user_id".to_string(), serde_json::json!(default_uid));
+        a.insert(
+            "user_id".to_string(),
+            serde_json::json!(pick_annuli_user_id_default(&config_path)),
+        );
     }
     std::fs::create_dir_all(mori_dir())
         .map_err(|e| format!("mkdir ~/.mori: {e}"))?;
@@ -4540,9 +4566,7 @@ fn main() {
         .unwrap_or(false);
     if !annuli_section_present && annuli_runtime_installed() {
         if let Some(cfg_path) = &config_path {
-            let default_uid = std::env::var("USER")
-                .or_else(|_| std::env::var("USERNAME"))
-                .unwrap_or_else(|_| "user".into());
+            let default_uid = pick_annuli_user_id_default(cfg_path);
             let mut json: serde_json::Value = std::fs::read_to_string(cfg_path)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())

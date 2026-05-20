@@ -87,9 +87,34 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px 12px;
+  padding: 6px 10px 8px;
+}
+/* 召喚師之名顯示 — Quickstart 寫的 cfg.user.name,點一下回 Quickstart 編輯 */
+.mori-sidebar-user {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 10px 10px;
+  margin: 0;
+  border: none;
+  background: transparent;
   border-bottom: 1px solid var(--c-divider);
   margin-bottom: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+}
+.mori-sidebar-user:hover { background: var(--c-sidebar-hover-bg); }
+.mori-sidebar-user-label {
+  font-size: 10px;
+  color: var(--c-text-soft);
+  letter-spacing: 0.3px;
+}
+.mori-sidebar-user-name {
+  font-size: 12px;
+  color: var(--c-brand-text);
+  font-weight: 500;
 }
 .mori-sidebar-brand-icon {
   /* badge logo: 深綠盤 + cream 描邊,在深 sidebar 上可見度最佳 */
