@@ -6,6 +6,17 @@
 
 ---
 
+## Unreleased — Bundled hey-mori.onnx bump → v1(verifier-trained,從 yazelin/hey-mori 來)
+
+Bundled wake-word model 從 205 KB「TTS-only generic 訓練版」換成 316 KB 的 verifier-trained 版,來源獨立到新 repo [`yazelin/hey-mori`](https://github.com/yazelin/hey-mori) 做版控,未來重訓只動那邊。
+
+- `crates/mori-tauri/assets/wakeword/hey-mori.onnx`:205 → 316 KB(sha256 `1fa7b8e9c1cc…`)
+- `crates/mori-tauri/src/wake_word.rs` 註解更新 — 點到 hey-mori repo,日誌字串 `(TTS-only generic)` → `(yazelin/hey-mori v1)`
+- 行為**不變**:`ensure_default_model` 仍只在 user dir 沒檔時解壓,不覆寫自訓過的 model
+- 個人聲線命中率仍建議跑 `mori-wake-train.py` + `mori-wake-verifier.py` 自訓
+
+---
+
 ## v0.6.6 — Annuli transparent setup + Mori 召喚師身分 + Quickstart returning UX(2026-05-20)
 
 繼 v0.6.5 之後三個 PR 收尾 annuli 整合的「沒人按按鈕也會 work」目標 + 兩個 user 抓到的 UX bug。
