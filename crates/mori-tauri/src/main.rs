@@ -1742,6 +1742,128 @@ fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String>
 ///   state.annuli_handle() 拿 snapshot,所以 swap 完下一次 invoke 自動拿到新 store。
 /// - 既有 in-flight 請求(例如 AnnuliMemoryStore 正在 POST /memory/section)持有
 ///   舊 client 的 Arc,會跑完才 drop — 不會中斷。
+/// 偵測 annuli runtime 在不在(`~/mori-universe/annuli/.venv/bin/python`)。
+/// AnnuliTab 用這條決定要不要顯示「一鍵啟用」按鈕。Windows fallback `Scripts/python.exe`。
+#[tauri::command]
+fn annuli_runtime_installed() -> bool {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let root = home.join("mori-universe").join("annuli");
+    let py = if cfg!(target_os = "windows") {
+        root.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        root.join(".venv").join("bin").join("python")
+    };
+    py.exists() && root.join("main.py").exists()
+}
+
+/// 一鍵啟用 annuli(DepsTab 裝完後給 user 的「直接打開」入口)。流程:
+/// 1. 驗 runtime 已裝(否則早回 err)
+/// 2. 寫 `annuli.enabled = true` + sane defaults(endpoint / spirit_name / user_id 空才填)
+/// 3. Reload AnnuliClient + AnnuliMemoryStore swap 進 state
+/// 4. 若 supervisor 不是 healthy → drop 舊 + maybe_spawn 新(該 fn 內部自己 health-check
+///    +「已 reachable 就 not-spawn」邏輯,跑兩次安全)
+///
+/// 回 user-facing 訊息(成功 / 失敗 reason)。
+#[tauri::command]
+async fn annuli_quick_enable(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    // 1. 驗 runtime
+    if !annuli_runtime_installed() {
+        return Err(
+            "annuli runtime 沒裝 — 先到 DepsTab 裝「Annuli 反思服務 runtime」(等同 \
+             git clone ~/mori-universe/annuli + uv venv + pip install -e .)"
+                .into(),
+        );
+    }
+
+    // 2. 讀現有 config + 補 defaults
+    let config_path = mori_dir().join("config.json");
+    let mut json: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let obj = json
+        .as_object_mut()
+        .ok_or_else(|| "config.json 不是 object".to_string())?;
+    let annuli = obj
+        .entry("annuli".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let a = annuli
+        .as_object_mut()
+        .ok_or_else(|| "config.json /annuli 不是 object".to_string())?;
+    a.insert("enabled".to_string(), serde_json::json!(true));
+    let str_empty = |a: &serde_json::Map<String, serde_json::Value>, k: &str| -> bool {
+        a.get(k).and_then(|v| v.as_str()).map(|s| s.is_empty()).unwrap_or(true)
+    };
+    if str_empty(a, "endpoint") {
+        a.insert("endpoint".to_string(), serde_json::json!("http://localhost:5000"));
+    }
+    if str_empty(a, "spirit_name") {
+        a.insert("spirit_name".to_string(), serde_json::json!("mori"));
+    }
+    if str_empty(a, "user_id") {
+        let default_uid = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "user".into());
+        a.insert("user_id".to_string(), serde_json::json!(default_uid));
+    }
+    std::fs::create_dir_all(mori_dir())
+        .map_err(|e| format!("mkdir ~/.mori: {e}"))?;
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?,
+    )
+    .map_err(|e| format!("write {}: {e}", config_path.display()))?;
+
+    // 3. Reload AnnuliClient / store(同 annuli_reload 的 if-ready 分支)
+    let annuli_cfg = annuli_config::AnnuliConfig::load(&config_path);
+    if !annuli_cfg.is_ready() {
+        return Err("config 寫好了但 is_ready=false — endpoint/spirit/user_id 還是空(不該發生)".into());
+    }
+    let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
+        .map_err(|e| format!("build annuli client: {e:#}"))?;
+    let client = Arc::new(client);
+    let store: Arc<dyn mori_core::memory::MemoryStore> =
+        Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
+    *state.memory.write() = store;
+    *state.annuli.write() = Some(client);
+
+    // 4. supervisor spawn — 只在沒 healthy 時動。已 spawned/already-running 別重啟。
+    let cur_state = state
+        .annuli_supervisor
+        .lock()
+        .as_ref()
+        .map(|s| s.info.state)
+        .unwrap_or("none");
+    let info_msg = if !matches!(cur_state, "spawned" | "already-running") {
+        // drop old(kill child if any)
+        *state.annuli_supervisor.lock() = None;
+        let sup = annuli_supervisor::AnnuliSupervisor::maybe_spawn(&annuli_cfg).await;
+        let m = format!("supervisor: {} ({})", sup.info.state, sup.info.reason);
+        *state.annuli_supervisor.lock() = Some(sup);
+        m
+    } else {
+        let r = state
+            .annuli_supervisor
+            .lock()
+            .as_ref()
+            .map(|s| s.info.reason.clone())
+            .unwrap_or_default();
+        format!("supervisor 已健康({cur_state} — {r})")
+    };
+    tracing::info!(info = %info_msg, "annuli quick-enable done");
+    let _ = app.emit(
+        "annuli-supervisor-changed",
+        serde_json::json!({ "from": "quick_enable" }),
+    );
+    Ok(format!("✓ Annuli 已啟用。{info_msg}"))
+}
+
 #[tauri::command]
 async fn annuli_reload(state: tauri::State<'_, Arc<AppState>>) -> Result<String, String> {
     let config_path = mori_core::llm::groq::GroqProvider::bootstrap_mori_config()
@@ -4547,6 +4669,8 @@ fn main() {
             wake_word::wake_word_set_model,
             wake_word::wake_word_train_command,
             wake_word_restart_listener,
+            annuli_runtime_installed,
+            annuli_quick_enable,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)

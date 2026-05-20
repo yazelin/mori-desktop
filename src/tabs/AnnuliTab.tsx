@@ -77,6 +77,11 @@ export default function AnnuliTab() {
   const [sleepBusy, setSleepBusy] = useState(false);
   const [sleepResult, setSleepResult] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // 一鍵啟用相關:`runtimeInstalled` 偵測 `~/mori-universe/annuli/.venv` 在不在;
+  // 在 → unconfigured 狀態下顯示快速啟用按鈕。`enableBusy` / `enableMsg` 給按鈕回饋。
+  const [runtimeInstalled, setRuntimeInstalled] = useState<boolean | null>(null);
+  const [enableBusy, setEnableBusy] = useState(false);
+  const [enableMsg, setEnableMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -113,6 +118,10 @@ export default function AnnuliTab() {
 
   useEffect(() => {
     refresh();
+    // 偵測 runtime 是否已裝(同 mount 一次,enable 後再 refresh status 帶到)
+    invoke<boolean>("annuli_runtime_installed")
+      .then(setRuntimeInstalled)
+      .catch(() => setRuntimeInstalled(false));
     // Wave 4 step 11:30s 自動刷新 status / events 數,給 background polling 感
     const id = setInterval(() => {
       // 只 refresh status / events,不重 fetch SOUL / sections(那兩個基本不變)
@@ -121,6 +130,24 @@ export default function AnnuliTab() {
     }, 30_000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  const quickEnable = async () => {
+    setEnableBusy(true);
+    setEnableMsg(null);
+    try {
+      const out = await invoke<string>("annuli_quick_enable");
+      setEnableMsg(out);
+      // 等 supervisor 跑(spawn + health-check 最多 15s),再 refresh
+      setTimeout(() => {
+        refresh();
+        invoke<boolean>("annuli_runtime_installed").then(setRuntimeInstalled).catch(() => {});
+      }, 2000);
+    } catch (e) {
+      setEnableMsg(`❌ ${String(e)}`);
+    } finally {
+      setEnableBusy(false);
+    }
+  };
 
   const triggerSleep = async () => {
     setSleepBusy(true);
@@ -157,10 +184,36 @@ export default function AnnuliTab() {
       <div className="mori-tab">
         <h1 className="mori-tab-title">{t("annuli_tab.title_unconfigured")}</h1>
         <p className="mori-tab-hint">{t("annuli_tab.unconfigured_hint")}</p>
-        <div className="mori-annuli-sleep-row">
-          <button className="mori-btn primary" onClick={gotoConfig}>
+        <div className="mori-annuli-sleep-row" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {runtimeInstalled && (
+            <button
+              className="mori-btn primary"
+              onClick={quickEnable}
+              disabled={enableBusy}
+              title="偵測到 ~/mori-universe/annuli runtime 已裝。按此自動寫入 annuli.enabled=true + 預設 endpoint/spirit/user_id + 啟動 supervisor"
+            >
+              {enableBusy ? "啟用中…" : "✨ 一鍵啟用 Annuli(runtime 已偵測到)"}
+            </button>
+          )}
+          <button className="mori-btn" onClick={gotoConfig}>
             <IconConfig /> {t("annuli_tab.go_config")}
           </button>
+          {runtimeInstalled === false && (
+            <span style={{ fontSize: 12, color: "var(--c-text-muted)" }}>
+              提示:Annuli runtime 未偵測到(`~/mori-universe/annuli/.venv` 不存在)。先到 Deps tab 裝「Annuli 反思服務 runtime」。
+            </span>
+          )}
+          {enableMsg && (
+            <span
+              style={{
+                fontSize: 12,
+                color: enableMsg.startsWith("❌") ? "var(--c-danger-text)" : "var(--c-success-text)",
+                marginLeft: 4,
+              }}
+            >
+              {enableMsg}
+            </span>
+          )}
         </div>
         <p className="mori-tab-hint">{t("annuli_tab.schema_hint")}</p>
         <pre className="mori-annuli-pre">
