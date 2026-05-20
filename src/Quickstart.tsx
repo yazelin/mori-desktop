@@ -67,7 +67,28 @@ interface QuickstartProps {
 
 export function Quickstart({ onDone }: QuickstartProps) {
   const { t, i18n } = useTranslation();
+  // First-time vs returning:第一次跑 quickstart_completed != true → ritual 模式預設,
+  // dismiss 按鈕用「先離開(Mori 仍會沉睡)」narrative。
+  // 已 quickstart_completed → direct 模式預設(?/召喚師 點來改設定的人不需要再走儀式),
+  // dismiss 按鈕變平實「回主畫面」(Mori 已醒,沒有沉睡 narrative)。
+  const [isReturning, setIsReturning] = useState<boolean>(false);
   const [mode, setMode] = useState<Mode>("ritual");
+  useEffect(() => {
+    invoke<string>("config_read")
+      .then((text) => {
+        try {
+          const cfg = JSON.parse(text);
+          const completed = cfg?.quickstart_completed === true;
+          setIsReturning(completed);
+          if (completed) setMode("direct");
+        } catch {
+          /* config parse 失敗 → 當第一次跑 */
+        }
+      })
+      .catch(() => {
+        /* 沒 config → 第一次跑 */
+      });
+  }, []);
   // 收尾用 — 「回家」按下後 modal 跟音樂同步 fade-out 600ms 才 onDone,
   // 不直接硬切視窗破壞儀式氣氛。Direct mode 也吃同一路徑(沒音樂時純 CSS 淡出)。
   const [closing, setClosing] = useState(false);
@@ -503,6 +524,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             envOpenaiDetected={envOpenaiDetected}
             starterLocale={starterLocale} setStarterLocale={setStarterLocale}
             onSwitchToDirect={() => setMode("direct")}
+            isReturning={isReturning}
           />
         )}
       </div>
@@ -827,6 +849,9 @@ interface DwellingProps extends CommonProps {
   scene: number;
   setScene: (s: number) => void;
   onSwitchToDirect: () => void;
+  /** First-time setup → 「先離開(Mori 仍會沉睡)」narrative;
+   *  Returning user(quickstart_completed=true)→ 「回主畫面」平實 */
+  isReturning: boolean;
 }
 
 function DwellingRite(props: DwellingProps) {
@@ -864,7 +889,7 @@ type StepProps = DwellingProps & {
 // ─── 第一幕 · 召喚 ──────────────────────────────────────────
 
 function SceneSummoning({
-  t, summonerName, setSummonerName, dots, onNext, doSkip, onSwitchToDirect,
+  t, summonerName, setSummonerName, dots, onNext, doSkip, onSwitchToDirect, isReturning,
 }: StepProps) {
   const nameReady = summonerName.trim().length > 0;
   // 召喚師打字時 confirm 兩段會動態冒出來,scroll 容器自動拉到底,
@@ -913,9 +938,9 @@ function SceneSummoning({
         <button
           className="mori-btn ghost"
           onClick={doSkip}
-          title={t("quickstart.ritual_dismiss_hint")}
+          title={t(isReturning ? "quickstart.ritual_dismiss_returning_hint" : "quickstart.ritual_dismiss_hint")}
         >
-          {t("quickstart.ritual_dismiss")}
+          {t(isReturning ? "quickstart.ritual_dismiss_returning" : "quickstart.ritual_dismiss")}
         </button>
         <button
           className="mori-btn ghost"

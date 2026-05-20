@@ -253,6 +253,8 @@
     "ritual_scene_4_name": "Scene 4 The Sealing",
     "ritual_scene_5_name": "Scene 5 The Settling",
     "ritual_dismiss": "Leave for now (Mori stays asleep)",
+    "ritual_dismiss_returning": "Back to main",
+    "ritual_dismiss_returning_hint": "Return to the main window (settings unchanged)",
     "ritual_dismiss_hint": "Until you share an aura, she can't hear you — voice & chat won't work. Reopen the rite anytime from the Help menu.",
     "ritual_switch_direct_hint": "Skip the narrative and use a single-page form with all fields at once (keys still required).",
     "ritual_back_hint": "Back to the previous scene (filled fields are kept).",

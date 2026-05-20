@@ -253,6 +253,8 @@
     "ritual_scene_4_name": "第四幕 驗印",
     "ritual_scene_5_name": "第五幕 安頓",
     "ritual_dismiss": "先離開(Mori 仍會沉睡)",
+    "ritual_dismiss_returning": "回主畫面",
+    "ritual_dismiss_returning_hint": "回到主畫面(不影響設定)",
     "ritual_dismiss_hint": "沒交一道靈氣前,她聽不見你 — 語音與對話都還無法使用。Help 選單可隨時喚她回來。",
     "ritual_switch_direct_hint": "跳過劇情敘事,改用單頁表單一次填齊所有欄位(同樣需要設 key)",
     "ritual_back_hint": "回到上一幕(已填的東西會保留)",
