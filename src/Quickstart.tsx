@@ -504,6 +504,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             envGeminiDetected={envGeminiDetected}
             envOpenaiDetected={envOpenaiDetected}
             starterLocale={starterLocale} setStarterLocale={setStarterLocale}
+            isReturning={isReturning}
           />
         ) : (
           <DwellingRite
@@ -594,6 +595,9 @@ interface CommonProps {
   envOpenaiDetected: boolean;
   starterLocale: "zh" | "en";
   setStarterLocale: (l: "zh" | "en") => void;
+  /** First-time(quickstart_completed != true)→ ritual / direct 都顯示「跳過 / 沉睡」
+   *  narrative;Returning(已 completed)→ 「回主畫面」平實。從 Quickstart root 傳下來。 */
+  isReturning: boolean;
 }
 
 // ─── 直接模式 ───────────────────────────────────────────────
@@ -604,7 +608,7 @@ function DirectForm(props: CommonProps) {
     powerBase, setPowerBase, powerModel, setPowerModel,
     verify, setVerify, doVerify, doSave, doSkip,
     envGroqDetected, envGeminiDetected, envOpenaiDetected,
-    starterLocale, setStarterLocale } = props;
+    starterLocale, setStarterLocale, isReturning } = props;
 
   const auraReal = auraKey.trim().length > 5 || (envGroqDetected && auraKey.trim() === "");
   // env-only path:env 偵測到 + 沒填 key 也算 ready(custom 多要求 api_base 已填)
@@ -826,9 +830,9 @@ function DirectForm(props: CommonProps) {
         <button
           className="mori-btn"
           onClick={doSkip}
-          title={t("quickstart.direct_skip_button_hint")}
+          title={t(isReturning ? "quickstart.ritual_dismiss_returning_hint" : "quickstart.direct_skip_button_hint")}
         >
-          {t("quickstart.direct_skip_button")}
+          {t(isReturning ? "quickstart.ritual_dismiss_returning" : "quickstart.direct_skip_button")}
         </button>
         <button
           className="mori-btn primary"
@@ -849,9 +853,6 @@ interface DwellingProps extends CommonProps {
   scene: number;
   setScene: (s: number) => void;
   onSwitchToDirect: () => void;
-  /** First-time setup → 「先離開(Mori 仍會沉睡)」narrative;
-   *  Returning user(quickstart_completed=true)→ 「回主畫面」平實 */
-  isReturning: boolean;
 }
 
 function DwellingRite(props: DwellingProps) {
