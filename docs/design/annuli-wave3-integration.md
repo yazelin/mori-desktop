@@ -1,7 +1,12 @@
 # Annuli Wave 3 整合計劃 — mori-desktop 端
 
-> 本文件記錄 mori-desktop ↔ annuli HTTP 整合在「**annuli wave 2 完成、mori-desktop 連線啟用**」當天該怎麼動。
-> **mori-desktop 端的 HTTP client 已經完成**(v0.5+ Wave 4 客戶端框架建好了)。卡關不在我們這邊,卡在 annuli wave 2 重構。
+> 本文件記錄 mori-desktop ↔ annuli HTTP 整合 ship-day checklist。
+> **狀態(2026-05-20)**:雙邊都 ready,可以開始實機跑。
+>
+> - mori-desktop 端 client / supervisor / Config UI / AnnuliTab 全 v0.5+ ship 完
+> - annuli 端 Wave 2 + Wave 3 都已落地(`yazelin/annuli` main HEAD),Wave 4 進行中(memory section endpoints)
+> - 過去的 `refactor/split-core-creator` 是 stale branch,main 從那分流後另闢 Wave 3 path,沒 merge 回來
+>
 > 對應位置:[annuli-memory.md](annuli-memory.md) 是設計,本文是 **執行 checklist**。
 
 ---
@@ -13,12 +18,14 @@
 | `AnnuliClient`(reqwest 包裝)| ✅ done | `crates/mori-core/src/annuli/client.rs` |
 | `AnnuliMemoryStore`(impl `MemoryStore`)| ✅ done | `crates/mori-core/src/memory/annuli.rs` |
 | `annuli_supervisor`(spawn python child)| ✅ done | `crates/mori-tauri/src/annuli_supervisor.rs` |
-| Hot-reload IPC(`annuli_reload`)| ✅ done | `crates/mori-tauri/src/main.rs:1725` |
+| Hot-reload IPC(`annuli_reload`)| ✅ done | `crates/mori-tauri/src/main.rs` |
 | Config UI(endpoint / spirit / token / basic_auth)| ✅ done | ConfigTab > Annuli subtab |
 | AnnuliTab 唯讀 browser(SOUL / memory / events)| ✅ done | `src/tabs/AnnuliTab.tsx` |
-| **annuli wave 2 service** | 🚧 in progress | `yazelin/annuli` repo `refactor/split-core-creator` branch |
+| annuli Wave 2(core/creator split)| ✅ done | annuli main |
+| annuli Wave 3(4-layer reflection + vault migrated + X-Soul-Token + 8 routes)| ✅ done | annuli main |
+| annuli Wave 4(memory section endpoints)| 🚧 in progress | annuli main(POST/GET `/memory` 已加) |
 
-mori-desktop 端基本上沒事可做了 — wave 2 服務 ship、`annuli.enabled = true` 就會走 HTTP。
+雙邊都 ready — 跑下面 ship-day checklist 即可上線。
 
 ---
 
@@ -40,7 +47,7 @@ mori-desktop 端基本上沒事可做了 — wave 2 服務 ship、`annuli.enable
 
 ## Wave 3 ship day checklist(mori-desktop 端)
 
-**前提**:annuli wave 2 部署到 `localhost:5000` 並 `/health` 回 200。
+**前提**:annuli 跑起來(`cd ~/mori-universe/annuli && python -m annuli.core.adapters.cli serve` 或對應 `main.py` 入口),`curl localhost:5000/health` 回 200。
 
 1. **本機驗 client connectivity**
    - Config tab > Annuli subtab → 填 endpoint `http://localhost:5000`,spirit `mori`,user_id 你的名字。
@@ -70,7 +77,7 @@ mori-desktop 端基本上沒事可做了 — wave 2 服務 ship、`annuli.enable
 
 ### 1. CORS
 
-Annuli wave 2 Flask 預設只接 `localhost` origin。mori-tauri 內 webview 走 `http://localhost:1420`(dev)或 `tauri://localhost`(prod)。**若連不上 → 先看 CORS headers**。
+Annuli Flask 預設可能只接 `localhost` origin。mori-tauri 內 webview 走 `http://localhost:1420`(dev)或 `tauri://localhost`(prod)。**若連不上 → 先看 CORS headers**。
 
 修法:annuli `app.py` 加 `flask-cors`,允許 `tauri://*` + `http://localhost:*` origin。
 

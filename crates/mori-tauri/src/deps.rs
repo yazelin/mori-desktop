@@ -584,6 +584,73 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
         },
+        // Wave 3 整合:annuli reflection 服務的 runtime。
+        //
+        // 狀態:annuli Wave 2 + Wave 3 已落地(2026-05),Wave 4 進行中。整合可
+        // 以開始實機跑;ship-day checklist 見 docs/design/annuli-wave3-integration.md。
+        DepSpec {
+            id: "annuli-runtime",
+            name: "Annuli 反思服務 runtime(Python venv)",
+            description: "Mori 的「年輪」反思服務 — vault-backed,寫長期記憶 + 跑 \
+                          /sleep ring reflection + 4-layer reflection(events / digest \
+                          / rings / curator)。沒裝 → mori-desktop 走 ~/.mori/memory/ \
+                          本機 fallback(目前狀態 OK,SOUL.md / 4-layer ring 全失效)。",
+            unlocks: "annuli.enabled=true 時走 HTTP 對接 ~/mori-universe/spirits/<name>/ \
+                      vault(SOUL.md + MEMORY.md + events + rings)",
+            size_hint: Some("~200MB(annuli code + venv + deps)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos"],
+            install_caveat: Some(
+                "Annuli Wave 4 仍在進行中。基本對接(SOUL / MEMORY / events / rings / sleep)\
+                 都接好可用,Wave 4 新 endpoints(memory section)還在收尾。裝完到 Config tab \
+                 開 annuli.enabled + 填 endpoint http://localhost:5000 即可連線。\
+                 整合 checklist 見 docs/design/annuli-wave3-integration.md。",
+            ),
+            check: CheckSpec::File {
+                path_template: "$HOME/mori-universe/annuli/.venv/bin/python",
+            },
+            install: InstallSpec::Shell {
+                script: "set -e; \
+                         ANNULI=\"$HOME/mori-universe/annuli\"; \
+                         UV=\"$HOME/.local/bin/uv\"; \
+                         if [ ! -d \"$ANNULI\" ]; then \
+                            echo '從 GitHub 拉 annuli...'; \
+                            mkdir -p \"$HOME/mori-universe\"; \
+                            git clone https://github.com/yazelin/annuli \"$ANNULI\"; \
+                         fi; \
+                         cd \"$ANNULI\"; \
+                         if [ ! -d \"$ANNULI/.venv\" ]; then \
+                            if [ -x \"$UV\" ]; then \
+                                echo '用 uv 建 venv...'; \
+                                \"$UV\" venv \"$ANNULI/.venv\" --python 3.11; \
+                            else \
+                                python3.11 -m venv \"$ANNULI/.venv\" || python3 -m venv \"$ANNULI/.venv\"; \
+                            fi; \
+                         fi; \
+                         if [ -x \"$UV\" ]; then \
+                            echo '用 uv pip install -e .'; \
+                            \"$UV\" pip install --python \"$ANNULI/.venv/bin/python\" -e \"$ANNULI\"; \
+                         elif [ -x \"$ANNULI/.venv/bin/pip\" ]; then \
+                            \"$ANNULI/.venv/bin/pip\" install -e \"$ANNULI\"; \
+                         else \
+                            \"$ANNULI/.venv/bin/python\" -m ensurepip --upgrade; \
+                            \"$ANNULI/.venv/bin/python\" -m pip install -e \"$ANNULI\"; \
+                         fi; \
+                         echo '✓ annuli runtime 裝好了。記得到 Config tab 開 annuli.enabled + 填 endpoint http://localhost:5000。'",
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows 一鍵安裝尚未實作 — annuli wave 2 ship 後再補。",
+                        "# 暫時手動跑(需 git + Python 3.11):",
+                        "git clone https://github.com/yazelin/annuli %USERPROFILE%\\mori-universe\\annuli",
+                        "cd %USERPROFILE%\\mori-universe\\annuli",
+                        "uv venv .venv --python 3.11",
+                        "uv pip install --python .venv\\Scripts\\python.exe -e .",
+                    ],
+                }),
+            ],
+        },
     ]
 }
 
