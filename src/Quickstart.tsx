@@ -67,7 +67,28 @@ interface QuickstartProps {
 
 export function Quickstart({ onDone }: QuickstartProps) {
   const { t, i18n } = useTranslation();
+  // First-time vs returning:第一次跑 quickstart_completed != true → ritual 模式預設,
+  // dismiss 按鈕用「先離開(Mori 仍會沉睡)」narrative。
+  // 已 quickstart_completed → direct 模式預設(?/召喚師 點來改設定的人不需要再走儀式),
+  // dismiss 按鈕變平實「回主畫面」(Mori 已醒,沒有沉睡 narrative)。
+  const [isReturning, setIsReturning] = useState<boolean>(false);
   const [mode, setMode] = useState<Mode>("ritual");
+  useEffect(() => {
+    invoke<string>("config_read")
+      .then((text) => {
+        try {
+          const cfg = JSON.parse(text);
+          const completed = cfg?.quickstart_completed === true;
+          setIsReturning(completed);
+          if (completed) setMode("direct");
+        } catch {
+          /* config parse 失敗 → 當第一次跑 */
+        }
+      })
+      .catch(() => {
+        /* 沒 config → 第一次跑 */
+      });
+  }, []);
   // 收尾用 — 「回家」按下後 modal 跟音樂同步 fade-out 600ms 才 onDone,
   // 不直接硬切視窗破壞儀式氣氛。Direct mode 也吃同一路徑(沒音樂時純 CSS 淡出)。
   const [closing, setClosing] = useState(false);
@@ -310,6 +331,17 @@ export function Quickstart({ onDone }: QuickstartProps) {
       // 召喚師之名 → user.name
       cfg.user.name = summonerName.trim();
 
+      // 同步 annuli.user_id(若 annuli 已存在但 user_id 還沒設,寫進去 — 對齊 vault identity)。
+      // 沒 cfg.annuli → 不建,startup auto-detect 偵測 runtime 時會自己拿 user.name 當 default。
+      // 已設過 user_id(非空)→ 尊重不覆蓋(可能是 user 在 Config tab 改過)。
+      if (cfg.annuli && typeof cfg.annuli === "object") {
+        const annuli = cfg.annuli as Record<string, unknown>;
+        const curUid = typeof annuli.user_id === "string" ? annuli.user_id.trim() : "";
+        if (!curUid) {
+          annuli.user_id = summonerName.trim();
+        }
+      }
+
       // 靈氣 → providers.groq.api_key (STT)
       // 維持寫進 providers.groq.api_key — Mori-core groq.rs discover_api_key 兩處都讀,
       // 但這條 inline path 是 Groq 主要存放位置(模型/STT model 也在 providers.groq.*)
@@ -472,6 +504,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             envGeminiDetected={envGeminiDetected}
             envOpenaiDetected={envOpenaiDetected}
             starterLocale={starterLocale} setStarterLocale={setStarterLocale}
+            isReturning={isReturning}
           />
         ) : (
           <DwellingRite
@@ -492,6 +525,7 @@ export function Quickstart({ onDone }: QuickstartProps) {
             envOpenaiDetected={envOpenaiDetected}
             starterLocale={starterLocale} setStarterLocale={setStarterLocale}
             onSwitchToDirect={() => setMode("direct")}
+            isReturning={isReturning}
           />
         )}
       </div>
@@ -561,6 +595,9 @@ interface CommonProps {
   envOpenaiDetected: boolean;
   starterLocale: "zh" | "en";
   setStarterLocale: (l: "zh" | "en") => void;
+  /** First-time(quickstart_completed != true)→ ritual / direct 都顯示「跳過 / 沉睡」
+   *  narrative;Returning(已 completed)→ 「回主畫面」平實。從 Quickstart root 傳下來。 */
+  isReturning: boolean;
 }
 
 // ─── 直接模式 ───────────────────────────────────────────────
@@ -571,7 +608,7 @@ function DirectForm(props: CommonProps) {
     powerBase, setPowerBase, powerModel, setPowerModel,
     verify, setVerify, doVerify, doSave, doSkip,
     envGroqDetected, envGeminiDetected, envOpenaiDetected,
-    starterLocale, setStarterLocale } = props;
+    starterLocale, setStarterLocale, isReturning } = props;
 
   const auraReal = auraKey.trim().length > 5 || (envGroqDetected && auraKey.trim() === "");
   // env-only path:env 偵測到 + 沒填 key 也算 ready(custom 多要求 api_base 已填)
@@ -793,9 +830,9 @@ function DirectForm(props: CommonProps) {
         <button
           className="mori-btn"
           onClick={doSkip}
-          title={t("quickstart.direct_skip_button_hint")}
+          title={t(isReturning ? "quickstart.ritual_dismiss_returning_hint" : "quickstart.direct_skip_button_hint")}
         >
-          {t("quickstart.direct_skip_button")}
+          {t(isReturning ? "quickstart.ritual_dismiss_returning" : "quickstart.direct_skip_button")}
         </button>
         <button
           className="mori-btn primary"
@@ -853,7 +890,7 @@ type StepProps = DwellingProps & {
 // ─── 第一幕 · 召喚 ──────────────────────────────────────────
 
 function SceneSummoning({
-  t, summonerName, setSummonerName, dots, onNext, doSkip, onSwitchToDirect,
+  t, summonerName, setSummonerName, dots, onNext, doSkip, onSwitchToDirect, isReturning,
 }: StepProps) {
   const nameReady = summonerName.trim().length > 0;
   // 召喚師打字時 confirm 兩段會動態冒出來,scroll 容器自動拉到底,
@@ -902,9 +939,9 @@ function SceneSummoning({
         <button
           className="mori-btn ghost"
           onClick={doSkip}
-          title={t("quickstart.ritual_dismiss_hint")}
+          title={t(isReturning ? "quickstart.ritual_dismiss_returning_hint" : "quickstart.ritual_dismiss_hint")}
         >
-          {t("quickstart.ritual_dismiss")}
+          {t(isReturning ? "quickstart.ritual_dismiss_returning" : "quickstart.ritual_dismiss")}
         </button>
         <button
           className="mori-btn ghost"

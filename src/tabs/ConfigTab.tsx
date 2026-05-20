@@ -2085,6 +2085,7 @@ function ConfigTab({
 
           {/* ── Annuli(vault-backed reflection engine) ────── */}
           {subTab === "annuli" && <>
+          <AnnuliStatusBanner />
           <Section
             title={t("config_tab.sections.annuli_connection")}
             hint={t("config_tab.sections.annuli_connection_hint")}
@@ -2493,6 +2494,117 @@ function WakeWordModelPicker() {
         )}
       </div>
     </FormRow>
+  );
+}
+
+// ─── Annuli status banner(Config tab Annuli 段頭) ───────────────────
+//
+// 顯示當前 annuli 連線狀態 — endpoint / configured / reachable / soul_token /
+// supervisor 是否在跑。Save 後 annuli_reload 跑完,點重新檢查或自動 30s 一次。
+
+type AnnuliStatusBannerStatus = {
+  configured: boolean;
+  reachable: boolean;
+  endpoint: string | null;
+  spirit: string | null;
+  user_id: string | null;
+  soul_token_configured: boolean;
+  error: string | null;
+};
+
+function AnnuliStatusBanner() {
+  const [status, setStatus] = useState<AnnuliStatusBannerStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const refresh = async () => {
+    setChecking(true);
+    try {
+      const st = await invoke<AnnuliStatusBannerStatus>("annuli_status");
+      setStatus(st);
+    } catch (e) {
+      console.error("[annuli status banner]", e);
+      setStatus(null);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 三色狀態(對齊 --c-*-bg/text token,light/dark 都 OK):
+  // - 綠 connected: configured + reachable
+  // - 黃 unreachable: configured + !reachable(annuli 沒跑)
+  // - 灰 disabled: !configured(fallback LocalMarkdown)
+  let bg = "var(--c-input-bg)";
+  let border = "var(--c-border)";
+  let label = "(載入中…)";
+  let detail: React.ReactNode = null;
+  if (status) {
+    if (!status.configured) {
+      bg = "var(--c-input-bg)";
+      border = "var(--c-border)";
+      label = "● Disabled — 走本機 ~/.mori/memory/ fallback";
+      detail = (
+        <span style={{ color: "var(--c-text-muted)" }}>
+          打開下方 enabled + 填 endpoint/spirit/user_id,儲存後自動熱重載 client。
+        </span>
+      );
+    } else if (status.reachable) {
+      bg = "var(--c-success-bg)";
+      border = "var(--c-border-strong)";
+      label = "● Connected";
+      detail = (
+        <span style={{ color: "var(--c-text)" }}>
+          {status.endpoint} · spirit=<code>{status.spirit ?? "?"}</code> · user_id=
+          <code>{status.user_id ?? "?"}</code> · soul_token{" "}
+          {status.soul_token_configured ? "✓ 已設" : "✗ 未設(寫敏感資料會 403)"}
+        </span>
+      );
+    } else {
+      bg = "var(--c-warning-bg)";
+      border = "var(--c-warning-border)";
+      label = "● Unreachable — annuli 沒在跑 / endpoint 不對";
+      detail = (
+        <span style={{ color: "var(--c-warning-text)" }}>
+          {status.endpoint ?? "(無 endpoint)"} {status.error ? `· ${status.error}` : ""}
+          {" — Annuli tab 一鍵啟用,或 "}
+          <code>cd ~/mori-universe/annuli && python main.py admin --port 5000</code>
+        </span>
+      );
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "10px 14px",
+        marginBottom: 12,
+        background: bg,
+        border: `1px solid ${border}`,
+        borderRadius: 6,
+        fontSize: 12.5,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <strong style={{ color: "var(--c-text-strong)" }}>{label}</strong>
+        <button
+          className="mori-btn small ghost"
+          onClick={refresh}
+          disabled={checking}
+          style={{ fontSize: 11 }}
+        >
+          {checking ? "檢查中…" : "↻ 重新檢查"}
+        </button>
+      </div>
+      {detail && <div>{detail}</div>}
+    </div>
   );
 }
 

@@ -1742,6 +1742,83 @@ fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String>
 ///   state.annuli_handle() 拿 snapshot,所以 swap 完下一次 invoke 自動拿到新 store。
 /// - 既有 in-flight 請求(例如 AnnuliMemoryStore 正在 POST /memory/section)持有
 ///   舊 client 的 Arc,會跑完才 drop — 不會中斷。
+/// 決定 annuli `user_id` 預設值的順序:
+/// 1. `cfg.user.name`(Quickstart 召喚師之名,user 真正取的名)
+/// 2. `$USER` / `$USERNAME` env(OS user 兜底,例如 `ct` / `Administrator`)
+/// 3. `"user"` 字串硬兜底
+///
+/// 給 `annuli_quick_enable` + startup auto-detect 共用,讓 Quickstart 名跟
+/// annuli vault id 自動對齊 — 不會出現 Quickstart「yazelin」但 vault 寫成 `ct` 的 split identity。
+fn pick_annuli_user_id_default(config_path: &std::path::Path) -> String {
+    let from_user_name = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.pointer("/user/name")
+                .and_then(|x| x.as_str())
+                .map(String::from)
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(name) = from_user_name {
+        return name;
+    }
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".into())
+}
+
+/// 把 supervisor 狀態對齊 config — enable / disable 對稱。
+///
+/// - 想 enabled,supervisor 不是 healthy → drop + maybe_spawn(內部 health-check
+///   過會 not-spawn,只 reset SupervisorInfo)
+/// - 想 disabled,supervisor 是「我們 spawn 的」(spawned / spawned-not-ready)
+///   → drop(kill_on_drop 帶走 annuli child)
+/// - 想 disabled,supervisor 是「已 running 外部 process」(already-running)→ 不動,
+///   那是 user 自己跑的 annuli,我們不該殺
+///
+/// 由 `annuli_reload` / `annuli_quick_enable` / startup auto-detect 共用。
+async fn sync_supervisor_to_config(state: &AppState, cfg: &annuli_config::AnnuliConfig) {
+    let cur_state = state
+        .annuli_supervisor
+        .lock()
+        .as_ref()
+        .map(|s| s.info.state);
+
+    if !cfg.enabled {
+        // 只殺「我們 spawn」的;external annuli 不動。
+        if matches!(cur_state, Some("spawned") | Some("spawned-not-ready")) {
+            tracing::info!(
+                prev_state = ?cur_state,
+                "annuli disabled — dropping supervisor to kill our spawned annuli child"
+            );
+            *state.annuli_supervisor.lock() = None;
+        } else {
+            tracing::debug!(
+                prev_state = ?cur_state,
+                "annuli disabled — supervisor state unchanged (not our child)"
+            );
+        }
+        return;
+    }
+
+    // 想 enabled。已 healthy(spawned / already-running)→ 不動。
+    if matches!(cur_state, Some("spawned") | Some("already-running")) {
+        tracing::debug!(prev_state = ?cur_state, "annuli enabled — supervisor 已健康");
+        return;
+    }
+    // 否則:drop 舊(disabled / remote / failed / spawned-not-ready)+ maybe_spawn 新
+    *state.annuli_supervisor.lock() = None;
+    let sup = annuli_supervisor::AnnuliSupervisor::maybe_spawn(cfg).await;
+    tracing::info!(
+        prev_state = ?cur_state,
+        new_state = sup.info.state,
+        reason = %sup.info.reason,
+        "annuli enabled — supervisor (re-)spawned"
+    );
+    *state.annuli_supervisor.lock() = Some(sup);
+}
+
 /// 偵測 annuli runtime 在不在(`~/mori-universe/annuli/.venv/bin/python`)。
 /// AnnuliTab 用這條決定要不要顯示「一鍵啟用」按鈕。Windows fallback `Scripts/python.exe`。
 #[tauri::command]
@@ -1807,10 +1884,10 @@ async fn annuli_quick_enable(
         a.insert("spirit_name".to_string(), serde_json::json!("mori"));
     }
     if str_empty(a, "user_id") {
-        let default_uid = std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "user".into());
-        a.insert("user_id".to_string(), serde_json::json!(default_uid));
+        a.insert(
+            "user_id".to_string(),
+            serde_json::json!(pick_annuli_user_id_default(&config_path)),
+        );
     }
     std::fs::create_dir_all(mori_dir())
         .map_err(|e| format!("mkdir ~/.mori: {e}"))?;
@@ -1833,29 +1910,14 @@ async fn annuli_quick_enable(
     *state.memory.write() = store;
     *state.annuli.write() = Some(client);
 
-    // 4. supervisor spawn — 只在沒 healthy 時動。已 spawned/already-running 別重啟。
-    let cur_state = state
+    // 4. supervisor 對齊 config(共用 helper,enable→啟動 / disable→殺 child)
+    sync_supervisor_to_config(&state, &annuli_cfg).await;
+    let info_msg = state
         .annuli_supervisor
         .lock()
         .as_ref()
-        .map(|s| s.info.state)
-        .unwrap_or("none");
-    let info_msg = if !matches!(cur_state, "spawned" | "already-running") {
-        // drop old(kill child if any)
-        *state.annuli_supervisor.lock() = None;
-        let sup = annuli_supervisor::AnnuliSupervisor::maybe_spawn(&annuli_cfg).await;
-        let m = format!("supervisor: {} ({})", sup.info.state, sup.info.reason);
-        *state.annuli_supervisor.lock() = Some(sup);
-        m
-    } else {
-        let r = state
-            .annuli_supervisor
-            .lock()
-            .as_ref()
-            .map(|s| s.info.reason.clone())
-            .unwrap_or_default();
-        format!("supervisor 已健康({cur_state} — {r})")
-    };
+        .map(|s| format!("supervisor: {} ({})", s.info.state, s.info.reason))
+        .unwrap_or_else(|| "supervisor: none".into());
     tracing::info!(info = %info_msg, "annuli quick-enable done");
     let _ = app.emit(
         "annuli-supervisor-changed",
@@ -1864,13 +1926,24 @@ async fn annuli_quick_enable(
     Ok(format!("✓ Annuli 已啟用。{info_msg}"))
 }
 
+/// C — annuli 熱重載 command。
+///
+/// 流程:
+/// 1. 重讀 `~/.mori/config.json` 的 `annuli` 子樹
+/// 2. 若 ready:重建 AnnuliClient + AnnuliMemoryStore;不 ready:重建 LocalMarkdownMemoryStore
+/// 3. 原子 swap 進 AppState.memory / AppState.annuli
+/// 4. **`sync_supervisor_to_config`** — enable→啟動 supervisor / disable→殺我們 spawn 的 child
+///
+/// skill_server / annuli_commands / agent pipeline 都走 state.memory_handle() /
+/// state.annuli_handle() 拿 snapshot,swap 完下一次 invoke 自動拿到新 store。
+/// 既有 in-flight 請求(例 AnnuliMemoryStore POST 中)持有舊 client Arc,跑完才 drop。
 #[tauri::command]
 async fn annuli_reload(state: tauri::State<'_, Arc<AppState>>) -> Result<String, String> {
     let config_path = mori_core::llm::groq::GroqProvider::bootstrap_mori_config()
         .map_err(|e| format!("locate config.json: {e:#}"))?;
     let annuli_cfg = annuli_config::AnnuliConfig::load(&config_path);
 
-    if annuli_cfg.is_ready() {
+    let result_msg = if annuli_cfg.is_ready() {
         let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
             .map_err(|e| format!("build annuli client: {e:#}"))?;
         let client = Arc::new(client);
@@ -1885,10 +1958,10 @@ async fn annuli_reload(state: tauri::State<'_, Arc<AppState>>) -> Result<String,
             user_id = %annuli_cfg.user_id,
             "annuli hot-reload → AnnuliMemoryStore"
         );
-        Ok(format!(
+        format!(
             "reloaded: annuli enabled @ {} (spirit={}, user_id={})",
             annuli_cfg.endpoint, annuli_cfg.spirit_name, annuli_cfg.user_id
-        ))
+        )
     } else {
         let memory_root = mori_core::memory::markdown::LocalMarkdownMemoryStore::default_root()
             .map_err(|e| format!("locate ~/.mori/memory: {e:#}"))?;
@@ -1900,11 +1973,16 @@ async fn annuli_reload(state: tauri::State<'_, Arc<AppState>>) -> Result<String,
             path = %memory_root.display(),
             "annuli hot-reload → LocalMarkdownMemoryStore (annuli disabled)"
         );
-        Ok(format!(
+        format!(
             "reloaded: annuli disabled, fallback LocalMarkdown @ {}",
             memory_root.display()
-        ))
-    }
+        )
+    };
+
+    // 把 supervisor 對齊 config(enable→啟動 / disable→殺我們 spawn 的 child)
+    sync_supervisor_to_config(&state, &annuli_cfg).await;
+
+    Ok(result_msg)
 }
 
 #[tauri::command]
@@ -4472,10 +4550,56 @@ fn main() {
     };
 
     // 載入 annuli config(hoist 出外層 — supervisor spawn task 也要這個 cfg)
-    let annuli_cfg = config_path
+    let mut annuli_cfg = config_path
         .as_deref()
         .map(annuli_config::AnnuliConfig::load)
         .unwrap_or_default();
+
+    // Startup auto-detect:user 從沒設過 annuli + runtime 在 ~/mori-universe/annuli/
+    // → 自動寫 sane defaults 進 config + 開 annuli。**只在 config 完全沒 annuli 段
+    // 時觸發**(尊重 user 明示 disabled 的設定);第二次跑就走正常 load path。
+    let annuli_section_present = config_path
+        .as_deref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .map(|v| v.get("annuli").is_some())
+        .unwrap_or(false);
+    if !annuli_section_present && annuli_runtime_installed() {
+        if let Some(cfg_path) = &config_path {
+            let default_uid = pick_annuli_user_id_default(cfg_path);
+            let mut json: serde_json::Value = std::fs::read_to_string(cfg_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            if let Some(obj) = json.as_object_mut() {
+                obj.insert(
+                    "annuli".to_string(),
+                    serde_json::json!({
+                        "enabled": true,
+                        "endpoint": "http://localhost:5000",
+                        "spirit_name": "mori",
+                        "user_id": default_uid,
+                    }),
+                );
+                if let Ok(text) = serde_json::to_string_pretty(&json) {
+                    match std::fs::write(cfg_path, text) {
+                        Ok(()) => tracing::info!(
+                            path = %cfg_path.display(),
+                            user_id = %default_uid,
+                            "annuli auto-detect: 寫進 default config(從沒設過 + runtime 在)"
+                        ),
+                        Err(e) => tracing::warn!(
+                            error = %e,
+                            path = %cfg_path.display(),
+                            "annuli auto-detect: 寫 config 失敗,跳過"
+                        ),
+                    }
+                }
+            }
+            annuli_cfg = annuli_config::AnnuliConfig::load(cfg_path);
+        }
+    }
+    let annuli_cfg = annuli_cfg; // 從這之後 immutable
 
     // 建立長期記憶 store + (可選)annuli HTTP client。Wave 4:
     // ~/.mori/config.json 有 `annuli.enabled=true` 且 endpoint / spirit / user_id
