@@ -174,6 +174,25 @@ impl AppState {
         // v0.3.1: floating.show_mode=recording 時,phase 切換要同步動 floating 顯示/隱藏。
         // Toggle 跟 Hold 兩個 mode 都走這條,一次到位。
         update_floating_visibility(app, &new_phase);
+
+        // Phase 3A 健康度補救:Listening mode 下每完成一輪 wake-triggered cycle
+        // (進入 Done/Error)就 respawn Python wake-listener。
+        //
+        // **為什麼**:cpal 開錄音 → 跟 sounddevice 共用 mic → 錄音結束釋放後,
+        // Windows audio session 偶爾把 sd 那條 input stream 弄進壞狀態(buffer
+        // 變靜音 / 空 frame),openwakeword 內部 feature buffer 累積 garbage,
+        // 雖然 Python 還活著但永不再 fire Wake event。實測 2 輪後就靜默。
+        //
+        // 對應:踢掉 Python(drop child + sd stream 隨之關)+ 重 spawn → 拿乾淨
+        // sd InputStream。延遲 ~2s(openwakeword model load),user 喊「Hey Mori」
+        // 之前該綽綽有餘。
+        if matches!(*self.mode.lock(), Mode::Listening)
+            && matches!(new_phase, Phase::Done { .. } | Phase::Error { .. })
+        {
+            update_wake_word_listener(self, app, Mode::Listening, Mode::Agent);
+            update_wake_word_listener(self, app, Mode::Agent, Mode::Listening);
+            tracing::info!("wake-listener respawned after cycle complete (fresh audio stream)");
+        }
     }
 
     /// 切換模式。idempotent — 同模式不發 event、不留 log。
@@ -4825,6 +4844,11 @@ fn main() {
             // Fresh user 不用先跑 mori-wake-train.py 就能用 Hey Mori。自訓過的不覆蓋。
             wake_word::ensure_default_model(&mori_dir());
 
+            // Phase 3A:deploy ~/.mori/bin/mori-wake-listener.py(openWakeWord bridge)。
+            // 跟 tts / speaker_id script 一樣 setup-time 自動展開,user 切 Hey Mori 待命
+            // 才不會因 script 沒裝 ERROR(乾淨 Windows 機尤其踩)。User 改過不覆寫。
+            wake_word::ensure_listener_script_deployed(&mori_dir());
+
             // Phase 3D:deploy ~/.mori/bin/mori-tts-edge.py(edge-tts bridge script)。
             // TTS speak-back 預設 OFF,user enable 才會用到。但 script 先 deploy 不影響。
             tts::ensure_script_deployed(&mori_dir());
@@ -5370,6 +5394,20 @@ fn main() {
                 // 不在 listener thread 裡呼叫 handle_hotkey_pressed — 它會 lock
                 // state.phase 等等,跑長一點怕擋住 Tauri event 派發。spawn 走。
                 tauri::async_runtime::spawn(async move {
+                    // Re-entrancy guard:user 在前一輪 wake → record/transcribe/agent
+                    // 還沒跑完時又喊 Hey Mori,新 wake event 不能去 handle_hotkey_pressed
+                    // (在 Recording 階段呼叫等同 toggle 停錄音 → 跟前一輪 stop_and_transcribe
+                    // 撞 state,整條 pipeline 卡住)。直接 ignore。
+                    {
+                        let phase = state.phase.lock();
+                        if !matches!(*phase, Phase::Idle | Phase::Done { .. } | Phase::Error { .. }) {
+                            tracing::debug!(
+                                phase = ?*phase,
+                                "wake event ignored — pipeline still busy from previous wake"
+                            );
+                            return;
+                        }
+                    }
                     // Phase 3A.1.2:wake-ack 音效。blocking 直到 ack 播完才開錄音,
                     // 避免 ack 從喇叭出來被 mic 收回污染 STT。spawn_blocking 把 rodio
                     // 的 sleep_until_end 移出 async runtime,不擋其他 task。

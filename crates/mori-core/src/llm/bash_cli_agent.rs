@@ -346,10 +346,23 @@ impl LlmProvider for BashCliAgentProvider {
             }
             CliProtocol::Codex => {
                 // codex 走 `codex exec` subcommand；system prompt 嵌進 stdin 頂部。
+                //
+                // `--dangerously-bypass-approvals-and-sandbox` 在 Linux/macOS 跳過所有
+                // approval prompt + sandbox 限制。**Windows 上這個 flag 會 hang**
+                // (推測:Windows 走 Linux-only sandbox primitive 初始化卡住,實測
+                // 純 PowerShell 跑同樣指令也 5+ 分鐘 0 output)。
+                //
+                // Windows 不傳 flag,改靠 codex 預設行為:`approval: never` 自動套用
+                // 於 non-interactive(有 `[PROMPT]` arg 或 stdin pipe),`sandbox:
+                // workspace-write` 允許 workdir / tmp 讀寫 — 足夠 mori 翻譯 / 簡單
+                // skill 的使用情境。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
                 let mut c = cli_command(&self.binary);
-                c.arg("exec")
-                    .arg("--dangerously-bypass-approvals-and-sandbox");
+                c.arg("exec");
+                #[cfg(not(target_os = "windows"))]
+                {
+                    c.arg("--dangerously-bypass-approvals-and-sandbox");
+                }
                 if let Some(model) = &self.model {
                     c.arg("--model").arg(model);
                 }

@@ -44,6 +44,10 @@ pub struct DepSpec {
     pub install_caveat: Option<&'static str>,
     /// 檢測指令(只回 0=有 / 非 0=沒有,stdout 拿來顯示版本資訊)
     pub check: CheckSpec,
+    /// 平台特定 check override。mirror `install_overrides` — Windows 的 binary
+    /// 通常多 `.exe` / venv 走 `Scripts\python.exe` 而非 `bin/python`,需要單獨
+    /// 寫一份 CheckSpec 才能正確偵測「裝過了沒」。
+    pub check_overrides: &'static [(&'static str, CheckSpec)],
     /// 安裝指令(若 needs_sudo,只給 user 看不執行)
     pub install: InstallSpec,
     /// 平台特定 install override。lookup 順序:此 list 內找符合 OS 的 →
@@ -63,6 +67,17 @@ impl DepSpec {
             }
         }
         &self.install
+    }
+
+    /// 取得當前 OS 適用的 CheckSpec — 跟 effective_install 同邏輯。
+    pub fn effective_check(&self) -> &CheckSpec {
+        let os = std::env::consts::OS;
+        for (platform, spec) in self.check_overrides {
+            if *platform == os {
+                return spec;
+            }
+        }
+        &self.check
     }
 
     /// 此 dep 是否適用當前 OS(用於 deps_list filter)。
@@ -133,6 +148,11 @@ pub fn registry() -> Vec<DepSpec> {
             check: CheckSpec::File {
                 path_template: "$HOME/.local/bin/uv",
             },
+            check_overrides: &[
+                ("windows", CheckSpec::File {
+                    path_template: "$HOME/.local/bin/uv.exe",
+                }),
+            ],
             install: InstallSpec::Shell {
                 script: "curl -LsSf https://astral.sh/uv/install.sh | sh",
             },
@@ -157,6 +177,11 @@ pub fn registry() -> Vec<DepSpec> {
             check: CheckSpec::File {
                 path_template: "$HOME/.local/bin/yt-dlp",
             },
+            check_overrides: &[
+                ("windows", CheckSpec::File {
+                    path_template: "$HOME/.local/bin/yt-dlp.exe",
+                }),
+            ],
             install: InstallSpec::Shell {
                 // 一鍵 bootstrap:沒 uv 先 curl install.sh,再用 uv 裝 yt-dlp
                 script: "if [ ! -x \"$HOME/.local/bin/uv\" ]; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi && \"$HOME/.local/bin/uv\" tool install --upgrade yt-dlp",
@@ -180,6 +205,7 @@ pub fn registry() -> Vec<DepSpec> {
             platforms: &["linux"],
             install_caveat: None,
             check: CheckSpec::Which { bin: "ydotool" },
+            check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &[
                     "sudo apt install ydotool",
@@ -202,6 +228,7 @@ pub fn registry() -> Vec<DepSpec> {
             platforms: &["linux"],
             install_caveat: None,
             check: CheckSpec::Which { bin: "xdotool" },
+            check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &["sudo apt install xdotool"],
             },
@@ -217,6 +244,7 @@ pub fn registry() -> Vec<DepSpec> {
             platforms: &["linux"],
             install_caveat: None,
             check: CheckSpec::Which { bin: "xclip" },
+            check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &["sudo apt install xclip"],
             },
@@ -234,6 +262,7 @@ pub fn registry() -> Vec<DepSpec> {
             check: CheckSpec::File {
                 path_template: "$HOME/.mori/models/ggml-small.bin",
             },
+            check_overrides: &[],
             install: InstallSpec::Shell {
                 script: "mkdir -p \"$HOME/.mori/models\" && \
                          wget -O \"$HOME/.mori/models/ggml-small.bin\" \
@@ -263,6 +292,11 @@ pub fn registry() -> Vec<DepSpec> {
             check: CheckSpec::File {
                 path_template: "$HOME/.mori/bin/whisper-server",
             },
+            check_overrides: &[
+                ("windows", CheckSpec::File {
+                    path_template: "$HOME/.mori/bin/whisper-server.exe",
+                }),
+            ],
             install: InstallSpec::Shell {
                 // 從 whisper.cpp GitHub release 抓 Linux x86_64 build,解壓出
                 // whisper-server。版本固定 pin 一個近期 stable;升級換 tag 即可。
@@ -309,6 +343,7 @@ pub fn registry() -> Vec<DepSpec> {
             platforms: &["linux", "macos", "windows"],
             install_caveat: None,
             check: CheckSpec::Which { bin: "claude" },
+            check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &[
                     "# 官方安裝(需先有 Node.js 18+):",
@@ -332,6 +367,7 @@ pub fn registry() -> Vec<DepSpec> {
             platforms: &["linux", "macos", "windows"],
             install_caveat: None,
             check: CheckSpec::Which { bin: "gemini" },
+            check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &[
                     "# 官方安裝(需先有 Node.js 18+):",
@@ -356,6 +392,7 @@ pub fn registry() -> Vec<DepSpec> {
                 "Windows 需要 v0.130+(JS 版),舊 native variant 不支援。",
             ),
             check: CheckSpec::Which { bin: "codex" },
+            check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &[
                     "# 官方安裝(需先有 Node.js 18+):",
@@ -377,6 +414,7 @@ pub fn registry() -> Vec<DepSpec> {
             platforms: &["linux", "macos", "windows"],
             install_caveat: None,
             check: CheckSpec::Which { bin: "ollama" },
+            check_overrides: &[],
             install: InstallSpec::Shell {
                 script: "curl -fsSL https://ollama.com/install.sh | sh",
             },
@@ -405,6 +443,7 @@ pub fn registry() -> Vec<DepSpec> {
                 args: &["list"],
                 needle: "qwen3:8b",
             },
+            check_overrides: &[],
             install: InstallSpec::Shell {
                 script: "ollama pull qwen3:8b",
             },
@@ -429,13 +468,17 @@ pub fn registry() -> Vec<DepSpec> {
             size_hint: Some("~150MB"),
             needs_sudo: false,
             platforms: &["linux", "macos", "windows"],
-            install_caveat: Some(
-                "Windows 一鍵安裝尚未實作(PowerShell 版 venv 路徑不一樣)— \
-                 暫時看 README.wake-train.md 手動設。",
-            ),
+            install_caveat: None,
+            // venv python 路徑跨平台:Linux/macOS `bin/python`、Windows `Scripts/python.exe`。
+            // CheckSpec::File 走 effective_check,各平台 override。
             check: CheckSpec::File {
                 path_template: "$HOME/.mori/wake-venv/bin/python",
             },
+            check_overrides: &[
+                ("windows", CheckSpec::File {
+                    path_template: "$HOME/.mori/wake-venv/Scripts/python.exe",
+                }),
+            ],
             // Linux/macOS:有 uv 用 uv,沒 uv fallback system python3.11
             // ⚠ uv venv 建的 venv **沒 pip 模組** — 必須用 `uv pip install` 或先
             // `python -m ensurepip` 補 pip 才能用。
@@ -464,15 +507,36 @@ pub fn registry() -> Vec<DepSpec> {
                             \"$VENV/bin/python\" -m ensurepip --upgrade; \
                             \"$VENV/bin/python\" -m pip install $PACKAGES; \
                          fi; \
-                         echo '✓ wake-venv + openwakeword 裝好了'",
+                         echo '下載 openwakeword pipeline models(mel / embedding / silero_vad,~4 MB)...'; \
+                         \"$VENV/bin/python\" -c 'from openwakeword.utils import download_models; download_models([\"__pipeline_only__\"])'; \
+                         echo '  ↑ 傳 dummy name 跳過 pre-trained wake-words(jarvis/alexa/mycroft/...)— Mori 用自家 hey-mori.onnx'; \
+                         echo '✓ wake-venv + openwakeword + pipeline models 裝好了'",
             },
+            // Windows 走同樣的 uv 邏輯,只是 venv 內 python 在 Scripts\python.exe。
+            // 走 Git Bash(sh -c),Tauri dep installer 端用 Command::new(\"sh\")。
+            // 假設 user 已裝 Git for Windows(repo verify.sh 也依賴),沒裝就走 Manual
+            // fallback。uv 沒裝會 fallback 提示去先裝 uv-runtime dep。
             install_overrides: &[
-                ("windows", InstallSpec::Manual {
-                    commands: &[
-                        "# Windows PowerShell(需先裝 Python 3.11):",
-                        "python -m venv %USERPROFILE%\\.mori\\wake-venv",
-                        "%USERPROFILE%\\.mori\\wake-venv\\Scripts\\pip install openwakeword sounddevice numpy onnxruntime scikit-learn",
-                    ],
+                ("windows", InstallSpec::Shell {
+                    script: "set -e; \
+                             VENV=\"$HOME/.mori/wake-venv\"; \
+                             UV=\"$HOME/.local/bin/uv.exe\"; \
+                             [ -x \"$UV\" ] || UV=\"$(command -v uv || true)\"; \
+                             if [ -z \"$UV\" ] || [ ! -x \"$UV\" ]; then \
+                                echo '✗ 找不到 uv — 請先安裝 uv-runtime(Deps tab 上方那一條)'; exit 1; \
+                             fi; \
+                             VENV_PY=\"$VENV/Scripts/python.exe\"; \
+                             if [ ! -d \"$VENV\" ]; then \
+                                echo '用 uv 建 venv(會自動下載 Python 3.11)...'; \
+                                \"$UV\" venv \"$VENV\" --python 3.11; \
+                             fi; \
+                             PACKAGES='openwakeword sounddevice numpy onnxruntime scikit-learn'; \
+                             echo '用 uv pip install...'; \
+                             \"$UV\" pip install --python \"$VENV_PY\" $PACKAGES; \
+                             echo '下載 openwakeword pipeline models(mel / embedding / silero_vad,~4 MB)...'; \
+                             \"$VENV_PY\" -c 'from openwakeword.utils import download_models; download_models([\"__pipeline_only__\"])'; \
+                             echo '  ↑ 傳 dummy name 跳過 pre-trained wake-words — Mori 用自家 hey-mori.onnx'; \
+                             echo '✓ wake-venv + openwakeword + pipeline models 裝好了'",
                 }),
             ],
         },
@@ -502,6 +566,17 @@ pub fn registry() -> Vec<DepSpec> {
                 ],
                 needle: "ok",
             },
+            check_overrides: &[
+                // Windows venv 內 python 在 Scripts\python.exe;sh -c 走 Git Bash
+                ("windows", CheckSpec::CommandStdoutContains {
+                    cmd: "sh",
+                    args: &[
+                        "-c",
+                        "$HOME/.mori/wake-venv/Scripts/python.exe -c 'import edge_tts; print(\"ok\")' 2>&1",
+                    ],
+                    needle: "ok",
+                }),
+            ],
             install: InstallSpec::Shell {
                 script: "set -e; \
                          VENV=\"$HOME/.mori/wake-venv\"; \
@@ -523,14 +598,23 @@ pub fn registry() -> Vec<DepSpec> {
                          echo '✓ edge-tts 裝好了'",
             },
             install_overrides: &[
-                ("windows", InstallSpec::Manual {
-                    commands: &[
-                        "# Windows PowerShell(需先有 wake-venv):",
-                        "# 優先用 uv:",
-                        "uv pip install --python %USERPROFILE%\\.mori\\wake-venv\\Scripts\\python.exe edge-tts",
-                        "# 或用 venv 內 pip(如果 venv 是 python -m venv 建的):",
-                        "%USERPROFILE%\\.mori\\wake-venv\\Scripts\\pip install edge-tts",
-                    ],
+                // Windows 走 uv Shell(假設 wake-listener-runtime 先裝好,wake-venv
+                // 已存在)。跟 Linux 同一條 uv 邏輯,只是 venv python 在 Scripts\python.exe。
+                ("windows", InstallSpec::Shell {
+                    script: "set -e; \
+                             VENV=\"$HOME/.mori/wake-venv\"; \
+                             UV=\"$HOME/.local/bin/uv.exe\"; \
+                             [ -x \"$UV\" ] || UV=\"$(command -v uv || true)\"; \
+                             VENV_PY=\"$VENV/Scripts/python.exe\"; \
+                             if [ ! -x \"$VENV_PY\" ]; then \
+                                echo '✗ wake-venv 不存在 — 先裝 wake-listener-runtime'; exit 2; \
+                             fi; \
+                             if [ -z \"$UV\" ] || [ ! -x \"$UV\" ]; then \
+                                echo '✗ 找不到 uv — 請先安裝 uv-runtime'; exit 1; \
+                             fi; \
+                             echo '用 uv pip install...'; \
+                             \"$UV\" pip install --python \"$VENV_PY\" edge-tts; \
+                             echo '✓ edge-tts 裝好了'",
                 }),
             ],
         },
@@ -555,6 +639,16 @@ pub fn registry() -> Vec<DepSpec> {
                 ],
                 needle: "ok",
             },
+            check_overrides: &[
+                ("windows", CheckSpec::CommandStdoutContains {
+                    cmd: "sh",
+                    args: &[
+                        "-c",
+                        "$HOME/.mori/wake-venv/Scripts/python.exe -c 'import resemblyzer; print(\"ok\")' 2>&1",
+                    ],
+                    needle: "ok",
+                }),
+            ],
             install: InstallSpec::Shell {
                 script: "set -e; \
                          VENV=\"$HOME/.mori/wake-venv\"; \
@@ -576,11 +670,22 @@ pub fn registry() -> Vec<DepSpec> {
                          echo '✓ resemblyzer 裝好了。第一次跑 enrollment 會自動下載 80MB pretrained model。'",
             },
             install_overrides: &[
-                ("windows", InstallSpec::Manual {
-                    commands: &[
-                        "# Windows PowerShell(需先有 wake-venv):",
-                        "uv pip install --python %USERPROFILE%\\.mori\\wake-venv\\Scripts\\python.exe resemblyzer",
-                    ],
+                // Windows 走 uv Shell,同 tts-runtime / wake-listener-runtime pattern。
+                ("windows", InstallSpec::Shell {
+                    script: "set -e; \
+                             VENV=\"$HOME/.mori/wake-venv\"; \
+                             UV=\"$HOME/.local/bin/uv.exe\"; \
+                             [ -x \"$UV\" ] || UV=\"$(command -v uv || true)\"; \
+                             VENV_PY=\"$VENV/Scripts/python.exe\"; \
+                             if [ ! -x \"$VENV_PY\" ]; then \
+                                echo '✗ wake-venv 不存在 — 先裝 wake-listener-runtime'; exit 2; \
+                             fi; \
+                             if [ -z \"$UV\" ] || [ ! -x \"$UV\" ]; then \
+                                echo '✗ 找不到 uv — 請先安裝 uv-runtime'; exit 1; \
+                             fi; \
+                             echo '用 uv pip install resemblyzer(~100MB,含 80MB pretrained model)...'; \
+                             \"$UV\" pip install --python \"$VENV_PY\" resemblyzer; \
+                             echo '✓ resemblyzer 裝好了。第一次跑 enrollment 會自動下載 pretrained model。'",
                 }),
             ],
         },
@@ -609,6 +714,7 @@ pub fn registry() -> Vec<DepSpec> {
             check: CheckSpec::File {
                 path_template: "$HOME/mori-universe/annuli/.venv/bin/python",
             },
+            check_overrides: &[],
             install: InstallSpec::Shell {
                 script: "set -e; \
                          ANNULI=\"$HOME/mori-universe/annuli\"; \
@@ -664,15 +770,22 @@ pub struct DepStatus {
 }
 
 pub fn check_dep(spec: &DepSpec) -> DepStatus {
-    match &spec.check {
-        CheckSpec::Which { bin } => match Command::new("which").arg(bin).output() {
-            Ok(out) if out.status.success() => DepStatus {
-                id: spec.id,
-                installed: true,
-                detail: Some(String::from_utf8_lossy(&out.stdout).trim().to_string()),
-            },
-            _ => DepStatus { id: spec.id, installed: false, detail: None },
-        },
+    // 走 effective_check — 平台特定 override 優先(像 Windows 的 uv 用 .exe 副檔名),
+    // 沒有再 fallback 預設(Linux 慣例 path)。
+    match spec.effective_check() {
+        CheckSpec::Which { bin } => {
+            // Windows 沒 `which`,用內建的 `where.exe`(Cmd built-in,但 where.exe 是
+            // 真檔案在 System32)。Linux/macOS 用 `which`。
+            let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+            match Command::new(cmd).arg(bin).output() {
+                Ok(out) if out.status.success() => DepStatus {
+                    id: spec.id,
+                    installed: true,
+                    detail: Some(String::from_utf8_lossy(&out.stdout).trim().to_string()),
+                },
+                _ => DepStatus { id: spec.id, installed: false, detail: None },
+            }
+        }
         CheckSpec::File { path_template } => {
             let path = expand_home(path_template);
             match std::fs::metadata(&path) {
