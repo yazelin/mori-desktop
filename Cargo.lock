@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "mori-cli"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2583,7 +2583,7 @@ dependencies = [
 
 [[package]]
 name = "mori-core"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2604,7 +2604,7 @@ dependencies = [
 
 [[package]]
 name = "mori-tauri"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "anyhow",
  "arboard",
