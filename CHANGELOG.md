@@ -6,14 +6,55 @@
 
 ---
 
-## Unreleased — Bundled hey-mori.onnx bump → v1(verifier-trained,從 yazelin/hey-mori 來)
+## v0.7.0 — Windows port 全面修補 + 真正自訓 wake-word model(2026-05-21)
 
-Bundled wake-word model 從 205 KB「TTS-only generic 訓練版」換成 316 KB 的 verifier-trained 版,來源獨立到新 repo [`yazelin/hey-mori`](https://github.com/yazelin/hey-mori) 做版控,未來重訓只動那邊。
+v0.6.6 號稱 Windows first-class,但實際拿乾淨 Windows 機跑完整 Hey Mori 流程踩出一整排 Windows-specific bug。本版把整條 wake→record→STT→agent→response cycle 在 Windows 跑通,並把過去 Linux-only TODO 補完。
 
-- `crates/mori-tauri/assets/wakeword/hey-mori.onnx`:205 → 316 KB(sha256 `1fa7b8e9c1cc…`)
-- `crates/mori-tauri/src/wake_word.rs` 註解更新 — 點到 hey-mori repo,日誌字串 `(TTS-only generic)` → `(yazelin/hey-mori v1)`
-- 行為**不變**:`ensure_default_model` 仍只在 user dir 沒檔時解壓,不覆寫自訓過的 model
-- 個人聲線命中率仍建議跑 `mori-wake-train.py` + `mori-wake-verifier.py` 自訓
+### Hey Mori pipeline on Windows(setup + listener + audio stream)
+
+- **Wake-listener script auto-deploy** — `wake_word::ensure_listener_script_deployed()` 開機把 bundled `mori-wake-listener.py` 寫到 `~/.mori/bin/`,跟 tts / speaker_id script 同 pattern。乾淨機切 Listening mode 不再 `script not found` 報錯。
+- **Default python auto-detect venv** — `wake_word.rs::config_from_disk` 預設 python 從寫死 `"python3"` 改成 auto-detect `~/.mori/wake-venv/Scripts/python.exe`(Windows)/ `bin/python`(Linux/macOS)。Windows 上 `python3` 會打到 MS Store fake stub,跑下去直接死。
+- **stderr pipe drain thread** — `WakeWordListener::spawn` 新增 `mori-wake-stderr` reader thread 持續吸 Python stderr 到 `tracing::debug`。原本 `Stdio::null()` 改 `Stdio::piped()` 為了可見性,但沒 reader 會在 Windows ~64KB pipe 滿後讓 Python 寫 stderr 卡死(實測 2-3 輪 wake 後整個 listener 啞掉)。
+- **Listener auto-respawn after each cycle** — `set_phase()` 進入 `Phase::Done / Error` 且 mode 是 Listening → 自動跑一輪 `update_wake_word_listener(Listening→Agent→Listening)` 等於 kill+respawn。修「cpal 開錄音搶 mic → sounddevice stream 進壞狀態 → openwakeword feature buffer 累積 garbage」的 N 輪後失聯 bug。
+- **Re-entrancy guard** — wake-word-detected listener 進入 callback 先檢查 phase,只有 `Idle / Done / Error` 才繼續;`Recording / Transcribing / Responding` 時 silently ignore + log。修「上一輪還在跑 user 又喊 → 第 2 個 wake 把前一輪 toggle 停掉、整條 pipeline 鎖死」的 race condition。
+
+### Windows uv-based install + openwakeword pipeline models
+
+- **Windows wake-listener-runtime install spec** — 從 `Manual`(文字叫 user 自己 copy-paste)升級成 `Shell` 走 uv,跟 Linux/macOS 同邏輯。uv 自動下載 Python 3.11 + 建 venv + `uv pip install openwakeword sounddevice numpy onnxruntime scikit-learn`。Deps tab 一鍵裝。
+- **Same treatment for tts-runtime / speaker-id-runtime** — edge-tts / resemblyzer 兩條 Windows Manual 也補成 uv Shell。
+- **openwakeword pipeline models auto-download** — install script 最後一步 `download_models(["__pipeline_only__"])` 用 dummy 名字觸發 openwakeword 內部 quirk:跳過 6 個 pre-trained wake-words(jarvis/alexa/mycroft/...,你不需要),只裝必要的 mel/embedding/silero_vad 三件套(~4MB)。否則 listener load model 時直接 `NO_SUCHFILE`。Linux 跟 Windows 都加。
+
+### Deps tab Windows 偵測架構修
+
+- **`check_overrides` 欄位** — mirror `install_overrides`,DepSpec 加平台特定 check variant。`effective_check()` 跟 `effective_install()` 同 lookup 順序。
+- **`Which` 在 Windows 走 `where`** — `which` 是 Unix-only command,Windows 沒有。`check_dep` 加 `cfg!(target_os = "windows")` 分流。修了 claude / gemini / codex / ollama / ydotool / xdotool / xclip 一律 ✗ 的誤報。
+- **`.exe` 副檔名** — uv / yt-dlp / whisper-server / wake-venv Python 在 Windows 都加 `.exe`,wake-venv Python 改 `Scripts\python.exe` 路徑。
+
+### Bash CLI agent Windows skip --dangerously-bypass-approvals-and-sandbox
+
+- **Codex Windows hang fix** — `codex exec --dangerously-bypass-approvals-and-sandbox` 在 Windows hang(實測純 PowerShell 跑同樣指令也 5+ 分鐘 0 output,猜測 Linux-only sandbox primitive 初始化卡住)。改成 `#[cfg(not(target_os = "windows"))]` gate flag,Windows 靠 codex 預設 `approval: never` + `sandbox: workspace-write`。實測 6-8s 完整 response。Linux/macOS 保留原 flag。
+
+### Bundled hey-mori.onnx → verifier-trained(#65)
+
+bundled model 從 TTS-only generic(205 KB,對個人聲線命中率不穩)換成 verifier-trained v1(316 KB,from `yazelin/hey-mori`)。Fresh user 開箱即用更穩。
+
+### Verified on Windows
+
+完整跑通 + 多輪穩定:
+- ✅ Hey Mori 偵測 → wake-ack → 錄音 → VAD silence-stop → silence-trim → STT(groq)→ agent loop → response → respawn → 下一輪
+- ✅ codex-bash / claude-bash / gemini-bash 三個 CLI provider 各跑通
+- ✅ Profile 切換(Alt+0~9 / Ctrl+Alt+0~9 / Ctrl+Alt+P picker)
+- ✅ Tray icon 切 mode / profile
+- ✅ Selection capture / paste-back / open_url / open_app / send_keys(Win32 SendInput 驗 Ctrl+A)
+- ✅ Cancel/abort hotkey
+- ✅ LogsTab filter
+- ✅ Floating sprite 透明視窗(動畫 sheet 仍 deferred,不算 regression)
+- ✅ Quickstart re-onboarding
+- ✅ Deps tab 全綠正確顯示
+
+### Closes
+
+- #32(乾淨機 provider 格式異常)— root cause 之一是 Codex Windows hang,本版修補後 starter profile 在 Windows 跑得通。
 
 ---
 

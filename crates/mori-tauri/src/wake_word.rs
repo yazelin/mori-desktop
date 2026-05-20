@@ -55,6 +55,10 @@ use serde::Deserialize;
 /// `examples/scripts/mori-wake-train.py`。
 const BUNDLED_HEY_MORI_ONNX: &[u8] = include_bytes!("../assets/wakeword/hey-mori.onnx");
 
+/// Bundled mori-wake-listener.py(Phase 3A)— Python openWakeWord bridge。
+/// `ensure_listener_script_deployed` 在 user dir 沒檔時寫一份過去當預設,user 可覆寫。
+const BUNDLED_LISTENER_SCRIPT: &[u8] = include_bytes!("../../../examples/scripts/mori-wake-listener.py");
+
 /// 確保 `<mori_dir>/wakeword/hey-mori.onnx` 存在。沒檔 → 解壓 bundled。
 /// 已存在 → 完全不動(user 可能訓過自己的)。
 pub fn ensure_default_model(mori_dir: &Path) {
@@ -80,6 +84,36 @@ pub fn ensure_default_model(mori_dir: &Path) {
             "ensure_default_model: write failed",
         ),
     }
+}
+
+/// 確保 `~/.mori/bin/mori-wake-listener.py` 存在。沒檔 → 寫 bundled。
+/// User 改過或自己版本 → 不覆寫(`!path.exists()` gate)。
+///
+/// Linux/macOS 順手 chmod +x。Windows 走 python.exe 顯式呼叫,permission bit 不用。
+pub fn ensure_listener_script_deployed(mori_dir: &Path) {
+    let bin = mori_dir.join("bin");
+    if let Err(e) = fs::create_dir_all(&bin) {
+        tracing::warn!(error = %e, dir = %bin.display(), "wake-listener ensure_script: mkdir failed");
+        return;
+    }
+    let path = bin.join("mori-wake-listener.py");
+    if path.exists() {
+        return;
+    }
+    if let Err(e) = fs::write(&path, BUNDLED_LISTENER_SCRIPT) {
+        tracing::warn!(error = %e, path = %path.display(), "wake-listener ensure_script: write failed");
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(&path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&path, perms);
+        }
+    }
+    tracing::info!(path = %path.display(), "wake-word: deployed bundled mori-wake-listener.py");
 }
 
 /// 啟動 listener 的設定。從 `~/.mori/config.json` 的 `listening_mode` 區塊讀。
@@ -137,9 +171,9 @@ impl WakeWordListener {
         if !config.script_path.exists() {
             bail!(
                 "wake-word script not found: {}\n\
-                 從 examples/scripts/mori-wake-listener.py 複製過去:\n\
-                   cp examples/scripts/mori-wake-listener.py ~/.mori/bin/\n\
-                   chmod +x ~/.mori/bin/mori-wake-listener.py",
+                 預期 mori-tauri setup 階段會自動 deploy(`ensure_listener_script_deployed`)。\n\
+                 若手動 clean 過 ~/.mori/bin/,重啟 Mori 會自動補回;或從 \n\
+                 examples/scripts/mori-wake-listener.py 複製過去。",
                 config.script_path.display()
             );
         }
@@ -167,7 +201,9 @@ impl WakeWordListener {
         }
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null()); // stderr 吞掉避免污染 stdout protocol
+            .stderr(Stdio::piped()); // pipe 而非吞掉 — 由獨立 reader thread 倒到 tracing::warn,
+                                     // 不污染 stdout JSON protocol,但能 surface ModuleNotFoundError
+                                     // / Python not found / 麥克風開不起來等死因(Windows 乾淨機尤其踩)
 
         let mut child = cmd.spawn().with_context(|| {
             format!(
@@ -192,9 +228,14 @@ impl WakeWordListener {
             .stdout
             .take()
             .ok_or_else(|| anyhow!("wake-word: child stdout missing"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("wake-word: child stderr missing"))?;
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_for_thread = shutdown.clone();
+        let shutdown_for_stderr = shutdown.clone();
         let on_wake = Arc::new(on_wake);
 
         let reader_thread = std::thread::Builder::new()
@@ -230,6 +271,31 @@ impl WakeWordListener {
             })
             .context("spawn wake-word reader thread")?;
 
+        // stderr drain thread — 必須跟 stdout 同等 active drain,否則 OS pipe buffer
+        // (Windows ~64KB)填滿後 Python `print(file=stderr)` / onnxruntime native
+        // 端日誌會 block 整個 child process,wake-listener 看起來活著但不再處理
+        // audio(3 次喊 Hey Mori 之後就靜默就是踩到這個)。
+        std::thread::Builder::new()
+            .name("mori-wake-stderr".into())
+            .spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    if shutdown_for_stderr.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match line {
+                        Ok(l) => {
+                            let t = l.trim();
+                            if !t.is_empty() {
+                                tracing::debug!(line = %t, "wake-word stderr");
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+            .context("spawn wake-word stderr drain thread")?;
+
         Ok(Self {
             child: Some(child),
             reader_thread: Some(reader_thread),
@@ -255,6 +321,24 @@ impl Drop for WakeWordListener {
 
 // ─── Config readers ────────────────────────────────────────────────────
 
+/// 預設 Python — 優先用 ~/.mori/wake-venv(uv / python -m venv 建的),fallback 系統 python3。
+/// 對齊 tts.rs / speaker_id.rs,共用一個 venv 比較省空間且依賴版本一致。
+///
+/// Windows 乾淨機通常沒系統 python3(只有 MS Store fake stub),所以 venv 路徑優先很重要。
+fn default_python(mori_dir: &Path) -> PathBuf {
+    let venv = mori_dir.join("wake-venv");
+    let candidate = if cfg!(target_os = "windows") {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python")
+    };
+    if candidate.exists() {
+        candidate
+    } else {
+        PathBuf::from("python3")
+    }
+}
+
 /// 從 `~/.mori/config.json` `listening_mode.*` 區塊讀 WakeWordConfig。
 /// 預設值對齊 Phase 3E pipeline 設計 — phrase = Hey Mori, threshold **0.7**。
 ///
@@ -272,7 +356,7 @@ pub fn config_from_disk(mori_dir: &Path) -> WakeWordConfig {
         .pointer("/listening_mode/python")
         .and_then(|v| v.as_str())
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("python3"));
+        .unwrap_or_else(|| default_python(mori_dir));
 
     let script_path = json
         .pointer("/listening_mode/script_path")
