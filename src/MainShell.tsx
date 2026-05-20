@@ -132,9 +132,8 @@ function MainShell() {
             onClick={() => setQuickstartOpen(true)}
             title="點開 Quickstart 編輯召喚師之名"
           >
-            <span className="mori-sidebar-user-label">為</span>
+            <span className="mori-sidebar-user-label">召喚師</span>
             <span className="mori-sidebar-user-name">{userName}</span>
-            <span className="mori-sidebar-user-label">而存在</span>
           </button>
         )}
         <nav className="mori-sidebar-nav">
