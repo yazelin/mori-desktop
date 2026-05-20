@@ -47,9 +47,12 @@ use std::thread::JoinHandle;
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde::Deserialize;
 
-/// Bundled hey-mori.onnx(TTS-only generic 訓練版,205 KB,對英文發音「Hey Mori」
-/// 通用適用)。`ensure_default_model` 在 user dir 沒檔時寫一份過去當預設,
-/// **不覆寫 user 自訓過的 model**(自訓對個人聲線命中率更高)。
+/// Bundled hey-mori.onnx — 316 KB,from <https://github.com/yazelin/hey-mori>
+///(openWakeWord dnn 50k steps + 650 piper-tts samples + sklearn verifier
+/// 二階段配合,對英文發音「Hey Mori」)。`ensure_default_model` 在 user dir
+/// 沒檔時寫一份過去當預設,**不覆寫 user 自訓過的 model**(自訓對個人聲線
+/// 命中率更高)。重訓 / 拿其他版本見 hey-mori repo;訓練 pipeline 見
+/// `examples/scripts/mori-wake-train.py`。
 const BUNDLED_HEY_MORI_ONNX: &[u8] = include_bytes!("../assets/wakeword/hey-mori.onnx");
 
 /// 確保 `<mori_dir>/wakeword/hey-mori.onnx` 存在。沒檔 → 解壓 bundled。
@@ -69,7 +72,7 @@ pub fn ensure_default_model(mori_dir: &Path) {
         Ok(()) => tracing::info!(
             path = %path.display(),
             size = BUNDLED_HEY_MORI_ONNX.len(),
-            "installed bundled hey-mori.onnx (TTS-only generic)",
+            "installed bundled hey-mori.onnx (yazelin/hey-mori v1)",
         ),
         Err(e) => tracing::warn!(
             error = %e,
