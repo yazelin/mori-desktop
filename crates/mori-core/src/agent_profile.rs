@@ -411,6 +411,12 @@ const AGENT_STARTERS: &[StarterTemplate] = &[
         display: "AGENT-05 · 聽我指令",
         content: include_str!("../../../examples/agent/AGENT-05.聽我指令.md"),
     },
+    StarterTemplate {
+        filename: "AGENT-06.Obsidian.md",
+        lang: "zh",
+        display: "AGENT-06 · Obsidian",
+        content: include_str!("../../../examples/agent/AGENT-06.Obsidian.md"),
+    },
     // en — 同 stem,EN 翻譯版,UI「加入範本」可選裝。注意 filename 跟 zh 不同
     // (display 部分換英文)避免 zh / en 同檔名衝突 — user 可同時擁有兩語版本。
     StarterTemplate {
@@ -442,6 +448,12 @@ const AGENT_STARTERS: &[StarterTemplate] = &[
         lang: "en",
         display: "AGENT-05 · listen",
         content: include_str!("../../../examples-en/agent/AGENT-05.listen.md"),
+    },
+    StarterTemplate {
+        filename: "AGENT-06.obsidian.md",
+        lang: "en",
+        display: "AGENT-06 · obsidian",
+        content: include_str!("../../../examples-en/agent/AGENT-06.obsidian.md"),
     },
 ];
 
