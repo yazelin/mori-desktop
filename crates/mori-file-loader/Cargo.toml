@@ -1,0 +1,14 @@
+[package]
+name = "mori-file-loader"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+description = "Mori 的「萬卷之口」 — 統一文件讀取(.txt / .md baseline,Wave 2 起加 pdf / docx / xlsx 等格式)。"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
