@@ -4,9 +4,10 @@
 //!
 //! 本 crate 現階段支援:
 //! - 純文字 `.txt` / `.md`(E-base)— 走 [`std::fs::read_to_string`]
-//! - `.pdf`(本 stream)— 走 [`pdf_extract::extract_text`]
+//! - `.pdf`(Stream E1)— 走 [`pdf_extract::extract_text`]
+//! - `.docx`(本 stream)— 走 [`docx_rs::read_docx`] + 手動 traverse paragraph
 //!
-//! `.docx` / `.xlsx` 等 binary 格式留給後續 stream;新加 format 時把對應的
+//! `.xlsx` 等 binary 格式留給後續 stream;新加 format 時把對應的
 //! `FileFormatReader` 加進 [`dispatch`] 即可,公開 API([`read_file_text`])保持不變。
 //!
 //! # 公開 API
@@ -26,6 +27,7 @@
 //! - 檔案不存在 → [`FileLoaderError::NotFound`]
 //! - 非 UTF-8 內容 → [`FileLoaderError::InvalidUtf8`](不 panic,不做 lossy decode)
 //! - PDF 解析失敗(壞檔 / 加密 / 不合 spec)→ [`FileLoaderError::PdfExtraction`]
+//! - DOCX 解析失敗(壞檔 / zip 損毀 / 不合 spec)→ [`FileLoaderError::DocxExtraction`]
 //!
 //! # Example
 //!
@@ -39,6 +41,7 @@
 
 use std::path::{Path, PathBuf};
 
+mod docx;
 mod pdf;
 
 /// `mori-file-loader` 的錯誤型別。
@@ -66,6 +69,12 @@ pub enum FileLoaderError {
     /// 不會 match 細節原因。
     #[error("pdf extraction failed: {0}")]
     PdfExtraction(String),
+
+    /// DOCX 解析 / 文字抽取失敗(壞檔、zip 損毀、不合 spec 等)。
+    /// 內含 underlying error 的字串表示 — caller 通常只給使用者看「這份 DOCX 讀不了」,
+    /// 不會 match 細節原因。
+    #[error("docx extraction failed: {0}")]
+    DocxExtraction(String),
 }
 
 /// 內部 trait:每個支援的副檔名對應一個 reader。
@@ -99,6 +108,7 @@ fn dispatch(ext_lower: &str) -> Option<Box<dyn FileFormatReader>> {
     match ext_lower {
         "txt" | "md" => Some(Box::new(PlainTextReader)),
         "pdf" => Some(Box::new(pdf::PdfReader)),
+        "docx" => Some(Box::new(docx::DocxReader)),
         _ => None,
     }
 }

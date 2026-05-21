@@ -1,6 +1,6 @@
 //! `mori-file-loader` integration tests。
 //!
-//! 跑 `read_file_text(path)` 的公開行為:`.txt` / `.md` baseline、`.pdf`、
+//! 跑 `read_file_text(path)` 的公開行為:`.txt` / `.md` baseline、`.pdf`、`.docx`、
 //! 未支援副檔名、missing file、UTF-8 邊界、case-insensitive 副檔名、壞檔錯誤分類。
 //!
 //! 之後加新 format 時,這層 baseline 不該被打破。
@@ -94,6 +94,40 @@ fn read_file_text_returns_extraction_error_for_corrupted_pdf() {
     match err {
         FileLoaderError::PdfExtraction(_) => {}
         other => panic!("expected PdfExtraction, got {other:?}"),
+    }
+}
+
+#[test]
+fn read_file_text_reads_docx() {
+    // checked-in fixture(`tests/fixtures/sample.docx`)— 由 python-docx 生成,
+    // 含兩段文字「Hello, Mori」+「This is a DOCX test」。
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample.docx");
+
+    let got = read_file_text(&path).expect("read sample.docx");
+    assert!(
+        got.contains("Hello, Mori"),
+        "extracted text should contain 'Hello, Mori', got: {got:?}",
+    );
+    assert!(
+        got.contains("DOCX test"),
+        "extracted text should contain 'DOCX test', got: {got:?}",
+    );
+}
+
+#[test]
+fn read_file_text_returns_extraction_error_for_corrupted_docx() {
+    let dir = TempDir::new().unwrap();
+    // 寫一份壞掉的「.docx」— 副檔名讓它走 DOCX reader,內容讓 docx-rs 解析爆炸
+    //(docx 本質是 zip,raw bytes 不是合法 zip header)。
+    let path = write_file(&dir, "broken.docx", b"not a real docx file");
+
+    let err = read_file_text(&path).expect_err("expect DocxExtraction");
+    match err {
+        FileLoaderError::DocxExtraction(_) => {}
+        other => panic!("expected DocxExtraction, got {other:?}"),
     }
 }
 
