@@ -180,6 +180,143 @@ fn read_file_text_returns_extraction_error_for_corrupted_xlsx() {
 }
 
 #[test]
+fn read_file_text_reads_epub() {
+    // checked-in fixture(`tests/fixtures/sample.epub`)— 由 ebooklib 生成,
+    // 兩個 chapter:
+    //   - Chapter 1:含 "Hello, Mori — the forest spirit." + entity decode +
+    //     `<style>` / `<script>`(都要被 strip 不洩漏)
+    //   - Chapter 2:含 "This is a EPUB test." + `<br/>` 換行
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample.epub");
+
+    let got = read_file_text(&path).expect("read sample.epub");
+    assert!(
+        got.contains("Hello, Mori"),
+        "extracted text should contain 'Hello, Mori', got: {got:?}",
+    );
+    assert!(
+        got.contains("forest spirit"),
+        "extracted text should contain 'forest spirit', got: {got:?}",
+    );
+    assert!(
+        got.contains("This is a EPUB test"),
+        "extracted text should contain 'This is a EPUB test', got: {got:?}",
+    );
+    // entity decode 應 work(`&amp;` → `&`、`&#65;` → `A`);
+    // 原始 XHTML 是 "Second paragraph &amp; entities &#65;.",
+    // strip 後預期 "Second paragraph & entities A."。
+    assert!(
+        got.contains("paragraph & entities"),
+        "extracted text should decode `&amp;`, got: {got:?}",
+    );
+    assert!(
+        got.contains("entities A"),
+        "expected decoded `&#65;` → 'A', got: {got:?}",
+    );
+    // CSS / JS 內容必須被 strip
+    assert!(
+        !got.contains("color:red"),
+        "css leaked into output: {got:?}",
+    );
+    assert!(
+        !got.contains("var x = 1"),
+        "js leaked into output: {got:?}",
+    );
+}
+
+#[test]
+fn read_file_text_returns_extraction_error_for_corrupted_epub() {
+    let dir = TempDir::new().unwrap();
+    // 寫一份壞掉的「.epub」— 副檔名讓它走 EPUB reader,內容讓 rbook 解析爆炸
+    //(epub 本質是 zip,raw bytes 不是合法 zip header)。
+    let path = write_file(&dir, "broken.epub", b"not a real epub file");
+
+    let err = read_file_text(&path).expect_err("expect EpubExtraction");
+    match err {
+        FileLoaderError::EpubExtraction(_) => {}
+        other => panic!("expected EpubExtraction, got {other:?}"),
+    }
+}
+
+#[test]
+fn docx_extracts_hyperlink_text() {
+    // checked-in fixture(`tests/fixtures/sample-with-hyperlink-break-tab.docx`)
+    //   - paragraph 1:hyperlink display text 「MoriForestLink」
+    //   - paragraph 2:見 docx_handles_runchild_break_and_tab
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample-with-hyperlink-break-tab.docx");
+
+    let got = read_file_text(&path).expect("read docx with hyperlink");
+    assert!(
+        got.contains("MoriForestLink"),
+        "hyperlink display text should be extracted, got: {got:?}",
+    );
+}
+
+#[test]
+fn docx_handles_runchild_break_and_tab() {
+    // 同 fixture 的 paragraph 2 包:
+    //   Run.children = [Text("LeftCell"), Tab, Text("RightCell"), Break, Text("AfterBreak")]
+    // 預期 extract 出含 "LeftCell\tRightCell\nAfterBreak"。
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample-with-hyperlink-break-tab.docx");
+
+    let got = read_file_text(&path).expect("read docx with break/tab");
+    assert!(
+        got.contains("LeftCell\tRightCell"),
+        "Tab should join cells with '\\t', got: {got:?}",
+    );
+    assert!(
+        got.contains("RightCell\nAfterBreak"),
+        "Break should insert '\\n' between text runs, got: {got:?}",
+    );
+}
+
+#[test]
+fn xlsx_datetime_formatted_as_iso() {
+    // checked-in fixture(`tests/fixtures/sample-with-datetime-error.xlsx`)— 由
+    // openpyxl 生成,B2 = datetime(2024-01-15 09:30:00)。
+    // 預期 output 含 ISO 8601 `2024-01-15T09:30:00`,**不**含 Debug 形式
+    // 「ExcelDateTime { ... }」。
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample-with-datetime-error.xlsx");
+
+    let got = read_file_text(&path).expect("read xlsx with datetime");
+    assert!(
+        got.contains("2024-01-15T09:30:00"),
+        "expected ISO 8601 datetime in output, got: {got:?}",
+    );
+    assert!(
+        !got.contains("ExcelDateTime"),
+        "should not leak Debug-formatted ExcelDateTime, got: {got:?}",
+    );
+}
+
+#[test]
+fn xlsx_error_cell_returns_placeholder() {
+    // 同 fixture 的 B3 是 explicit error cell (`#DIV/0!`,data_type="e")。
+    // 預期 output 含 `[#ERROR]` placeholder,而不是 silently empty。
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample-with-datetime-error.xlsx");
+
+    let got = read_file_text(&path).expect("read xlsx with error cell");
+    assert!(
+        got.contains("[#ERROR]"),
+        "expected [#ERROR] placeholder in output, got: {got:?}",
+    );
+}
+
+#[test]
 fn read_file_text_handles_unicode() {
     let dir = TempDir::new().unwrap();
     let content = "森林裡有一隻 Mori 🌲 — 年輪不會說謊。";

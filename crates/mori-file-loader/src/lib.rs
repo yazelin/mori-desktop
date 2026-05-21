@@ -6,7 +6,8 @@
 //! - 純文字 `.txt` / `.md`(E-base)— 走 [`std::fs::read_to_string`]
 //! - `.pdf`(Stream E1)— 走 [`pdf_extract::extract_text`]
 //! - `.docx`(Stream E2)— 走 [`docx_rs::read_docx`] + 手動 traverse paragraph
-//! - `.xlsx`(本 stream)— 走 [`calamine::open_workbook`] + 多 sheet flatten
+//! - `.xlsx`(Stream E3)— 走 [`calamine::open_workbook`] + 多 sheet flatten
+//! - `.epub`(Stream E4)— 走 [`rbook::Epub`] + spine reader + XHTML strip
 //!
 //! 舊版 `.xls` / `.xlsb` / `.ods` 等 binary 格式留給後續 stream;新加 format 時把
 //! 對應的 `FileFormatReader` 加進 [`dispatch`] 即可,公開 API([`read_file_text`])
@@ -31,6 +32,7 @@
 //! - PDF 解析失敗(壞檔 / 加密 / 不合 spec)→ [`FileLoaderError::PdfExtraction`]
 //! - DOCX 解析失敗(壞檔 / zip 損毀 / 不合 spec)→ [`FileLoaderError::DocxExtraction`]
 //! - XLSX 解析失敗(壞檔 / zip 損毀 / 不合 spec)→ [`FileLoaderError::XlsxExtraction`]
+//! - EPUB 解析失敗(壞檔 / zip 損毀 / 不合 spec)→ [`FileLoaderError::EpubExtraction`]
 //!
 //! # Example
 //!
@@ -45,6 +47,7 @@
 use std::path::{Path, PathBuf};
 
 mod docx;
+mod epub;
 mod pdf;
 mod xlsx;
 
@@ -85,6 +88,12 @@ pub enum FileLoaderError {
     /// 不會 match 細節原因。
     #[error("xlsx extraction failed: {0}")]
     XlsxExtraction(String),
+
+    /// EPUB 解析 / 文字抽取失敗(壞檔、zip 損毀、不合 spec 等)。
+    /// 內含 underlying error 的字串表示 — caller 通常只給使用者看「這份 EPUB 讀不了」,
+    /// 不會 match 細節原因。
+    #[error("epub extraction failed: {0}")]
+    EpubExtraction(String),
 }
 
 /// 內部 trait:每個支援的副檔名對應一個 reader。
@@ -121,6 +130,7 @@ fn dispatch(ext_lower: &str) -> Option<Box<dyn FileFormatReader>> {
         "docx" => Some(Box::new(docx::DocxReader)),
         // 暫不支援 `.xls`(舊 binary 格式);calamine 雖然能讀,本 stream 只動 xlsx。
         "xlsx" => Some(Box::new(xlsx::XlsxReader)),
+        "epub" => Some(Box::new(epub::EpubReader)),
         _ => None,
     }
 }
