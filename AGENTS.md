@@ -12,6 +12,7 @@ mori-desktop is a Tauri 2 desktop app with a Vite/React/TypeScript frontend and 
 - `crates/mori-tauri/`: Tauri shell, native commands, skills, platform integration
 - `scripts/`: setup and verification scripts used by humans, CI, and agents
 - `docs/agent-workflow.md`: cloud-agent SOP for Codex Cloud, Claude Code, PRs, CI, and releases
+- `docs/release-format.md`: unified template for GitHub Release body (publish step after `git tag` + release.yml). Follow it instead of pasting CHANGELOG — different audience.
 
 The repository is part of the Mori universe. Preserve the existing poetic Traditional Chinese product language in docs/UI, but keep code identifiers conventional Rust/TypeScript unless nearby code already uses Mori-specific terms.
 
