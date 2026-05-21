@@ -3312,8 +3312,22 @@ async fn run_agent_pipeline(
         // 5J: profile body 為「persona + 行為指示」，Rust 統一注入 context section
         let win_ctx_snapshot = state.hotkey_window_context.lock().clone();
         let context_section = build_context_section(&win_ctx_snapshot, &ctx, Some(&memory_index));
+        // §13.12 P0-1:讀 vault 裡的 SOUL.md 注入 system prompt 頂層。
+        // 同 SOUL 異 Rings — SOUL 跨 user 共用,memories/USER/rings 才 per-user。
+        // spirit_name 從 annuli config 拿(default "mori"),空字串退到 "mori"。
+        // 注意:這條走 vault 直接讀檔(不經 annuli HTTP)— vault 是 source of truth,
+        // annuli 是 consumer 之一(跟 mori-desktop 同層讀同一份 vault,不互相依賴)。
+        let soul_text = {
+            let cfg = annuli_config::AnnuliConfig::load(&mori_dir().join("config.json"));
+            let spirit = if cfg.spirit_name.is_empty() {
+                "mori".to_string()
+            } else {
+                cfg.spirit_name
+            };
+            default_vault_root().and_then(|root| load_soul_content(&root, &spirit))
+        };
         let system_prompt = if body_expanded.trim().is_empty() {
-            build_system_prompt(&memory_index, &ctx)
+            build_system_prompt(soul_text.as_deref(), &memory_index, &ctx)
         } else {
             format!("{}\n\n---\n\n{}", body_expanded, context_section)
         };
@@ -4248,16 +4262,69 @@ fn chinese_weekday(en: &str) -> &'static str {
     }
 }
 
-fn build_system_prompt(memory_index: &str, ctx: &MoriContext) -> String {
+/// 預設 vault 根目錄:`$HOME/mori-universe/spirits`(Windows fallback 走 `USERPROFILE`)。
+///
+/// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` / `transcribe_cmds::mori_home_dir()`
+/// 同一條 fallback 邏輯 — 沒 `HOME` 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md
+/// 工程注意第一點)。
+fn default_vault_root() -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(|h| std::path::PathBuf::from(h).join("mori-universe").join("spirits"))
+}
+
+/// 從 vault 讀 `<vault_root>/<spirit_name>/identity/SOUL.md` 全文。
+///
+/// 找不到 / 讀失敗 / 空字串 → `None`(caller 自己 fallback,不 panic)。
+/// `vault_root` 抽參數是為了 unit test 可以餵 tempdir。
+fn load_soul_content(vault_root: &std::path::Path, spirit_name: &str) -> Option<String> {
+    let path = vault_root
+        .join(spirit_name)
+        .join("identity")
+        .join("SOUL.md");
+    match std::fs::read_to_string(&path) {
+        Ok(s) if !s.trim().is_empty() => Some(s),
+        Ok(_) => {
+            tracing::debug!(
+                path = %path.display(),
+                "SOUL.md exists but is empty, treating as missing",
+            );
+            None
+        }
+        Err(e) => {
+            tracing::debug!(
+                path = %path.display(),
+                error = %e,
+                "SOUL.md not readable, falling back to hardcoded opener",
+            );
+            None
+        }
+    }
+}
+
+fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext) -> String {
     let now = chrono::Local::now()
         .format("%Y-%m-%d %H:%M (%a)")
         .to_string();
     let mut prompt = String::new();
 
-    prompt.push_str(
-        "你是 Mori,一個輕巧、貼心的桌面 AI 管家。背景設定:你是來自 world-tree \
-         森林的精靈,被使用者帶到桌面當日常陪伴與助手。\n\n",
-    );
+    // §13.12 P0-1:SOUL.md 注入(同 SOUL 異 Rings — SOUL 跨 user 共用,
+    // 是 Mori 自己的 identity;Rings/USER/memories 才 per-user)。
+    // SOUL 來自 `~/mori-universe/spirits/<name>/identity/SOUL.md`,讀失敗就 fallback
+    // 原本 hardcode 開場白,行為不破。
+    match soul {
+        Some(text) if !text.trim().is_empty() => {
+            prompt.push_str(text.trim_end());
+            prompt.push_str("\n\n");
+        }
+        _ => {
+            prompt.push_str(
+                "你是 Mori,一個輕巧、貼心的桌面 AI 管家。背景設定:你是來自 world-tree \
+                 森林的精靈,被使用者帶到桌面當日常陪伴與助手。\n\n",
+            );
+        }
+    }
 
     // 反 LLM safety bias 的 hard rule — gpt-oss-120b / 部分開源 model 對
     // 「打開 app / URL / 模擬鍵盤」會無謂拒絕,編造「需要授權」「需要許可」
@@ -6092,5 +6159,113 @@ mod tests {
         let out = build_context_section(&empty_win_ctx(), &empty_mori_ctx(), Some("  \n"));
         assert!(out.contains("長期記憶索引"));
         assert!(out.contains("目前沒有記憶"));
+    }
+
+    // ─── §13.12 P0-1:SOUL.md 注入 system prompt ───────────────────────
+    //
+    // lore canon「同 SOUL 異 Rings」— SOUL.md 是跨 user 共用的 identity,
+    // 進 system prompt 第一層,蓋過原本 hardcode 的「你是 Mori」開場白。
+    // 找不到 / 讀失敗 → fall back 原 hardcode,行為不破。
+    //
+    // 函式簽名拆成兩段:
+    //   1. `load_soul_content(vault_root, spirit_name)`:純檔案 I/O,可 mock。
+    //   2. `build_system_prompt(soul, memory_index, ctx)`:純組裝,好測試。
+    // caller 負責讀 SOUL,build_system_prompt 不碰 disk。
+
+    #[test]
+    fn build_system_prompt_uses_soul_when_provided() {
+        let soul = "我是 Mori,在森林裡長大,不是被召喚的式神 — 是自己長出來的。";
+        let out = build_system_prompt(Some(soul), "", &empty_mori_ctx());
+        // SOUL 內容在頂部(在「工具呼叫授權」之前)
+        let soul_pos = out.find(soul).expect("SOUL content missing from prompt");
+        let auth_pos = out
+            .find("工具呼叫授權")
+            .expect("tool auth section missing from prompt");
+        assert!(
+            soul_pos < auth_pos,
+            "SOUL should appear before tool auth section; soul_pos={soul_pos}, auth_pos={auth_pos}"
+        );
+        // 不應同時出現 hardcoded fallback 開場白
+        assert!(
+            !out.contains("你是 Mori,一個輕巧、貼心的桌面 AI 管家"),
+            "fallback opener leaked when SOUL provided: {out}"
+        );
+    }
+
+    #[test]
+    fn build_system_prompt_falls_back_when_no_soul() {
+        let out = build_system_prompt(None, "", &empty_mori_ctx());
+        // SOUL 缺 → 用原 hardcode 開場白
+        assert!(
+            out.contains("你是 Mori,一個輕巧、貼心的桌面 AI 管家"),
+            "fallback opener missing when SOUL is None: {out}"
+        );
+        // 其餘 runtime instructions 保留
+        assert!(out.contains("工具呼叫授權"));
+        assert!(out.contains("回覆規則"));
+    }
+
+    #[test]
+    fn build_system_prompt_preserves_runtime_sections_with_soul() {
+        // SOUL 注入不該影響「工具授權」「回覆規則」「可用工具」「memory index」
+        let soul = "（SOUL 內容）";
+        let out = build_system_prompt(
+            Some(soul),
+            "- mem1: 用戶喜歡 Rust",
+            &empty_mori_ctx(),
+        );
+        assert!(out.contains(soul));
+        assert!(out.contains("工具呼叫授權"));
+        assert!(out.contains("回覆規則"));
+        assert!(out.contains("recall_memory"));
+        assert!(out.contains("paste_selection_back"));
+        // memory_index 參數該被附在末尾
+        assert!(out.contains("mem1: 用戶喜歡 Rust"));
+    }
+
+    #[test]
+    fn load_soul_content_reads_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_root = dir.path();
+        let spirit_dir = vault_root.join("mori").join("identity");
+        std::fs::create_dir_all(&spirit_dir).unwrap();
+        let soul_text = "我是 Mori,測試用 SOUL 內容。\n";
+        std::fs::write(spirit_dir.join("SOUL.md"), soul_text).unwrap();
+
+        let got = load_soul_content(vault_root, "mori");
+        assert_eq!(got.as_deref(), Some(soul_text));
+    }
+
+    #[test]
+    fn load_soul_content_returns_none_for_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        // 沒寫任何檔案
+        let got = load_soul_content(dir.path(), "mori");
+        assert!(got.is_none(), "expected None for missing SOUL.md, got {got:?}");
+    }
+
+    #[test]
+    fn load_soul_content_returns_none_for_unreadable() {
+        // 指向不存在的 vault_root → None,不 panic
+        let got = load_soul_content(std::path::Path::new("/nonexistent/vault/path"), "mori");
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn load_soul_content_uses_spirit_name_subdir() {
+        // 不同 spirit_name → 不同子路徑
+        let dir = tempfile::tempdir().unwrap();
+        let vault_root = dir.path();
+        let aoi_dir = vault_root.join("aoi").join("identity");
+        std::fs::create_dir_all(&aoi_dir).unwrap();
+        std::fs::write(aoi_dir.join("SOUL.md"), "我是 Aoi。").unwrap();
+
+        // 找 mori → None(沒寫)
+        assert!(load_soul_content(vault_root, "mori").is_none());
+        // 找 aoi → 有
+        assert_eq!(
+            load_soul_content(vault_root, "aoi").as_deref(),
+            Some("我是 Aoi。")
+        );
     }
 }
