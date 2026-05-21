@@ -41,5 +41,11 @@ regex = "1"
 # 自身只依 thiserror,不 depend mori-core。
 mori-file-loader = { path = "../mori-file-loader" }
 
+# §9 P1 「時之鳥」K5:`remind_me` LLM-callable skill(`skill/remind_me.rs`)
+# 包 mori-time::ReminderService 公開 API。純 path dep,無 cycle 風險 —
+# mori-time 不 depend mori-core(它的 deps 是 rusqlite / chrono / tokio-cron-
+# scheduler / notify-rust / chrono-english,跟 mori-core 各自獨立)。
+mori-time = { path = "../mori-time" }
+
 [dev-dependencies]
 tempfile = "3"
