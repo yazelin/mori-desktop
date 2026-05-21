@@ -45,6 +45,11 @@ pub enum CommandError {
     Store(#[from] ReminderError),
     #[error("scheduler: {0}")]
     Schedule(#[from] SchedulerError),
+    /// snooze 等狀態變更動作收到非 Pending / Snoozed reminder。
+    /// `current` 是 `ReminderStatus` 的 Debug 字串(`"Fired"` / `"Cancelled"`),
+    /// 對 user 而言夠可讀,也方便 LLM tool 回傳 / 前端顯示。
+    #[error("reminder {id} can't be snoozed (status: {current})")]
+    InvalidStatus { id: i64, current: String },
 }
 
 /// 整合 K1-K4 的主入口 service。
@@ -207,6 +212,23 @@ impl ReminderService {
         when_expr: String,
     ) -> Result<(), CommandError> {
         let until = parser::parse(&when_expr)?;
+
+        // Guard:只允許對 Pending / Snoozed 的 reminder snooze。
+        // 對 Fired(一次性已響)/ Cancelled(已取消)snooze 沒意義 —
+        // K1 store.snooze 不認狀態、會悄悄改回 Snoozed,等於把過期 / 取消的鳥重新喚回,
+        // 對 user 是 surprise update。早 fail 一條清楚的 InvalidStatus。
+        {
+            let store = self.store.lock().await;
+            let current = store.get(id)?;
+            use crate::schema::ReminderStatus::{Pending, Snoozed};
+            if !matches!(current.status, Pending | Snoozed) {
+                return Err(CommandError::InvalidStatus {
+                    id,
+                    current: format!("{:?}", current.status),
+                });
+            }
+        }
+
         // 先 cancel scheduler 內舊 job(避免兩個 timer 並存)
         self.scheduler.cancel(id).await?;
         // 更新 store(snooze 內部會把 due_at 一起更新成 until)+ 拿回新 row
@@ -431,6 +453,61 @@ mod tests {
         assert_eq!(pending.len(), 1, "expected 1 reloaded pending, got {}", pending.len());
         assert_eq!(pending[0].id, r_id);
         assert_eq!(pending[0].text, "persistent");
+    }
+
+    #[tokio::test]
+    async fn snooze_rejects_fired_reminder() {
+        // 一條已 Fired 的 reminder 不該被 snooze 回 Snoozed 狀態 —
+        // K5 snooze guard。在 store 端直接 mark_fired,然後試 snooze,期望 InvalidStatus。
+        let dir = TempDir::new().unwrap();
+        let svc = service_in(&dir).await;
+        let r = svc
+            .remind_me("done".into(), "1 hour".into())
+            .await
+            .unwrap();
+        // 直接 mark_fired(bypass scheduler — 我們只測 commands.rs guard)
+        svc.store.lock().await.mark_fired(r.id, Utc::now()).unwrap();
+
+        let err = svc
+            .snooze_reminder(r.id, "30 minutes".into())
+            .await
+            .expect_err("snooze 已 fired reminder 必須回 InvalidStatus");
+        match err {
+            CommandError::InvalidStatus { id, current } => {
+                assert_eq!(id, r.id);
+                assert_eq!(current, "Fired");
+            }
+            other => panic!("expected InvalidStatus, got {other:?}"),
+        }
+        // 確認 store 端 status 沒被悄悄改回 Snoozed
+        let after = svc.store.lock().await.get(r.id).unwrap();
+        assert_eq!(after.status, ReminderStatus::Fired);
+    }
+
+    #[tokio::test]
+    async fn snooze_rejects_cancelled_reminder() {
+        // 同上,Cancelled 的 reminder 也擋。
+        let dir = TempDir::new().unwrap();
+        let svc = service_in(&dir).await;
+        let r = svc
+            .remind_me("nope".into(), "1 hour".into())
+            .await
+            .unwrap();
+        svc.cancel_reminder(r.id).await.unwrap();
+
+        let err = svc
+            .snooze_reminder(r.id, "30 minutes".into())
+            .await
+            .expect_err("snooze cancelled reminder 必須回 InvalidStatus");
+        match err {
+            CommandError::InvalidStatus { id, current } => {
+                assert_eq!(id, r.id);
+                assert_eq!(current, "Cancelled");
+            }
+            other => panic!("expected InvalidStatus, got {other:?}"),
+        }
+        let after = svc.store.lock().await.get(r.id).unwrap();
+        assert_eq!(after.status, ReminderStatus::Cancelled);
     }
 
     #[tokio::test]
