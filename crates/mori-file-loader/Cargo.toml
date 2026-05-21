@@ -11,6 +11,7 @@ description = "Mori 的「萬卷之口」 — 統一文件讀取(.txt / .md base
 thiserror = { workspace = true }
 pdf-extract = "0.10"
 docx-rs = "0.4"
+calamine = "0.26"
 
 [dev-dependencies]
 tempfile = "3"
