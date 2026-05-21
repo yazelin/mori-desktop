@@ -2168,6 +2168,12 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
     for def in &profile.frontmatter.shell_skills {
         registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
     }
+    // Stream I:Anthropic SKILL.md — `~/.mori/skills/<name>/SKILL.md` 的 body
+    // 當 prompt-augmentation 給 LLM。D-light(不執行 scripts/)。
+    let anthropic_dir = mori_core::skill::anthropic_skill::default_skills_dir();
+    for skill in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
+        registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
+    }
     let _ = state; // suppress unused warning (state above is only used through .memory)
 
     // 走 registry.names() 而不是 tool_definitions(),因為要拿到 Skill object
@@ -3490,6 +3496,19 @@ async fn run_agent_pipeline(
             }
         }
 
+        // Stream I:Anthropic SKILL.md — `~/.mori/skills/<name>/SKILL.md` 的 body
+        // 當 prompt-augmentation 給 LLM。D-light(不執行 scripts/)。同樣受
+        // agent_disabled 鎖:Mori 沒分到靈力時所有額外 skill 都不掛。
+        // 不受 enabled_skills filter 影響(對齊 shell_skills:user 放進 skills/
+        // 目錄就是要用的)。
+        if !agent_disabled {
+            let anthropic_dir = mori_core::skill::anthropic_skill::default_skills_dir();
+            for skill in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
+                tracing::info!(skill = %skill.name, "registering anthropic SKILL.md (prompt-augmentation)");
+                registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
+            }
+        }
+
         let registry = Arc::new(registry);
 
         // brand-3 follow-up: profile frontmatter `agent_mode: dispatch` 讓 agent loop
@@ -4456,7 +4475,7 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
         "  • 觸發:user 提到「讀這份 PDF / 摘要這個 docx / 看一下這個 xlsx」、丟給你檔案路徑\n",
     );
     prompt.push_str(
-        "  • 支援格式:.txt / .md(純文字直讀)、.pdf(若有 pdf-extract)、.docx(若有 docx-rs)、.xlsx(若有 calamine)\n",
+        "  • 支援格式:.txt / .md(純文字直讀)、.pdf、.docx、.xlsx\n",
     );
     prompt.push_str(
         "  • path 是檔案絕對路徑或相對路徑(相對 user $HOME)\n",
