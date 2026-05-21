@@ -12,6 +12,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 mori-core = { workspace = true }
+# 「萬卷之口」— 統一文件讀取 lib，本 crate 透過 file_loader_cmd::read_file_text_cmd
+# 把它包成 Tauri command，讓 LLM 經 system prompt 工具描述能讀使用者丟的 .txt/.md
+# （Wave 2 起 .pdf/.docx/.xlsx 等 reader merge 後自動可用，dispatch by extension）。
+mori-file-loader = { path = "../mori-file-loader" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
