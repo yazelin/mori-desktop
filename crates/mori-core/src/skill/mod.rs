@@ -182,6 +182,9 @@ mod paste_selection;
 // Phase 3B: URL 偵測 + 抓網址內容
 mod fetch_url;
 
+// Stream E:「萬卷之口」— 讀本地檔案為 LLM-callable tool
+mod read_file;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -197,6 +200,7 @@ pub use set_mode::SetModeSkill;
 pub use paste_selection::PasteSelectionBackSkill;
 
 pub use fetch_url::FetchUrlSkill;
+pub use read_file::ReadFileSkill;
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 

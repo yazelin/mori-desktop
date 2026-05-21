@@ -47,7 +47,8 @@ use mori_core::paste::PasteController;
 use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill, PolishSkill,
-    RecallMemorySkill, RememberSkill, SetModeSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
+    ReadFileSkill, RecallMemorySkill, RememberSkill, SetModeSkill, SkillRegistry, SummarizeSkill,
+    TranslateSkill,
 };
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
@@ -2144,6 +2145,7 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
         routing.skill_provider("compose"),
     )));
     registry.register(Arc::new(FetchUrlSkill::new()));
+    registry.register(Arc::new(ReadFileSkill));
     registry.register(Arc::new(RememberSkill::new(mem_arc.clone())));
     registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
     registry.register(Arc::new(ForgetMemorySkill::new(mem_arc.clone())));
@@ -3433,6 +3435,12 @@ async fn run_agent_pipeline(
         }
         if allows("fetch_url") {
             registry.register(Arc::new(mori_core::skill::FetchUrlSkill::new()));
+        }
+        // Stream E:「萬卷之口」 — `read_file_text` LLM tool dispatch 路徑。
+        // system prompt 已在 build_system_prompt 注入工具描述,沒這個 register
+        // LLM 知道工具存在但 reach 不到實作(SkillRegistry::dispatch 找不到 name)。
+        if allows("read_file_text") {
+            registry.register(Arc::new(mori_core::skill::ReadFileSkill));
         }
         // set_mode 永遠註冊(「晚安」「醒醒」是核心功能,無法被 disable)
         // — 但 agent_disabled 時整個 skill 系統都不掛,user 還可以用 UI 按鈕切 mode

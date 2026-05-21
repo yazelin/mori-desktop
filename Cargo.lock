@@ -2590,6 +2590,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hound",
+ "mori-file-loader",
  "regex",
  "reqwest 0.12.28",
  "schemars 0.8.22",
