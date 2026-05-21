@@ -250,6 +250,47 @@ pub fn registry() -> Vec<DepSpec> {
             },
             install_overrides: &[],
         },
+        // 時之鳥(mori-time)桌面通知用 — Linux 走 notify-rust → libnotify → libdbus
+        // session bus。沒裝 → K2 scheduler 觸發 fire() 會回 NotifyError::Notify("no
+        // session bus" / "spawn error"),整個 reminder 提醒失敗。
+        //
+        // 注意:Tauri 2 + libayatana-appindicator-dev 的 build deps 通常會自動把
+        // libdbus-1-3 拉進來,所以多數 dev 機其實「已經有」。仍然顯式列出來,讓
+        // user 知道時之鳥需要這個 lib + 一鍵看狀態,fresh install / minimal container
+        // 環境不至於默默失敗。
+        DepSpec {
+            id: "libdbus",
+            name: "libdbus(時之鳥桌面通知)",
+            description: "Linux 桌面通知(notify-rust → libnotify → dbus session bus)\
+                          需要的共享 lib。Windows / macOS 走 native API,不需要。",
+            unlocks: "mori-time「時之鳥」reminder 到時間真的彈通知 popup",
+            size_hint: Some("~500KB"),
+            needs_sudo: true,
+            platforms: &["linux"],
+            install_caveat: None,
+            // ldconfig -p 列 cache 內所有 .so → grep libdbus-1.so。
+            // 比 pkg-config dbus-1 / dpkg -l 跨發行版更穩(pkg-config 看的是 -dev pkg,
+            // runtime 不需要;dpkg 只 Debian 系)。
+            check: CheckSpec::CommandStdoutContains {
+                cmd: "sh",
+                args: &["-c", "ldconfig -p 2>/dev/null | grep -i 'libdbus-1.so'"],
+                needle: "libdbus-1.so",
+            },
+            check_overrides: &[],
+            // apt / dnf / pacman 都需要 sudo,給 user 自己跑指令(Manual)。
+            // 預設給 Debian/Ubuntu 指令,其他發行版在 commands 內也列出來給 user 看。
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# Ubuntu / Debian:",
+                    "sudo apt install libdbus-1-3",
+                    "# Fedora / RHEL:",
+                    "# sudo dnf install dbus-libs",
+                    "# Arch / Manjaro:",
+                    "# sudo pacman -S dbus",
+                ],
+            },
+            install_overrides: &[],
+        },
         DepSpec {
             id: "whisper-model",
             name: "whisper-local model (ggml-small.bin)",
