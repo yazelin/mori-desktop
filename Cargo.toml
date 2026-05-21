@@ -5,6 +5,7 @@ members = [
     "crates/mori-tauri",
     "crates/mori-cli",
     "crates/mori-file-loader",
+    "crates/mori-time",
 ]
 
 [workspace.package]
