@@ -13,9 +13,12 @@
 //! K1 ship 後其他 sub-streams 可並行接,不會 module conflict。
 
 pub mod schema;
-pub mod scheduler; // K2 stub
-pub mod notifier; // K3 stub
-pub mod parser; // K4 stub
-pub mod commands; // K5 stub
+pub mod scheduler;
+pub mod notifier;
+pub mod parser;
+pub mod commands;
 
 pub use schema::{Reminder, ReminderError, ReminderStatus, ReminderStore};
+pub use scheduler::{ReminderScheduler, SchedulerError};
+pub use notifier::{Notifier, NotifyError};
+pub use commands::{CommandError, ReminderService};

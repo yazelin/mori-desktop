@@ -16,6 +16,12 @@ mori-core = { workspace = true }
 # 把它包成 Tauri command，讓 LLM 經 system prompt 工具描述能讀使用者丟的 .txt/.md
 # （Wave 2 起 .pdf/.docx/.xlsx 等 reader merge 後自動可用，dispatch by extension）。
 mori-file-loader = { path = "../mori-file-loader" }
+# §9 P1 「時之鳥」K5 — mori-time::ReminderService。Tauri 端啟動時建一個
+# `Arc<ReminderService>` 註冊進 Tauri Manager，commands(remind_me_cmd /
+# list_reminders_cmd / cancel_reminder_cmd / snooze_reminder_cmd)+ LLM
+# RemindMeSkill 都從 AppState 拿這份 Arc。mori-time 不 depend mori-core /
+# mori-tauri,純 leaf crate。
+mori-time = { path = "../mori-time" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
