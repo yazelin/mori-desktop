@@ -4456,7 +4456,7 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
         "  • 觸發:user 提到「讀這份 PDF / 摘要這個 docx / 看一下這個 xlsx」、丟給你檔案路徑\n",
     );
     prompt.push_str(
-        "  • 支援格式:.txt / .md(純文字直讀)、.pdf(若有 pdf-extract)、.docx(若有 docx-rs)、.xlsx(若有 calamine)\n",
+        "  • 支援格式:.txt / .md(純文字直讀)、.pdf、.docx、.xlsx\n",
     );
     prompt.push_str(
         "  • path 是檔案絕對路徑或相對路徑(相對 user $HOME)\n",
