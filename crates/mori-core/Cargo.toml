@@ -36,5 +36,10 @@ hound = "3.5"
 # (tracing-subscriber / reqwest 都用),這裡顯式宣告便於直接 use。
 regex = "1"
 
+# Stream E:`read_file_text` LLM-callable skill(`skill/read_file.rs`)包
+# mori-file-loader 公開 API。純 path dep,無 cycle 風險 — mori-file-loader
+# 自身只依 thiserror,不 depend mori-core。
+mori-file-loader = { path = "../mori-file-loader" }
+
 [dev-dependencies]
 tempfile = "3"
