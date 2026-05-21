@@ -25,6 +25,7 @@ mod selection;
 mod shell_skill;
 mod skill_server;
 mod recordings;
+mod soul_distribution;
 mod speaker_id;
 mod theme;
 mod transcribe_cmds;
@@ -4811,6 +4812,43 @@ fn main() {
         }
     }
     let annuli_cfg = annuli_cfg; // 從這之後 immutable
+
+    // §13.12 P0-3:確保 vault 內 SOUL.md 存在(canonical SOUL 分發)。
+    //
+    // 新 user 第一次跑 → vault 是空的 → 從 world-tree HTTP 拉 SOUL 摘錄,
+    // 連不到就用 bundle 在 binary 內的 canonical SOUL.md(`include_str!`)。
+    // 已存在 SOUL.md(任何 content,包括空檔)→ 不動,user 個體 SOUL 不能被覆蓋。
+    //
+    // 失敗 → 只 warn,不 panic — startup 不該被 SOUL distribution 卡住。
+    // 後續 Stream A 的 `load_soul_content` 會自動 pick up 這裡寫進去的 SOUL。
+    if let Some(vault_root) = default_vault_root() {
+        let spirit = if annuli_cfg.spirit_name.is_empty() {
+            "mori".to_string()
+        } else {
+            annuli_cfg.spirit_name.clone()
+        };
+        // 在 spawn_blocking 跑 — HTTP fetch 是 sync,別 block tauri runtime。
+        // 雖然這裡還沒進 tauri::Builder,但 std::thread 起一個更輕量。
+        // 不 join,fire-and-forget(完成前 user 第一輪對話 race condition 可能讀不到,
+        // 但 P0-1 fallback opener 會接住)。
+        let vault_root_clone = vault_root.clone();
+        let spirit_clone = spirit.clone();
+        std::thread::spawn(move || {
+            match soul_distribution::ensure_soul_at_vault(&vault_root_clone, &spirit_clone) {
+                Ok(()) => {}
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    vault_root = %vault_root_clone.display(),
+                    spirit = %spirit_clone,
+                    "failed to ensure canonical SOUL.md at vault — Mori 仍可跑,只是 SOUL 注入會走 fallback opener"
+                ),
+            }
+        });
+    } else {
+        tracing::warn!(
+            "could not determine vault root ($HOME/$USERPROFILE 未設?),跳過 SOUL distribution"
+        );
+    }
 
     // 建立長期記憶 store + (可選)annuli HTTP client。Wave 4:
     // ~/.mori/config.json 有 `annuli.enabled=true` 且 endpoint / spirit / user_id
