@@ -185,6 +185,11 @@ mod fetch_url;
 // Stream E:「萬卷之口」— 讀本地檔案為 LLM-callable tool
 mod read_file;
 
+// Stream I:Anthropic SKILL.md 格式 — 載入 `~/.mori/skills/<name>/SKILL.md`,
+// 把 markdown body 當 prompt-augmentation 給 LLM。對齊
+// https://agentskills.io/specification。D-light(只讀 body,不執行 scripts/)。
+pub mod anthropic_skill;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -201,6 +206,10 @@ pub use paste_selection::PasteSelectionBackSkill;
 
 pub use fetch_url::FetchUrlSkill;
 pub use read_file::ReadFileSkill;
+
+pub use anthropic_skill::{
+    discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicSkill,
+};
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 
