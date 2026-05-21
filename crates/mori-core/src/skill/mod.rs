@@ -185,6 +185,9 @@ mod fetch_url;
 // Stream E:「萬卷之口」— 讀本地檔案為 LLM-callable tool
 mod read_file;
 
+// §9 P1 「時之鳥」K5:remind_me LLM tool dispatch path — 接 mori_time::ReminderService
+mod remind_me;
+
 // Stream I:Anthropic SKILL.md 格式 — 載入 `~/.mori/skills/<name>/SKILL.md`,
 // 把 markdown body 當 prompt-augmentation 給 LLM。對齊
 // https://agentskills.io/specification。D-light(只讀 body,不執行 scripts/)。
@@ -206,6 +209,7 @@ pub use paste_selection::PasteSelectionBackSkill;
 
 pub use fetch_url::FetchUrlSkill;
 pub use read_file::ReadFileSkill;
+pub use remind_me::RemindMeSkill;
 
 pub use anthropic_skill::{
     discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicSkill,
