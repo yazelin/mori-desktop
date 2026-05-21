@@ -2,17 +2,11 @@
 # Obsidian integration — wraps the official Obsidian CLI (v1.12.4+, GA 2026/02)
 # as shell_skills so Mori can search the vault / read+write daily notes / create notes.
 #
-# Prerequisites:
-#   1. Install Obsidian app (https://obsidian.md) — the CLI is a client; Obsidian
-#      must be running in the background (system tray / dock is fine)
-#   2. Install the official Obsidian CLI:
-#      - macOS:  brew install --cask obsidian-cli
-#      - Linux:  download https://obsidian.md/cli into ~/bin/ (or anywhere on $PATH)
-#      - Win:    winget install Obsidian.CLI (or grab the .exe from official releases)
-#      Note: the CLI and Obsidian app are two separate installs — you need both.
-#   3. Open Obsidian app at least once so the vault is registered (CLI defaults
-#      to the last-opened vault when no --vault flag is passed)
-#   4. Optional: run `obsidian vault list` to confirm the CLI sees your vault
+# Prerequisites: the Obsidian CLI is **bundled inside the Obsidian app** (v1.12.4+);
+# it is NOT a separate binary.
+#   1. Install Obsidian app v1.12.4+ (https://obsidian.md)
+#   2. In-app: Settings → General → Command line interface → Register CLI → enable
+#   3. Open new terminal, run `obsidian --version` to verify PATH
 #
 # Uses claude-bash because "find note → read → rewrite → write back" often needs
 # 2-3 rounds of tool calling, and pure-API tool calling has slightly higher failure
@@ -26,15 +20,15 @@ shell_skills:
       (filename + short context). Supports Obsidian's search syntax (`tag:#x`,
       `path:folder/`, `"exact phrase"`, `file:(a OR b)`, etc.) — straight pass-
       through of the in-app search syntax.
-      **Obsidian app must be running** (system tray is fine, no foreground
-      needed); otherwise returns connection error.
+      If Obsidian app isn't running, the CLI auto-launches it (3-5s cold-start
+      delay on first call). Only errors if app is not installed.
     parameters:
       query:
         type: string
         required: true
         description: search string (Obsidian search syntax supported)
-    command: ["obsidian", "search", "{{query}}"]
-    timeout_secs: 15
+    command: ["obsidian", "search", "query={{query}}"]
+    timeout_secs: 30
 
   - name: obsidian_read
     description: |
@@ -43,13 +37,15 @@ shell_skills:
       "daily/2026-05-21" or "projects/mori roadmap".
       File-not-found returns ERROR + hint; the LLM should fall back to
       obsidian_search to find the correct path.
+      If Obsidian app isn't running, the CLI auto-launches it (3-5s cold-start
+      delay on first call). Only errors if app is not installed.
     parameters:
       path:
         type: string
         required: true
         description: vault-relative note path (`.md` extension optional)
-    command: ["obsidian", "note", "read", "{{path}}"]
-    timeout_secs: 10
+    command: ["obsidian", "read", "path={{path}}"]
+    timeout_secs: 20
 
   - name: obsidian_create
     description: |
@@ -59,6 +55,8 @@ shell_skills:
       Returns ERROR if file exists (no overwrite). To edit an existing note,
       use obsidian_daily_append for daily notes, or obsidian_read it first then
       obsidian_create under a new title.
+      If Obsidian app isn't running, the CLI auto-launches it (3-5s cold-start
+      delay on first call). Only errors if app is not installed.
     parameters:
       title:
         type: string
@@ -68,8 +66,8 @@ shell_skills:
         type: string
         required: true
         description: markdown content
-    command: ["obsidian", "note", "create", "--title", "{{title}}", "--body", "{{body}}"]
-    timeout_secs: 10
+    command: ["obsidian", "create", "name={{title}}", "content={{body}}"]
+    timeout_secs: 20
 
   - name: obsidian_daily_append
     description: |
@@ -79,34 +77,40 @@ shell_skills:
       Best fit for "jot this idea down", "todo", "today's quick note", etc. —
       cleaner than obsidian_create because it avoids scattering tiny one-off files.
       Do **not** prepend "- " or a timestamp to `text` — the CLI handles formatting.
+      If Obsidian app isn't running, the CLI auto-launches it (3-5s cold-start
+      delay on first call). Only errors if app is not installed.
     parameters:
       text:
         type: string
         required: true
         description: line(s) to append to today's daily
-    command: ["obsidian", "daily", "append", "{{text}}"]
-    timeout_secs: 10
+    command: ["obsidian", "daily:append", "content={{text}}"]
+    timeout_secs: 20
 
   - name: obsidian_daily_read
     description: |
       Read today's full daily note (returns ERROR if today's daily doesn't exist
       yet). Use for "what did I do today" / "what did I note down today" queries.
       For other dates, use obsidian_read with a date-shaped path instead.
-    command: ["obsidian", "daily", "read"]
-    timeout_secs: 10
+      If Obsidian app isn't running, the CLI auto-launches it (3-5s cold-start
+      delay on first call). Only errors if app is not installed.
+    command: ["obsidian", "daily:read"]
+    timeout_secs: 20
 
   - name: obsidian_search_tag
     description: |
       Search the vault by tag — a shortcut over obsidian_search. The `#` prefix
       is NOT required, the CLI prepends it.
       Example: tag="reflection" finds all notes tagged #reflection.
+      If Obsidian app isn't running, the CLI auto-launches it (3-5s cold-start
+      delay on first call). Only errors if app is not installed.
     parameters:
       tag:
         type: string
         required: true
         description: tag name (no `#` prefix)
-    command: ["obsidian", "search", "tag:#{{tag}}"]
-    timeout_secs: 15
+    command: ["obsidian", "search", "query=tag:#{{tag}}"]
+    timeout_secs: 30
 ---
 You are Mori's **Obsidian note assistant**. The user keeps their second brain in
 an Obsidian vault — your job is to search, read, and write notes for her so she
