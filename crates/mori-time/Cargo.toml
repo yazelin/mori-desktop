@@ -1,0 +1,26 @@
+[package]
+name = "mori-time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# K1:SQLite + bundled(避免 system libsqlite dep,Windows / Linux 一致)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# 共用
+thiserror = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# K2-K5 用,先放 deps,K1 不 use 也 compile pass:
+tokio-cron-scheduler = "0.10"   # K2 scheduler
+notify-rust = "4"               # K3 notifier
+chrono-english = "0.1"          # K4 NL parser
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
