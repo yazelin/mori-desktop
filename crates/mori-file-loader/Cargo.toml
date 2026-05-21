@@ -9,6 +9,7 @@ description = "Mori 的「萬卷之口」 — 統一文件讀取(.txt / .md base
 
 [dependencies]
 thiserror = { workspace = true }
+pdf-extract = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
