@@ -32,8 +32,16 @@ Thumbs.db
 # Mori runtime data
 .mori/
 
-# Claude Code session state(不該進版本控制 — 個人 IDE-like artifact)
-.claude/
+# Claude Code 個人 session state(history / settings / cache 等不該進版本控制
+# 的 IDE-like artifact),預設整個 .claude/ 都不追。
+.claude/*
+# 但 skills 是共享 workflow 定義 — 多人協作 / 跨 device 都要拿得到,allowlist 回來。
+!.claude/skills/
+
+# Python byproduct(`python -m py_compile` 之類驗證 / examples/scripts/ 跑起來
+# 會產生,不該進 repo)。
+__pycache__/
+*.pyc
 
 # 開發用 scratch — tokenizer 測試 / 一次性實驗腳本,不進 repo。
 scratch/
