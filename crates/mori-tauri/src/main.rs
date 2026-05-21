@@ -8,6 +8,7 @@ mod annuli_supervisor;
 mod character_pack;
 mod context_provider;
 mod deps;
+mod file_loader_cmd;
 mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
@@ -4440,6 +4441,22 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
     prompt.push_str("  • kind:email / message / essay / social_post / other\n");
     prompt.push_str("  • length_hint:short / medium(預設)/ long\n\n");
 
+    // 「萬卷之口」— 統一文件讀取入口。LLM 透過這個能把使用者塞過來的檔案
+    // 內容拉進 context 再處理(摘要 / 翻譯 / 回答關於檔案內容的問題)。
+    prompt.push_str("**read_file_text(path)**:讀檔案內容回傳純文字。\n");
+    prompt.push_str(
+        "  • 觸發:user 提到「讀這份 PDF / 摘要這個 docx / 看一下這個 xlsx」、丟給你檔案路徑\n",
+    );
+    prompt.push_str(
+        "  • 支援格式:.txt / .md(純文字直讀)、.pdf(若有 pdf-extract)、.docx(若有 docx-rs)、.xlsx(若有 calamine)\n",
+    );
+    prompt.push_str(
+        "  • path 是檔案絕對路徑或相對路徑(相對 user $HOME)\n",
+    );
+    prompt.push_str(
+        "  • 讀失敗會回 error message,**不要重試**或編造內容 — 直接告訴 user 失敗了\n\n",
+    );
+
     prompt.push_str(
         "**選 skill 的判斷**:閒聊或一般問答**直接答**,不要硬叫工具。\
          上面這些 text skills 是當使用者**明確要求一個動作**(翻譯 / 潤稿 / \
@@ -4930,6 +4947,7 @@ fn main() {
             character_sprite_data_url,
             character_dir,
             character_upgrade_pack_to_4x4,
+            file_loader_cmd::read_file_text_cmd,
             transcribe_cmds::transcribe_check_deps,
             transcribe_cmds::transcribe_file_cmd,
             transcribe_cmds::transcribe_paths_cmd,
@@ -6221,6 +6239,24 @@ mod tests {
         assert!(out.contains("paste_selection_back"));
         // memory_index 參數該被附在末尾
         assert!(out.contains("mem1: 用戶喜歡 Rust"));
+    }
+
+    // ─── Stream E:「萬卷之口」file_loader tool 描述注入 ──────────────────
+    //
+    // `read_file_text` Tauri command 在 file_loader_cmd 模組,但 LLM 要看得到
+    // 必須在 system prompt 內有對應描述。這個測試把「prompt 含 read_file_text
+    // 描述」當合約釘住,避免有人改 prompt 時不小心拿掉。
+    #[test]
+    fn build_system_prompt_includes_read_file_text_tool() {
+        let prompt = build_system_prompt(None, "", &empty_mori_ctx());
+        assert!(
+            prompt.contains("read_file_text"),
+            "read_file_text tool description missing from system prompt"
+        );
+        assert!(
+            prompt.contains("讀檔案"),
+            "read_file_text description tagline missing from system prompt"
+        );
     }
 
     #[test]

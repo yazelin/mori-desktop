@@ -2626,6 +2626,7 @@ dependencies = [
  "hound",
  "image",
  "mori-core",
+ "mori-file-loader",
  "parking_lot",
  "rand 0.8.6",
  "raw-window-handle",
