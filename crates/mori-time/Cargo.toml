@@ -21,6 +21,8 @@ tokio-cron-scheduler = "0.10"   # K2 scheduler
 notify-rust = "4"               # K3 notifier
 chrono-english = "0.1"          # K4 NL parser
 tokio = { workspace = true }
+# K5 commands — on_fire callback / startup reload log + warn 用
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
