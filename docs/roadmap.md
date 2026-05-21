@@ -33,7 +33,7 @@ Windows v0.2 已上線,設計上 mori-core 跟其他平台完全共用,加 macOS
 
 ---
 
-## 中期 — 三條主線
+## 中期 — 四條主線
 
 ### 記憶之森 — 本機記憶架構升級
 
@@ -55,27 +55,72 @@ Windows v0.2 已上線,設計上 mori-core 跟其他平台完全共用,加 macOS
 設計上仍然「**user 打開記事本就能看 / 改**」— 跟現有 `~/.mori/agent/`
 `~/.mori/voice_input/` plain-text 哲學一致。
 
-### 林間心跳 — 接 Annuli scheduler
+### 時之鳥 — 本機提醒 / cron(目前完全空缺)
+
+> Mori 目前**完全沒有排程 / 提醒能力** — Annuli 是「**反思服務**」不是 scheduler
+> (見 [`design/annuli-memory.md`](design/annuli-memory.md):「vault-backed 反思服務」),
+> mori-desktop 自身也沒 timer。User 跟 Mori 說「6 點提醒我打電話」目前接不住。
+
+**為什麼不寄生在 Annuli — 時間方向不同**:
+
+| | 時之鳥(本機 timer) | Annuli(反思服務) |
+|---|---|---|
+| 責任 | 在某時間點**做某事** | 整理**過去發生**的事 |
+| 時間方向 | 未來(triggers) | 過去(reflection) |
+| 場景 | 「6 點打電話給媽」「pomodoro 25 分鐘」「等這個 commit 跑完通知我」 | 「化今天為一輪年輪」「整週對話 → 反思文」 |
+| 持久化 | rusqlite `~/.mori/reminders.db`,per-machine | vault markdown,跨機器 |
+| 產物 | 桌面通知 + 可選 TTS / 可選 LLM 回呼 | rings / digests markdown 反思文 |
+
+**Stack(全 Rust crate,跨 Linux / Win / mac)**:
+
+- **`tokio-cron-scheduler`** — async cron + 一次性 timer + 間隔執行
+- **`notify-rust`** — 跨平台桌面通知(libnotify / Win toast / NSUserNotification 統一 API)
+- **`chrono-english`**(或自寫小 parser)— 「明天下午 3 點」「30 分鐘後」→ DateTime
+- **rusqlite** + `~/.mori/reminders.db` — 持久化,user 可直接 `sqlite3` 看 / 編
+
+**LLM 用內建 skill 操作**(不靠 profile shell_skills,寫進 mori-core):
+
+```yaml
+# 內建 skill (SkillRegistry 註冊)
+- remind_me        # 設提醒,支援自然語言時間
+- list_reminders   # 列待觸發
+- cancel_reminder
+- snooze_reminder
+```
+
+**未來延伸**:
+- Reminder 觸發可選回呼:純通知 / 加 TTS 講話 / 喚 mori 跑一個 prompt(eg「列出今天 commit」)
+- Pomodoro / focus session 內建 + 整合 wake-word(focus 時暫停聽 wake-word)
+- **Annuli 整合是 bonus 而非依賴**:本機 reminder 完成事件可選 `POST /events` 進
+  vault,讓 Annuli 反思時看得到「user 今天設了哪些提醒、做完了沒」
+
+**設計原則**:本機優先 / 離線可用 / 無中央代理 / user 可直接看 sqlite。
+跟 Annuli 各管各的時間維度,不互相依賴。
+
+### 林間心跳 — 接 Annuli 反思服務
 
 > **Ship day checklist** 在 [`design/annuli-wave3-integration.md`](design/annuli-wave3-integration.md) —
 > mori-desktop 端 client / supervisor / Config UI 全建好,卡在 annuli wave 2 重構;
 > 那邊 ship 後對著 checklist 跑一輪即可連線。
 
-Annuli 那邊**已經有完整的背景循環系統**(APScheduler 跑 4 條任務:
-explore / learn / study / post)。mori-desktop 不重做,改成**前端 + Annuli 控制台**:
+Annuli 是 [vault-backed 反思服務](design/annuli-memory.md) — 不是 scheduler。
+mori-desktop 對接的是 Annuli 的**反思產物**(events / digests / rings):
 
-- mori-desktop 主視窗加「**Annuli**」tab — 顯示 Annuli 跑的 task 狀態、
-  最近 ring、knowledge 庫
-- 提供 GUI 切換 task on/off(POST `http://localhost:5000/schedule/<id>/toggle`)
-- 提供「**立即觸發**」按鈕(POST `/schedule/<id>/run`)
-- Annuli 完成長任務 → 推 `AgentPulse` 通知(desktop notification / Slack DM
-  / email),Mori sprite 主動講話「你 30 分鐘前要的 X 好了」
-- 桌面快捷:`Ctrl+Alt+Z` 觸發 Annuli `/sleep`(化今天為一輪年輪)
+- mori-desktop 主視窗加「**Annuli**」tab — 顯示最近 rings、daily digests、events 流
+- 對話事件 append:每輪 Mori 回應 → `POST /spirits/<x>/events`(append-only)
+- 桌面快捷:`Ctrl+Alt+Z` 觸發 `/sleep` → `POST /spirits/<x>/rings/new`(化今日為一輪年輪)
+- Annuli daily digest 完成 → 推 `AgentPulse` 通知(desktop notification),
+  Mori sprite 主動講「今天的年輪寫好了」
+- Creator 側(explore / learn / study / post)走 `annuli-creator/`,**不在 mori-desktop 對接範圍**
+  (預設 user 機器不跑;有人要 fork 寫作工作站才開)
 
 **配置**:
 - `~/.mori/config.json` 多 `annuli.endpoint`(預設 `http://localhost:5000`)
 - `annuli.enable_sync` boolean(預設 off,user 自己 enable,主權在 user)
 - Sleep mode 暫停整個對 Annuli 的對接
+
+**注意**:時間維度排程屬於[時之鳥](#時之鳥--本機提醒--cron目前完全空缺)(上一節),
+本節純粹是反思產物的 GUI 控制台 + 對話事件 sink。
 
 ### 跨界之手 — 服務整合 framework
 
