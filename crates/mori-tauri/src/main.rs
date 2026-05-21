@@ -13,6 +13,7 @@ mod hotkey_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
+mod reminders_cmd;
 mod x11_hotkey;
 #[cfg(target_os = "linux")]
 mod x11_shape;
@@ -47,9 +48,10 @@ use mori_core::paste::PasteController;
 use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill, PolishSkill,
-    ReadFileSkill, RecallMemorySkill, RememberSkill, SetModeSkill, SkillRegistry, SummarizeSkill,
-    TranslateSkill,
+    ReadFileSkill, RecallMemorySkill, RememberSkill, RemindMeSkill, SetModeSkill, SkillRegistry,
+    SummarizeSkill, TranslateSkill,
 };
+use mori_time::{Notifier, ReminderService};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -2127,7 +2129,10 @@ struct SkillInfo {
 }
 
 #[tauri::command]
-async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<SkillInfo>, String> {
+async fn skills_list(
+    state: tauri::State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<Vec<SkillInfo>, String> {
     // 內容跟 skill_server::build_dynamic_registry 等價,直接呼叫(在 main 直接拼簡單版)
     let memory = state.memory_handle();
     let routing = mori_core::llm::Routing::build_from_config(None)
@@ -2146,6 +2151,11 @@ async fn skills_list(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Skill
     )));
     registry.register(Arc::new(FetchUrlSkill::new()));
     registry.register(Arc::new(ReadFileSkill));
+    // §9 P1 「時之鳥」K5:LLM-callable remind_me skill。從 Tauri Manager 拿
+    // ReminderService Arc(已在 main() 啟動時 `.manage(reminder_service)`)。
+    if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
+        registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
+    }
     registry.register(Arc::new(RememberSkill::new(mem_arc.clone())));
     registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
     registry.register(Arc::new(ForgetMemorySkill::new(mem_arc.clone())));
@@ -3448,6 +3458,16 @@ async fn run_agent_pipeline(
         if allows("read_file_text") {
             registry.register(Arc::new(mori_core::skill::ReadFileSkill));
         }
+        // §9 P1 「時之鳥」K5 — `remind_me` LLM tool dispatch 路徑。同上,system prompt
+        // 已注入工具描述,沒 register LLM 叫 remind_me 會吃 "unknown skill" error。
+        // ReminderService 從 Tauri Manager 拿(main 啟動已 .manage)。
+        if allows("remind_me") {
+            if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
+                registry.register(Arc::new(mori_core::skill::RemindMeSkill::new(
+                    svc.inner().clone(),
+                )));
+            }
+        }
         // set_mode 永遠註冊(「晚安」「醒醒」是核心功能,無法被 disable)
         // — 但 agent_disabled 時整個 skill 系統都不掛,user 還可以用 UI 按鈕切 mode
         if !agent_disabled {
@@ -4484,6 +4504,22 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
         "  • 讀失敗會回 error message,**不要重試**或編造內容 — 直接告訴 user 失敗了\n\n",
     );
 
+    // §9 P1 「時之鳥」K5 — remind_me 工具描述。LLM 看 user 講「X 點提醒我 Y」「等等
+    // 記得 Y」「明天 9 點提醒我做 Z」這類就叫這個 tool。解析失敗 / 過去時間會 Err。
+    prompt.push_str("**remind_me(text, when)**:設一個提醒。\n");
+    prompt.push_str(
+        "  • 觸發:user 說「X 點提醒我 Y」「等等記得 Y」「明天早上 9 點提醒我做 Z」等\n",
+    );
+    prompt.push_str(
+        "  • text:要提醒的內容(短句),例:「打電話給媽」「喝水」「會議開始」\n",
+    );
+    prompt.push_str(
+        "  • when:中/英文自然語言時間。中文「30 分鐘後」「明天 9 點」「下午 3 點」「下週一」;英文「30 minutes」「tomorrow 9am」「6pm」「next mon」\n",
+    );
+    prompt.push_str(
+        "  • 解析失敗(不認得時間格式)/ 過去時間會回 error message,直接告訴 user 不認得時間格式並請他換個說法\n\n",
+    );
+
     prompt.push_str(
         "**選 skill 的判斷**:閒聊或一般問答**直接答**,不要硬叫工具。\
          上面這些 text skills 是當使用者**明確要求一個動作**(翻譯 / 潤稿 / \
@@ -4887,6 +4923,43 @@ fn main() {
 
     let state_for_setup = state.clone();
 
+    // §9 P1 「時之鳥」K5:在 Builder 開跑前先建好 ReminderService。
+    // SQLite migrate + 重排 pending reminder 都在 async `new()` 內;Tauri 提供
+    // `block_on` 入口在 sync `main()` 裡跑 async,啟動完成才繼續往下。
+    //
+    // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。失敗就 warn +
+    // 略過(不擋啟動)— LLM RemindMeSkill / Tauri commands 走到 state.get 也會直接
+    // 拿到 None,在 user 真正叫 remind_me 才會看到「reminder service not available」
+    // 提示。優雅 degrade,不要因為 .mori dir 寫不進去就死整個 app。
+    let reminders_db_path = mori_dir().join("reminders.db");
+    if let Some(parent) = reminders_db_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!(
+                path = %parent.display(),
+                error = %e,
+                "failed to create dir for reminders.db",
+            );
+        }
+    }
+    // 失敗就 panic — sqlite open 失敗代表 ~/.mori 整個寫不進去,連 config / memory 都會
+    // 跟著炸,reminders 反正不可能撐起來。早死早超生。
+    let reminder_service: Arc<ReminderService> = Arc::new(
+        tauri::async_runtime::block_on(ReminderService::new(
+            &reminders_db_path,
+            Notifier::new("Mori"),
+        ))
+        .unwrap_or_else(|e| {
+            panic!(
+                "ReminderService init failed (path={}): {e}",
+                reminders_db_path.display()
+            )
+        }),
+    );
+    tracing::info!(
+        path = %reminders_db_path.display(),
+        "ReminderService ready (時之鳥)",
+    );
+
     tauri::Builder::default()
         // 5J-followup: 防止 mori-tauri orphan + 新實例並存的搶 tray / hotkey 戰。
         // 第二個 instance 啟動時觸發此 callback:把焦點還給第一個然後自殺。
@@ -4898,6 +4971,9 @@ fn main() {
             }
         }))
         .manage(state.clone())
+        // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
+        // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
+        .manage(reminder_service.clone())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // 轉錄頁:native file/folder picker(WebView <input type=file> 給不到絕對路徑)
@@ -4975,6 +5051,10 @@ fn main() {
             character_dir,
             character_upgrade_pack_to_4x4,
             file_loader_cmd::read_file_text_cmd,
+            reminders_cmd::remind_me_cmd,
+            reminders_cmd::list_reminders_cmd,
+            reminders_cmd::cancel_reminder_cmd,
+            reminders_cmd::snooze_reminder_cmd,
             transcribe_cmds::transcribe_check_deps,
             transcribe_cmds::transcribe_file_cmd,
             transcribe_cmds::transcribe_paths_cmd,
@@ -6283,6 +6363,28 @@ mod tests {
         assert!(
             prompt.contains("讀檔案"),
             "read_file_text description tagline missing from system prompt"
+        );
+    }
+
+    // ─── §9 P1 「時之鳥」K5:remind_me tool 描述注入 ────────────────────
+    //
+    // `remind_me` Tauri command 在 reminders_cmd 模組,LLM 要看到必須在 system
+    // prompt 注入工具描述。釘住「prompt 含 remind_me + when 關鍵字」當合約。
+    #[test]
+    fn build_system_prompt_includes_remind_me_tool() {
+        let prompt = build_system_prompt(None, "", &empty_mori_ctx());
+        assert!(
+            prompt.contains("remind_me"),
+            "remind_me tool description missing from system prompt"
+        );
+        assert!(
+            prompt.contains("提醒"),
+            "remind_me description tagline (提醒) missing from system prompt"
+        );
+        // when 參數說明有,代表用法描述進來了
+        assert!(
+            prompt.contains("when"),
+            "remind_me when param missing from system prompt"
         );
     }
 
