@@ -12,14 +12,18 @@
 //! - on-fire callback 內部把 K3 notifier + store.mark_fired() 串好;一次性 reminder
 //!   觸發後 store 自動標 Fired,週期性(cron)reminder 保留 Pending 持續觸發
 //!
-//! ## 為什麼用 catch_unwind 包 callback?
+//! ## on_fire panic 怎麼處理?
 //!
-//! K2 reviewer 建議:`on_fire` callback 跑在 tokio-cron-scheduler 的 worker task,
-//! 如果裡面 panic 會把整個 scheduler task 拖死,導致後續所有 reminder 都不響。
-//! 我們用 [`std::panic::catch_unwind`] 包 K3 / store call 那段,panic 只 log warn,
-//! 不傳染。`AssertUnwindSafe` 是因為 Notifier / store reference 都不是 UnwindSafe
-//! (rusqlite Connection 帶內部 mutable state),但我們不在 panic 後繼續用它們
-//! (callback 結束就放回 Arc,沒有 partially-mutated state 殘留)。
+//! `on_fire` callback 跑在 tokio-cron-scheduler 的 worker task。我們把實際工作
+//! (notifier.fire + store.mark_fired)`tokio::spawn` 進一個獨立 task,**仰賴
+//! tokio 的 task 隔離**:單一 spawned task 內 panic 只殺那條 task,不會 abort
+//! tokio runtime,也不會傳染回 scheduler。
+//!
+//! 早前版本曾用 `std::panic::catch_unwind` 包 `tokio::spawn(...)`,但那個包法只
+//! 罩 `tokio::spawn` 自己(基本不會 panic),罩不到 spawned async block 內的
+//! `notifier.fire` / `store.mark_fired` — async work 被 spawn 出去後,catch_unwind
+//! 已經 return 完了。砍掉那層誤導死防護。要看 panic 細節可從 tokio task panic
+//! log 取(tracing-subscriber 預設會 emit)。
 
 use std::path::Path;
 use std::sync::Arc;
@@ -91,39 +95,29 @@ impl ReminderService {
         let on_fire: OnFireCallback = Arc::new(move |reminder: Reminder| {
             let store_inner = Arc::clone(&store_for_cb);
             let notifier_inner = notifier_for_cb.clone();
-            // reminder.id 在 panic-log path 也要,先抓出來避免 move ownership 衝突
-            let reminder_id = reminder.id;
-            // 包 catch_unwind:不讓 panic 拖死整個 scheduler task。
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                tokio::spawn(async move {
-                    // K3:發桌面通知。失敗 log warn,不 throw。
-                    if let Err(e) = notifier_inner.fire(&reminder) {
+            // 仰賴 tokio task 隔離:spawned task 內 panic 只殺那條 task,不傳染
+            // scheduler。詳見模組 doc。
+            tokio::spawn(async move {
+                // K3:發桌面通知。失敗 log warn,不 throw。
+                if let Err(e) = notifier_inner.fire(&reminder) {
+                    tracing::warn!(
+                        reminder_id = reminder.id,
+                        error = %e,
+                        "notifier.fire failed (reminder still mark_fired)",
+                    );
+                }
+                // 一次性 reminder:fire 後 store 標 Fired。週期性(cron)保留 Pending。
+                if reminder.cron_expr.is_none() {
+                    let store = store_inner.lock().await;
+                    if let Err(e) = store.mark_fired(reminder.id, Utc::now()) {
                         tracing::warn!(
                             reminder_id = reminder.id,
                             error = %e,
-                            "notifier.fire failed (reminder still mark_fired)",
+                            "mark_fired failed",
                         );
                     }
-                    // 一次性 reminder:fire 後 store 標 Fired。週期性(cron)保留 Pending。
-                    if reminder.cron_expr.is_none() {
-                        let store = store_inner.lock().await;
-                        if let Err(e) = store.mark_fired(reminder.id, Utc::now()) {
-                            tracing::warn!(
-                                reminder_id = reminder.id,
-                                error = %e,
-                                "mark_fired failed",
-                            );
-                        }
-                    }
-                });
-            }));
-            if let Err(panic) = result {
-                tracing::warn!(
-                    reminder_id,
-                    panic = ?panic,
-                    "on_fire callback panicked (suppressed to keep scheduler alive)",
-                );
-            }
+                }
+            });
         });
 
         // 3) Create scheduler + start
@@ -203,9 +197,10 @@ impl ReminderService {
 
     /// 把現有 reminder snooze 到指定時間。`when_expr` 同 [`remind_me`] 走 NL parser。
     ///
-    /// 內部:parse → store.snooze(更新 status + snoozed_until)→ scheduler 重 schedule。
-    /// 注意:K2 schedule 是用 reminder.due_at 算 one-shot duration,所以我們在
-    /// schedule 前把 reminder.due_at 更新成新 until,讓 scheduler 用新時間。
+    /// 內部:parse → store.snooze(更新 status + snoozed_until + **due_at**)→
+    /// scheduler 重 schedule。K2 scheduler 是用 reminder.due_at 算 one-shot
+    /// duration,store.snooze 已把 due_at 一起推到 until,reload-on-startup 也
+    /// 不會用到舊 due_at 立刻觸發。
     pub async fn snooze_reminder(
         &self,
         id: i64,
@@ -214,16 +209,11 @@ impl ReminderService {
         let until = parser::parse(&when_expr)?;
         // 先 cancel scheduler 內舊 job(避免兩個 timer 並存)
         self.scheduler.cancel(id).await?;
-        // 更新 store
+        // 更新 store(snooze 內部會把 due_at 一起更新成 until)+ 拿回新 row
         let updated = {
             let store = self.store.lock().await;
             store.snooze(id, until)?;
-            // 拿出更新後完整 reminder(包含新 snoozed_until + Snoozed status)。
-            // K2 scheduler 用的是 due_at,不是 snoozed_until — 但 snooze 行為是「延後觸發」,
-            // 我們在 schedule call 前把 reminder.due_at 改成 `until` 來達到延後效果。
-            let mut r = store.get(id)?;
-            r.due_at = until;
-            r
+            store.get(id)?
         };
         self.scheduler.schedule(&updated).await?;
         Ok(())
@@ -380,6 +370,46 @@ mod tests {
         // snoozed reminder 仍在 list_pending(因為 list_pending 含 Snoozed)
         let pending = svc.list_reminders().await.unwrap();
         assert!(pending.iter().any(|x| x.id == r.id));
+    }
+
+    #[tokio::test]
+    async fn snooze_persists_due_at_for_reload() {
+        // K5 fix:snooze 後 drop service、重開,reload 出來的 reminder 必須有「新」
+        // due_at(=snooze until),不是原本 30 分鐘後那個。若 schema.snooze 沒同更
+        // due_at,reload-on-startup 的重排會用過去的 due_at,reminder 立刻觸發 —
+        // 等於 snooze 沒效果。
+        let dir = TempDir::new().unwrap();
+        let db = dir.path().join("reminders.db");
+
+        let (r_id, snooze_until) = {
+            let svc = ReminderService::new(&db, fresh_notifier()).await.unwrap();
+            let r = svc
+                .remind_me("snz-reload".into(), "30 minutes".into())
+                .await
+                .unwrap();
+            // snooze 到 2 小時後
+            svc.snooze_reminder(r.id, "2 hours".into()).await.unwrap();
+            // 抓出來確認 store 端 due_at 已被推到 ~2h 後
+            let after = svc.store.lock().await.get(r.id).unwrap();
+            assert_eq!(after.status, ReminderStatus::Snoozed);
+            // due_at 跟 snoozed_until 應該一致
+            assert_eq!(after.due_at, after.snoozed_until.unwrap());
+            (r.id, after.due_at)
+        };
+
+        // drop svc → 重開
+        let svc2 = ReminderService::new(&db, fresh_notifier()).await.unwrap();
+        let pending = svc2.list_reminders().await.unwrap();
+        let reloaded = pending.iter().find(|x| x.id == r_id).expect("reloaded");
+        // reload 後 due_at 仍是 snooze until(~2h 後),不是原本 30min 後
+        let drift = (reloaded.due_at - snooze_until).num_seconds().abs();
+        assert!(drift <= 1, "reloaded due_at drift={drift}s");
+        // 跟 now 比應該 ≈ 2h 後(1.9h ~ 2.1h)
+        let from_now = (reloaded.due_at - Utc::now()).num_seconds();
+        assert!(
+            (6840..=7560).contains(&from_now),
+            "reloaded due_at should be ~7200s in future, got {from_now}s",
+        );
     }
 
     #[tokio::test]

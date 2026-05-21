@@ -2152,7 +2152,9 @@ async fn skills_list(
     registry.register(Arc::new(FetchUrlSkill::new()));
     registry.register(Arc::new(ReadFileSkill));
     // §9 P1 「時之鳥」K5:LLM-callable remind_me skill。從 Tauri Manager 拿
-    // ReminderService Arc(已在 main() 啟動時 `.manage(reminder_service)`)。
+    // ReminderService Arc(main() 啟動時 `.manage(reminder_service)`,init 失敗
+    // 直接 panic,所以這裡 try_state 理論上不會 None;留 try_state 是 defensive,
+    // 不撈到時就跳過註冊,後續若 LLM 真叫 remind_me 也會吃 "unknown skill" 而非 crash)。
     if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
     }
@@ -3460,7 +3462,8 @@ async fn run_agent_pipeline(
         }
         // §9 P1 「時之鳥」K5 — `remind_me` LLM tool dispatch 路徑。同上,system prompt
         // 已注入工具描述,沒 register LLM 叫 remind_me 會吃 "unknown skill" error。
-        // ReminderService 從 Tauri Manager 拿(main 啟動已 .manage)。
+        // ReminderService 從 Tauri Manager 拿(main 啟動已 .manage,init 失敗
+        // 直接 panic 所以這裡理論上 try_state 不會 None;留 try_state 是 defensive)。
         if allows("remind_me") {
             if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
                 registry.register(Arc::new(mori_core::skill::RemindMeSkill::new(
@@ -4927,10 +4930,11 @@ fn main() {
     // SQLite migrate + 重排 pending reminder 都在 async `new()` 內;Tauri 提供
     // `block_on` 入口在 sync `main()` 裡跑 async,啟動完成才繼續往下。
     //
-    // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。失敗就 warn +
-    // 略過(不擋啟動)— LLM RemindMeSkill / Tauri commands 走到 state.get 也會直接
-    // 拿到 None,在 user 真正叫 remind_me 才會看到「reminder service not available」
-    // 提示。優雅 degrade,不要因為 .mori dir 寫不進去就死整個 app。
+    // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。**失敗就 panic**
+    // (見下方 `.unwrap_or_else`)— 立場是「~/.mori 寫不進去 = config.json / memory
+    // 全部跟著炸,reminders 不可能比它們先撐住」,所以早死早超生,不嘗試 degrade。
+    // 對應 RemindMeSkill 註冊那邊也保證 ReminderService 一定 ready(不過註冊段仍
+    // 用 try_state 維持 defensive,即便理論上 unwrap 也行)。
     let reminders_db_path = mori_dir().join("reminders.db");
     if let Some(parent) = reminders_db_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {

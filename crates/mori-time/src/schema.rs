@@ -214,10 +214,16 @@ impl ReminderStore {
     }
 
     /// snooze 到指定時間。status -> Snoozed。
+    ///
+    /// **同時更新 `due_at = until`** — 這條 invariant 給 reload-on-startup 用:
+    /// `ReminderService::new()` 會 `list_pending()` 後重新 schedule,scheduler 是用
+    /// `due_at` 算 one-shot 觸發時間,不是 `snoozed_until`。若只更 `snoozed_until`,
+    /// drop / restart 後重排會用舊 `due_at`(可能已過),導致 reminder 立刻觸發,
+    /// 等於 snooze 沒效果。
     pub fn snooze(&self, id: i64, until: DateTime<Utc>) -> Result<(), ReminderError> {
         let n = self.conn.execute(
             r#"UPDATE reminders
-               SET snoozed_until = ?1, status = ?2
+               SET snoozed_until = ?1, due_at = ?1, status = ?2
                WHERE id = ?3"#,
             params![until.to_rfc3339(), ReminderStatus::Snoozed.as_db_str(), id],
         )?;
@@ -394,6 +400,31 @@ mod tests {
             Err(ReminderError::NotFound(_)) => {}
             other => panic!("expected NotFound, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn snooze_updates_due_at_too() {
+        // K5 fix:snooze 必須同更 due_at,reload-on-startup 才不會立刻觸發。
+        let s = store();
+        // due 在過去 — 模擬「reminder 本來該響了,user snooze」
+        let past_due = Utc::now() - Duration::minutes(5);
+        let r = s.create("late".into(), past_due, None).unwrap();
+
+        let until = Utc::now() + Duration::hours(2);
+        s.snooze(r.id, until).unwrap();
+
+        let after = s.get(r.id).unwrap();
+        assert_eq!(after.status, ReminderStatus::Snoozed);
+        assert!(after.snoozed_until.is_some());
+        // 關鍵 invariant:due_at 也被推到 until,不是停在 past_due
+        let drift = (after.due_at - until).num_seconds().abs();
+        assert!(drift <= 1, "due_at should track snoozed_until, drift={drift}s");
+
+        // list_pending 拿出來的也得是新 due_at(防 SELECT 漏 column 等 dumb bug)
+        let pending = s.list_pending().unwrap();
+        let r2 = pending.iter().find(|x| x.id == r.id).expect("in pending");
+        let drift2 = (r2.due_at - until).num_seconds().abs();
+        assert!(drift2 <= 1, "list_pending due_at drift={drift2}s");
     }
 
     #[test]
