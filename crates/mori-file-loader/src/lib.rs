@@ -2,10 +2,12 @@
 //!
 //! 給 Mori 一個對外穩定的入口讀使用者塞過來的文件;副檔名 dispatch 給對應實作。
 //!
-//! 本 crate 是 **skeleton**:現階段(E-base)只支援純文字格式 — `.txt` / `.md`,
-//! 兩者都走 [`std::fs::read_to_string`]。後續 Wave 2 才會加 `.pdf` / `.docx` /
-//! `.xlsx` 等 binary 格式,屆時把對應的 `FileFormatReader` 加進 [`dispatch`] 即可,
-//! 公開 API([`read_file_text`])保持不變。
+//! 本 crate 現階段支援:
+//! - 純文字 `.txt` / `.md`(E-base)— 走 [`std::fs::read_to_string`]
+//! - `.pdf`(本 stream)— 走 [`pdf_extract::extract_text`]
+//!
+//! `.docx` / `.xlsx` 等 binary 格式留給後續 stream;新加 format 時把對應的
+//! `FileFormatReader` 加進 [`dispatch`] 即可,公開 API([`read_file_text`])保持不變。
 //!
 //! # 公開 API
 //!
@@ -23,6 +25,7 @@
 //! - 無副檔名 → [`FileLoaderError::UnsupportedExtension`]`("")`
 //! - 檔案不存在 → [`FileLoaderError::NotFound`]
 //! - 非 UTF-8 內容 → [`FileLoaderError::InvalidUtf8`](不 panic,不做 lossy decode)
+//! - PDF 解析失敗(壞檔 / 加密 / 不合 spec)→ [`FileLoaderError::PdfExtraction`]
 //!
 //! # Example
 //!
@@ -36,6 +39,8 @@
 
 use std::path::{Path, PathBuf};
 
+mod pdf;
+
 /// `mori-file-loader` 的錯誤型別。
 #[derive(Debug, thiserror::Error)]
 pub enum FileLoaderError {
@@ -43,7 +48,7 @@ pub enum FileLoaderError {
     #[error("file not found: {0}")]
     NotFound(PathBuf),
 
-    /// 副檔名目前還沒有對應的 reader(eg `.pdf` 要等 Wave 2)。
+    /// 副檔名目前還沒有對應的 reader。
     /// 內含的字串是 **lowercase** 副檔名;無副檔名時為空字串。
     #[error("unsupported extension: {0}")]
     UnsupportedExtension(String),
@@ -55,13 +60,19 @@ pub enum FileLoaderError {
     /// 檔案內容不是合法 UTF-8。
     #[error("invalid utf-8 in file: {0}")]
     InvalidUtf8(PathBuf),
+
+    /// PDF 解析 / 文字抽取失敗(壞檔、加密、不合 spec 等)。
+    /// 內含 underlying error 的字串表示 — caller 通常只給使用者看「這份 PDF 讀不了」,
+    /// 不會 match 細節原因。
+    #[error("pdf extraction failed: {0}")]
+    PdfExtraction(String),
 }
 
 /// 內部 trait:每個支援的副檔名對應一個 reader。
 ///
-/// **目前不公開** — Wave 2 加新 format 時再決定要不要對外開放(plugin registry)。
+/// **目前不公開** — 加新 format 時再決定要不要對外開放(plugin registry)。
 /// 現階段 [`dispatch`] 用 hardcoded match,結構單純,易刪易加。
-trait FileFormatReader {
+pub(crate) trait FileFormatReader {
     fn read(&self, path: &Path) -> Result<String, FileLoaderError>;
 }
 
@@ -83,10 +94,11 @@ impl FileFormatReader for PlainTextReader {
 
 /// 把 lowercase 副檔名 dispatch 到對應 reader。
 ///
-/// Wave 2 加新 format 在這邊加 arm 即可。
+/// 加新 format 在這邊加 arm 即可。
 fn dispatch(ext_lower: &str) -> Option<Box<dyn FileFormatReader>> {
     match ext_lower {
         "txt" | "md" => Some(Box::new(PlainTextReader)),
+        "pdf" => Some(Box::new(pdf::PdfReader)),
         _ => None,
     }
 }

@@ -191,16 +191,19 @@ mod tests {
 
     #[tokio::test]
     async fn read_file_skill_returns_error_for_unsupported_ext() {
+        // 用 .zzz 而非 .pdf — Wave 2 加 pdf-extract 後 .pdf 變 supported,
+        // 改用真未知副檔名測 "unsupported" branch。對齊 mori-file-loader
+        // integration test 同樣的 rename。
         let dir = TempDir::new().unwrap();
-        let p = dir.path().join("data.pdf");
-        fs::write(&p, b"%PDF-fake").unwrap();
+        let p = dir.path().join("data.zzz");
+        fs::write(&p, b"random bytes").unwrap();
 
         let skill = ReadFileSkill;
         let args = serde_json::json!({ "path": p.to_str().unwrap() });
         let err = skill
             .execute(args, &empty_context())
             .await
-            .expect_err("pdf not supported yet");
+            .expect_err("zzz not a supported extension");
         assert!(err.to_string().contains("unsupported"));
     }
 

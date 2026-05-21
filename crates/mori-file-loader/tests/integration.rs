@@ -1,9 +1,9 @@
 //! `mori-file-loader` integration tests。
 //!
-//! 跑 `read_file_text(path)` 的公開行為:`.txt` / `.md` baseline、未支援副檔名、
-//! missing file、UTF-8 邊界、case-insensitive 副檔名。
+//! 跑 `read_file_text(path)` 的公開行為:`.txt` / `.md` baseline、`.pdf`、
+//! 未支援副檔名、missing file、UTF-8 邊界、case-insensitive 副檔名、壞檔錯誤分類。
 //!
-//! 之後 Wave 2 各 format crate 加 impl 時,這層 baseline 不該被打破。
+//! 之後加新 format 時,這層 baseline 不該被打破。
 
 use std::fs;
 use std::io::Write;
@@ -55,17 +55,45 @@ fn read_file_text_returns_not_found_for_missing() {
 }
 
 #[test]
-fn read_file_text_returns_unsupported_for_pdf() {
+fn read_file_text_returns_unsupported_for_unknown_extension() {
     let dir = TempDir::new().unwrap();
-    // 寫一個假 .pdf — 副檔名才是重點,內容無所謂
-    let path = write_file(&dir, "doc.pdf", b"%PDF-1.4 fake");
+    // 用一個確定不會被 support 的副檔名(避免哪天 docx / xlsx 加進來踩到)。
+    let path = write_file(&dir, "garbage.zzz", b"whatever");
 
     let err = read_file_text(&path).expect_err("expect UnsupportedExtension");
     match err {
         FileLoaderError::UnsupportedExtension(ext) => {
-            assert_eq!(ext, "pdf", "should report lowercase extension");
+            assert_eq!(ext, "zzz", "should report lowercase extension");
         }
         other => panic!("expected UnsupportedExtension, got {other:?}"),
+    }
+}
+
+#[test]
+fn read_file_text_reads_pdf() {
+    // checked-in fixture(`tests/fixtures/sample.pdf`)— 含已知字串 "Hello, Mori"。
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample.pdf");
+
+    let got = read_file_text(&path).expect("read sample.pdf");
+    assert!(
+        got.contains("Hello, Mori"),
+        "extracted text should contain 'Hello, Mori', got: {got:?}",
+    );
+}
+
+#[test]
+fn read_file_text_returns_extraction_error_for_corrupted_pdf() {
+    let dir = TempDir::new().unwrap();
+    // 寫一份壞掉的「.pdf」— 副檔名讓它走 PDF reader,內容讓 pdf-extract 解析爆炸。
+    let path = write_file(&dir, "broken.pdf", b"not a real pdf file");
+
+    let err = read_file_text(&path).expect_err("expect PdfExtraction");
+    match err {
+        FileLoaderError::PdfExtraction(_) => {}
+        other => panic!("expected PdfExtraction, got {other:?}"),
     }
 }
 
