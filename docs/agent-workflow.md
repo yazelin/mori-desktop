@@ -21,6 +21,7 @@ Agents should read these files before editing:
 - `CLAUDE.md`: Claude Code-specific context and Mori project constraints.
 - `scripts/verify.sh`: single verification entrypoint for local dev, CI, and cloud agents.
 - `.github/pull_request_template.md`: expected PR summary, verification, and platform impact notes.
+- `docs/release-format.md`: unified template + section-by-section guidance for GitHub Release body (rewrite the draft Release body after `git tag` push + release.yml; do not paste CHANGELOG verbatim).
 
 Do not let agents invent new verification commands unless a task specifically requires it. Keep the shared verifier as the source of truth.
 
