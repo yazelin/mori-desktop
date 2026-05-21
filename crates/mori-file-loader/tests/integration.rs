@@ -132,6 +132,54 @@ fn read_file_text_returns_extraction_error_for_corrupted_docx() {
 }
 
 #[test]
+fn read_file_text_reads_xlsx() {
+    // checked-in fixture(`tests/fixtures/sample.xlsx`)— 由 openpyxl 生成,
+    // 兩個 sheet:
+    //   - "Data":  header「Name | Score」+ row「Mori | 100」
+    //   - "Notes": 單 cell「This is a XLSX test」
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sample.xlsx");
+
+    let got = read_file_text(&path).expect("read sample.xlsx");
+    assert!(
+        got.contains("Sheet: Data"),
+        "extracted text should contain 'Sheet: Data' header, got: {got:?}",
+    );
+    assert!(
+        got.contains("Sheet: Notes"),
+        "extracted text should contain 'Sheet: Notes' header, got: {got:?}",
+    );
+    assert!(
+        got.contains("Mori"),
+        "extracted text should contain 'Mori', got: {got:?}",
+    );
+    assert!(
+        got.contains("100"),
+        "extracted text should contain '100', got: {got:?}",
+    );
+    assert!(
+        got.contains("This is a XLSX test"),
+        "extracted text should contain 'This is a XLSX test', got: {got:?}",
+    );
+}
+
+#[test]
+fn read_file_text_returns_extraction_error_for_corrupted_xlsx() {
+    let dir = TempDir::new().unwrap();
+    // 寫一份壞掉的「.xlsx」— 副檔名讓它走 XLSX reader,內容讓 calamine 解析爆炸
+    //(xlsx 本質是 zip,raw bytes 不是合法 zip header)。
+    let path = write_file(&dir, "broken.xlsx", b"not a real xlsx file");
+
+    let err = read_file_text(&path).expect_err("expect XlsxExtraction");
+    match err {
+        FileLoaderError::XlsxExtraction(_) => {}
+        other => panic!("expected XlsxExtraction, got {other:?}"),
+    }
+}
+
+#[test]
 fn read_file_text_handles_unicode() {
     let dir = TempDir::new().unwrap();
     let content = "森林裡有一隻 Mori 🌲 — 年輪不會說謊。";
