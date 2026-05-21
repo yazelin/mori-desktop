@@ -112,14 +112,16 @@ Mori 目前只「聽」(語音)+「讀」(剪貼簿文字),不會「看」。要
 
 **不做 OS-level screen polling**(隱私底線)— **user 主動觸發才看**。
 
-### 唇與聲 — TTS + 角色化
+### 唇與聲 — TTS + 角色化 ✅ base v0.6.1 done
 
-Mori 還不能開口說話。要補:
+**v0.6.1 已 ship**:edge-tts 免費 + native zh-TW + Config tab UI 開關 + 共用 wake-venv runtime + 中斷支援(Ctrl+Alt+Esc 停 sink)。Mori 已經能講話了。
 
-- TTS(OpenAI / ElevenLabs / 本機 Piper),per-profile 設不同聲線
-- floating sprite **嘴型同步**:viseme map(音訊 → 嘴型)動畫
-- 角色化語氣:每個 agent / voice profile 自己的聲音 + 嘴型 + 個性
-- 接 Annuli 的 persona — Mori 講話時 LLM 在 system prompt 看得到當前 persona
+**未來要補**(角色化 / 動畫 / persona 對接):
+
+- **多 TTS provider** — 目前只 edge-tts。要補 OpenAI / ElevenLabs / 本機 Piper,per-profile 設不同聲線
+- **嘴型同步** — floating sprite 接 viseme map(音訊 → 嘴型)動畫
+- **角色化語氣** — 每個 agent / voice profile 自己的聲音 + 嘴型 + 個性
+- **Annuli persona 對接** — Mori 講話時 LLM 在 system prompt 看得到當前 persona
 
 ### 林之耳 — Wake Word ✅ v0.6.0 done(部分)
 
@@ -139,13 +141,14 @@ Mori 還不能開口說話。要補:
 - ✅ Phase 3D — TTS speak-back(edge-tts 免費 + native zh-TW + UI 開關)
 - ✅ Phase 3E — Speaker verification(resemblyzer 聲紋,只認 enrolled user)
 
-**留 v0.6.x**:
-- Phase 3A.2 — Custom wake-word phrase UI(目前只有 CLI 訓練,要 UI 化 + Windows
-  piper-phonemize 跨平台修)
+**留 v0.6.x / v0.7.x**:
+- ✅ Phase 3A.2 — Custom wake-word phrase UI(v0.6.5 ship,Hey Mori section
+  加 model picker + 訓練指令 helper)。**剩 Windows piper-phonemize 跨平台修** —
+  目前訓練只在 Linux 跑得起來,Windows wheel 不齊
 - ✅ Phase 3C.2 — Ask-back(Intent::Unclear → Mori 用 TTS 反問 + 寫進
   conversation 給下次 wake 當 context)— v0.6.3。**自動**重進 Listening 留到
   下個迭代(目前 user 需手動再 wake)
-- TTS 中斷支援(Ctrl+Alt+Esc 停 sink)+ sentence streaming
+- ✅ TTS 中斷支援(Ctrl+Alt+Esc 停 sink)— v0.6.1。剩 sentence streaming
 - Speaker enrollment 進度 real-time UI(目前 modal 是純 JS 倒數,Python 已 emit JSON event 待 Rust forward)
 
 ### 多界橋樑 — IM Bot 整合(Telegram / Discord / LINE / Slack)

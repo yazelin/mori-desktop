@@ -212,12 +212,50 @@ async fn dispatch_skill(
     })?;
 
     tracing::info!(skill = %name, "skill dispatch via HTTP (dynamic registry)");
+    // 為了診斷可見性,記下 args 摘要(避免巨大 payload 進 log;只取 first ~500 chars
+    // 的 JSON serialization),skill 結果 ok/err + 文字長度都進 event_log。
+    // 這樣 `mori skill call open_url` / shell_skill 出問題時,JSONL 一行就能定位:
+    // 「skill 跑了沒、輸入是什麼、回什麼、ok 或 error」。
+    let started_at = std::time::Instant::now();
+    let args_preview = {
+        let s = args.to_string();
+        if s.len() > 500 { format!("{}…(truncated)", &s[..500]) } else { s }
+    };
     let ctx = MoriContext::default();
-    match skill.execute(args, &ctx).await {
-        Ok(out) => Ok(out.user_message),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}: {e:#}", name),
-        )),
+    let result = skill.execute(args, &ctx).await;
+    let latency_ms = started_at.elapsed().as_millis() as u64;
+    match result {
+        Ok(out) => {
+            let preview = if out.user_message.chars().count() > 200 {
+                format!("{}…", out.user_message.chars().take(200).collect::<String>())
+            } else {
+                out.user_message.clone()
+            };
+            mori_core::event_log::append(json!({
+                "kind": "skill_dispatch",
+                "skill": name,
+                "args_preview": args_preview,
+                "latency_ms": latency_ms,
+                "ok": true,
+                "user_message_chars": out.user_message.chars().count(),
+                "user_message_preview": preview,
+            }));
+            Ok(out.user_message)
+        }
+        Err(e) => {
+            let err_str = format!("{e:#}");
+            mori_core::event_log::append(json!({
+                "kind": "skill_dispatch",
+                "skill": name,
+                "args_preview": args_preview,
+                "latency_ms": latency_ms,
+                "ok": false,
+                "error": err_str.clone(),
+            }));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("{}: {err_str}", name),
+            ))
+        }
     }
 }

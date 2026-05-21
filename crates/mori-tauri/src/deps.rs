@@ -769,6 +769,16 @@ pub struct DepStatus {
     pub detail: Option<String>,
 }
 
+/// 跑 detect 用的子程序。集中設 `CREATE_NO_WINDOW`(GUI parent spawn console
+/// child 才不會閃黑框)+ 短 timeout(check 不該超過 5s,卡住的 ollama / pip
+/// 不能拖住整個 DepsTab)。
+fn run_check_cmd(cmd: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+    let mut c = Command::new(cmd);
+    c.args(args.iter());
+    mori_core::suppress_console_on_windows!(c);
+    c.output()
+}
+
 pub fn check_dep(spec: &DepSpec) -> DepStatus {
     // 走 effective_check — 平台特定 override 優先(像 Windows 的 uv 用 .exe 副檔名),
     // 沒有再 fallback 預設(Linux 慣例 path)。
@@ -777,7 +787,7 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
             // Windows 沒 `which`,用內建的 `where.exe`(Cmd built-in,但 where.exe 是
             // 真檔案在 System32)。Linux/macOS 用 `which`。
             let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-            match Command::new(cmd).arg(bin).output() {
+            match run_check_cmd(cmd, &[bin]) {
                 Ok(out) if out.status.success() => DepStatus {
                     id: spec.id,
                     installed: true,
@@ -802,7 +812,7 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
             }
         }
         CheckSpec::CommandStdoutContains { cmd, args, needle } => {
-            match Command::new(cmd).args(args.iter()).output() {
+            match run_check_cmd(cmd, args) {
                 Ok(out) if out.status.success() => {
                     let stdout = String::from_utf8_lossy(&out.stdout);
                     if stdout.contains(needle) {

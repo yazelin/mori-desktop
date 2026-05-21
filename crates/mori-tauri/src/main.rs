@@ -192,6 +192,11 @@ impl AppState {
             update_wake_word_listener(self, app, Mode::Listening, Mode::Agent);
             update_wake_word_listener(self, app, Mode::Agent, Mode::Listening);
             tracing::info!("wake-listener respawned after cycle complete (fresh audio stream)");
+            mori_core::event_log::append(serde_json::json!({
+                "kind": "wake_listener_respawn",
+                "reason": "cycle_complete",
+                "phase": format!("{new_phase:?}"),
+            }));
         }
     }
 
@@ -228,6 +233,11 @@ fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new:
         // Drop kills subprocess
         if state.wake_word.lock().take().is_some() {
             tracing::info!("wake-word listener stopped (left Listening mode)");
+            mori_core::event_log::append(serde_json::json!({
+                "kind": "wake_listener_stopped",
+                "prev_mode": format!("{prev:?}"),
+                "new_mode": format!("{new:?}"),
+            }));
         }
         return;
     }
@@ -255,6 +265,10 @@ fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new:
             }
             WakeEvent::Ready { model } => {
                 tracing::info!(model, "wake-word listener ready");
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "wake_listener_ready",
+                    "model": model,
+                }));
                 let _ = app_for_cb.emit(
                     "wake-word-status",
                     serde_json::json!({ "kind": "ready", "model": model }),
@@ -262,6 +276,10 @@ fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new:
             }
             WakeEvent::Error { msg } => {
                 tracing::error!(msg, "wake-word listener error");
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "wake_listener_error",
+                    "msg": msg,
+                }));
                 let _ = app_for_cb.emit(
                     "wake-word-status",
                     serde_json::json!({ "kind": "error", "msg": msg }),
@@ -273,9 +291,17 @@ fn update_wake_word_listener(state: &AppState, app: &AppHandle, prev: Mode, new:
             Ok(l) => {
                 *state.wake_word.lock() = Some(l);
                 tracing::info!("wake-word listener spawned (entered Listening mode)");
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "wake_listener_spawned",
+                    "prev_mode": format!("{prev:?}"),
+                }));
             }
             Err(e) => {
                 tracing::error!(error = %e, "failed to spawn wake-word listener");
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "wake_listener_spawn_failed",
+                    "msg": format!("{e:#}"),
+                }));
                 let _ = app.emit(
                     "wake-word-status",
                     serde_json::json!({
@@ -1578,33 +1604,84 @@ struct DepInfo {
     status: crate::deps::DepStatus,
 }
 
-#[tauri::command]
-fn deps_list() -> Vec<DepInfo> {
-    // 過濾掉跟當前平台無關的 deps — Windows user 不用看到 ydotool / xdotool /
-    // xclip;Linux user 不用看到 Windows installer 那一堆。`applies_to_current_os()`
-    // 在 deps.rs 內看 spec.platforms 是否含 `std::env::consts::OS`。
-    crate::deps::registry()
+/// Process-wide DepsTab 快取。`deps_list(force=false)` 用快取(秒等級);
+/// `deps_list(force=true)` 跑完整檢測再寫回。`deps_install` 跑完成功 → 也清掉。
+///
+/// 為什麼放 module-level OnceLock 而不是 `AppState`:`DepInfo` 定義在後面,
+/// AppState struct 看不到;且整個 process 系統 deps 狀態本來就是 single source,
+/// 不需要 per-AppState instance。
+fn deps_cache() -> &'static parking_lot::Mutex<Option<Vec<DepInfo>>> {
+    static CACHE: std::sync::OnceLock<parking_lot::Mutex<Option<Vec<DepInfo>>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| parking_lot::Mutex::new(None))
+}
+
+/// 真的跑檢測 — registry filter → 並行 spawn_blocking → 排序回 registry 原順序。
+async fn deps_check_all() -> Vec<DepInfo> {
+    let specs: Vec<crate::deps::DepSpec> = crate::deps::registry()
         .into_iter()
         .filter(|spec| spec.applies_to_current_os())
-        .map(|spec| {
-            let status = crate::deps::check_dep(&spec);
-            // 平台特定 install override 在 server-side 已解析,前端拿到的
-            // `install` 就是當前 OS 該用的那個版本。
-            let install = spec.effective_install().clone();
-            DepInfo {
-                id: spec.id,
-                name: spec.name,
-                description: spec.description,
-                unlocks: spec.unlocks,
-                size_hint: spec.size_hint,
-                needs_sudo: spec.needs_sudo,
-                install_caveat: spec.install_caveat,
-                check: spec.check.clone(),
-                install,
-                status,
-            }
+        .collect();
+
+    // 並行跑所有 check_dep — 之前 sequential 跑 14 個 dep,慢的(Python import
+    // probe / `ollama list`)單筆 1-2s,總和 5-10s 卡住 DepsTab。每個 check 包
+    // spawn_blocking 丟 blocking pool,再 join_all 等齊,總時間 = max 而非 sum,
+    // 通常 < 2s。
+    //
+    // 順序保留 — registry 寫死的順序對 UI 來說有意義(uv 在最上面、annuli 在最下)。
+    // 用 enumerate 把 idx 串進去,join 完後依 idx 排回去。
+    let handles: Vec<_> = specs
+        .into_iter()
+        .enumerate()
+        .map(|(idx, spec)| {
+            tokio::task::spawn_blocking(move || {
+                let status = crate::deps::check_dep(&spec);
+                let install = spec.effective_install().clone();
+                (
+                    idx,
+                    DepInfo {
+                        id: spec.id,
+                        name: spec.name,
+                        description: spec.description,
+                        unlocks: spec.unlocks,
+                        size_hint: spec.size_hint,
+                        needs_sudo: spec.needs_sudo,
+                        install_caveat: spec.install_caveat,
+                        check: spec.check.clone(),
+                        install,
+                        status,
+                    },
+                )
+            })
         })
-        .collect()
+        .collect();
+
+    let mut results: Vec<(usize, DepInfo)> = Vec::with_capacity(handles.len());
+    for h in handles {
+        // spawn_blocking 不會 panic(check_dep 不會炸 — 內部全用 match);萬一
+        // join error(極稀有,blocking thread cancelled)就跳過該筆,不擋整列。
+        if let Ok(pair) = h.await {
+            results.push(pair);
+        }
+    }
+    results.sort_by_key(|(idx, _)| *idx);
+    results.into_iter().map(|(_, info)| info).collect()
+}
+
+#[tauri::command]
+async fn deps_list(force: Option<bool>) -> Vec<DepInfo> {
+    // D 方案:永久快取 + 顯式 refresh。
+    // - force=Some(true)  → 一定重檢
+    // - force=None/false  → 有快取就用,沒有才檢
+    // - `deps_install` 成功後會清快取 → 接著的 deps_list 自動拿到新狀態
+    if !force.unwrap_or(false) {
+        if let Some(cached) = deps_cache().lock().clone() {
+            return cached;
+        }
+    }
+    let fresh = deps_check_all().await;
+    *deps_cache().lock() = Some(fresh.clone());
+    fresh
 }
 
 #[tauri::command]
@@ -1614,10 +1691,14 @@ async fn deps_install(id: String) -> Result<crate::deps::InstallResult, String> 
         .find(|s| s.id == id)
         .ok_or_else(|| format!("unknown dep id: {id}"))?;
     // Manual install 走不到 run_install — UI 已直接顯示指令給 user
-    tokio::task::spawn_blocking(move || crate::deps::run_install(&spec))
+    let result = tokio::task::spawn_blocking(move || crate::deps::run_install(&spec))
         .await
         .map_err(|e| format!("install join: {e}"))?
-        .map_err(|e| format!("install: {e:#}"))
+        .map_err(|e| format!("install: {e:#}"))?;
+    // 不管 install success / fail 都清快取 — 失敗也可能改變外部狀態(e.g. 半裝),
+    // 強迫下次 deps_list 重檢比賭快取仍正確安全。前端拿到結果後也會主動 reload。
+    *deps_cache().lock() = None;
+    Ok(result)
 }
 
 // ─── brand-3: Theme IPC ───────────────────────────────────────────

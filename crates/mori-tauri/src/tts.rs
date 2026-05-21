@@ -198,13 +198,16 @@ fn synth_and_play(cfg: &TtsConfig, text: &str, sink_slot: &TtsSinkSlot) -> anyho
     );
 
     // 1. Spawn Python subprocess,stdin 餵 text
-    let mut child = Command::new(&cfg.python)
-        .arg(&cfg.script_path)
+    let mut cmd = Command::new(&cfg.python);
+    cmd.arg(&cfg.script_path)
         .arg(&out_mp3)
         .arg(&cfg.voice)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // 抑制 GUI parent spawn console child 的黑框
+    mori_core::suppress_console_on_windows!(cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| anyhow::anyhow!("spawn python: {e}"))?;
 

@@ -180,17 +180,17 @@ pub fn verify_audio_file(audio_path: &Path) -> VerifyOutcome {
         ));
     }
 
-    let output = match Command::new(&cfg.python)
-        .arg(&script)
+    let mut cmd = Command::new(&cfg.python);
+    cmd.arg(&script)
         .arg(&user_emb)
         .arg(audio_path)
         .arg("--threshold")
         .arg(cfg.threshold.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-    {
+        .stderr(Stdio::piped());
+    mori_core::suppress_console_on_windows!(cmd);
+    let output = match cmd.output() {
         Ok(o) => o,
         Err(e) => return VerifyOutcome::Error(format!("spawn python: {e}")),
     };
@@ -279,14 +279,16 @@ pub async fn speaker_id_enroll(
     let python = cfg.python.clone();
     let app_for_thread = app.clone();
     let exit_status = tokio::task::spawn_blocking(move || -> Result<std::process::ExitStatus, String> {
-        let mut child = Command::new(&python)
-            .arg(&script)
+        let mut cmd = Command::new(&python);
+        cmd.arg(&script)
             .arg(&out_path)
             .arg("--seconds")
             .arg(secs.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        mori_core::suppress_console_on_windows!(cmd);
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("spawn python: {e}"))?;
 

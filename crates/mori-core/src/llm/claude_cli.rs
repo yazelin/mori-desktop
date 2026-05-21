@@ -135,6 +135,7 @@ impl LlmProvider for ClaudeCliProvider {
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        crate::suppress_console_on_windows!(cmd);
 
         tracing::debug!(
             binary = %self.binary,

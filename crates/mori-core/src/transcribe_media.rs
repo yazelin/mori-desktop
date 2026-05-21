@@ -66,28 +66,30 @@ pub type ProgressFn = Arc<dyn Fn(u32, u32, &Path) + Send + Sync>;
 /// stdin 不接;檔案路徑 → stdout WAV bytes。Buffer 全在 memory,1 小時音訊
 /// ~115MB(可接受);10+ 小時的 user 應該丟伺服器跑而不是 desktop。
 pub async fn extract_wav_bytes(input: &Path) -> Result<Vec<u8>> {
-    let output = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-        ])
-        .arg(input)
-        .args([
-            "-vn", // ignore video stream(影片檔直接拿音軌)
-            "-ar",
-            &TARGET_SAMPLE_RATE.to_string(),
-            "-ac",
-            "1", // mono
-            "-c:a",
-            "pcm_s16le",
-            "-f",
-            "wav",
-            "-", // stdout
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+    ])
+    .arg(input)
+    .args([
+        "-vn", // ignore video stream(影片檔直接拿音軌)
+        "-ar",
+        &TARGET_SAMPLE_RATE.to_string(),
+        "-ac",
+        "1", // mono
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        "-", // stdout
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    crate::suppress_console_on_windows!(cmd);
+    let output = cmd
         .output()
         .await
         .context("spawn ffmpeg — 確認系統有裝 ffmpeg")?;

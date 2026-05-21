@@ -6,6 +6,73 @@
 
 ---
 
+## v0.7.1 — MSI 安裝體驗補強 + JSONL 觀測補完(2026-05-21)
+
+v0.7.0 release 後拿乾淨 Windows 機跑完整 MSI 安裝測,踩出一輪 release-only(dev 模式碰不到)的 bug,以及一輪「LLM 跑壞時看不到內部狀態」的盲點。本版集中補完。
+
+### MSI / NSIS 安裝 — `mori` CLI 一起 bundle 進 installer
+
+dev 模式 `npm run tauri dev` 跑 mori-tauri 從 `target/debug/`,旁邊就有 `mori.exe`,`bash_cli_agent::detect_mori_cli` 找得到。MSI / NSIS 裝完從 `C:\Program Files\Mori\` 啟動,只有 `Mori.exe` **沒** `mori.exe` → claude / codex / gemini Bash tool 跑 `mori skill list` 直接 `command not found`,所有 bash-cli-agent provider 在 MSI 環境永遠廢。
+
+- **`tauri.conf.json` `bundle.externalBin`** 加 `../../target/release/mori`,Tauri bundler 自動帶 mori CLI 進 .exe / .msi / .deb installer。
+- **新 build script `scripts/stage-mori-cli-for-bundle.mjs`** — Tauri externalBin 要求 binary 命名為 `mori-<target-triple>.exe`,跑 `rustc -vV` 拿 host triple → 把 `target/release/mori.exe` rename + copy 過去。`package.json` `predev` / `prebuild` 串進 chain。
+- Tauri externalBin 安裝後自動把 triple suffix 拿掉,user 拿到的就是純 `mori.exe`,`detect_mori_cli` 開箱即用。
+
+### 黑色 cmd 視窗全面消除
+
+`mori-tauri` release build 走 `windows_subsystem = "windows"` 是 GUI subsystem,沒繼承 console。每次 spawn console subsystem child(`python.exe` / `claude.cmd` / `codex.exe` / `where.exe` / `ollama.exe` / `ffmpeg.exe` / ...)若不顯式 `CREATE_NO_WINDOW`,Windows 會給 child 配一個新 console window → 黑框跳出來 / 常駐。dev 模式因為 parent 有 console,child 繼承不會跳新的,**所以這 bug 只在 MSI 後現形**。
+
+- **新巨集 `mori_core::suppress_console_on_windows!`** — 跨 std / tokio `Command` 統一抑制,non-Windows no-op。
+- 套到所有 spawn 點:`wake_word.rs`(Python wake-listener)、`bash_cli_agent.rs`(claude/codex/gemini CLI)、`claude_cli.rs`(legacy)、`tts.rs`(edge-tts)、`speaker_id.rs`(verify + enroll)、`shell_skill.rs`、`whisper_local.rs`(whisper-server)、`transcribe_media.rs`(ffmpeg / ffprobe)、`deps.rs`(check 子程序 `where` / `ollama list` / Python import probe)。
+
+### codex agent on Windows — 加 `--skip-git-repo-check`
+
+`codex exec` 預設拒絕在「非 git repo」cwd 跑(防誤刪 / 誤改),Mori 從 `C:\Program Files\Mori\` 啟動非 git repo → codex CLI 直接 exit 1 with `Not inside a trusted directory and --skip-git-repo-check was not specified`。Linux/macOS 路徑帶 `--dangerously-bypass-approvals-and-sandbox` 順便豁免,Windows 因為那個 flag 會 hang 拿掉後就裸奔到這個 git check。
+
+`bash_cli_agent::Codex` 分支跨平台都加 `--skip-git-repo-check`,Linux 雖然 bypass flag 已涵蓋多帶沒副作用、明確易讀。
+
+### JSONL event_log 觀測補完
+
+Release build tracing **沒接 file appender**(GUI app 沒 console、log 全消失),debug 全靠 `~/.mori/logs/mori-YYYY-MM-DD.jsonl`。之前 wake-listener / mori CLI dispatch / LLM 拿到什麼 prompt 都沒記,出問題只能盲猜。本版三類事件補齊:
+
+- **`wake_listener_*`** — `spawned` / `ready` / `error` / `respawn` / `stopped` / `diag`。Listening mode 進退、模型載入、每輪 cycle 補位 respawn、Python 端 audio level / max_score 全程可見。
+- **`skill_dispatch`**(skill_server 內)— 每筆 `POST /skill/<name>` 記下 `{skill, args_preview, latency_ms, ok, user_message_preview, error}`。LLM 是不是真的呼叫 `open_url` / `google_search` / shell skill,還是只在 response 裡幻覺出「已開啟 ...」字串,JSONL 一行就能驗。
+- **`llm_call`** 加 `stdin_tail_preview` / `response_preview` / `system_prompt_chars` / `stdin_chars`。claude / codex / gemini 拿到什麼上下文、回什麼,直接看 JSONL 不再需要 strace 子程序。
+
+### Hey Mori listener v4
+
+`mori-wake-listener.py` 重訂 version,user `~/.mori/bin/` 內舊 script 由 `BUNDLED_LISTENER_VERSION` gate 自動覆寫升級。
+
+- **`sd.default.device["input"]` 修** — 之前 `sd.default.device[0]` subscript 在 default in/out idx 不同時拋 `Input and output device are different`,user log 一直看到這條 noise。改成 dict-key access 不踩 sounddevice 內部 assert。
+- **`emit()` / `diag()` 包 try/except `OSError`** — Mori tray 結束時 parent 把 stderr/stdout pipe 關掉,sounddevice 的 cffi audio callback 還在跑、`print()` 寫到關掉的 fd 觸發 `OSError 22` → cffi 跳出「Python-CFFI error」白色對話框擋住結束流程。helper 吞掉 stale-pipe error。
+- **Diag signal-gated** — 5s 級別 diag 改成只在 `max_score > 0.30` 或 `max_rms > 0.02` 才寫一行;idle 期間完全靜默。之前每分鐘 12 筆 `max_score=0.000 max_rms=0.0000` 把 JSONL 塞滿。
+
+### DepsTab — 並行 check + 永久快取 + UI 透明化
+
+- **`check_dep` 並行化** — `tokio::spawn_blocking + join_all`,14 個 dep 從 sequential 5-10s 壓到 ~2s。
+- **永久 process-wide 快取** — `deps_list(force)`:預設用快取秒開,Refresh 鈕 / install 完自動 force=true 重檢。後端 `OnceLock<Mutex<Option<Vec<DepInfo>>>>`,`deps_install` 成功不論成敗都 invalidate。
+- **UI 提示文字** — 「狀態使用快取顯示,進 Tab 不會重新偵測。在 Mori 外面自己裝 / 升級依賴後請按重新整理」。
+
+### Verified
+
+實機跑通 + 多輪穩定:
+- ✅ MSI / NSIS 裝完 `C:\Program Files\Mori\` 同目錄有 `Mori.exe` + `mori.exe`,claude-bash / codex-bash agent profile 都跑得起來
+- ✅ 進 Hey Mori 模式、跑 codex/claude agent、用 action skill(open_url / google_search)— 整段流程 **零黑框**
+- ✅ codex agent 從 MSI 啟動正常 response,JSONL 看不到 `Not inside a trusted directory` 錯誤
+- ✅ DepsTab 第一次進 ~2s,切走再切回秒開,Refresh 鈕觸發重檢
+- ✅ `llm_call` event 帶 `stdin_tail_preview` / `response_preview`,看得到 claude/codex 拿到什麼、回什麼
+- ✅ `skill_dispatch` event 跟 `agent_completed.response` 對齊,驗證了 mori CLI 確實被 dispatch(之前懷疑的「LLM 幻覺 open_url 訊息」沒重現)
+- ✅ idle 期間 JSONL 沒有 `5s diag: max_score=0.000` spam
+- ✅ Mori tray quit 不再跳 Python-CFFI error 對話框
+
+### 升級
+
+無 breaking change。`~/.mori/` 任何檔不動,`config.json` schema 不變。
+- `~/.mori/bin/mori-wake-listener.py` 開機自動升 v4(`BUNDLED_LISTENER_VERSION` 機制),user 不用手動清。
+- 既有 `~/.mori/wake-venv` / openwakeword pipeline models 保留,可繼續用。
+
+---
+
 ## v0.7.0 — Windows port 全面修補 + 真正自訓 wake-word model(2026-05-21)
 
 v0.6.6 號稱 Windows first-class,但實際拿乾淨 Windows 機跑完整 Hey Mori 流程踩出一整排 Windows-specific bug。本版把整條 wake→record→STT→agent→response cycle 在 Windows 跑通,並把過去 Linux-only TODO 補完。
