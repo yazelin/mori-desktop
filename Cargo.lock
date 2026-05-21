@@ -2603,6 +2603,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mori-file-loader"
+version = "0.7.1"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "mori-tauri"
 version = "0.7.1"
 dependencies = [
