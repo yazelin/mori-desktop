@@ -356,9 +356,16 @@ impl LlmProvider for BashCliAgentProvider {
                 // 於 non-interactive(有 `[PROMPT]` arg 或 stdin pipe),`sandbox:
                 // workspace-write` 允許 workdir / tmp 讀寫 — 足夠 mori 翻譯 / 簡單
                 // skill 的使用情境。
+                //
+                // `--skip-git-repo-check` 是必加 — codex exec 預設要求 cwd 在 git repo
+                // 內(防止使用者誤對非 repo 跑 destructive 命令),Mori 安裝目錄
+                // 不是 git repo → codex 直接 exit 1 with
+                // "Not inside a trusted directory and --skip-git-repo-check was not
+                // specified"。Linux 路徑因為帶了 `--dangerously-bypass-approvals-and-
+                // sandbox` 順便跳過這條 check,Windows 拿掉 bypass 後就裸奔到 git check。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
                 let mut c = cli_command(&self.binary);
-                c.arg("exec");
+                c.arg("exec").arg("--skip-git-repo-check");
                 #[cfg(not(target_os = "windows"))]
                 {
                     c.arg("--dangerously-bypass-approvals-and-sandbox");
@@ -407,6 +414,12 @@ impl LlmProvider for BashCliAgentProvider {
             // SIGKILL,避免 claude / gemini / codex subprocess 變 orphan 繼續吃 token。
             .kill_on_drop(true);
 
+        // Release build mori-tauri 是 `windows_subsystem = "windows"` GUI process,
+        // 沒繼承 console。Spawn console subsystem child(claude.cmd / gemini.cmd /
+        // codex.exe,以及 cli_command 內部包的 cmd.exe wrapper)會閃黑框,用共用
+        // 巨集抑制。詳細理由見 [`crate::process`]。
+        crate::suppress_console_on_windows!(cmd);
+
         tracing::debug!(
             binary = %self.binary,
             protocol = ?self.protocol,
@@ -439,6 +452,21 @@ impl LlmProvider for BashCliAgentProvider {
         .with_context(|| format!("`{}` agent 超時(180s)— 子程序可能 hang", self.binary))?
         .context("wait for agent CLI")?;
 
+        // 給 user 看 LLM call 細節:transcript 結尾(最新 user message + 上下文)、
+        // system prompt 大小、response 開頭。完整 dump 太大會塞爆 JSONL,各 500 chars
+        // 上限。Skill 真正執行細節走 `skill_dispatch` event(skill_server 內 log)。
+        let stdin_tail_preview = {
+            let s = String::from_utf8_lossy(&stdin_bytes);
+            let total = s.chars().count();
+            if total > 500 {
+                let skip = total - 500;
+                format!("…(前 {skip} chars 省略){}", s.chars().skip(skip).collect::<String>())
+            } else {
+                s.into_owned()
+            }
+        };
+        let system_prompt_chars = system_prompt.chars().count();
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let msg = format!(
@@ -455,6 +483,9 @@ impl LlmProvider for BashCliAgentProvider {
                 "latency_ms": started_at.elapsed().as_millis() as u64,
                 "ok": false,
                 "error": msg,
+                "system_prompt_chars": system_prompt_chars,
+                "stdin_chars": stdin_bytes.len(),
+                "stdin_tail_preview": stdin_tail_preview,
             }));
             bail!(msg);
         }
@@ -464,6 +495,12 @@ impl LlmProvider for BashCliAgentProvider {
             .trim()
             .to_string();
 
+        let response_preview = if response.chars().count() > 500 {
+            format!("{}…(後 {} chars 省略)", response.chars().take(500).collect::<String>(), response.chars().count() - 500)
+        } else {
+            response.clone()
+        };
+
         crate::event_log::append(serde_json::json!({
             "kind": "llm_call",
             "provider": self.name(),
@@ -472,6 +509,10 @@ impl LlmProvider for BashCliAgentProvider {
             "latency_ms": started_at.elapsed().as_millis() as u64,
             "ok": true,
             "output_chars": response.chars().count(),
+            "system_prompt_chars": system_prompt_chars,
+            "stdin_chars": stdin_bytes.len(),
+            "stdin_tail_preview": stdin_tail_preview,
+            "response_preview": response_preview,
         }));
 
         Ok(ChatResponse {

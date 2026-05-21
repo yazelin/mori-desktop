@@ -21,6 +21,7 @@ pub mod llm;
 pub mod memory;
 pub mod mode;
 pub mod paste;
+pub mod process;
 pub mod redact;
 pub mod runtime;
 pub mod skill;

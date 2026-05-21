@@ -121,6 +121,9 @@ impl Skill for ShellSkill {
         // SIGKILL — 避免殘留 process 卡 X11 clipboard ownership / ydotool 半發 key
         // sequence,造成下次 shell_skill 異常(如 ZeroType agent 永久叫不動)。
         cmd.kill_on_drop(true);
+        // 抑制 Windows GUI parent spawn console child 黑框 — user shell_skill 跑
+        // `gh pr list` / `git status` 之類 console binary 也會跳黑色 cmd 視窗。
+        mori_core::suppress_console_on_windows!(cmd);
 
         let mut child = cmd
             .spawn()

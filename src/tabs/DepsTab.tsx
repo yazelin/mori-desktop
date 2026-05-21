@@ -183,10 +183,13 @@ function DepsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = async () => {
+  // force=true 強制重檢(走 Refresh 鈕 / install 完成的 callback);
+  // force=false / 省略 → 後端有 cache 就直接回,沒 cache 才真檢。
+  // 第一次 mount 用 false → 從快取秒開,沒快取才真跑檢測。
+  const reload = async (force = false) => {
     setLoading(true);
     try {
-      const list = await invoke<DepInfo[]>("deps_list");
+      const list = await invoke<DepInfo[]>("deps_list", { force });
       setDeps(list);
       setError(null);
     } catch (e: any) {
@@ -196,7 +199,7 @@ function DepsTab() {
     }
   };
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload(false); }, []);
 
   const installedCount = deps.filter((d) => d.status.installed).length;
 
@@ -204,12 +207,18 @@ function DepsTab() {
     <div className="mori-tab mori-tab-deps">
       <h2 className="mori-tab-title">{t("deps_tab.title")}</h2>
       <p className="mori-tab-hint">{t("deps_tab.hint")}</p>
+      {/* D 方案提示:狀態不會自動更新,UI 不會背景 poll,user 在外面手動裝 / 升級 deps
+          後要按 Refresh 才看得到新狀態。透過 Mori 自己的「安裝」按鈕裝完會自動 invalidate
+          快取,所以那條路徑 user 不用按。 */}
+      <p className="mori-tab-hint" style={{ opacity: 0.7, fontSize: "0.85em" }}>
+        ⓘ 狀態使用快取顯示,進 Tab 不會重新偵測。在 Mori 外面自己裝 / 升級任何依賴後,按右側「重新整理」才會更新。
+      </p>
 
       {error && <div className="mori-config-error">{error}</div>}
 
       <div className="mori-deps-toolbar">
         <span className="mori-memory-count">{installedCount} / {deps.length} {t("deps_tab.installed_count_suffix")}</span>
-        <button className="mori-btn" onClick={reload}><IconRefresh width={13} height={13} /> {t("deps_tab.refresh_button")}</button>
+        <button className="mori-btn" onClick={() => reload(true)}><IconRefresh width={13} height={13} /> {t("deps_tab.refresh_button")}</button>
       </div>
 
       {loading ? (
@@ -217,7 +226,9 @@ function DepsTab() {
       ) : (
         <div className="mori-deps-list">
           {deps.map((d) => (
-            <DepCard key={d.id} dep={d} onRefresh={reload} />
+            // install 完 / manual recheck 都當 force refresh — 同 Refresh 鈕路徑,
+            // 確保剛裝完外部 deps 立刻看到綠勾,不被殘留 cache 騙。
+            <DepCard key={d.id} dep={d} onRefresh={() => reload(true)} />
           ))}
         </div>
       )}

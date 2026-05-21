@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# MORI_LISTENER_VERSION: 4
 """mori-wake-listener.py — Hey Mori wake-word detector(Phase 3A)。
 
 mori-tauri 在 Listening mode 下會 spawn 這隻 script,持續開麥克風跑
@@ -42,7 +43,22 @@ from pathlib import Path
 
 # Import 失敗時要 emit error event 給 mori-tauri,不能直接 raise。
 def emit(obj):
-    print(json.dumps(obj), flush=True)
+    try:
+        print(json.dumps(obj), flush=True)
+    except OSError:
+        # parent kill 後 stdout pipe 已關閉,寫入會炸 OSError 22 (Windows) /
+        # BrokenPipeError (Linux)。emit 純診斷用途,失敗就吞,別讓 sounddevice
+        # callback 把 exception 冒到 cffi 層 → 跳 Python-CFFI error 對話框。
+        pass
+
+
+def diag(line):
+    """印一行診斷字到 stderr,失敗吞掉(同 emit 的理由)。Rust 端 stderr drain
+    抓 `[wake-listener]` prefix 倒進 event_log JSONL。"""
+    try:
+        print(f"[wake-listener] {line}", file=sys.stderr, flush=True)
+    except OSError:
+        pass
 
 
 def main():
@@ -83,6 +99,30 @@ def main():
         emit({"event": "error", "msg": f"model load failed: {e}"})
         sys.exit(4)
 
+    # 診斷:把 sounddevice 看到的 default input device + 全 device list 印到 stderr,
+    # Windows 乾淨機常踩「sounddevice 預設挑到錯的 mic / 預設 mic 是 stereo mix /
+    # 沒 mic」這類沒 error 但 audio 一直靜音的狀況。Rust 端 stderr drain 抓
+    # `[wake-listener]` prefix 倒進 event_log JSONL。
+    #
+    # sd.default.device 在 default in/out idx 不同時(常見:USB mic input + 內建喇叭
+    # output),取 `[0]` 會炸 "Input and output device are different"。改成各別
+    # 用 `sd.default.device['input']` 拿,避免那條 sounddevice 內部 assert。
+    try:
+        try:
+            input_idx = sd.default.device["input"]
+        except Exception:
+            input_idx = None
+        default_info = sd.query_devices(input_idx) if input_idx is not None else sd.query_devices(kind="input")
+        diag(f"default input device: idx={input_idx} info={default_info}")
+        all_inputs = [
+            (i, d["name"], d["max_input_channels"], d.get("default_samplerate"))
+            for i, d in enumerate(sd.query_devices())
+            if d["max_input_channels"] > 0
+        ]
+        diag(f"all input devices: {all_inputs}")
+    except Exception as e:
+        diag(f"device query failed: {e}")
+
     emit({"event": "ready", "model": model_path})
 
     # openWakeWord 接 16kHz mono int16,80ms 一塊(1280 samples)。
@@ -94,18 +134,56 @@ def main():
     last_wake_ts = 0.0
     SUPPRESS_SECS = 1.5
 
+    # 診斷:每 ~5s 評估「該不該印 audio level + 最高 score」。
+    #
+    # v4 起改成「只在有信號時才印」 — idle 期間(沒人講話、mic 沒輸入)完全靜默,
+    # 避免 mori log JSONL 被每分鐘 12 筆 `max_score=0.000 max_rms=0.0000` 的空 diag
+    # 塞爆。下面兩 gate 任一過就印一行,長期保留診斷價值但不刷屏:
+    #
+    #   - max_score > DIAG_SCORE_GATE → near-miss(像 wake-word 但沒過 threshold)
+    #   - max_rms   > DIAG_RMS_GATE   → mic 真的有收到聲音(idle 噪音 < 0.001,
+    #                                   有人說話 > 0.02),確認 mic 沒死
+    diag_state = {"counter": 0, "max_score": 0.0, "max_rms": 0.0}
+    DIAG_EVERY_CHUNKS = 62  # 62 * 80ms ≈ 5s 評估一次
+    DIAG_SCORE_GATE = 0.30  # near-miss 門檻(threshold 0.55 的下半)
+    DIAG_RMS_GATE = 0.02    # 有人說話的音量門檻
+
     def callback(indata, frames, time_info, status):
         nonlocal last_wake_ts
         # indata: shape (frames, 1) int16
         audio = indata[:, 0]
         predictions = model.predict(audio)
+        # 累積本輪 5s 內的 max score + max RMS(int16 → /32768 normalize 到 [0,1])
+        rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2))) / 32768.0
+        diag_state["max_rms"] = max(diag_state["max_rms"], rms)
+        diag_state["counter"] += 1
         for word, score in predictions.items():
-            if score >= threshold:
+            s = float(score)
+            if s > diag_state["max_score"]:
+                diag_state["max_score"] = s
+            if s >= threshold:
                 now = time.time()
                 if now - last_wake_ts < SUPPRESS_SECS:
                     continue  # 抑制連續觸發
                 last_wake_ts = now
-                emit({"event": "wake", "word": word, "score": float(score)})
+                emit({"event": "wake", "word": word, "score": s})
+        if diag_state["counter"] >= DIAG_EVERY_CHUNKS:
+            should_emit = (
+                diag_state["max_score"] > DIAG_SCORE_GATE
+                or diag_state["max_rms"] > DIAG_RMS_GATE
+            )
+            # 用 helper 而非 raw print — parent kill 後 stderr pipe 關掉,直接 print
+            # 會在 sounddevice 的 cffi callback 內冒 OSError 22 → Windows 跳
+            # "Python-CFFI error" 對話框,擋使用者 Mori 結束流程。helper 吞 OSError。
+            if should_emit:
+                diag(
+                    f"5s diag: max_score={diag_state['max_score']:.3f} "
+                    f"(threshold={threshold}) max_rms={diag_state['max_rms']:.4f} "
+                    f"(0=silent, normal speech ~0.05-0.2)"
+                )
+            diag_state["counter"] = 0
+            diag_state["max_score"] = 0.0
+            diag_state["max_rms"] = 0.0
 
     try:
         with sd.InputStream(

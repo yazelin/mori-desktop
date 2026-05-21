@@ -4,9 +4,9 @@
   "version": "0.7.0",
   "type": "module",
   "scripts": {
-    "predev": "cargo build -p mori-cli",
+    "predev": "cargo build -p mori-cli && node scripts/stage-mori-cli-for-bundle.mjs debug",
     "dev": "vite",
-    "prebuild": "cargo build -p mori-cli --release",
+    "prebuild": "cargo build -p mori-cli --release && node scripts/stage-mori-cli-for-bundle.mjs release",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

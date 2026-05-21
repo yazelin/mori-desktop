@@ -235,6 +235,7 @@ impl WhisperServer {
             lang,
         ]);
         cmd.stdout(Stdio::null()).stderr(Stdio::null());
+        crate::suppress_console_on_windows!(cmd);
 
         let child = cmd.spawn().with_context(|| {
             format!(

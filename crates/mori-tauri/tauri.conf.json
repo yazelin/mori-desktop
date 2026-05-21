@@ -80,6 +80,7 @@
     ],
     "category": "Productivity",
     "shortDescription": "森林精靈 Mori 的桌面身體",
-    "longDescription": "Mori 是個跨平台的 AI 管家,聽你說話、處理你的任務、記住你的偏好。"
+    "longDescription": "Mori 是個跨平台的 AI 管家,聽你說話、處理你的任務、記住你的偏好。",
+    "externalBin": ["../../target/release/mori"]
   }
 }

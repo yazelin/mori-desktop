@@ -56,8 +56,16 @@ use serde::Deserialize;
 const BUNDLED_HEY_MORI_ONNX: &[u8] = include_bytes!("../assets/wakeword/hey-mori.onnx");
 
 /// Bundled mori-wake-listener.py(Phase 3A)— Python openWakeWord bridge。
-/// `ensure_listener_script_deployed` 在 user dir 沒檔時寫一份過去當預設,user 可覆寫。
+/// `ensure_listener_script_deployed` 走 [`BUNDLED_LISTENER_VERSION`] gate:
+/// 沒檔或檔內 version 比 bundled 舊 → 寫一份過去。User 自己改過的版本
+/// 會被升級覆寫(這支 script 是純 protocol bridge,不該被 user 客製,
+/// 反而 stale script 漏新診斷 / bug fix 比較痛)。
 const BUNDLED_LISTENER_SCRIPT: &[u8] = include_bytes!("../../../examples/scripts/mori-wake-listener.py");
+
+/// Bundled script 內第 2 行的 `# MORI_LISTENER_VERSION: N` 標記。每次改 script
+/// (尤其加診斷 / 改 protocol)就 bump 一次 — 比較舊版的 deploy 上去當 source
+/// of truth。寫死字串比動態 parse bundled 內容簡單也少踩開機 IO。
+const BUNDLED_LISTENER_VERSION: &str = "4";
 
 /// 確保 `<mori_dir>/wakeword/hey-mori.onnx` 存在。沒檔 → 解壓 bundled。
 /// 已存在 → 完全不動(user 可能訓過自己的)。
@@ -86,8 +94,14 @@ pub fn ensure_default_model(mori_dir: &Path) {
     }
 }
 
-/// 確保 `~/.mori/bin/mori-wake-listener.py` 存在。沒檔 → 寫 bundled。
-/// User 改過或自己版本 → 不覆寫(`!path.exists()` gate)。
+/// 確保 `~/.mori/bin/mori-wake-listener.py` 存在且 version >= bundled。
+/// 沒檔 → 寫 bundled;有檔但 version 比 bundled 舊(或讀不到 version line)→
+/// 覆寫成 bundled。
+///
+/// Version gate 原因:script 加診斷 / 修 bug 後,既有 user dir 不會自動更新,
+/// fresh install 之後仍跑 stale script(看不到新 diag 線索)。前一版用
+/// `!path.exists()` 守「user 自己客製」的可能,但實務上沒人客製 thin bridge
+/// script,反而漏掉診斷比較痛。
 ///
 /// Linux/macOS 順手 chmod +x。Windows 走 python.exe 顯式呼叫,permission bit 不用。
 pub fn ensure_listener_script_deployed(mori_dir: &Path) {
@@ -97,7 +111,17 @@ pub fn ensure_listener_script_deployed(mori_dir: &Path) {
         return;
     }
     let path = bin.join("mori-wake-listener.py");
-    if path.exists() {
+    let needs_deploy = match fs::read_to_string(&path) {
+        Ok(existing) => {
+            // 找 `# MORI_LISTENER_VERSION: N` 那行。沒找到 → 視為舊版(可能是
+            // 還沒有 version marker 的更早 deploy)→ overwrite。
+            let marker = format!("MORI_LISTENER_VERSION: {BUNDLED_LISTENER_VERSION}");
+            let up_to_date = existing.lines().take(5).any(|l| l.contains(&marker));
+            !up_to_date
+        }
+        Err(_) => true, // 沒檔 / 讀失敗 → deploy
+    };
+    if !needs_deploy {
         return;
     }
     if let Err(e) = fs::write(&path, BUNDLED_LISTENER_SCRIPT) {
@@ -113,7 +137,11 @@ pub fn ensure_listener_script_deployed(mori_dir: &Path) {
             let _ = fs::set_permissions(&path, perms);
         }
     }
-    tracing::info!(path = %path.display(), "wake-word: deployed bundled mori-wake-listener.py");
+    tracing::info!(
+        path = %path.display(),
+        version = BUNDLED_LISTENER_VERSION,
+        "wake-word: deployed bundled mori-wake-listener.py",
+    );
 }
 
 /// 啟動 listener 的設定。從 `~/.mori/config.json` 的 `listening_mode` 區塊讀。
@@ -205,6 +233,10 @@ impl WakeWordListener {
                                      // 不污染 stdout JSON protocol,但能 surface ModuleNotFoundError
                                      // / Python not found / 麥克風開不起來等死因(Windows 乾淨機尤其踩)
 
+        // 抑制 Windows GUI parent spawn python.exe 時跳出的黑色 cmd 視窗。
+        // stdout/stderr 已 pipe 到自家 reader thread,不需要 console。
+        mori_core::suppress_console_on_windows!(cmd);
+
         let mut child = cmd.spawn().with_context(|| {
             format!(
                 "spawn wake-word listener: python={} script={}\n\
@@ -286,7 +318,21 @@ impl WakeWordListener {
                     match line {
                         Ok(l) => {
                             let t = l.trim();
-                            if !t.is_empty() {
+                            if t.is_empty() {
+                                continue;
+                            }
+                            // listener Python 自己印的診斷行(device list / 5s
+                            // 級別 audio level + max score)用 `[wake-listener]`
+                            // 前綴標記 → 走 event_log JSONL,user release build
+                            // 沒 console 也看得到(tracing 沒 file appender)。
+                            // 其他 stderr(onnxruntime 內部噪訊 / numpy warning)
+                            // 仍走 tracing DEBUG,不污染 event log。
+                            if let Some(rest) = t.strip_prefix("[wake-listener] ") {
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "wake_listener_diag",
+                                    "text": rest,
+                                }));
+                            } else {
                                 tracing::debug!(line = %t, "wake-word stderr");
                             }
                         }
