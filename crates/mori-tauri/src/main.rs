@@ -18,6 +18,7 @@ mod mcp_cmd;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
+mod reminder_emitter;
 mod reminders_cmd;
 mod x11_hotkey;
 #[cfg(target_os = "linux")]
@@ -68,7 +69,7 @@ use mori_core::skill::{
     RecallMemorySkill, RememberSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
     SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
-use mori_time::{NoopEmitter, Notifier, ReminderService};
+use mori_time::{Notifier, ReminderService};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -5246,45 +5247,6 @@ fn main() {
 
     let state_for_setup = state.clone();
 
-    // §9 P1 「時之鳥」K5:在 Builder 開跑前先建好 ReminderService。
-    // SQLite migrate + 重排 pending reminder 都在 async `new()` 內;Tauri 提供
-    // `block_on` 入口在 sync `main()` 裡跑 async,啟動完成才繼續往下。
-    //
-    // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。**失敗就 panic**
-    // (見下方 `.unwrap_or_else`)— 立場是「~/.mori 寫不進去 = config.json / memory
-    // 全部跟著炸,reminders 不可能比它們先撐住」,所以早死早超生,不嘗試 degrade。
-    // 對應 RemindMeSkill 註冊那邊也保證 ReminderService 一定 ready(不過註冊段仍
-    // 用 try_state 維持 defensive,即便理論上 unwrap 也行)。
-    let reminders_db_path = mori_dir().join("reminders.db");
-    if let Some(parent) = reminders_db_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(
-                path = %parent.display(),
-                error = %e,
-                "failed to create dir for reminders.db",
-            );
-        }
-    }
-    // 失敗就 panic — sqlite open 失敗代表 ~/.mori 整個寫不進去,連 config / memory 都會
-    // 跟著炸,reminders 反正不可能撐起來。早死早超生。
-    let reminder_service: Arc<ReminderService> = Arc::new(
-        tauri::async_runtime::block_on(ReminderService::new(
-            &reminders_db_path,
-            Notifier::new("Mori"),
-            Arc::new(NoopEmitter), // Task 5 換成真實的 TauriEventEmitter
-        ))
-        .unwrap_or_else(|e| {
-            panic!(
-                "ReminderService init failed (path={}): {e}",
-                reminders_db_path.display()
-            )
-        }),
-    );
-    tracing::info!(
-        path = %reminders_db_path.display(),
-        "ReminderService ready (時之鳥)",
-    );
-
     // Wave 6 MCP-2:啟動 McpRegistry — 從 `~/.mori/mcp.json` 載 config + 依序
     // connect 各 server。config 不存在 / 讀失敗 / 個別 server connect 失敗都不
     // 擋啟動(個別失敗只 log warn,registry 保留其餘成功的)。
@@ -5341,9 +5303,6 @@ fn main() {
             }
         }))
         .manage(state.clone())
-        // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
-        // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
-        .manage(reminder_service.clone())
         // Wave 6 MCP-2:把 McpRegistry 註冊進 Manager。
         // mcp_cmd 內 list / call command + agent loop 內 McpToolSkill 註冊都從這裡拿 clone。
         .manage(mcp_registry.clone())
@@ -5482,6 +5441,48 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // §9 P1 「時之鳥」K5:建好 ReminderService 並注入 TauriEventEmitter。
+            // 在 setup 內初始化,因為 TauriEventEmitter 需要 AppHandle(setup 前拿不到)。
+            // SQLite migrate + 重排 pending reminder 都在 async `new()` 內;
+            // block_on 讓 async 在 setup sync context 內跑完才繼續。
+            //
+            // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。
+            // 失敗就 panic — sqlite open 失敗代表 ~/.mori 整個寫不進去,
+            // 連 config / memory 都會跟著炸,reminders 反正不可能撐起來。早死早超生。
+            let reminders_db_path = mori_dir().join("reminders.db");
+            if let Some(parent) = reminders_db_path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!(
+                        path = %parent.display(),
+                        error = %e,
+                        "failed to create dir for reminders.db",
+                    );
+                }
+            }
+            let app_handle_for_emitter = app.handle().clone();
+            let reminder_service: Arc<ReminderService> = Arc::new(
+                tauri::async_runtime::block_on(ReminderService::new(
+                    &reminders_db_path,
+                    Notifier::new("Mori"),
+                    std::sync::Arc::new(reminder_emitter::TauriEventEmitter {
+                        handle: app_handle_for_emitter,
+                    }),
+                ))
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "ReminderService init failed (path={}): {e}",
+                        reminders_db_path.display()
+                    )
+                }),
+            );
+            tracing::info!(
+                path = %reminders_db_path.display(),
+                "ReminderService ready (時之鳥)",
+            );
+            // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
+            // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
+            app.manage(reminder_service);
+
             // Wave 8 Gm-2「跨界之手」:GmailClient 若啟動時 init 成功就註冊到 Manager;
             // None 就跳過(Gmail OAuth 還沒跑),Gmail skill registry 那邊也會看 try_state
             // 撈不到就 skip。OAuth start command 仍可呼叫,user 跑完 → 重啟 Mori → init OK。
