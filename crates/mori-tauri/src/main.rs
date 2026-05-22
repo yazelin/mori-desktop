@@ -9,6 +9,7 @@ mod character_pack;
 mod context_provider;
 mod correction_audit_config;
 mod correction_cmd;
+mod correction_substitute_config;
 mod deps;
 mod file_loader_cmd;
 // Wave 8 Gm-2 「跨界之手」 — Gmail Tauri commands(OAuth start / status / list /
@@ -3334,11 +3335,19 @@ async fn run_agent_pipeline(
 
     // Deterministic corrections substitute — transcript 是 user STT 輸出,
     // 送進 LLM 前先套 corrections.md 字典,讓 LLM 看到正字(兜底 LLM 自身漏套)。
+    // config correction_substitute.enabled = false 時跳過,完全靠 LLM cleanup。
     let transcript = {
-        let corrections_md =
-            std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
-        if !corrections_md.is_empty() {
-            mori_core::corrections_apply::apply_corrections(&transcript, &corrections_md)
+        let sub_cfg = correction_substitute_config::CorrectionSubstituteConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if sub_cfg.enabled {
+            let corrections_md =
+                std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+            if !corrections_md.is_empty() {
+                mori_core::corrections_apply::apply_corrections(&transcript, &corrections_md)
+            } else {
+                transcript
+            }
         } else {
             transcript
         }
@@ -4327,21 +4336,30 @@ async fn run_voice_input_pipeline(
 
     // Step 3:deterministic corrections substitute — LLM 漏套字典率 ~50%,
     // 這步兜底保證 corrections.md 條目 100% 套用。長 variant 先套(避免 substring conflict)。
+    // config correction_substitute.enabled = false 時跳過,完全靠 LLM cleanup。
     let cleaned_text = {
-        let corrections_md =
-            std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
-        if !corrections_md.is_empty() {
-            let before_chars = cleaned_text.chars().count();
-            let applied =
-                mori_core::corrections_apply::apply_corrections(&cleaned_text, &corrections_md);
-            let after_chars = applied.chars().count();
-            tracing::debug!(
-                chars_before = before_chars,
-                chars_after = after_chars,
-                "voice-input corrections substitute applied"
-            );
-            applied
+        let sub_cfg = correction_substitute_config::CorrectionSubstituteConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if sub_cfg.enabled {
+            let corrections_md =
+                std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+            if !corrections_md.is_empty() {
+                let before_chars = cleaned_text.chars().count();
+                let applied =
+                    mori_core::corrections_apply::apply_corrections(&cleaned_text, &corrections_md);
+                let after_chars = applied.chars().count();
+                tracing::debug!(
+                    chars_before = before_chars,
+                    chars_after = after_chars,
+                    "voice-input corrections substitute applied"
+                );
+                applied
+            } else {
+                cleaned_text
+            }
         } else {
+            tracing::debug!("voice-input corrections substitute skipped (disabled in config)");
             cleaned_text
         }
     };
@@ -5705,6 +5723,8 @@ fn main() {
             notification_config::set_notification_config,
             correction_audit_config::get_correction_audit_config,
             correction_audit_config::set_correction_audit_config,
+            correction_substitute_config::get_correction_substitute_config,
+            correction_substitute_config::set_correction_substitute_config,
             correction_cmd::correction_inbox_list,
             correction_cmd::correction_inbox_accept,
             correction_cmd::correction_inbox_dismiss,

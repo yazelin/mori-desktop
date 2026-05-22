@@ -1229,6 +1229,14 @@ function ConfigTab({
     model: "openai/gpt-oss-120b",
   });
 
+  // correction_substitute config — deterministic string replace toggle
+  type CorrectionSubstituteConfig = {
+    enabled: boolean;
+  };
+  const [substituteCfg, setSubstituteCfg] = useState<CorrectionSubstituteConfig>({
+    enabled: true,
+  });
+
   useEffect(() => {
     invoke<string>("config_read")
       .then((t) => { setRaw(t); setOrig(t); })
@@ -1241,6 +1249,9 @@ function ConfigTab({
     invoke<CorrectionAuditConfig>("get_correction_audit_config")
       .then(setAuditCfg)
       .catch((e) => console.warn("get_correction_audit_config failed", e));
+    invoke<CorrectionSubstituteConfig>("get_correction_substitute_config")
+      .then(setSubstituteCfg)
+      .catch((e) => console.warn("get_correction_substitute_config failed", e));
   }, []);
 
   const saveAudit = async (next: CorrectionAuditConfig) => {
@@ -1249,6 +1260,15 @@ function ConfigTab({
       await invoke("set_correction_audit_config", { cfg: next });
     } catch (e) {
       console.error("set_correction_audit_config failed", e);
+      alert(`儲存失敗:${e}`);
+    }
+  };
+
+  const saveSubstitute = async (next: CorrectionSubstituteConfig) => {
+    setSubstituteCfg(next);
+    try {
+      await invoke("set_correction_substitute_config", { cfg: next });
+    } catch (e) {
       alert(`儲存失敗:${e}`);
     }
   };
@@ -2291,6 +2311,18 @@ function ConfigTab({
                 type="checkbox"
                 checked={auditCfg.enabled}
                 onChange={(e) => saveAudit({ ...auditCfg, enabled: e.target.checked })}
+              />
+            </FormRow>
+          </Section>
+          <Section
+            title="字典硬轉"
+            hint="LLM cleanup 完之後,程式直接套 corrections.md 字典條目進 cleaned 文字(strict string replace)。100% reliable 但 context-free(類似 OpenCC 簡繁硬轉)。關掉的話完全靠 LLM cleanup,漏率高但有上下文判斷。"
+          >
+            <FormRow label="enabled" hint="ON(預設):字典條目 100% 套用,context-free。OFF:不硬轉,完全靠 LLM cleanup(漏率高但 context-aware)。">
+              <input
+                type="checkbox"
+                checked={substituteCfg.enabled}
+                onChange={(e) => saveSubstitute({ enabled: e.target.checked })}
               />
             </FormRow>
           </Section>
