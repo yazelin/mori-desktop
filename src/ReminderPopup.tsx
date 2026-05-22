@@ -109,6 +109,50 @@ function ReminderPopup() {
     };
   }, []);
 
+  // === polling fallback:listener 漏接 emit 時 5 秒內補正 ===
+  // merge by id:避免 race 覆蓋使用者剛 dismiss 的條目。
+  useEffect(() => {
+    const pollId = window.setInterval(async () => {
+      try {
+        const active = await invoke<ActiveReminder[]>("reminder_active_queue");
+        setQueue((prev) => {
+          const activeIds = new Set(active.map((a) => a.id));
+          // 保留 prev 內 active 還在的
+          const kept = prev.filter((r) => activeIds.has(r.id));
+          // 加入 active 中 prev 還沒有的(listener 漏掉的 fire)
+          const prevIds = new Set(prev.map((r) => r.id));
+          const fresh = active.filter((r) => !prevIds.has(r.id));
+          if (fresh.length > 0) {
+            console.log("[reminder_popup] polling found fresh reminders:", fresh);
+          }
+          return [...kept, ...fresh];
+        });
+      } catch (e) {
+        console.warn("[reminder_popup] polling active_queue failed", e);
+      }
+    }, 5000);
+    return () => window.clearInterval(pollId);
+  }, []);
+
+  // === queue 從空變非空 → re-fetch sprite position(popup hidden 期間 sprite 可能被拖動)===
+  const hadEmptyQueue = useRef(true);
+  useEffect(() => {
+    const isEmptyNow = queue.length === 0;
+    if (hadEmptyQueue.current && !isEmptyNow) {
+      // 從空變非空
+      (async () => {
+        try {
+          const pos = await invoke<{ x: number; y: number }>("get_sprite_position");
+          console.log("[reminder_popup] sprite position refreshed on queue resurrect:", pos);
+          setSpritePos(pos);
+        } catch (e) {
+          console.warn("[reminder_popup] sprite_position refresh failed", e);
+        }
+      })();
+    }
+    hadEmptyQueue.current = isEmptyNow;
+  }, [queue.length]);
+
   // === queue 變化 → setSize / setPosition / show ===
   useEffect(() => {
     const win = getCurrentWindow();
