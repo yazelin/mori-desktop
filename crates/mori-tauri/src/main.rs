@@ -4575,7 +4575,7 @@ fn chinese_weekday(en: &str) -> &'static str {
 /// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` / `transcribe_cmds::mori_home_dir()`
 /// 同一條 fallback 邏輯 — 沒 `HOME` 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md
 /// 工程注意第一點)。
-fn default_vault_root() -> Option<std::path::PathBuf> {
+pub(crate) fn default_vault_root() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()
@@ -5779,8 +5779,9 @@ fn main() {
             // dispatch skill。失敗只 warn 不卡啟動 — Tauri UI 跟語音/chat
             // pipeline 沒這個 server 也能用。
             let app_for_server = state_for_setup.clone();
+            let handle_for_server = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match crate::skill_server::start(app_for_server).await {
+                match crate::skill_server::start(app_for_server, handle_for_server).await {
                     Ok(info) => tracing::info!(
                         port = info.port,
                         "skill HTTP server started — Bash CLI proxy ready"

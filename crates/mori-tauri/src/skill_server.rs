@@ -37,10 +37,13 @@ use axum::{
 use mori_core::context::Context as MoriContext;
 use mori_core::runtime::{generate_auth_token, RuntimeInfo};
 use mori_core::skill::{
-    ComposeSkill, EditMemorySkill, ForgetMemorySkill, PolishSkill, RecallMemorySkill,
-    RememberSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
+    ComposeSkill, EditMemorySkill, ForgetMemorySkill, ListGmailSkill, PolishSkill, ReadFileSkill,
+    ReadGmailSkill, ReadWikiPageSkill, RecallMemorySkill, RememberSkill, RemindMeSkill,
+    SendGmailSkill, SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
+use mori_time::ReminderService;
 use serde_json::{json, Value};
+use tauri::Manager;
 
 #[derive(Clone)]
 pub struct SkillServerState {
@@ -48,9 +51,16 @@ pub struct SkillServerState {
     /// C:不直接持 Arc<dyn MemoryStore>(會被 hot-reload swap 後變 stale),
     /// 持 Arc<AppState>,每次 handler 透過 `app.memory_handle()` 拿當下 snapshot。
     pub app: Arc<crate::AppState>,
+    /// Tauri AppHandle — 從 Manager 拿 stateful service(ReminderService /
+    /// SharedGmailClient / McpRegistry)。沒這個就只能掛純 functional skill,
+    /// 時之鳥 / Gmail / MCP tool 全進不來。
+    pub app_handle: tauri::AppHandle,
 }
 
-pub async fn start(app: Arc<crate::AppState>) -> Result<RuntimeInfo> {
+pub async fn start(
+    app: Arc<crate::AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<RuntimeInfo> {
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
         .await
         .context("bind 127.0.0.1:random")?;
@@ -73,6 +83,7 @@ pub async fn start(app: Arc<crate::AppState>) -> Result<RuntimeInfo> {
     let state = SkillServerState {
         auth_token: Arc::from(token.as_str()),
         app,
+        app_handle,
     };
     let app = Router::new()
         .route("/skill/list", get(list_skills))
@@ -110,19 +121,30 @@ fn check_auth(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, St
 
 // ─── 5I: 動態 registry builder ──────────────────────────────────────────
 
-/// 依當前 Agent profile build 一個臨時 SkillRegistry：
-/// - Built-in（純 LLM）skill: translate / polish / summarize / compose
-/// - Memory skill: remember / recall_memory / forget_memory / edit_memory
-/// - Action skill (Linux): open_url / open_app / send_keys / google_search /
-///   ask_chatgpt / ask_gemini / find_youtube
-/// - Shell skill: 來自 active agent profile 的 `shell_skills:` 定義
+/// 依當前 Agent profile build 一個臨時 SkillRegistry。內容必須對齊 main.rs
+/// `skills_list` 那塊 — 否則 claude-bash / gemini-bash 等走 HTTP 拿 skill list
+/// 的 provider 會看不到新 skill(LLM hallucinate「沒掛」)。
 ///
-/// 注意：set_mode / paste_selection_back 等 stateful skill 不註冊到 HTTP 入口，
-/// 它們有 AppHandle / state 依賴，且通常不適合外部觸發。
-fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
+/// 包含:
+/// - Built-in 純 LLM skill: translate / polish / summarize / compose / fetch_url
+/// - 萬卷之口: read_file_text
+/// - 時之鳥 K5: remind_me(需 ReminderService state)
+/// - Gmail(跨界之手): list_gmail / read_gmail / send_gmail(需 SharedGmailClient state)
+/// - 記憶之森: read_wiki_page(需 vault_root + spirit_name)
+/// - Memory: remember / recall_memory / forget_memory / edit_memory
+/// - Action skill: open_url / open_app / send_keys / google_search /
+///   ask_chatgpt / ask_gemini / find_youtube
+/// - Shell skill: active agent profile 的 `shell_skills:` 定義
+/// - Stream I Anthropic SKILL.md: prompt + 可選 scripts
+/// - Wave 6 MCP: 已連接 MCP server 的 tool
+///
+/// **故意排除**:set_mode / paste_selection_back 是 stateful + AppHandle 強耦合,
+/// 不適合外部觸發。
+async fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
     let routing = mori_core::llm::Routing::build_from_config(None)
         .context("build routing for skill_server dynamic registry")?;
     let memory = state.app.memory_handle();
+    let app = &state.app_handle;
     let mut registry = SkillRegistry::new();
 
     // Built-in 純 LLM skill
@@ -130,8 +152,35 @@ fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
     registry.register(Arc::new(PolishSkill::new(routing.skill_provider("polish"))));
     registry.register(Arc::new(SummarizeSkill::new(routing.skill_provider("summarize"))));
     registry.register(Arc::new(ComposeSkill::new(routing.skill_provider("compose"))));
-    // Phase 3B: URL fetching
     registry.register(Arc::new(mori_core::skill::FetchUrlSkill::new()));
+
+    // Stream E 萬卷之口
+    registry.register(Arc::new(ReadFileSkill));
+
+    // §9 P1 時之鳥 K5 — ReminderService 透過 Tauri Manager 拿。沒撈到就跳過
+    // (LLM 拿不到 remind_me skill,但其他不會炸)。
+    if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
+        registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
+    }
+
+    // Wave 8 Gm-2 Gmail — optional state,沒設不註冊
+    if let Some(shared) = app.try_state::<SharedGmailClient>() {
+        let client = shared.0.clone();
+        registry.register(Arc::new(ListGmailSkill::new(client.clone())));
+        registry.register(Arc::new(ReadGmailSkill::new(client.clone())));
+        registry.register(Arc::new(SendGmailSkill::new(client)));
+    }
+
+    // Wave 7 L-mori 記憶之森
+    if let Some(vault_root) = crate::default_vault_root() {
+        let cfg = crate::annuli_config::AnnuliConfig::load(&crate::mori_dir().join("config.json"));
+        let spirit = if cfg.spirit_name.is_empty() {
+            "mori".to_string()
+        } else {
+            cfg.spirit_name
+        };
+        registry.register(Arc::new(ReadWikiPageSkill::new(vault_root, spirit)));
+    }
 
     // Memory skills
     registry.register(Arc::new(RememberSkill::new(memory.clone())));
@@ -139,8 +188,7 @@ fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
     registry.register(Arc::new(ForgetMemorySkill::new(memory.clone())));
     registry.register(Arc::new(EditMemorySkill::new(memory.clone())));
 
-    // 5G-6: action skills(Linux: xdg-open / gtk-launch / ydotool;
-    // Windows: cmd /c start + SendInput)
+    // 5G-6: action skills
     registry.register(Arc::new(crate::action_skills::OpenUrlSkill));
     registry.register(Arc::new(crate::action_skills::OpenAppSkill));
     registry.register(Arc::new(crate::action_skills::SendKeysSkill));
@@ -155,6 +203,34 @@ fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistry> {
         registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
     }
 
+    // Stream I / Wave 6 DF-2: Anthropic SKILL.md(prompt + optional scripts)
+    let anthropic_dir = mori_core::skill::anthropic_skill::default_skills_dir();
+    for discovered in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
+        let mori_core::skill::DiscoveredSkill {
+            skill,
+            scripts_dir,
+        } = discovered;
+        if let Some(sd) = scripts_dir {
+            registry.register(Arc::new(mori_core::skill::AnthropicScriptSkill::new(
+                skill.clone(),
+                sd,
+            )));
+        }
+        registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
+    }
+
+    // Wave 6 MCP-2: 已連接 MCP server 提供的 tool。沒掛 MCP 就跳過。
+    // 注意 all_tools() 是 async,所以 build_dynamic_registry 整個是 async。
+    if let Some(mcp_reg) = app.try_state::<Arc<mori_mcp::McpRegistry>>() {
+        let mcp_arc = mcp_reg.inner().clone();
+        for tool in mcp_arc.all_tools().await {
+            registry.register(Arc::new(mori_core::skill::McpToolSkill::new(
+                mcp_arc.clone(),
+                tool,
+            )));
+        }
+    }
+
     Ok(registry)
 }
 
@@ -164,7 +240,7 @@ async fn list_skills(
 ) -> Result<Json<Value>, (StatusCode, String)> {
     check_auth(&headers, &state.auth_token)?;
 
-    let registry = build_dynamic_registry(&state).map_err(|e| {
+    let registry = build_dynamic_registry(&state).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("build registry: {e:#}"),
@@ -196,7 +272,7 @@ async fn dispatch_skill(
 ) -> Result<String, (StatusCode, String)> {
     check_auth(&headers, &state.auth_token)?;
 
-    let registry = build_dynamic_registry(&state).map_err(|e| {
+    let registry = build_dynamic_registry(&state).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("build registry: {e:#}"),
