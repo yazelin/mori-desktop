@@ -2137,20 +2137,26 @@ function ConfigTab({
               />
             </FormRow>
             <FormRow
-              label="x11 backplate"
-              hint={t("config_tab.rows.hint_x11_backplate")}
+              label="backplate"
+              hint={t("config_tab.rows.hint_backplate")}
             >
               <Select
-                value={cfg.floating?.x11_backplate ?? "plain"}
+                value={
+                  (cfg.floating?.backplate as string | undefined) ??
+                  (cfg.floating?.x11_backplate as string | undefined) ??
+                  "plain"
+                }
                 onChange={(v) =>
                   applyPatch((c) => {
                     const f = ensureSubObj(c, "floating");
-                    f.x11_backplate = v;
+                    f.backplate = v;
+                    // 順便清掉舊 key,避免兩個並存造成困惑
+                    delete f.x11_backplate;
                   })
                 }
                 options={[
                   { value: "plain", label: "素色(跟著 theme 漸層)" },
-                  { value: "logo", label: "背板(美術 PNG / 自訂)" },
+                  { value: "logo", label: "背板(角色 / 自訂 PNG)" },
                 ]}
               />
             </FormRow>
