@@ -286,6 +286,37 @@ impl ReminderService {
         Ok(())
     }
 
+    /// 2026-05-22:popup [稍後 5 分] 用 — 把 fired reminder「再提醒一次」。
+    /// 跟 snooze_reminder 不同:那個只動 due_at(僅限 Pending/Snoozed);
+    /// 這個是「原本 dismissed,新建一筆 N 分鐘後 fire」,給 fired-but-missed 的情境。
+    ///
+    /// 流程:
+    /// 1. 拿原本 reminder,確認 status=Fired(其他狀態 reject InvalidStatus)
+    /// 2. mark_dismissed 原本
+    /// 3. 建新 reminder 同 text、due_at = now + delay_minutes、cron_expr = None
+    /// 4. schedule 新 reminder
+    /// 5. 返回新 reminder
+    pub async fn reschedule_fired_reminder(
+        &self,
+        id: i64,
+        delay_minutes: i64,
+    ) -> Result<Reminder, CommandError> {
+        let store = self.store.lock().await;
+        let original = store.get(id)?;
+        if !matches!(original.status, crate::schema::ReminderStatus::Fired) {
+            return Err(CommandError::InvalidStatus {
+                id,
+                current: format!("{:?}", original.status),
+            });
+        }
+        store.mark_dismissed(id, Utc::now())?;
+        let new_due = Utc::now() + chrono::Duration::minutes(delay_minutes);
+        let new_r = store.create(original.text.clone(), new_due, None)?;
+        drop(store);
+        self.scheduler.schedule(&new_r).await?;
+        Ok(new_r)
+    }
+
     /// 把現有 reminder snooze 到指定時間。`when_expr` 同 [`remind_me`] 走 NL parser。
     ///
     /// 內部:parse → store.snooze(更新 status + snoozed_until + **due_at**)→
@@ -539,6 +570,64 @@ mod tests {
         assert_eq!(pending.len(), 1, "expected 1 reloaded pending, got {}", pending.len());
         assert_eq!(pending[0].id, r_id);
         assert_eq!(pending[0].text, "persistent");
+    }
+
+    #[tokio::test]
+    async fn reschedule_fired_reminder_dismisses_original_and_creates_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("r.db");
+        let svc = ReminderService::new(
+            &db,
+            Notifier::new("Mori-Test"),
+            Arc::new(NoopEmitter),
+        )
+        .await
+        .unwrap();
+
+        // 建 + 強制 fire
+        let original_id = {
+            let store = svc.store.lock().await;
+            let r = store
+                .create("test".to_string(), Utc::now() - Duration::minutes(1), None)
+                .unwrap();
+            store.mark_fired(r.id, Utc::now()).unwrap();
+            r.id
+        };
+
+        // reschedule
+        let new_r = svc.reschedule_fired_reminder(original_id, 5).await.unwrap();
+
+        // assert: original dismissed,新建 reminder due_at 約 5 分鐘後,同 text,Pending
+        let store = svc.store.lock().await;
+        let original = store.get(original_id).unwrap();
+        assert!(original.dismissed_at.is_some(), "original should be dismissed");
+        assert_eq!(new_r.text, "test");
+        assert_eq!(new_r.status, ReminderStatus::Pending);
+        let due_diff = (new_r.due_at - Utc::now()).num_minutes();
+        assert!(due_diff >= 4 && due_diff <= 5, "new due_at should be ~5 min from now, got {due_diff}");
+    }
+
+    #[tokio::test]
+    async fn reschedule_fired_reminder_rejects_non_fired() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("r.db");
+        let svc = ReminderService::new(
+            &db,
+            Notifier::new("Mori-Test"),
+            Arc::new(NoopEmitter),
+        )
+        .await
+        .unwrap();
+        // Pending reminder — 不該被 reschedule_fired
+        let r = {
+            let store = svc.store.lock().await;
+            store.create("pending".to_string(), Utc::now() + Duration::hours(1), None).unwrap()
+        };
+        let err = svc.reschedule_fired_reminder(r.id, 5).await.unwrap_err();
+        match err {
+            CommandError::InvalidStatus { id, .. } => assert_eq!(id, r.id),
+            other => panic!("expected InvalidStatus, got {other:?}"),
+        }
     }
 
     #[tokio::test]

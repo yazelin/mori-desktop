@@ -159,16 +159,18 @@ pub async fn reminder_dismiss(
     store.mark_dismissed(id, Utc::now()).map_err(|e| e.to_string())
 }
 
-/// `reminder_snooze(id, minutes)` — 暫緩 `minutes` 分鐘。
-/// 內部轉換成 NL 字串並走 `ReminderService::snooze_reminder` NL parser 路徑。
+/// `reminder_snooze(id, minutes)` — popup [稍後 N 分] 用。
+/// 對 fired reminder 做 reschedule:dismiss 原本 + 建新一筆 N 分鐘後 fire。
+/// 使用 `ReminderService::reschedule_fired_reminder`,語義對齊「我錯過了,再提醒一次」。
 #[tauri::command]
 pub async fn reminder_snooze(
     id: i64,
     minutes: u32,
     svc: tauri::State<'_, Arc<ReminderService>>,
 ) -> Result<(), String> {
-    svc.snooze_reminder(id, format!("{} minutes", minutes))
+    svc.reschedule_fired_reminder(id, minutes as i64)
         .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
