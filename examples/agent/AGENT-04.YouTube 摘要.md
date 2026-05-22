@@ -9,7 +9,8 @@
 # 用 claude-bash 是因為摘要任務 reasoning depth 重要 + tool calling 穩定,
 # user 不介意走 user 自己 quota。想省 quota 改 provider: groq 也行。
 provider: claude-bash
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 shell_skills:
   - name: youtube_transcript
     description: |

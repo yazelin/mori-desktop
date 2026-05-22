@@ -11,7 +11,8 @@
 # tool calling,純 API tool calling 失敗率高一點。沒裝 Claude Code 改成
 # gemini-bash 或留空都行。
 provider: claude-bash
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 shell_skills:
   - name: obsidian_search
     description: |

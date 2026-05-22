@@ -3393,10 +3393,10 @@ async fn run_agent_pipeline(
 
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
         let memory_index = memory.read_index_as_context().await.unwrap_or_default();
-        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_read=true 才生效）
+        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_file_include=true 才生效）
         let body_expanded = mori_core::agent_profile::preprocess_file_includes(
             &agent_profile.body,
-            agent_profile.frontmatter.enable_read,
+            agent_profile.frontmatter.enable_file_include,
         );
         // 5J: profile body 為「persona + 行為指示」，Rust 統一注入 context section
         let win_ctx_snapshot = state.hotkey_window_context.lock().clone();
@@ -4142,7 +4142,7 @@ async fn run_voice_input_pipeline(
 
     let body_expanded = mori_core::agent_profile::preprocess_file_includes(
         &profile.body,
-        profile.frontmatter.enable_read,
+        profile.frontmatter.enable_file_include,
     );
     // VoiceInput 不傳 memory_index（單輪 dictation 不需要長期記憶索引）
     let context_section = build_context_section(&win_ctx, &mori_ctx, None);

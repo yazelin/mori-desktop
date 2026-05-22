@@ -22,7 +22,8 @@
 # args) is stable. Switch to `provider: groq` to save quota; tool calling
 # works for simple intents but failure rate is higher for complex ones.
 provider: claude-bash
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 enabled_skills:
   - ask_gemini
   - find_youtube

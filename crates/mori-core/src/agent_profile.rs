@@ -18,8 +18,12 @@ use crate::voice_input_profile::SlotSwitchInfo;
 
 // ─── Frontmatter ──────────────────────────────────────────────────────────
 
+fn default_enable_file_include() -> bool {
+    true
+}
+
 /// 從 AGENT-XX.md 的 YAML frontmatter 解析出來的設定。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AgentFrontmatter {
     /// LLM provider（claude-bash / groq / ollama / claude-cli / ...）
@@ -29,7 +33,16 @@ pub struct AgentFrontmatter {
     pub stt_provider: Option<String>,
     /// 此 profile 暴露給 LLM 的 skill 子集（empty / 缺 → 全 SkillRegistry 都暴露）
     pub enabled_skills: Vec<String>,
-    /// 啟用 profile body 的 #file: 預處理
+    /// 編譯期 `#file:path` 預處理 — Rust 讀檔 inline 替換進 system prompt。
+    /// 預設 true（agent profile 通常要 import corrections.md 等共用片段）。
+    #[serde(default = "default_enable_file_include")]
+    pub enable_file_include: bool,
+    /// LLM 可呼叫 `read_file_text` skill 動態讀檔。預設 false（需 agent loop）。
+    pub enable_read_skill: bool,
+    /// Legacy flag — 過去同時管 #file: 預處理 + ReadFileSkill 兩件事。
+    /// 保留做 backward-compat：`enable_read: true` 會在解析後填入
+    /// `enable_file_include = true`（若未顯式設）且 `enable_read_skill = true`
+    /// （若未顯式設）。新 profile 請改用 `enable_file_include` / `enable_read_skill`。
     pub enable_read: bool,
     /// 5H: 使用者自訂的 shell skills（依附此 profile，切走就消失）
     pub shell_skills: Vec<ShellSkillDef>,
@@ -39,6 +52,21 @@ pub struct AgentFrontmatter {
     /// 用於「轉發 / bridge」型 profile(如 ZeroType bridge),避免不必要二次
     /// LLM call 卡 hang。
     pub agent_mode: Option<String>,
+}
+
+impl Default for AgentFrontmatter {
+    fn default() -> Self {
+        Self {
+            provider: None,
+            stt_provider: None,
+            enabled_skills: Vec::new(),
+            enable_file_include: true, // agent profile 預設 import corrections.md
+            enable_read_skill: false,
+            enable_read: false,
+            shell_skills: Vec::new(),
+            agent_mode: None,
+        }
+    }
 }
 
 /// 5H: profile 中自訂的 shell skill 定義。每次 profile 切換時動態建立成
@@ -156,14 +184,50 @@ pub fn parse_agent_profile(name: &str, content: &str) -> AgentProfile {
     }
 }
 
+/// 中間解析結構，用來追蹤 enable_file_include / enable_read_skill 是否被顯式設定。
+/// serde_yml 無法直接告知「這個 field 有沒有出現在 YAML 裡」，用 Option<bool> 繞道。
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct AgentFrontmatterRaw {
+    pub provider: Option<String>,
+    pub stt_provider: Option<String>,
+    pub enabled_skills: Vec<String>,
+    pub enable_file_include: Option<bool>,
+    pub enable_read_skill: Option<bool>,
+    pub enable_read: bool,
+    pub shell_skills: Vec<ShellSkillDef>,
+    pub agent_mode: Option<String>,
+}
+
 fn parse_agent_frontmatter(s: &str) -> AgentFrontmatter {
     // 5H: 改用 serde_yml 解析完整 YAML，支援 shell_skills 之類的巢狀結構。
-    match serde_yml::from_str::<AgentFrontmatter>(s) {
-        Ok(fm) => fm,
+    let raw: AgentFrontmatterRaw = match serde_yml::from_str(s) {
+        Ok(r) => r,
         Err(e) => {
             tracing::warn!(?e, "agent profile frontmatter YAML parse failed, using defaults");
-            AgentFrontmatter::default()
+            return AgentFrontmatter::default();
         }
+    };
+    // Legacy compat：enable_read=true → 填入兩個新 flag（若使用者未顯式設新 flag）
+    let enable_file_include = match raw.enable_file_include {
+        Some(v) => v,                               // 顯式設 → 用新 flag 值
+        None if raw.enable_read => true,            // legacy compat
+        None => true,                               // 新預設 true
+    };
+    let enable_read_skill = match raw.enable_read_skill {
+        Some(v) => v,                               // 顯式設 → 用新 flag 值
+        None if raw.enable_read => true,            // legacy compat
+        None => false,                              // 新預設 false
+    };
+    AgentFrontmatter {
+        provider: raw.provider,
+        stt_provider: raw.stt_provider,
+        enabled_skills: raw.enabled_skills,
+        enable_file_include,
+        enable_read_skill,
+        enable_read: raw.enable_read,
+        shell_skills: raw.shell_skills,
+        agent_mode: raw.agent_mode,
     }
 }
 
@@ -637,7 +701,8 @@ pub const DEFAULT_AGENT_MD: &str = r#"---
 # shell_skill(skill_server 已動態化)。
 
 # provider: claude-bash    # 進階:有裝 Claude Code 才打開
-enable_read: true   # 啟用 #file: 預處理（讓 body 能引用 ~/.mori/corrections.md）
+enable_file_include: true   # 啟用 #file: 預處理（讓 body 能引用 ~/.mori/corrections.md）
+# enable_read_skill: true  # 若要讓 LLM 動態呼叫 read_file_text skill，打開這行
 
 # enabled_skills 留空 = 全 built-in skill 都可用（包含 open_url / open_app
 # / send_keys / google_search / ask_chatgpt / ask_gemini / find_youtube 等）
@@ -726,17 +791,66 @@ mod tests {
 
     #[test]
     fn enable_read_default_false() {
+        // legacy field default 仍 false
         let fm = AgentFrontmatter::default();
         assert!(!fm.enable_read);
     }
 
     #[test]
-    fn enable_read_parsed() {
+    fn enable_file_include_default_true() {
+        // agent profile default: enable_file_include=true
+        let fm = AgentFrontmatter::default();
+        assert!(fm.enable_file_include);
+    }
+
+    #[test]
+    fn enable_read_skill_default_false() {
+        let fm = AgentFrontmatter::default();
+        assert!(!fm.enable_read_skill);
+    }
+
+    #[test]
+    fn enable_read_parsed_legacy_compat() {
+        // enable_read=true → legacy field set + compat fills new flags
         let p = parse_agent_profile(
             "t",
             "---\nenable_read: true\n---\nbody",
         );
-        assert!(p.frontmatter.enable_read);
+        assert!(p.frontmatter.enable_read); // legacy preserved
+        assert!(p.frontmatter.enable_file_include); // compat filled
+        assert!(p.frontmatter.enable_read_skill); // compat filled
+    }
+
+    #[test]
+    fn new_flag_enable_file_include_explicit_false_overrides_legacy() {
+        let p = parse_agent_profile(
+            "t",
+            "---\nenable_read: true\nenable_file_include: false\n---\nbody",
+        );
+        assert!(!p.frontmatter.enable_file_include); // explicit false wins
+        assert!(p.frontmatter.enable_read_skill); // not explicitly set → compat fills
+    }
+
+    #[test]
+    fn new_flag_enable_read_skill_explicit_false_overrides_legacy() {
+        let p = parse_agent_profile(
+            "t",
+            "---\nenable_read: true\nenable_read_skill: false\n---\nbody",
+        );
+        assert!(p.frontmatter.enable_file_include); // not explicitly set → compat fills
+        assert!(!p.frontmatter.enable_read_skill); // explicit false wins
+    }
+
+    #[test]
+    fn agent_profile_new_flags_explicit() {
+        // 直接用新 flag，不走 legacy
+        let p = parse_agent_profile(
+            "t",
+            "---\nenable_file_include: true\nenable_read_skill: true\n---\nbody",
+        );
+        assert!(p.frontmatter.enable_file_include);
+        assert!(p.frontmatter.enable_read_skill);
+        assert!(!p.frontmatter.enable_read); // legacy not set
     }
 
     #[test]

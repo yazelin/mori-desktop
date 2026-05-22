@@ -4,7 +4,8 @@
 # Starting from 5I, claude-bash / gemini-bash / codex-bash all see action_skill
 # and shell_skill too (skill_server is dynamic). Switch to any tool-calling provider.
 provider: claude-bash
-enable_read: true   # Enable #file: preprocessing (so body can reference ~/.mori/corrections.md)
+enable_file_include: true   # Enable #file: preprocessing (so body can reference ~/.mori/corrections.md)
+# enable_read_skill: true  # Uncomment to let LLM dynamically call read_file_text skill
 
 # enabled_skills empty = all built-in skills available (including open_url /
 # open_app / send_keys / google_search / ask_chatgpt / ask_gemini / find_youtube)
