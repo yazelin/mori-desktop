@@ -5391,6 +5391,7 @@ fn main() {
             reminders_cmd::reminder_active_queue,
             reminders_cmd::reminder_dismiss,
             reminders_cmd::reminder_snooze,
+            reminders_cmd::get_sprite_position,
             mcp_cmd::mcp_list_tools_cmd,
             mcp_cmd::mcp_call_tool_cmd,
             // Wave 8 Gm-2「跨界之手」— Gmail Tauri commands(OAuth + list / get / send)。

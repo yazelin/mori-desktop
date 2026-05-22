@@ -26,6 +26,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use mori_time::{Reminder, ReminderService};
 use serde::Serialize;
+use tauri::Manager;
 
 // ─────────────────────────────────────────────────────────────────────
 // Popup-queue 型別 — 給前端 reminder popup 用的精簡 view
@@ -169,6 +170,37 @@ pub async fn reminder_snooze(
     svc.snooze_reminder(id, format!("{} minutes", minutes))
         .await
         .map_err(|e| e.to_string())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Sprite position query — popup mount 時主動拿 sprite 位置
+// ─────────────────────────────────────────────────────────────────────
+
+/// `get_sprite_position()` — 回傳 floating sprite window 的目前邏輯座標。
+///
+/// ReminderPopup mount 時用這個補抓 sprite 位置(只在拖動後才 emit sprite-moved,
+/// mount 時 spritePos 預設 (0,0),anchor 算成 (0, 212) → 不在任何 monitor 範圍)。
+///
+/// 失敗(floating window 不存在或 Tauri API 失敗)→ 回 Err,前端 fallback 用 (0,0)。
+#[tauri::command]
+pub fn get_sprite_position(
+    app: tauri::AppHandle,
+) -> Result<SpritePosition, String> {
+    let win = app
+        .get_webview_window("floating")
+        .ok_or_else(|| "floating window not found".to_string())?;
+    let phys = win.outer_position().map_err(|e| e.to_string())?;
+    let scale = win.scale_factor().unwrap_or(1.0);
+    Ok(SpritePosition {
+        x: phys.x as f64 / scale,
+        y: phys.y as f64 / scale,
+    })
+}
+
+#[derive(Serialize)]
+pub struct SpritePosition {
+    pub x: f64,
+    pub y: f64,
 }
 
 #[cfg(test)]

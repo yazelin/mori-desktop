@@ -69,6 +69,15 @@ function ReminderPopup() {
         console.warn("[reminder_popup] active_queue fetch failed", e);
       }
 
+      // 1b) 主動查 sprite 位置 — 只在拖動後才 emit sprite-moved,
+      //     mount 時 spritePos 預設 (0,0) → anchor 算成 (0,212) → 不在任何 monitor。
+      try {
+        const pos = await invoke<{ x: number; y: number }>("get_sprite_position");
+        setSpritePos(pos);
+      } catch (e) {
+        console.warn("[reminder_popup] get_sprite_position failed, using (0,0)", e);
+      }
+
       // 2) 訂閱新 fire 事件
       const u1 = await listen<ActiveReminder>("reminder-fire-show", (e) => {
         pendingNew.current.push(e.payload);
