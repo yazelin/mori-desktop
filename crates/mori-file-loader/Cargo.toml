@@ -11,7 +11,17 @@ description = "Mori 的「萬卷之口」 — 統一文件讀取(.txt / .md base
 thiserror = { workspace = true }
 pdf-extract = "0.10"
 docx-rs = "0.4"
-calamine = "0.26"
+# `dates` feature 啟用 ExcelDateTime::as_datetime(),讓 xlsx reader 能把 DateTime
+# cell 渲染成 ISO 8601 字串。
+calamine = { version = "0.26", features = ["dates"] }
+# 用 chrono::NaiveDateTime::format 把 calamine 給的 datetime 渲染成 ISO 8601。
+# calamine 帶 chrono 但 default-features=false(沒 alloc / 沒 format),所以這層
+# 要自己 dep 帶預設 features。version 跟 calamine 對齊在 0.4 系列。
+chrono = "0.4"
+# EPUB reader 走 rbook(Apache-2.0,active maintenance);只用 read path,
+# 關掉 write / prelude default 來縮 dep tree。`threadsafe` 保留以滿足 reader 在
+# Tauri runtime 中跨 thread 用的可能(我們現階段同步呼叫,但留 Send + Sync 邊界)。
+rbook = { version = "0.7.6", default-features = false, features = ["threadsafe"] }
 
 [dev-dependencies]
 tempfile = "3"

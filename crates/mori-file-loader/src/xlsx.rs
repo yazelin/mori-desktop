@@ -16,9 +16,13 @@
 //!   - `Float(f)` → `format!("{}", f)`(Rust 的 `Display` 已 trim trailing 0)
 //!   - `Int(i)` → `format!("{}", i)`
 //!   - `Bool(b)` → `format!("{}", b)`(`true` / `false`)
-//!   - `DateTime` / `DateTimeIso` / `DurationIso` → `format!("{:?}")`
-//!     (保留結構化資訊;真要 ISO 字串 user 多半已存成字串)
-//!   - `Empty` / `Error` → 空字串(該 cell 不輸出內容,但 row 仍按位置補 `\t`)
+//!   - `DateTime(dt)` → `dt.as_datetime()` → `%Y-%m-%dT%H:%M:%S`(ISO 8601 second
+//!     精度;對 LLM consumption 比 `{:?}` Debug 友善太多。`as_datetime()` 偶爾
+//!     回 None(極端值或 1904/1900 epoch quirk),fallback 回 Debug 形式)
+//!   - `DateTimeIso(s)` / `DurationIso(s)` → 直接用字串(已是 ISO)
+//!   - `Empty` → 空字串(該 cell 不輸出內容,但 row 仍按位置補 `\t`)
+//!   - `Error(_)` → `"[#ERROR]"` placeholder(debug 用 — 之前直接吃成空字串,
+//!     `#REF!` / `#DIV/0!` 之類錯誤 cell 整個沒了 trace,排查很痛)
 //! - **格式範圍**:目前 **只支援 `.xlsx`**。calamine 也能讀 `.xls` / `.xlsb` /
 //!   `.ods`,但本 stream 只動 xlsx,其他副檔名不掛 dispatch arm。
 //! - **錯誤 wrap**:`calamine::XlsxError`(以及更上層的 `calamine::Error`)涵蓋
@@ -78,17 +82,26 @@ impl FileFormatReader for XlsxReader {
 
 /// 把單一 cell 的 [`calamine::Data`] 格式化成 LLM 友善的字串。
 ///
-/// `Empty` / `Error` 一律輸出空字串 — caller 仍會保留 cell 在 row 中的位置
-/// (用 `\t` 對齊),但不會在 cell 內容上揭露錯誤 marker。
+/// `Empty` 輸出空字串(該 cell 不揭露內容,但 row 仍會用 `\t` 保留位置)。
+/// `Error` 輸出 `[#ERROR]` placeholder 方便 debug — 之前直接吃成空字串,
+/// `#REF!` / `#DIV/0!` 之類錯誤 cell 整個沒了 trace。
 fn format_cell(data: &Data) -> String {
     match data {
         Data::String(s) => s.clone(),
         Data::Float(f) => format!("{}", f),
         Data::Int(i) => format!("{}", i),
         Data::Bool(b) => format!("{}", b),
-        Data::DateTime(dt) => format!("{:?}", dt),
+        Data::DateTime(dt) => dt
+            .as_datetime()
+            // chrono 的 `NaiveDateTime` 預設 Display 就是 `YYYY-MM-DD HH:MM:SS`,
+            // 我們改用 `%Y-%m-%dT%H:%M:%S` 拿 ISO 8601(date 跟 time 中間用 `T`)。
+            .map(|ndt| ndt.format("%Y-%m-%dT%H:%M:%S").to_string())
+            // as_datetime() 偶爾回 None(極端 epoch 值);fallback 不揭露 None,
+            // 而是退回原本 Debug 形式,讓 caller 至少看得到「這 cell 是 DateTime」。
+            .unwrap_or_else(|| format!("{:?}", dt)),
         Data::DateTimeIso(s) => s.clone(),
         Data::DurationIso(s) => s.clone(),
-        Data::Empty | Data::Error(_) => String::new(),
+        Data::Empty => String::new(),
+        Data::Error(_) => "[#ERROR]".to_string(),
     }
 }
