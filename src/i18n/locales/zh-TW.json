@@ -458,7 +458,7 @@
       "hint_hotkey_picker": "開 profile picker overlay(方向鍵選 voice / agent profile)。",
       "hint_x11_shape": "floating window OS-level 形狀。改完 save 即時套用(XShape clip 重新計算 + 套上)。",
       "hint_x11_radius": "圓角矩形的角弧(px)，只在 x11_shape = rounded 時用。1 ~ 80。",
-      "hint_x11_backplate": "floating window 內部底圖。logo 模式可放自己 PNG 在 ~/.mori/floating/backplate-{dark,light}.png 取代預設 Mori logo，即時生效。",
+      "hint_backplate": "floating window 背板。logo 模式優先讀 character pack 自帶的 backdrop-{dark,light}.png；沒有就讀 ~/.mori/floating/backplate-{dark,light}.png；都沒有就用內建預設。即時生效,跨平台。",
       "hint_annuli_enabled": "不打勾就走 LocalMarkdown fallback(舊行為)",
       "hint_annuli_endpoint": "annuli HTTP base URL,**沒** trailing slash。本機通常 http://localhost:5000；正式機 https://ching-tech.ddns.net/jinn 之類。",
       "hint_annuli_spirit": "vault spirit 名，本機通常 mori，正式機 jinn。錯了會打到別人的 vault。",

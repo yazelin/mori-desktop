@@ -486,13 +486,6 @@ fn read_floating_shape(config_path: &std::path::Path) -> (String, u32) {
     (shape, radius)
 }
 
-/// 讀使用者 `~/.mori/floating/backplate-{dark,light}.png`,有的話以 base64
-/// data URL 回給 React 餵 CSS;沒有就回 null,讓 React 用 shipped fallback。
-///
-/// 為什麼用 data URL 而不是 Tauri asset protocol:asset protocol 需要 in
-/// tauri.conf.json security 開啟 + 設 scope,加 capabilities 規則才能跨
-/// window 用。data URL 直接是字串,React → CSS variable → background-image
-/// 一條龍,不動 Tauri 設定。檔案 ~500KB,base64 後 ~700KB,記憶體 OK。
 /// 即時套用 floating window XShape clip。React ConfigTab save 後 invoke
 /// 這個 → user 改 shape / radius 不用重啟 Mori。
 ///
@@ -533,35 +526,54 @@ fn apply_floating_shape(app: AppHandle, shape: String, radius: u32) -> Result<()
     Ok(())
 }
 
+/// 讀使用者全域 `~/.mori/floating/backplate-{dark,light}.png`,有的話以 base64
+/// data URL 回給 React。沒有就 Ok(None),React 端 fallback 到 shipped default。
+///
+/// 用 data URL 而不是 Tauri asset protocol:asset protocol 需要 in tauri.conf.json
+/// security 開啟 + 設 scope。data URL 直接是字串,React → CSS variable → background-image
+/// 一條龍,不動 Tauri 設定。檔案 ~500KB,base64 ~700KB,記憶體 OK。
 #[tauri::command]
 fn read_floating_backplate(theme: String) -> Result<Option<String>, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use base64::Engine as _;
-        let Some(home) = std::env::var("HOME").ok() else {
-            return Err("HOME not set".to_string());
-        };
-        let allowed_theme = matches!(theme.as_str(), "dark" | "light");
-        if !allowed_theme {
-            return Err(format!(
-                "invalid theme '{theme}', expected 'dark' or 'light'"
-            ));
-        }
-        let path = std::path::PathBuf::from(home)
-            .join(".mori/floating")
-            .join(format!("backplate-{theme}.png"));
-        if !path.exists() {
-            return Ok(None);
-        }
-        let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        Ok(Some(format!("data:image/png;base64,{b64}")))
+    use base64::Engine as _;
+    if !matches!(theme.as_str(), "dark" | "light") {
+        return Err(format!(
+            "invalid theme '{theme}', expected 'dark' or 'light'"
+        ));
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = theme;
-        Ok(None)
+    let path = crate::mori_dir()
+        .join("floating")
+        .join(format!("backplate-{theme}.png"));
+    if !path.exists() {
+        return Ok(None);
     }
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:image/png;base64,{b64}")))
+}
+
+/// 讀 character pack 的 `~/.mori/characters/<stem>/backdrop-{dark,light}.png`,
+/// 有的話以 base64 data URL 回給 React。沒有就 Ok(None) — React 端 fallback
+/// 到 user global,再 fallback 到 shipped default。
+///
+/// 跟 `read_floating_backplate` 並列(後者讀 user global `~/.mori/floating/`),
+/// 拆兩支 command 是因為 input 不同(stem+theme vs theme),分開比加 Option<stem>
+/// 分支清楚。
+#[tauri::command]
+fn read_character_backdrop(stem: String, theme: String) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+    if !matches!(theme.as_str(), "dark" | "light") {
+        return Err(format!(
+            "invalid theme '{theme}', expected 'dark' or 'light'"
+        ));
+    }
+    let path = crate::character_pack::pack_dir(&stem)
+        .join(format!("backdrop-{theme}.png"));
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:image/png;base64,{b64}")))
 }
 
 #[tauri::command]
@@ -1791,11 +1803,46 @@ fn character_get_active() -> Result<(String, crate::character_pack::CharacterMan
 }
 
 #[tauri::command]
-fn character_set_active(stem: String) -> Result<crate::character_pack::CharacterManifest, String> {
+fn character_set_active(
+    app: tauri::AppHandle,
+    stem: String,
+) -> Result<crate::character_pack::CharacterManifest, String> {
     crate::character_pack::set_active(&stem).map_err(|e| format!("set active: {e:#}"))?;
     let m = crate::character_pack::load_manifest(&stem)
         .map_err(|e| format!("load manifest {stem}: {e:#}"))?;
+    // 2026-05-23:emit 給 FloatingMori reload sprite + backdrop,無需重啟
+    let _ = app.emit("character-changed", &stem);
     Ok(m)
+}
+
+/// 從 zip 檔匯入角色包,完成後自動 set_active 切換到新角色。
+///
+/// `zip_path` 是本機絕對路徑(frontend 透過 file picker 取得)。
+/// 成功後 emit:
+///   - `character-pack-imported` (payload: CharacterEntry)
+///   - `character-changed`       (payload: stem string)
+/// 並寫 event_log 供 LogsTab 顯示。
+#[tauri::command]
+fn character_pack_import_zip(
+    app: tauri::AppHandle,
+    zip_path: String,
+) -> Result<crate::character_pack::CharacterEntry, String> {
+    let bytes = std::fs::read(&zip_path).map_err(|e| format!("read zip: {e}"))?;
+    let entry =
+        crate::character_pack::import_zip(&bytes).map_err(|e| e.to_string())?;
+    // import 完自動 set_active(spec §4.5 success flow — UI 預期 import 後立刻顯示新角色)
+    crate::character_pack::set_active(&entry.stem)
+        .map_err(|e| format!("set_active after import: {e}"))?;
+    let _ = app.emit("character-pack-imported", &entry);
+    let _ = app.emit("character-changed", &entry.stem);
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "character_pack_imported",
+        "stem": entry.stem,
+        "display_name": entry.display_name,
+        "author": entry.author,
+        "version": entry.version,
+    }));
+    Ok(entry)
 }
 
 /// 讀 sprite 檔成 data URL(`data:image/png;base64,...`)讓 frontend `<img>` /
@@ -1842,15 +1889,6 @@ fn character_dir() -> String {
     crate::character_pack::characters_dir()
         .display()
         .to_string()
-}
-
-/// 升級任意 character pack 內 single-frame sprite 到 4×4 placeholder。
-/// 主要給 user import 進來的 pack(非 default mori)用 — Config UI 按鈕呼叫。
-/// 回 (upgraded, skipped)。
-#[tauri::command]
-fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String> {
-    crate::character_pack::upgrade_pack_to_4x4(&stem)
-        .map_err(|e| format!("upgrade pack {stem}: {e:#}"))
 }
 
 /// C — annuli 熱重載 command。
@@ -5601,6 +5639,7 @@ fn main() {
             force_raise_window,
             apply_floating_shape,
             read_floating_backplate,
+            read_character_backdrop,
             build_info,
             chat_provider_info,
             current_phase,
@@ -5662,9 +5701,9 @@ fn main() {
             character_list,
             character_get_active,
             character_set_active,
+            character_pack_import_zip,
             character_sprite_data_url,
             character_dir,
-            character_upgrade_pack_to_4x4,
             file_loader_cmd::read_file_text_cmd,
             reminders_cmd::remind_me_cmd,
             reminders_cmd::list_reminders_cmd,
@@ -7139,5 +7178,22 @@ mod tests {
             load_soul_content(vault_root, "aoi").as_deref(),
             Some("我是 Aoi。")
         );
+    }
+}
+
+#[cfg(test)]
+mod backdrop_ipc_tests {
+    use super::*;
+
+    #[test]
+    fn read_character_backdrop_rejects_unknown_theme() {
+        let err = read_character_backdrop("mori".into(), "neon".into()).unwrap_err();
+        assert!(err.contains("invalid theme"), "got: {err}");
+    }
+
+    #[test]
+    fn read_character_backdrop_missing_file_returns_none() {
+        let out = read_character_backdrop("__nonexistent_pack__".into(), "dark".into()).unwrap();
+        assert!(out.is_none(), "expected None for missing file, got Some");
     }
 }

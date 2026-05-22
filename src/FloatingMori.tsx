@@ -155,38 +155,56 @@ type CharacterManifest = {
   };
 };
 
+type BackplateMode = "plain" | "logo";
+
 /**
- * X11 backplate 模式套用:
- * - "plain"  → 移除 .backplate-logo class,CSS 走純漸層
- * - "logo"   → 加 class、讀 user 自訂 PNG(`~/.mori/floating/backplate-{dark,light}.png`)
- *              成 data URL 餵 CSS variable。沒有自訂檔就清空 var → CSS fallback
- *              到 shipped `public/floating/backplate-x11-{dark,light}.png`
+ * 解析 backdrop 圖片 chain(高優先到低):
+ * 1. character pack 自己的 ~/.mori/characters/<stem>/backdrop-{theme}.png
+ * 2. user 全域 ~/.mori/floating/backplate-{theme}.png
+ * 3. shipped fallback(CSS var 預設 url(...))
  *
- * Wayland body bg 是 transparent,backplate-logo class 的 background-image
- * 也會被 inherit transparent !important 蓋掉,沒副作用。
+ * 任一階成功就直接 return data URL,失敗(網路 invoke 例外 / 檔不存在)往下走。
  */
-async function applyX11Backplate(mode: string) {
-  const body = document.body;
+async function resolveBackdropUrl(
+  stem: string,
+  theme: "dark" | "light",
+): Promise<string | null> {
+  try {
+    const url = await invoke<string | null>("read_character_backdrop", { stem, theme });
+    if (url) return url;
+  } catch (e) {
+    console.warn(`[FloatingMori] read_character_backdrop ${theme} failed`, e);
+  }
+  try {
+    const url = await invoke<string | null>("read_floating_backplate", { theme });
+    if (url) return url;
+  } catch (e) {
+    console.warn(`[FloatingMori] read_floating_backplate ${theme} failed`, e);
+  }
+  return null;
+}
+
+/**
+ * Backdrop 模式套用(跨平台):
+ * - "plain" → 清空 CSS variables,.mori-backdrop 元素 background-image 變 none
+ * - "logo"  → 跑 resolveBackdropUrl 拿 dark + light data URL,寫進 CSS variables
+ *
+ * X11 plain 模式的不透明 gradient body bg(body.x11-fallback)還是有效,
+ * 那是另一套(防 WebKit half-alpha bug),不在這裡管。
+ */
+async function applyBackdrop(mode: BackplateMode, stem: string) {
   const root = document.documentElement;
   if (mode !== "logo") {
-    body.classList.remove("backplate-logo");
-    root.style.removeProperty("--floating-backplate-dark");
-    root.style.removeProperty("--floating-backplate-light");
+    root.style.removeProperty("--mori-backdrop-dark");
+    root.style.removeProperty("--mori-backdrop-light");
     return;
   }
-  // logo 模式 — 先加 class 讓 CSS shipped fallback 立刻生效,
-  // 然後 async 讀 user 自訂 PNG,有的話覆寫 CSS variable
-  body.classList.add("backplate-logo");
   for (const theme of ["dark", "light"] as const) {
-    try {
-      const dataUrl = await invoke<string | null>("read_floating_backplate", { theme });
-      if (dataUrl) {
-        root.style.setProperty(`--floating-backplate-${theme}`, `url(${dataUrl})`);
-      } else {
-        root.style.removeProperty(`--floating-backplate-${theme}`);
-      }
-    } catch (e) {
-      console.warn(`[FloatingMori] read_floating_backplate ${theme} failed`, e);
+    const dataUrl = await resolveBackdropUrl(stem, theme);
+    if (dataUrl) {
+      root.style.setProperty(`--mori-backdrop-${theme}`, `url(${dataUrl})`);
+    } else {
+      root.style.removeProperty(`--mori-backdrop-${theme}`);
     }
   }
 }
@@ -227,6 +245,8 @@ function FloatingMori() {
 
   // 5P-3: Character pack — manifest + 各 state 的 sprite data URL
   const [manifest, setManifest] = useState<CharacterManifest | null>(null);
+  const [activeStem, setActiveStem] = useState<string>("mori");
+  const [backplateMode, setBackplateMode] = useState<BackplateMode>("plain");
   const [sprites, setSprites] = useState<Partial<Record<Visual, string>>>({});
   // 5P-6 fix: sprite 載完後 delay 300ms 才啟動 CSS animation,讓 backgroundImage
   // swap(fallback → data URL)跟 backgroundSize 變化(100% → 400%)先穩定,
@@ -254,9 +274,10 @@ function FloatingMori() {
           animated: parsed?.floating?.animated ?? true,
           wander: parsed?.floating?.wander ?? false,
         });
-        // X11 backplate 動態套用(Wayland body 透明,sub-rule 不會匹配,沒副作用)
-        const backplate = parsed?.floating?.x11_backplate ?? "plain";
-        await applyX11Backplate(backplate);
+        // 跨平台 backplate 模式(dual-read：新 key backplate 優先,fallback 舊 key x11_backplate)
+        const backplate: BackplateMode =
+          (parsed?.floating?.backplate ?? parsed?.floating?.x11_backplate ?? "plain") as BackplateMode;
+        setBackplateMode(backplate);
         // X11 shape:CSS pseudo border-radius + OS-level XShape clip 都即時
         // 同步,改 config save 就生效不用重啟。
         const shape = parsed?.floating?.x11_shape ?? "circle";
@@ -294,6 +315,7 @@ function FloatingMori() {
     const loadCharacterPack = async () => {
       try {
         const [stem, m] = await invoke<[string, CharacterManifest]>("character_get_active");
+        setActiveStem(stem);
         setManifest(m);
         // foreach state 抓 data URL
         const allStates: Visual[] = ["idle", "sleeping", "recording", "thinking", "done", "error", "walking"];
@@ -329,6 +351,12 @@ function FloatingMori() {
       unlistenChar.then((f) => f());
     };
   }, []);
+
+  // 模式或角色變動就重套 backdrop。stem 也是 dep — 切角色時即便 mode 不變,
+  // character pack 自帶的 backdrop 也要重抓。
+  useEffect(() => {
+    applyBackdrop(backplateMode, activeStem);
+  }, [backplateMode, activeStem]);
 
   // ── 初始化 & 事件訂閱 ─────────────────────────────────────────────
 
@@ -707,6 +735,8 @@ function FloatingMori() {
       {/* 5J: sprite-area — 永遠固定在 widget 左上 160×160,讓 sprite 不會
           因為 window 變寬 / 變高而跑位置。bubble / chip 浮在這之外。 */}
       <div className="mori-sprite-area">
+        {/* 背板:可選的角色背景圖(character pack / user global / shipped fallback) */}
+        <div className="mori-backdrop" />
         {/* 背景光暈：錄音中由音量驅動；其他狀態 CSS animation */}
         <div className="mori-aura" style={auraStyle} />
 

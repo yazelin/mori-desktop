@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "package_name": "mori",
+  "display_name": "Mori",
+  "version": "1.0.0",
+  "author": "yazelin",
+  "license": "CC-BY-NC-SA-4.0",
+  "description": "森林精靈,Mori-desktop 預設角色",
+  "tags": [
+    "fantasy",
+    "elf",
+    "cute",
+    "official"
+  ],
+  "states": [
+    "idle",
+    "sleeping",
+    "recording",
+    "thinking",
+    "done",
+    "error"
+  ],
+  "optional_states": [
+    "walking",
+    "dragging"
+  ],
+  "loop_modes": {
+    "idle": "loop",
+    "sleeping": "loop",
+    "recording": "loop",
+    "thinking": "loop",
+    "done": "one-shot",
+    "error": "one-shot"
+  },
+  "loop_durations_ms": {
+    "idle": 3000,
+    "sleeping": 5000,
+    "recording": 1500,
+    "thinking": 2000,
+    "done": 1000,
+    "error": 2000
+  },
+  "sprite_spec": {
+    "format": "PNG-32",
+    "grid": "4x4",
+    "total_size": "1024x1024",
+    "frame_size": "256x256",
+    "frame_order": "row-major-left-to-right-top-to-bottom",
+    "background": "transparent"
+  }
+}

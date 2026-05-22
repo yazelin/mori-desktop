@@ -458,7 +458,7 @@
       "hint_hotkey_picker": "Opens the profile picker overlay (arrow keys to pick a voice / agent profile).",
       "hint_x11_shape": "OS-level shape of the floating window. Saving applies immediately (XShape clip is recomputed and reapplied).",
       "hint_x11_radius": "Corner radius (px) for the rounded-rectangle shape. Only used when x11_shape = rounded. 1–80.",
-      "hint_x11_backplate": "Backplate behind the floating window contents. In logo mode, drop your own PNG at ~/.mori/floating/backplate-{dark,light}.png to replace the default Mori logo — applies immediately.",
+      "hint_backplate": "Backplate behind the floating window. In logo mode, the active character pack's own backdrop-{dark,light}.png wins; otherwise ~/.mori/floating/backplate-{dark,light}.png; otherwise the shipped default. Applies immediately. Cross-platform.",
       "hint_annuli_enabled": "When unchecked, falls back to LocalMarkdown (the original behavior)",
       "hint_annuli_endpoint": "annuli HTTP base URL, **no** trailing slash. Local is usually http://localhost:5000; production is something like https://ching-tech.ddns.net/jinn.",
       "hint_annuli_spirit": "Vault spirit name. Usually `mori` locally, `jinn` in production. Wrong value writes to someone else's vault.",

@@ -41,8 +41,9 @@ body.floating-window.x11-fallback {
      alpha / blur / 漸層,不怕邊緣 half-alpha 外洩 — alpha 永遠在 opaque
      base 上 composite,輸出全 alpha=1 給 X server。
 
-     Base = "plain" 模式(config: floating.x11_backplate = "plain"):
-     右下 vignette + 對角漸層,純色跟著 theme variable 走。 */
+     X11 上 plain 模式的不透明 base(防 WebKit half-alpha bug):
+     右下 vignette + 對角漸層,純色跟著 theme variable 走。floating.backplate
+     設成 "logo" 時走 .mori-backdrop DOM 元素,這層仍然在底下墊著。 */
   background:
     radial-gradient(
       circle at 75% 80%,
@@ -57,41 +58,6 @@ body.floating-window.x11-fallback {
       var(--c-page-bg) 100%
     ) !important;
   position: relative;
-}
-/* logo 模式(config: floating.x11_backplate = "logo"):疊一張 backplate PNG。
-   URL 由 React 從 CSS variable 餵 — user 自訂優先讀 ~/.mori/floating/
-   backplate-{dark,light}.png 經 base64 data URL,沒有 fallback 到 shipped
-   public/floating/backplate-x11-{dark,light}.png。fallback url 直接寫在
-   CSS variable 裡讓「沒登入 react 也能 graceful」(雖然實際不會發生)。 */
-body.floating-window.x11-fallback.backplate-logo {
-  background:
-    radial-gradient(
-      circle at 75% 80%,
-      rgba(0, 0, 0, 0.20) 0%,
-      rgba(0, 0, 0, 0.06) 40%,
-      transparent 70%
-    ),
-    var(--floating-backplate-dark, url('/floating/backplate-x11-dark.png')) center center / cover no-repeat,
-    linear-gradient(
-      135deg,
-      var(--c-page-bg) 0%,
-      var(--c-surface-bg) 100%
-    ) !important;
-}
-html[data-theme-base="light"] body.floating-window.x11-fallback.backplate-logo {
-  background:
-    radial-gradient(
-      circle at 75% 80%,
-      rgba(0, 0, 0, 0.12) 0%,
-      rgba(0, 0, 0, 0.03) 40%,
-      transparent 70%
-    ),
-    var(--floating-backplate-light, url('/floating/backplate-x11-light.png')) center center / cover no-repeat,
-    linear-gradient(
-      135deg,
-      var(--c-page-bg) 0%,
-      var(--c-surface-bg) 100%
-    ) !important;
 }
 /* X11 floating 的 border ring + 內部光暈。多層 inset shadow 模擬玻璃球
    邊緣高光、底側陰影。border-radius 跟 XShape config(circle / rounded /
@@ -160,6 +126,27 @@ body.floating-window #root {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* ─── backdrop(可選背板:character pack > user global > shipped default) ─ */
+
+/* DOM 元素,跨平台。CSS variable 從 React 餵 — applyBackdrop 跑 resolveBackdropUrl
+   拿到 data URL 寫進 --mori-backdrop-{dark,light}。模式 "plain" 時 variable
+   被清,background-image 變 none(無背板)。
+   inset:0 蓋滿 sprite-area(160×160),也就是 sprite + drop-shadow + aura 全
+   蓋住 — X11 上 logo 模式可以順便緩解 WebKit half-alpha bug(整個 region
+   都是 opaque pixel)。 */
+.mori-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--mori-backdrop-dark);
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+html[data-theme-base="light"] .mori-backdrop {
+  background-image: var(--mori-backdrop-light);
 }
 
 /* ─── aura(背景環 / 光暈) ──────────────────────────────────────── */
