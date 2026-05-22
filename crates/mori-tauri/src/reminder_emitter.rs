@@ -33,6 +33,27 @@ impl EventEmitter for TauriEventEmitter {
             );
             return Ok(());
         }
+
+        tracing::info!(
+            reminder_id = reminder.id,
+            text = %reminder.text,
+            "TauriEventEmitter: about to emit reminder-fire-show to popup window",
+        );
+
+        // 加在 emit_to 前:記錄 popup window 狀態,診斷 setPosition/setSize 是否生效
+        use tauri::Manager;
+        if let Some(popup_win) = self.handle.get_webview_window("reminder_popup") {
+            let pos = popup_win.outer_position().ok();
+            let size = popup_win.outer_size().ok();
+            let visible = popup_win.is_visible().ok();
+            tracing::info!(
+                ?pos, ?size, ?visible,
+                "popup window state pre-emit"
+            );
+        } else {
+            tracing::warn!("reminder_popup window not registered with Manager!");
+        }
+
         let payload = ReminderFirePayload {
             id: reminder.id,
             text: &reminder.text,
@@ -44,8 +65,11 @@ impl EventEmitter for TauriEventEmitter {
         };
         // emit_to 特定 window 比較精準;若 popup 還沒 mount listener,event 丟失,
         // 但 popup mount 時會 invoke reminder_active_queue 補抓,所以不擋。
-        self.handle
+        let result = self
+            .handle
             .emit_to("reminder_popup", "reminder-fire-show", payload)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string());
+        tracing::info!(?result, "emit_to reminder-fire-show result");
+        result
     }
 }

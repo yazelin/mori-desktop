@@ -205,6 +205,40 @@ pub struct SpritePosition {
     pub y: f64,
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Debug command — popup window state from Tauri's perspective
+// ─────────────────────────────────────────────────────────────────────
+
+/// `debug_reminder_popup_state()` — 從 Tauri 視角回傳 popup window 的實際位置/大小/可見性。
+/// 診斷用:可與 X11/mutter 所見對比,找出 setPosition/setSize 是否真的生效。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PopupDebugState {
+    pub label: String,
+    pub is_visible: bool,
+    pub outer_position: (i32, i32), // physical px
+    pub outer_size: (u32, u32),     // physical px
+    pub scale_factor: f64,
+}
+
+#[tauri::command]
+pub fn debug_reminder_popup_state(app: tauri::AppHandle) -> Result<PopupDebugState, String> {
+    let win = app
+        .get_webview_window("reminder_popup")
+        .ok_or_else(|| "reminder_popup window not found".to_string())?;
+    let pos = win.outer_position().map_err(|e| e.to_string())?;
+    let size = win.outer_size().map_err(|e| e.to_string())?;
+    let visible = win.is_visible().map_err(|e| e.to_string())?;
+    let scale = win.scale_factor().map_err(|e| e.to_string())?;
+    Ok(PopupDebugState {
+        label: "reminder_popup".to_string(),
+        is_visible: visible,
+        outer_position: (pos.x, pos.y),
+        outer_size: (size.width, size.height),
+        scale_factor: scale,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     //! 對齊 `file_loader_cmd::tests` 的風格 — Tauri State / runtime mock 麻煩,

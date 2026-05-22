@@ -59,8 +59,10 @@ function ReminderPopup() {
 
     (async () => {
       // 1) 補抓 mount 前 emit 過、popup 還沒 ready 收到的 reminder
+      console.log("[reminder_popup] mount: invoking get_sprite_position");
       try {
         const active = await invoke<ActiveReminder[]>("reminder_active_queue");
+        console.log("[reminder_popup] active_queue:", active);
         if (active.length > 0) {
           setQueue(active);
           setMode("popup");
@@ -73,6 +75,7 @@ function ReminderPopup() {
       //     mount 時 spritePos 預設 (0,0) → anchor 算成 (0,212) → 不在任何 monitor。
       try {
         const pos = await invoke<{ x: number; y: number }>("get_sprite_position");
+        console.log("[reminder_popup] sprite position:", pos);
         setSpritePos(pos);
       } catch (e) {
         console.warn("[reminder_popup] get_sprite_position failed, using (0,0)", e);
@@ -80,9 +83,11 @@ function ReminderPopup() {
 
       // 2) 訂閱新 fire 事件
       const u1 = await listen<ActiveReminder>("reminder-fire-show", (e) => {
+        console.log("[reminder_popup] fire event received:", e.payload);
         pendingNew.current.push(e.payload);
         if (debounceTimer.current !== null) window.clearTimeout(debounceTimer.current);
         debounceTimer.current = window.setTimeout(() => {
+          console.log("[reminder_popup] debounce flush, pending count:", pendingNew.current.length);
           flushPending();
           setMode("popup");  // 新 fire 進來,從 chip 拉回 popup
         }, DEBOUNCE_MS);
@@ -107,27 +112,31 @@ function ReminderPopup() {
   // === queue 變化 → setSize / setPosition / show ===
   useEffect(() => {
     const win = getCurrentWindow();
+    console.log("[reminder_popup] resize effect, queue.length:", queue.length, "mode:", mode, "spritePos:", spritePos);
     if (queue.length === 0) {
       // 完全 dismiss 過渡 — 雙保險:移 off-screen + 縮 1x1
-      win.setPosition(new LogicalPosition(-10000, -10000)).catch(() => {});
-      win.setSize(new LogicalSize(1, 1)).catch(() => {});
+      console.log("[reminder_popup] empty → hide off-screen");
+      win.setPosition(new LogicalPosition(-10000, -10000)).catch((e) => console.error("[reminder_popup] setPosition fail:", e));
+      win.setSize(new LogicalSize(1, 1)).catch((e) => console.error("[reminder_popup] setSize fail:", e));
       return;
     }
     // sprite 旁 anchor:預設貼 sprite 下方
     const anchorX = spritePos.x;
     const anchorY = spritePos.y + SPRITE_HEIGHT + SPRITE_GAP;
-    win.setPosition(new LogicalPosition(anchorX, anchorY)).catch(() => {});
+    console.log("[reminder_popup] anchor:", { anchorX, anchorY });
+    win.setPosition(new LogicalPosition(anchorX, anchorY)).catch((e) => console.error("[reminder_popup] setPosition fail:", e));
 
     if (mode === "chip") {
-      win.setSize(new LogicalSize(CHIP_SIZE, CHIP_SIZE)).catch(() => {});
+      win.setSize(new LogicalSize(CHIP_SIZE, CHIP_SIZE)).catch((e) => console.error("[reminder_popup] setSize chip fail:", e));
       return;
     }
     // popup mode:跟著 card 內容高度
     requestAnimationFrame(() => {
       const measured = cardRef.current?.offsetHeight ?? 0;
+      console.log("[reminder_popup] measured offsetHeight:", measured);
       if (measured <= 0) return;  // 沿用 ChatBubble pattern,offsetHeight=0 skip
       const h = Math.min(POPUP_MAX_HEIGHT, measured);
-      win.setSize(new LogicalSize(POPUP_WIDTH, h)).catch(() => {});
+      win.setSize(new LogicalSize(POPUP_WIDTH, h)).catch((e) => console.error("[reminder_popup] setSize popup fail:", e));
     });
   }, [queue, mode, spritePos]);
 
