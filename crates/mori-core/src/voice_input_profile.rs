@@ -75,6 +75,11 @@ pub struct VoiceInputFrontmatter {
     /// 貼回後模擬 Enter（預設 false）
     pub enable_auto_enter: bool,
 
+    // ── Type A flags — 編譯期 / Rust 端處理，不需要 agent loop ──────
+    /// 編譯期 `#file:path` 預處理 — Rust 讀檔 inline 替換進 system prompt。
+    /// 預設 true（voice profile 通常要 import 字典 / 共用 prompt 片段）。
+    pub enable_file_include: bool,
+
     // ── Type B flags（有任何一個為 true → 走 agent loop）──────────
     pub enable_send_keys: bool,
     pub enable_open_url: bool,
@@ -83,8 +88,15 @@ pub struct VoiceInputFrontmatter {
     pub enable_ask_chatgpt: bool,
     pub enable_ask_gemini: bool,
     pub enable_find_youtube: bool,
-    pub enable_read: bool,
+    /// LLM 可呼叫 `read_file_text` skill 動態讀檔。預設 false（voice profile
+    /// 不該 LLM tool call，只做 cleanup）。
+    pub enable_read_skill: bool,
     pub enable_run_shell: bool,
+    /// Legacy flag — 過去同時管 #file: 預處理 + ReadFileSkill 兩件事。
+    /// 保留做 backward-compat parser：`enable_read: true` 會在解析後填入
+    /// `enable_file_include = true`（若未顯式設）且 `enable_read_skill = true`
+    /// （若未顯式設）。新 profile 請改用 `enable_file_include` / `enable_read_skill`。
+    pub enable_read: bool,
 
     // ── mori 專屬鍵 ───────────────────────────────────────────────
     /// mori 具名 provider 快捷（groq / ollama / claude-bash / ... / 自訂 OpenAI-compat）。
@@ -124,6 +136,7 @@ impl Default for VoiceInputFrontmatter {
         Self {
             enable_smart_paste: true,
             enable_auto_enter: false,
+            enable_file_include: true, // voice profile 預設要 import 字典
             enable_send_keys: false,
             enable_open_url: false,
             enable_open_app: false,
@@ -131,8 +144,9 @@ impl Default for VoiceInputFrontmatter {
             enable_ask_chatgpt: false,
             enable_ask_gemini: false,
             enable_find_youtube: false,
-            enable_read: false,
+            enable_read_skill: false,
             enable_run_shell: false,
+            enable_read: false, // legacy, backward-compat
             provider: None,
             stt_provider: None,
             paste_shortcut: None,
@@ -152,7 +166,7 @@ impl VoiceInputFrontmatter {
             || self.enable_ask_chatgpt
             || self.enable_ask_gemini
             || self.enable_find_youtube
-            || self.enable_read
+            || self.enable_read_skill
             || self.enable_run_shell
     }
 
@@ -243,6 +257,10 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
     let mut fm = VoiceInputFrontmatter::default();
     // 5N: 偵測 SCREAMING_SNAKE 舊寫法用，end-of-loop 統一 warn 一次。
     let mut deprecated_uppercase: Vec<String> = Vec::new();
+    // 追蹤哪些新 flag 被顯式設定（用來 legacy compat 時判斷是否覆蓋）
+    let mut explicit_file_include = false;
+    let mut explicit_read_skill = false;
+
     for line in s.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -262,6 +280,10 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
             // ── enable flags(canonical: lowercase enable_X)─────────────────
             "enable_smart_paste" => fm.enable_smart_paste = parse_bool(value),
             "enable_auto_enter" => fm.enable_auto_enter = parse_bool(value),
+            "enable_file_include" => {
+                fm.enable_file_include = parse_bool(value);
+                explicit_file_include = true;
+            }
             "enable_send_keys" => fm.enable_send_keys = parse_bool(value),
             "enable_open_url" => fm.enable_open_url = parse_bool(value),
             "enable_open_app" => fm.enable_open_app = parse_bool(value),
@@ -269,8 +291,13 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
             "enable_ask_chatgpt" => fm.enable_ask_chatgpt = parse_bool(value),
             "enable_ask_gemini" => fm.enable_ask_gemini = parse_bool(value),
             "enable_find_youtube" => fm.enable_find_youtube = parse_bool(value),
-            "enable_read" => fm.enable_read = parse_bool(value),
+            "enable_read_skill" => {
+                fm.enable_read_skill = parse_bool(value);
+                explicit_read_skill = true;
+            }
             "enable_run_shell" => fm.enable_run_shell = parse_bool(value),
+            // legacy — backward-compat，新 profile 請用 enable_file_include / enable_read_skill
+            "enable_read" => fm.enable_read = parse_bool(value),
             // ── mori 原生鍵 ────────────────────────────────────────────
             "provider" => fm.provider = non_empty(value),
             "stt_provider" => fm.stt_provider = non_empty(value),
@@ -304,6 +331,15 @@ fn parse_frontmatter(s: &str) -> VoiceInputFrontmatter {
             "voice profile frontmatter 用了 SCREAMING_SNAKE 寫法,canonical 是 \
              lowercase snake_case — 例 ENABLE_READ → enable_read。下版可能移除大寫接受。",
         );
+    }
+    // Legacy compat：enable_read=true → 填入兩個新 flag（若使用者未顯式設新 flag）
+    if fm.enable_read {
+        if !explicit_file_include {
+            fm.enable_file_include = true;
+        }
+        if !explicit_read_skill {
+            fm.enable_read_skill = true;
+        }
     }
     fm
 }
@@ -700,9 +736,12 @@ mod tests {
     fn parse_profile_lowercase_enable_keys() {
         // 5N: lowercase canonical 寫法應該正常被認識(過去因 parser 只認 SCREAMING
         // 被默默忽略,所有 USER-XX profile 的 `enable_read: true` 都沒效)。
+        // legacy enable_read=true → both new flags get set (compat)
         let content = "---\nenable_read: true\nenable_auto_enter: true\nenable_smart_paste: false\n---\nbody";
         let p = parse_profile("test", content);
-        assert!(p.frontmatter.enable_read);
+        assert!(p.frontmatter.enable_read); // legacy field still set
+        assert!(p.frontmatter.enable_file_include); // compat: filled from enable_read
+        assert!(p.frontmatter.enable_read_skill); // compat: filled from enable_read
         assert!(p.frontmatter.enable_auto_enter);
         assert!(!p.frontmatter.enable_smart_paste);
     }
@@ -712,7 +751,9 @@ mod tests {
         // 5N: case-insensitive — Enable_Read / ENABLE_read 等 weird 寫法也吃
         let content = "---\nEnable_Read: true\nENABLE_run_shell: yes\n---\nbody";
         let p = parse_profile("test", content);
-        assert!(p.frontmatter.enable_read);
+        assert!(p.frontmatter.enable_read); // legacy field
+        assert!(p.frontmatter.enable_file_include); // compat
+        assert!(p.frontmatter.enable_read_skill); // compat
         assert!(p.frontmatter.enable_run_shell);
     }
 
@@ -733,7 +774,7 @@ mod tests {
 
     #[test]
     fn resolved_provider_default_when_no_provider() {
-        let content = "---\nenable_read: true\n---\nbody";
+        let content = "---\nenable_file_include: true\n---\nbody";
         let p = parse_profile("test", content);
         assert!(matches!(p.frontmatter.resolved_provider(), ResolvedProvider::Default));
     }
@@ -817,5 +858,89 @@ mod tests {
         let stem = "USER-01.朋友閒聊";
         let display = stem.splitn(3, '.').nth(1).unwrap_or(stem).to_string();
         assert_eq!(display, "朋友閒聊");
+    }
+
+    // ── 新 flag 測試 ──────────────────────────────────────────────────────
+
+    #[test]
+    fn enable_file_include_default_true() {
+        // voice profile 預設應 enable_file_include=true（字典 import 預設開）
+        let fm = VoiceInputFrontmatter::default();
+        assert!(fm.enable_file_include);
+    }
+
+    #[test]
+    fn enable_read_skill_default_false() {
+        // LLM 動態讀檔能力預設 off
+        let fm = VoiceInputFrontmatter::default();
+        assert!(!fm.enable_read_skill);
+    }
+
+    #[test]
+    fn has_type_b_flags_false_when_only_file_include() {
+        // enable_file_include 不是 Type B，不應觸發 agent loop
+        let content = "---\nenable_file_include: true\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(!p.frontmatter.has_type_b_flags());
+    }
+
+    #[test]
+    fn has_type_b_flags_true_when_enable_read_skill() {
+        // enable_read_skill 是 Type B
+        let content = "---\nenable_read_skill: true\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(p.frontmatter.has_type_b_flags());
+    }
+
+    #[test]
+    fn legacy_enable_read_true_enables_both_new_flags() {
+        // enable_read=true（legacy）→ compat 自動 fill 兩個新 flag
+        let content = "---\nenable_read: true\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(p.frontmatter.enable_read); // legacy field preserved
+        assert!(p.frontmatter.enable_file_include); // filled by compat
+        assert!(p.frontmatter.enable_read_skill); // filled by compat
+    }
+
+    #[test]
+    fn new_flag_overrides_legacy_when_both_set_file_include_false() {
+        // 顯式 enable_file_include: false 應覆蓋 legacy enable_read: true 的 fill
+        let content = "---\nenable_read: true\nenable_file_include: false\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(p.frontmatter.enable_read); // legacy still set
+        assert!(!p.frontmatter.enable_file_include); // explicit false wins
+        assert!(p.frontmatter.enable_read_skill); // not explicitly set → compat fills
+    }
+
+    #[test]
+    fn new_flag_overrides_legacy_when_both_set_read_skill_false() {
+        // 顯式 enable_read_skill: false 應覆蓋 legacy enable_read: true 的 fill
+        let content = "---\nenable_read: true\nenable_read_skill: false\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(p.frontmatter.enable_read); // legacy still set
+        assert!(p.frontmatter.enable_file_include); // not explicitly set → compat fills
+        assert!(!p.frontmatter.enable_read_skill); // explicit false wins
+        // enable_read_skill=false → not Type B
+        assert!(!p.frontmatter.has_type_b_flags());
+    }
+
+    #[test]
+    fn enable_read_false_does_not_override_new_flag_defaults() {
+        // enable_read=false（legacy default）→ 不影響新 flag default（enable_file_include=true）
+        let content = "---\nenable_read: false\n---\nbody";
+        let p = parse_profile("test", content);
+        // default: enable_file_include=true survives (legacy_compat only fires when enable_read=true)
+        assert!(p.frontmatter.enable_file_include);
+        assert!(!p.frontmatter.enable_read_skill);
+    }
+
+    #[test]
+    fn new_flag_enable_file_include_explicit_false() {
+        // 新 flag 顯式 false 正確解析
+        let content = "---\nenable_file_include: false\n---\nbody";
+        let p = parse_profile("test", content);
+        assert!(!p.frontmatter.enable_file_include);
+        assert!(!p.frontmatter.enable_read_skill);
+        assert!(!p.frontmatter.has_type_b_flags());
     }
 }

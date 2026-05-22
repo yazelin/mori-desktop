@@ -50,6 +50,22 @@
         "focus": false
       },
       {
+        "label": "reminder_popup",
+        "title": "Mori (reminder)",
+        "width": 320,
+        "height": 96,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "visible": true,
+        "focus": false,
+        "x": -10000,
+        "y": -10000
+      },
+      {
         "label": "picker",
         "title": "Mori — 切換 Profile",
         "width": 520,

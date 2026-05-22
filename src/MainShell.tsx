@@ -23,9 +23,10 @@ import DepsTab from "./tabs/DepsTab";
 import LogsTab from "./tabs/LogsTab";
 import RecordingsTab from "./tabs/RecordingsTab";
 import TranscribeTab from "./tabs/TranscribeTab";
+import CorrectionsTab from "./tabs/CorrectionsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
-  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic,
+  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic, IconPencil,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { setLocale, nextLocale } from "./i18n";
@@ -33,7 +34,7 @@ import { Quickstart, shouldShowQuickstart } from "./Quickstart";
 
 type NavPayload = { tab: TabId; subTab?: string };
 
-type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs" | "transcribe" | "recordings";
+type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs" | "transcribe" | "recordings" | "corrections";
 
 type TabDef = {
   id: TabId;
@@ -50,9 +51,10 @@ const TABS: TabDef[] = [
   { id: "annuli",   Icon: IconAnnuli,   key: "annuli" },
   { id: "skills",   Icon: IconSkills,   key: "skills" },
   { id: "transcribe", Icon: IconTranscribe, key: "transcribe" },
+  { id: "recordings", Icon: IconMic,    key: "recordings" },
+  { id: "corrections", Icon: IconPencil, key: "corrections" },
   { id: "deps",     Icon: IconDeps,     key: "deps" },
   { id: "logs",     Icon: IconHelp,     key: "logs" },
-  { id: "recordings", Icon: IconMic,    key: "recordings" },
 ];
 
 function MainShell() {
@@ -209,9 +211,10 @@ function MainShell() {
         {tab === "annuli" && <AnnuliTab />}
         {tab === "skills" && <SkillsTab />}
         {tab === "transcribe" && <TranscribeTab />}
+        {tab === "recordings" && <RecordingsTab />}
+        {tab === "corrections" && <CorrectionsTab />}
         {tab === "deps" && <DepsTab />}
         {tab === "logs" && <LogsTab />}
-        {tab === "recordings" && <RecordingsTab />}
       </main>
       {quickstartOpen && <Quickstart onDone={() => setQuickstartOpen(false)} />}
     </div>

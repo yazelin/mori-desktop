@@ -137,7 +137,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use mori_time::Notifier;
+    use mori_time::{NoopEmitter, Notifier};
     use tempfile::TempDir;
 
     fn empty_context() -> Context {
@@ -147,7 +147,7 @@ mod tests {
     async fn service_in(dir: &TempDir) -> Arc<ReminderService> {
         let db = dir.path().join("reminders.db");
         Arc::new(
-            ReminderService::new(&db, Notifier::new("Mori-Test"))
+            ReminderService::new(&db, Notifier::disabled("Mori-Test"), Arc::new(NoopEmitter))
                 .await
                 .expect("new service"),
         )

@@ -7,6 +7,9 @@ mod annuli_config;
 mod annuli_supervisor;
 mod character_pack;
 mod context_provider;
+mod correction_audit_config;
+mod correction_cmd;
+mod correction_substitute_config;
 mod deps;
 mod file_loader_cmd;
 // Wave 8 Gm-2 「跨界之手」 — Gmail Tauri commands(OAuth start / status / list /
@@ -15,9 +18,11 @@ mod file_loader_cmd;
 mod gmail_cmd;
 mod hotkey_config;
 mod mcp_cmd;
+mod notification_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
+mod reminder_emitter;
 mod reminders_cmd;
 mod x11_hotkey;
 #[cfg(target_os = "linux")]
@@ -65,7 +70,7 @@ use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill,
     ListGmailSkill, PolishSkill, ReadFileSkill, ReadGmailSkill, ReadWikiPageSkill,
-    RecallMemorySkill, RememberSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
+    RecallMemorySkill, RememberSkill, RemindMeCronSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
     SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_time::{Notifier, ReminderService};
@@ -2174,6 +2179,9 @@ async fn skills_list(
     // 不撈到時就跳過註冊,後續若 LLM 真叫 remind_me 也會吃 "unknown skill" 而非 crash)。
     if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
+        // 2026-05-22:remind_me_cron 共用同一 ReminderService(cron job 也是它管),
+        // 一起註冊。LLM 自己 NL → 6-field cron string,skill 端把 cron 餵 service。
+        registry.register(Arc::new(RemindMeCronSkill::new(svc.inner().clone())));
     }
     // Wave 8 Gm-2「跨界之手」— Gmail skill。SharedGmailClient 是 optional state
     // (沒 OAuth / token 沒裝 → 撈不到,Gmail skill 不出現在 Skills tab)。
@@ -3324,6 +3332,27 @@ async fn run_agent_pipeline(
     );
 
     let memory = state.memory_handle();
+
+    // Deterministic corrections substitute — transcript 是 user STT 輸出,
+    // 送進 LLM 前先套 corrections.md 字典,讓 LLM 看到正字(兜底 LLM 自身漏套)。
+    // config correction_substitute.enabled = false 時跳過,完全靠 LLM cleanup。
+    let transcript = {
+        let sub_cfg = correction_substitute_config::CorrectionSubstituteConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if sub_cfg.enabled {
+            let corrections_md =
+                std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+            if !corrections_md.is_empty() {
+                mori_core::corrections_apply::apply_corrections(&transcript, &corrections_md)
+            } else {
+                transcript
+            }
+        } else {
+            transcript
+        }
+    };
+
     // history snapshot 給 LLM 看,**過濾掉 voice_input role**(語音輸入 dictation
     // 是 user 給其他 app 用的,不該被當作對話 history)。其他 role(user / assistant
     // / tool / system)照吃。
@@ -3386,10 +3415,10 @@ async fn run_agent_pipeline(
 
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
         let memory_index = memory.read_index_as_context().await.unwrap_or_default();
-        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_read=true 才生效）
+        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_file_include=true 才生效）
         let body_expanded = mori_core::agent_profile::preprocess_file_includes(
             &agent_profile.body,
-            agent_profile.frontmatter.enable_read,
+            agent_profile.frontmatter.enable_file_include,
         );
         // 5J: profile body 為「persona + 行為指示」，Rust 統一注入 context section
         let win_ctx_snapshot = state.hotkey_window_context.lock().clone();
@@ -3657,6 +3686,16 @@ async fn run_agent_pipeline(
         if allows("remind_me") {
             if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
                 registry.register(Arc::new(mori_core::skill::RemindMeSkill::new(
+                    svc.inner().clone(),
+                )));
+            }
+        }
+        // 2026-05-22:remind_me_cron 跟 remind_me 同 ReminderService,但 LLM 角度是
+        // 完全不同 skill(一個 one-shot NL、一個週期性 6-field cron string),分開
+        // allows() gate 給 user 細粒度過濾。
+        if allows("remind_me_cron") {
+            if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
+                registry.register(Arc::new(mori_core::skill::RemindMeCronSkill::new(
                     svc.inner().clone(),
                 )));
             }
@@ -3946,6 +3985,100 @@ async fn run_agent_pipeline(
                 rec.finalize();
             }
 
+            // Correction audit — Agent mode 也跑一次 background LLM,把可能諧音錯字
+            // 候選寫進 inbox。Agent mode 沒有 raw/cleaned 兩個版本,兩邊都傳同一條
+            // transcript(LLM 仍可走 corrections.md 模糊匹配 + 語義推測)。
+            // 失敗 silent(僅 log + event_log),不擋 agent pipeline。
+            {
+                let cfg = correction_audit_config::CorrectionAuditConfig::load(
+                    &mori_dir().join("config.json"),
+                );
+                if cfg.enabled {
+                    let raw = transcript.clone();
+                    let cleaned = transcript.clone(); // Agent mode 無 cleanup step,用 raw 當 cleaned
+                    let session_id = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+                    let corrections_md_path = mori_dir().join("corrections.md");
+                    let inbox_path = mori_dir().join("correction_inbox.jsonl");
+
+                    tauri::async_runtime::spawn(async move {
+                        let routing = match mori_core::llm::Routing::build_from_config(None) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::warn!(?e, "correction_audit(agent): routing build failed, skip");
+                                return;
+                            }
+                        };
+                        let provider = routing.skill_provider("correction_audit");
+
+                        let corrections_md =
+                            std::fs::read_to_string(&corrections_md_path).unwrap_or_default();
+
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_started",
+                            "session_id": session_id,
+                            "pipeline": "agent",
+                        }));
+
+                        match mori_core::correction_audit::audit(
+                            provider,
+                            &raw,
+                            &cleaned,
+                            &corrections_md,
+                        )
+                        .await
+                        {
+                            Ok(candidates) => {
+                                let mut written = 0usize;
+                                for c in &candidates {
+                                    let is_dismissed = mori_core::correction_inbox::is_dismissed(
+                                        &inbox_path,
+                                        &c.wrong,
+                                        &c.suggested,
+                                    )
+                                    .unwrap_or(false);
+                                    if is_dismissed {
+                                        continue;
+                                    }
+                                    let entry =
+                                        mori_core::correction_inbox::InboxEntry::new_pending(
+                                            &session_id,
+                                            mori_core::correction_inbox::InboxSource::LlmAudit,
+                                            &c.wrong,
+                                            &c.suggested,
+                                            c.confidence,
+                                            &c.reason,
+                                        );
+                                    if let Err(e) = mori_core::correction_inbox::append_entry(
+                                        &inbox_path,
+                                        &entry,
+                                    ) {
+                                        tracing::warn!(?e, "correction_audit(agent): append inbox entry failed");
+                                        continue;
+                                    }
+                                    written += 1;
+                                }
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "correction_audit_completed",
+                                    "session_id": session_id,
+                                    "pipeline": "agent",
+                                    "candidates_total": candidates.len(),
+                                    "candidates_written": written,
+                                }));
+                            }
+                            Err(e) => {
+                                tracing::warn!(?e, "correction_audit(agent) failed");
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "correction_audit_failed",
+                                    "session_id": session_id,
+                                    "pipeline": "agent",
+                                    "error": format!("{e:#}"),
+                                }));
+                            }
+                        }
+                    });
+                }
+            }
+
             state.set_phase(
                 &app,
                 Phase::Done {
@@ -4031,7 +4164,7 @@ async fn run_voice_input_pipeline(
 
     let body_expanded = mori_core::agent_profile::preprocess_file_includes(
         &profile.body,
-        profile.frontmatter.enable_read,
+        profile.frontmatter.enable_file_include,
     );
     // VoiceInput 不傳 memory_index（單輪 dictation 不需要長期記憶索引）
     let context_section = build_context_section(&win_ctx, &mori_ctx, None);
@@ -4201,6 +4334,36 @@ async fn run_voice_input_pipeline(
         }
     };
 
+    // Step 3:deterministic corrections substitute — LLM 漏套字典率 ~50%,
+    // 這步兜底保證 corrections.md 條目 100% 套用。長 variant 先套(避免 substring conflict)。
+    // config correction_substitute.enabled = false 時跳過,完全靠 LLM cleanup。
+    let cleaned_text = {
+        let sub_cfg = correction_substitute_config::CorrectionSubstituteConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if sub_cfg.enabled {
+            let corrections_md =
+                std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+            if !corrections_md.is_empty() {
+                let before_chars = cleaned_text.chars().count();
+                let applied =
+                    mori_core::corrections_apply::apply_corrections(&cleaned_text, &corrections_md);
+                let after_chars = applied.chars().count();
+                tracing::debug!(
+                    chars_before = before_chars,
+                    chars_after = after_chars,
+                    "voice-input corrections substitute applied"
+                );
+                applied
+            } else {
+                cleaned_text
+            }
+        } else {
+            tracing::debug!("voice-input corrections substitute skipped (disabled in config)");
+            cleaned_text
+        }
+    };
+
     if cleaned_text.is_empty() {
         state.set_phase(
             &app,
@@ -4276,6 +4439,101 @@ async fn run_voice_input_pipeline(
         "target_process": win_ctx.process_name,
         "profile": profile.name,
     }));
+
+    // 2026-05-22:Correction audit — 對話結束後 background LLM 跑一次,把可能諧音錯字
+    // 候選寫進 inbox。失敗 silent(僅 log + event_log),不擋 voice pipeline。可在
+    // ConfigTab 校正 sub-tab toggle 關掉。
+    {
+        let cfg = correction_audit_config::CorrectionAuditConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if cfg.enabled {
+            let raw = transcript.clone();
+            let cleaned = cleaned_text.clone();
+            // SessionRecord 無 session_id() — 用 pipeline 完成時的 timestamp 當 id。
+            let session_id = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+            let corrections_md_path = mori_dir().join("corrections.md");
+            let inbox_path = mori_dir().join("correction_inbox.jsonl");
+
+            tauri::async_runtime::spawn(async move {
+                // build provider via routing(None = no groq retry callback;audit 失敗 silent)
+                let routing = match mori_core::llm::Routing::build_from_config(None) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(?e, "correction_audit: routing build failed, skip");
+                        return;
+                    }
+                };
+                // 未在 routing.skills 定義的 key 安全 fallback 到 skill_fallback。
+                let provider = routing.skill_provider("correction_audit");
+
+                // 讀 corrections.md 全文(缺檔 → 空字串,audit 仍繼續)
+                let corrections_md =
+                    std::fs::read_to_string(&corrections_md_path).unwrap_or_default();
+
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "correction_audit_started",
+                    "session_id": session_id,
+                }));
+
+                match mori_core::correction_audit::audit(
+                    provider,
+                    &raw,
+                    &cleaned,
+                    &corrections_md,
+                )
+                .await
+                {
+                    Ok(candidates) => {
+                        let mut written = 0usize;
+                        for c in &candidates {
+                            // 已 dismiss 過(同 wrong+suggested pair)→ skip
+                            let is_dismissed = mori_core::correction_inbox::is_dismissed(
+                                &inbox_path,
+                                &c.wrong,
+                                &c.suggested,
+                            )
+                            .unwrap_or(false);
+                            if is_dismissed {
+                                continue;
+                            }
+                            let entry =
+                                mori_core::correction_inbox::InboxEntry::new_pending(
+                                    &session_id,
+                                    mori_core::correction_inbox::InboxSource::LlmAudit,
+                                    &c.wrong,
+                                    &c.suggested,
+                                    c.confidence,
+                                    &c.reason,
+                                );
+                            if let Err(e) = mori_core::correction_inbox::append_entry(
+                                &inbox_path,
+                                &entry,
+                            ) {
+                                tracing::warn!(?e, "correction_audit: append inbox entry failed");
+                                continue;
+                            }
+                            written += 1;
+                        }
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_completed",
+                            "session_id": session_id,
+                            "candidates_total": candidates.len(),
+                            "candidates_written": written,
+                        }));
+                    }
+                    Err(e) => {
+                        tracing::warn!(?e, "correction_audit failed");
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_failed",
+                            "session_id": session_id,
+                            "error": format!("{e:#}"),
+                        }));
+                    }
+                }
+            });
+        }
+    }
 
     // Phase B:finalize session for voice_input pipeline
     if let Some(rec) = state.recording_session.lock().take() {
@@ -4575,7 +4833,7 @@ fn chinese_weekday(en: &str) -> &'static str {
 /// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` / `transcribe_cmds::mori_home_dir()`
 /// 同一條 fallback 邏輯 — 沒 `HOME` 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md
 /// 工程注意第一點)。
-fn default_vault_root() -> Option<std::path::PathBuf> {
+pub(crate) fn default_vault_root() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()
@@ -4798,6 +5056,32 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
     );
     prompt.push_str(
         "  • 解析失敗(不認得時間格式)/ 過去時間會回 error message,直接告訴 user 不認得時間格式並請他換個說法\n\n",
+    );
+
+    // 2026-05-22 remind_me_cron — 週期性 reminder。LLM 自己 NL → 6-field cron string。
+    // 一次性 reminder 走 remind_me;「每天 / 每週 / 每月」「每隔 N 分」這類週期性走這個。
+    prompt.push_str("**remind_me_cron(text, cron)**:設週期性提醒(cron schedule)。\n");
+    prompt.push_str(
+        "  • 觸發:user 說「每天 8 點提醒我喝水」「每週一 9 點提醒我開會」「每月 1 號提醒我繳費」「每隔 30 分提醒我站起來」這類**週期性**\n",
+    );
+    prompt.push_str("  • text:要提醒的內容(短句),跟 remind_me 同\n");
+    prompt.push_str(
+        "  • cron:**6-field** cron expression(秒在前):`sec min hour day month weekday`。\
+         你自己從 user 的中文 / 英文時間描述生 cron string。\n",
+    );
+    prompt.push_str("  • 範例對照:\n");
+    prompt.push_str("    - 每天 8 點 → `0 0 8 * * *`\n");
+    prompt.push_str("    - 每天早上 8 點半 → `0 30 8 * * *`\n");
+    prompt.push_str("    - 每週一 9 點 → `0 0 9 * * 1`(週日 = 0,週一 = 1,週日也可用 7)\n");
+    prompt.push_str("    - 每週末 14:30(週六+週日)→ `0 30 14 * * 0,6`\n");
+    prompt.push_str("    - 每月 1 號 0 點 → `0 0 0 1 * *`\n");
+    prompt.push_str("    - 每 30 分 → `0 */30 * * * *`\n");
+    prompt.push_str("    - 每小時整點 → `0 0 * * * *`\n");
+    prompt.push_str(
+        "  • 一次性提醒(「等等」「明天 9 點」之類)走 `remind_me` 不要用 cron\n",
+    );
+    prompt.push_str(
+        "  • cron 格式錯會回 error,看 error message 自己修(常見錯:5-field 漏秒、weekday 寫成 7 但 schedule 不接、月份用文字而非數字)\n\n",
     );
 
     prompt.push_str(
@@ -5049,8 +5333,14 @@ fn main() {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mori_tauri=debug,mori_core=debug".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                // Default filter:涵蓋整組 mori-* crate。漏 sub-crate 等於它們的
+                // tracing log 整個被吃掉(2026-05-22 踩過:reminder fire 加了 info
+                // log 結果看不到,原來 mori_time 沒在 filter 內)。
+                "mori_tauri=debug,mori_core=debug,\
+                 mori_time=info,mori_mcp=info,mori_gmail=info,mori_file_loader=info"
+                    .into()
+            }),
         )
         .init();
 
@@ -5240,44 +5530,6 @@ fn main() {
 
     let state_for_setup = state.clone();
 
-    // §9 P1 「時之鳥」K5:在 Builder 開跑前先建好 ReminderService。
-    // SQLite migrate + 重排 pending reminder 都在 async `new()` 內;Tauri 提供
-    // `block_on` 入口在 sync `main()` 裡跑 async,啟動完成才繼續往下。
-    //
-    // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。**失敗就 panic**
-    // (見下方 `.unwrap_or_else`)— 立場是「~/.mori 寫不進去 = config.json / memory
-    // 全部跟著炸,reminders 不可能比它們先撐住」,所以早死早超生,不嘗試 degrade。
-    // 對應 RemindMeSkill 註冊那邊也保證 ReminderService 一定 ready(不過註冊段仍
-    // 用 try_state 維持 defensive,即便理論上 unwrap 也行)。
-    let reminders_db_path = mori_dir().join("reminders.db");
-    if let Some(parent) = reminders_db_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(
-                path = %parent.display(),
-                error = %e,
-                "failed to create dir for reminders.db",
-            );
-        }
-    }
-    // 失敗就 panic — sqlite open 失敗代表 ~/.mori 整個寫不進去,連 config / memory 都會
-    // 跟著炸,reminders 反正不可能撐起來。早死早超生。
-    let reminder_service: Arc<ReminderService> = Arc::new(
-        tauri::async_runtime::block_on(ReminderService::new(
-            &reminders_db_path,
-            Notifier::new("Mori"),
-        ))
-        .unwrap_or_else(|e| {
-            panic!(
-                "ReminderService init failed (path={}): {e}",
-                reminders_db_path.display()
-            )
-        }),
-    );
-    tracing::info!(
-        path = %reminders_db_path.display(),
-        "ReminderService ready (時之鳥)",
-    );
-
     // Wave 6 MCP-2:啟動 McpRegistry — 從 `~/.mori/mcp.json` 載 config + 依序
     // connect 各 server。config 不存在 / 讀失敗 / 個別 server connect 失敗都不
     // 擋啟動(個別失敗只 log warn,registry 保留其餘成功的)。
@@ -5334,9 +5586,6 @@ fn main() {
             }
         }))
         .manage(state.clone())
-        // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
-        // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
-        .manage(reminder_service.clone())
         // Wave 6 MCP-2:把 McpRegistry 註冊進 Manager。
         // mcp_cmd 內 list / call command + agent loop 內 McpToolSkill 註冊都從這裡拿 clone。
         .manage(mcp_registry.clone())
@@ -5421,6 +5670,11 @@ fn main() {
             reminders_cmd::list_reminders_cmd,
             reminders_cmd::cancel_reminder_cmd,
             reminders_cmd::snooze_reminder_cmd,
+            reminders_cmd::reminder_active_queue,
+            reminders_cmd::reminder_dismiss,
+            reminders_cmd::reminder_snooze,
+            reminders_cmd::get_sprite_position,
+            reminders_cmd::debug_reminder_popup_state,
             mcp_cmd::mcp_list_tools_cmd,
             mcp_cmd::mcp_call_tool_cmd,
             // Wave 8 Gm-2「跨界之手」— Gmail Tauri commands(OAuth + list / get / send)。
@@ -5465,6 +5719,19 @@ fn main() {
             wake_word_restart_listener,
             annuli_runtime_installed,
             annuli_quick_enable,
+            notification_config::get_notification_config,
+            notification_config::set_notification_config,
+            correction_audit_config::get_correction_audit_config,
+            correction_audit_config::set_correction_audit_config,
+            correction_substitute_config::get_correction_substitute_config,
+            correction_substitute_config::set_correction_substitute_config,
+            correction_cmd::correction_inbox_list,
+            correction_cmd::correction_inbox_accept,
+            correction_cmd::correction_inbox_dismiss,
+            correction_cmd::correction_inbox_delete,
+            correction_cmd::correction_inbox_change_suggestion,
+            correction_cmd::voice_feedback_set,
+            correction_cmd::corrections_md_content,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -5475,6 +5742,59 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // §9 P1 「時之鳥」K5:建好 ReminderService 並注入 TauriEventEmitter。
+            // 在 setup 內初始化,因為 TauriEventEmitter 需要 AppHandle(setup 前拿不到)。
+            // SQLite migrate + 重排 pending reminder 都在 async `new()` 內;
+            // block_on 讓 async 在 setup sync context 內跑完才繼續。
+            //
+            // DB path = `~/.mori/reminders.db`,對齊既有 mori_dir() pattern。
+            // 失敗就 panic — sqlite open 失敗代表 ~/.mori 整個寫不進去,
+            // 連 config / memory 都會跟著炸,reminders 反正不可能撐起來。早死早超生。
+            let reminders_db_path = mori_dir().join("reminders.db");
+            if let Some(parent) = reminders_db_path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!(
+                        path = %parent.display(),
+                        error = %e,
+                        "failed to create dir for reminders.db",
+                    );
+                }
+            }
+            let app_handle_for_emitter = app.handle().clone();
+            // 2026-05-22:讀 notification config,設定 notifier 的 os_notification_enabled 開關。
+            let notification_cfg =
+                notification_config::NotificationConfig::load(&mori_dir().join("config.json"));
+            let notifier = Notifier::new("Mori");
+            notifier
+                .enabled
+                .store(notification_cfg.os_notification_enabled, std::sync::atomic::Ordering::Relaxed);
+            let notifier_enabled_handle = notifier.enabled_handle();
+            let reminder_service: Arc<ReminderService> = Arc::new(
+                tauri::async_runtime::block_on(ReminderService::new(
+                    &reminders_db_path,
+                    notifier,
+                    std::sync::Arc::new(reminder_emitter::TauriEventEmitter {
+                        handle: app_handle_for_emitter,
+                    }),
+                ))
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "ReminderService init failed (path={}): {e}",
+                        reminders_db_path.display()
+                    )
+                }),
+            );
+            tracing::info!(
+                path = %reminders_db_path.display(),
+                "ReminderService ready (時之鳥)",
+            );
+            // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
+            // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
+            app.manage(reminder_service);
+            // 2026-05-22:把 notifier enabled handle 存進 Tauri State,
+            // set_notification_config command 可透過 State 推 os_notification_enabled toggle。
+            app.manage(notifier_enabled_handle);
+
             // Wave 8 Gm-2「跨界之手」:GmailClient 若啟動時 init 成功就註冊到 Manager;
             // None 就跳過(Gmail OAuth 還沒跑),Gmail skill registry 那邊也會看 try_state
             // 撈不到就 skip。OAuth start command 仍可呼叫,user 跑完 → 重啟 Mori → init OK。
@@ -5779,8 +6099,9 @@ fn main() {
             // dispatch skill。失敗只 warn 不卡啟動 — Tauri UI 跟語音/chat
             // pipeline 沒這個 server 也能用。
             let app_for_server = state_for_setup.clone();
+            let handle_for_server = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match crate::skill_server::start(app_for_server).await {
+                match crate::skill_server::start(app_for_server, handle_for_server).await {
                     Ok(info) => tracing::info!(
                         port = info.port,
                         "skill HTTP server started — Bash CLI proxy ready"

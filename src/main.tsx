@@ -6,6 +6,7 @@ import MainShell from "./MainShell";
 import FloatingMori from "./FloatingMori";
 import ChatBubble from "./ChatBubble";
 import Picker from "./Picker";
+import ReminderPopup from "./ReminderPopup";
 import { subscribeTheme } from "./theme";
 // A i18n:第一個 import 就讓 i18next init(zh-TW + en),之後 syncLocaleFromConfig
 // 才用 ~/.mori/config.json 的 `locale` 欄位覆寫(避免啟動白屏等 IPC)。
@@ -16,6 +17,7 @@ import "./chat-panel.css";
 import "./floating.css";
 import "./chat-bubble.css";
 import "./picker.css";
+import "./reminder-popup.css";
 
 const label = getCurrentWindow().label;
 const root = document.getElementById("root")!;
@@ -68,6 +70,15 @@ if (label === "floating") {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <Picker />
+    </React.StrictMode>,
+  );
+} else if (label === "reminder_popup") {
+  // in-app reminder popup — Linux GNOME 抑制 OS 通知 banner 替代方案
+  document.documentElement.classList.add("reminder-popup-window");
+  document.body.classList.add("reminder-popup-window");
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <ReminderPopup />
     </React.StrictMode>,
   );
 } else {

@@ -21,6 +21,8 @@
 
 use crate::schema::Reminder;
 use notify_rust::Notification;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Notifier 發通知時可能出的錯。
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +51,9 @@ pub struct Notifier {
     /// 或 absolute path;Windows/macOS 多半 ignore。`None` = 不設,讓 desktop env
     /// 用 default。
     icon_path: Option<String>,
+    /// 2026-05-22:OS 桌面通知開關。caller(mori-tauri)持同一 Arc,
+    /// 在 user 切 toggle 時更新。fire() 先檢查再走 .show()。
+    pub enabled: Arc<AtomicBool>,
 }
 
 impl Notifier {
@@ -57,7 +62,24 @@ impl Notifier {
         Self {
             app_name: app_name.into(),
             icon_path: None,
+            enabled: Arc::new(AtomicBool::new(true)),
         }
+    }
+
+    /// 取得共用的 enabled flag handle,給 caller 切 toggle 用。
+    pub fn enabled_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.enabled)
+    }
+
+    /// Builder:建立 OS 通知預設**關閉**的 Notifier。
+    ///
+    /// 用在 tests / CI 避免 `.fire()` 真的走 dbus 污染 user desktop。
+    /// Production code 請用 [`Self::new`](預設 enabled=true)。
+    /// 名字故意寫長以防誤用在 production。
+    pub fn disabled(app_name: impl Into<String>) -> Self {
+        let n = Self::new(app_name);
+        n.enabled.store(false, Ordering::Relaxed);
+        n
     }
 
     /// Builder:設 icon 路徑 / freedesktop icon 名。
@@ -81,6 +103,14 @@ impl Notifier {
     /// summary 用 reminder text、body 是 "Mori 提醒你"。會真的呼叫 `.show()`,
     /// 在沒 dbus / 沒 display 的環境會 Err。
     pub fn fire(&self, reminder: &Reminder) -> Result<(), NotifyError> {
+        // 2026-05-22:os_notification_enabled toggle off → 直接 Ok 不發送
+        if !self.enabled.load(Ordering::Relaxed) {
+            tracing::debug!(
+                reminder_id = reminder.id,
+                "notifier.fire skipped — os_notification_enabled toggle off"
+            );
+            return Ok(());
+        }
         let n = self.build_for_reminder(reminder);
         Self::show(&n)
     }
@@ -103,11 +133,28 @@ impl Notifier {
     }
 
     /// 組純文字通知對應的 [`Notification`] 物件 — 不發送。
+    ///
+    /// **Sticky by default**:freedesktop `Timeout::Never` + Linux Resident hint +
+    /// Critical urgency,user 必須手動點關才會消(2026-05-22 user 需求:reminder
+    /// 不能彈一下就消失,user 在錄音/講話時錯過就找不回來)。GNOME 預設對 Normal
+    /// urgency 會強制 auto-dismiss,所以一定要 Critical 才留得住;KDE 對 Resident
+    /// hint 就聽話,不一定要 Critical。三層下去最穩。
+    ///
+    /// Windows/macOS:.timeout() / .urgency() / .hint() 在那兩平台是 no-op
+    /// (notify-rust 在 cfg 上會 strip 掉 Linux 專屬的 hint / urgency)。
     pub(crate) fn build_text(&self, summary: &str, body: &str) -> Notification {
         let mut n = Notification::new();
         n.appname(&self.app_name).summary(summary).body(body);
         if let Some(icon) = &self.icon_path {
             n.icon(icon);
+        }
+        // freedesktop 標準「永不超時」— 0 = 不自動關
+        n.timeout(notify_rust::Timeout::Never);
+        // Linux/BSD 才有 Hint / Urgency type,Windows/macOS 沒這個概念
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            n.hint(notify_rust::Hint::Resident(true));
+            n.urgency(notify_rust::Urgency::Critical);
         }
         n.finalize()
     }
@@ -148,6 +195,7 @@ mod tests {
             cron_expr: None,
             created_at: now,
             fired_at: None,
+            dismissed_at: None,
             snoozed_until: None,
             status: ReminderStatus::Pending,
         }
@@ -206,5 +254,13 @@ mod tests {
         assert_eq!(built.summary, "吃藥");
         assert_eq!(built.body, "別忘記吃晚餐後的藥");
         assert_eq!(built.appname, "Mori");
+    }
+
+    #[test]
+    fn fire_returns_ok_when_disabled() {
+        // enabled=false 時 fire() return Ok 而不 attempt dbus
+        let n = Notifier::disabled("Mori-Test");
+        let r = sample_reminder("disabled-test");
+        assert!(n.fire(&r).is_ok());
     }
 }

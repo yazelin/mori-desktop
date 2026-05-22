@@ -27,6 +27,9 @@ pub struct Reminder {
     pub created_at: DateTime<Utc>,
     /// 上次實際觸發時間;`None` = 還沒響過。
     pub fired_at: Option<DateTime<Utc>>,
+    /// 用戶明確關掉 popup 的時間;`None` = 還沒 dismiss 過。
+    /// 區分「fired 但 user 沒看」vs「user 已關掉」。
+    pub dismissed_at: Option<DateTime<Utc>>,
     /// 暫緩到何時(snooze 後 status = Snoozed,到時間才繼續排程)。
     pub snoozed_until: Option<DateTime<Utc>>,
     pub status: ReminderStatus,
@@ -120,6 +123,21 @@ impl ReminderStore {
             CREATE INDEX IF NOT EXISTS idx_reminders_due_at ON reminders(due_at);
             "#,
         )?;
+
+        // 2026-05-22: dismissed_at 區分「fired 但 user 沒看」vs「user 已關掉」
+        // SQLite 沒 ADD COLUMN IF NOT EXISTS,用 table_info pragma 檢查
+        let has_dismissed_at: bool = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('reminders') WHERE name = 'dismissed_at'")
+            .and_then(|mut s| s.query_row([], |_| Ok(true)))
+            .unwrap_or(false);
+        if !has_dismissed_at {
+            self.conn.execute(
+                "ALTER TABLE reminders ADD COLUMN dismissed_at TEXT",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -151,6 +169,7 @@ impl ReminderStore {
             cron_expr: cron,
             created_at: now,
             fired_at: None,
+            dismissed_at: None,
             snoozed_until: None,
             status,
         })
@@ -159,7 +178,7 @@ impl ReminderStore {
     /// 列出仍需排程的 reminder(status = Pending 或 Snoozed)。
     pub fn list_pending(&self) -> Result<Vec<Reminder>, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
                FROM reminders
                WHERE status IN ('pending', 'snoozed')
                ORDER BY due_at ASC"#,
@@ -173,7 +192,7 @@ impl ReminderStore {
     /// 列出所有 reminder(含 fired / cancelled),由舊到新。
     pub fn list_all(&self) -> Result<Vec<Reminder>, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
                FROM reminders
                ORDER BY id ASC"#,
         )?;
@@ -186,7 +205,7 @@ impl ReminderStore {
     /// 拿單筆。找不到回 `NotFound(id)`。
     pub fn get(&self, id: i64) -> Result<Reminder, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
                FROM reminders
                WHERE id = ?1"#,
         )?;
@@ -246,9 +265,50 @@ impl ReminderStore {
         }
         Ok(())
     }
+
+    /// 標 reminder 為 user 已 dismiss(從 popup 點 [關閉] 後寫入)。
+    /// 寫入時間,reminder.status 不動(`Fired` 不變),只是 popup 不再列出。
+    pub fn mark_dismissed(&self, id: i64, at: DateTime<Utc>) -> Result<(), ReminderError> {
+        let affected = self.conn.execute(
+            "UPDATE reminders SET dismissed_at = ?1 WHERE id = ?2",
+            params![at.to_rfc3339(), id],
+        )?;
+        if affected == 0 {
+            return Err(ReminderError::NotFound(id));
+        }
+        Ok(())
+    }
+
+    /// 給 in-app popup 用的 active queue:
+    /// - status = Fired
+    /// - dismissed_at IS NULL
+    /// - fired_at > now - 7 days(grace,超過自動忽略,不再 popup)
+    /// 排序 fired_at DESC(最新先)。
+    pub fn list_active_popup_queue(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Reminder>, ReminderError> {
+        let grace_cutoff = now - chrono::Duration::days(7);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
+             FROM reminders
+             WHERE status = 'fired'
+               AND dismissed_at IS NULL
+               AND fired_at > ?1
+             ORDER BY fired_at DESC",
+        )?;
+        let rows = stmt.query_map(params![grace_cutoff.to_rfc3339()], row_to_reminder)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(ReminderError::from)
+            .and_then(|v| v.into_iter().collect::<Result<Vec<_>, _>>())
+    }
 }
 
 /// 把 sqlite row 拆成 `Reminder`。回傳 nested Result 因為 status 解析可能失敗。
+///
+/// 欄位順序(對應 SELECT 的 column 位置):
+/// 0=id, 1=text, 2=due_at, 3=cron_expr, 4=created_at,
+/// 5=fired_at, 6=dismissed_at, 7=snoozed_until, 8=status
 fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderError>> {
     let id: i64 = row.get(0)?;
     let text: String = row.get(1)?;
@@ -256,8 +316,9 @@ fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderE
     let cron_expr: Option<String> = row.get(3)?;
     let created_at: String = row.get(4)?;
     let fired_at: Option<String> = row.get(5)?;
-    let snoozed_until: Option<String> = row.get(6)?;
-    let status: String = row.get(7)?;
+    let dismissed_at: Option<String> = row.get(6)?;
+    let snoozed_until: Option<String> = row.get(7)?;
+    let status: String = row.get(8)?;
 
     Ok((|| -> Result<Reminder, ReminderError> {
         Ok(Reminder {
@@ -267,6 +328,7 @@ fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderE
             cron_expr,
             created_at: parse_rfc3339(&created_at)?,
             fired_at: fired_at.as_deref().map(parse_rfc3339).transpose()?,
+            dismissed_at: dismissed_at.as_deref().map(parse_rfc3339).transpose()?,
             snoozed_until: snoozed_until.as_deref().map(parse_rfc3339).transpose()?,
             status: ReminderStatus::from_db_str(&status)?,
         })
@@ -456,5 +518,53 @@ mod tests {
             .unwrap();
         let fetched = s.get(r.id).unwrap();
         assert_eq!(fetched.cron_expr.as_deref(), Some("0 0 8 * * *"));
+    }
+
+    #[test]
+    fn migration_adds_dismissed_at_idempotent() {
+        let store = ReminderStore::open_in_memory().expect("open");
+        // 二次 migrate 不爆
+        store.migrate().expect("migrate 2nd time");
+        // 寫進去之後讀得到 None
+        let r = store
+            .create("test".to_string(), Utc::now(), None)
+            .expect("create");
+        assert!(r.dismissed_at.is_none(), "new reminder dismissed_at should be None");
+    }
+
+    #[test]
+    fn mark_dismissed_sets_timestamp() {
+        let store = ReminderStore::open_in_memory().expect("open");
+        let r = store
+            .create("hello".to_string(), Utc::now(), None)
+            .expect("create");
+        store.mark_fired(r.id, Utc::now()).expect("mark fired");
+        let when = Utc::now();
+        store.mark_dismissed(r.id, when).expect("mark dismissed");
+        let got = store.get(r.id).expect("get");
+        assert!(got.dismissed_at.is_some(), "dismissed_at should be Some after mark_dismissed");
+    }
+
+    #[test]
+    fn list_active_popup_queue_filters_dismissed_and_super_overdue() {
+        let store = ReminderStore::open_in_memory().expect("open");
+        let now = Utc::now();
+        let week_plus_one = now - chrono::Duration::days(8);
+        let recent = now - chrono::Duration::minutes(5);
+
+        // 一筆 7 天前 fired 沒 dismiss → 不算 active(超過 grace)
+        let stale = store.create("stale".to_string(), week_plus_one, None).unwrap();
+        store.mark_fired(stale.id, week_plus_one).unwrap();
+        // 一筆 5 分鐘前 fired 沒 dismiss → active
+        let active = store.create("active".to_string(), recent, None).unwrap();
+        store.mark_fired(active.id, recent).unwrap();
+        // 一筆 fired + dismissed → 不算 active
+        let done = store.create("done".to_string(), recent, None).unwrap();
+        store.mark_fired(done.id, recent).unwrap();
+        store.mark_dismissed(done.id, now).unwrap();
+
+        let queue = store.list_active_popup_queue(now).expect("list");
+        let ids: Vec<i64> = queue.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![active.id], "only the recent unsmissed reminder should appear");
     }
 }

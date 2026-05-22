@@ -24,6 +24,7 @@ import {
   IconClipboard,
   IconPencil,
   IconAnnuli,
+  IconLightning,
 } from "../icons";
 
 // 5P-6: character pack picker
@@ -245,6 +246,7 @@ type SubTabId =
   | "x11"
   | "annuli"
   | "corrections"
+  | "notifications"
   | "raw";
 
 interface SubTabSpec {
@@ -581,7 +583,7 @@ function CharacterPicker() {
 }
 
 const ALL_SUBTAB_IDS: SubTabId[] = [
-  "quick", "llm", "voice", "appearance", "hotkey", "x11", "annuli", "corrections", "raw",
+  "quick", "llm", "voice", "appearance", "hotkey", "x11", "annuli", "corrections", "notifications", "raw",
 ];
 
 // ── Wake-ack 音效設定(Phase 3A.1.2)──────────────────────────────────────
@@ -1190,6 +1192,51 @@ function ConfigTab({
   const [corrOrig, setCorrOrig] = useState<string>("");
   const [corrStatus, setCorrStatus] = useState<SaveStatus>({ kind: "idle" });
 
+  // 通知區段 — 2026-05-22 新增(Task 11)
+  // i18n follow-up:目前 inline 中文字串,對齊本檔其他 hardcode 中文 section 的 pattern。
+  type NotificationConfig = {
+    popup_enabled: boolean;
+    os_notification_enabled: boolean;
+  };
+  const [notifCfg, setNotifCfg] = useState<NotificationConfig>({
+    popup_enabled: true,
+    os_notification_enabled: true,
+  });
+  useEffect(() => {
+    invoke<NotificationConfig>("get_notification_config")
+      .then(setNotifCfg)
+      .catch((e) => console.warn("get_notification_config failed", e));
+  }, []);
+  const saveNotif = async (next: NotificationConfig) => {
+    setNotifCfg(next);
+    try {
+      await invoke("set_notification_config", { cfg: next });
+    } catch (e) {
+      console.error("set_notification_config failed", e);
+      alert(`儲存失敗:${e}`);
+    }
+  };
+
+  // correction_audit config(Task 11)
+  type CorrectionAuditConfig = {
+    enabled: boolean;
+    provider: string;
+    model: string;
+  };
+  const [auditCfg, setAuditCfg] = useState<CorrectionAuditConfig>({
+    enabled: true,
+    provider: "groq",
+    model: "openai/gpt-oss-120b",
+  });
+
+  // correction_substitute config — deterministic string replace toggle
+  type CorrectionSubstituteConfig = {
+    enabled: boolean;
+  };
+  const [substituteCfg, setSubstituteCfg] = useState<CorrectionSubstituteConfig>({
+    enabled: true,
+  });
+
   useEffect(() => {
     invoke<string>("config_read")
       .then((t) => { setRaw(t); setOrig(t); })
@@ -1199,7 +1246,32 @@ function ConfigTab({
       .catch(() => {
         setCorrText("# Mori STT 校正表\n\n# 看到左邊 → 改成右邊\n# 例:modem -> Markdown\n\n");
       });
+    invoke<CorrectionAuditConfig>("get_correction_audit_config")
+      .then(setAuditCfg)
+      .catch((e) => console.warn("get_correction_audit_config failed", e));
+    invoke<CorrectionSubstituteConfig>("get_correction_substitute_config")
+      .then(setSubstituteCfg)
+      .catch((e) => console.warn("get_correction_substitute_config failed", e));
   }, []);
+
+  const saveAudit = async (next: CorrectionAuditConfig) => {
+    setAuditCfg(next);
+    try {
+      await invoke("set_correction_audit_config", { cfg: next });
+    } catch (e) {
+      console.error("set_correction_audit_config failed", e);
+      alert(`儲存失敗:${e}`);
+    }
+  };
+
+  const saveSubstitute = async (next: CorrectionSubstituteConfig) => {
+    setSubstituteCfg(next);
+    try {
+      await invoke("set_correction_substitute_config", { cfg: next });
+    } catch (e) {
+      alert(`儲存失敗:${e}`);
+    }
+  };
 
   // Parse raw JSON for form view(失敗則保留 form 為 default,raw view 顯紅框)
   const cfg: AnyObj = useMemo(() => {
@@ -1311,6 +1383,8 @@ function ConfigTab({
     ...(isX11 ? [{ id: "x11" as SubTabId, label: t("config_tab.subtabs.x11"), Icon: IconKeyboard }] : []),
     { id: "annuli" as SubTabId, label: t("config_tab.subtabs.annuli"), Icon: IconAnnuli },
     { id: "corrections" as SubTabId, label: t("config_tab.subtabs.corrections"), Icon: IconClipboard },
+    // i18n follow-up:通知 sub-tab label 暫用 inline 中文
+    { id: "notifications" as SubTabId, label: "通知", Icon: IconLightning },
     { id: "raw", label: t("config_tab.subtabs.raw"), Icon: IconPencil },
   ];
 
@@ -2229,6 +2303,30 @@ function ConfigTab({
           {/* ── Corrections.md(獨立檔,獨立 save) ────────── */}
           {subTab === "corrections" && <>
           <Section
+            title="校正(LLM audit)"
+            hint="Mori 對話結束後跑一次 LLM(預設 Groq gpt-oss-120b 便宜),把可能的 STT 諧音錯字候選放進「校正盒」分頁,等你確認加入字典。關掉就不跑。"
+          >
+            <FormRow label="enabled" hint="ON → 對話結束後自動偵測諧音錯字,結果放進校正盒等確認。OFF → 不跑 LLM,不產生候選。">
+              <input
+                type="checkbox"
+                checked={auditCfg.enabled}
+                onChange={(e) => saveAudit({ ...auditCfg, enabled: e.target.checked })}
+              />
+            </FormRow>
+          </Section>
+          <Section
+            title="字典硬轉"
+            hint="LLM cleanup 完之後,程式直接套 corrections.md 字典條目進 cleaned 文字(strict string replace)。100% reliable 但 context-free(類似 OpenCC 簡繁硬轉)。關掉的話完全靠 LLM cleanup,漏率高但有上下文判斷。"
+          >
+            <FormRow label="enabled" hint="ON(預設):字典條目 100% 套用,context-free。OFF:不硬轉,完全靠 LLM cleanup(漏率高但 context-aware)。">
+              <input
+                type="checkbox"
+                checked={substituteCfg.enabled}
+                onChange={(e) => saveSubstitute({ enabled: e.target.checked })}
+              />
+            </FormRow>
+          </Section>
+          <Section
             title={t("config_tab.sections.corrections_title")}
             hint={t("config_tab.sections.corrections_hint")}
           >
@@ -2253,6 +2351,37 @@ function ConfigTab({
               >{t("common.revert")}</button>
               <StatusBadge status={corrStatus} />
             </div>
+          </Section>
+          </>}
+
+          {/* ── 通知(popup / OS notification)── 2026-05-22 Task 11 ── */}
+          {subTab === "notifications" && <>
+          <Section
+            title="通知"
+            hint="Reminder 到期時要如何告訴你。In-app popup 是主路徑(最可靠);OS 桌面通知為輔。"
+          >
+            <FormRow label="In-app popup" hint="Reminder fire 時在 Mori 視窗內彈出 popup 視窗。建議保持開啟作為主通知路徑。">
+              <input
+                type="checkbox"
+                checked={notifCfg.popup_enabled}
+                onChange={(e) => saveNotif({ ...notifCfg, popup_enabled: e.target.checked })}
+              />
+            </FormRow>
+            <FormRow
+              label="OS 桌面通知"
+              hint="透過作業系統通知中心顯示通知。⚠ 在 Linux GNOME 上若 Mori 有 alwaysOnTop 視窗可能被 shell 抑制。建議 in-app popup 保持開啟為主路徑。"
+            >
+              <input
+                type="checkbox"
+                checked={notifCfg.os_notification_enabled}
+                onChange={(e) => saveNotif({ ...notifCfg, os_notification_enabled: e.target.checked })}
+              />
+            </FormRow>
+            {!notifCfg.popup_enabled && !notifCfg.os_notification_enabled && (
+              <p className="mori-config-section-hint" style={{ marginTop: "0.4em", borderLeft: "3px solid var(--mori-danger, #c66)", paddingLeft: "0.6em", color: "var(--mori-danger, #c66)" }}>
+                ⚠ 你關掉了所有通知方式 — reminder fire 後不會主動告訴你。
+              </p>
+            )}
           </Section>
           </>}
 

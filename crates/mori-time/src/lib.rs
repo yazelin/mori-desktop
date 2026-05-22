@@ -21,4 +21,4 @@ pub mod commands;
 pub use schema::{Reminder, ReminderError, ReminderStatus, ReminderStore};
 pub use scheduler::{ReminderScheduler, SchedulerError};
 pub use notifier::{Notifier, NotifyError};
-pub use commands::{CommandError, ReminderService};
+pub use commands::{CommandError, EventEmitter, NoopEmitter, ReminderService};

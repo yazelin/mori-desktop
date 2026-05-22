@@ -12,7 +12,8 @@
 # 2-3 rounds of tool calling, and pure-API tool calling has slightly higher failure
 # rate. Switch to gemini-bash or leave provider blank if Claude Code isn't installed.
 provider: claude-bash
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 shell_skills:
   - name: obsidian_search
     description: |

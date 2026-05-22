@@ -1,7 +1,8 @@
 ---
 # 展示自訂 shell_skills — 把 gh / docker / 任何 CLI 變 Mori 能力,不用改 Rust
 provider: claude-bash
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 shell_skills:
   - name: gh_pr_list
     description: 列出 mori-desktop repo 開放的 PR

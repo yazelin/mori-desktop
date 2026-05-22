@@ -8,7 +8,8 @@
 # Claude Code / Gemini CLI / Codex CLI)。
 
 # provider: claude-bash   # 進階:有裝 Claude Code 才打開
-enable_read: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)
+enable_file_include: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)
+# enable_read_skill: true  # 若要讓 LLM 動態呼叫 read_file_text skill，打開這行
 
 # enabled_skills 留空 = 全 built-in skill 都可用(包含 open_url / open_app
 # / send_keys / google_search / ask_chatgpt / ask_gemini / find_youtube 等)

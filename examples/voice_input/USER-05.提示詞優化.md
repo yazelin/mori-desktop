@@ -11,6 +11,7 @@ provider: claude-bash
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false
+enable_file_include: true  # 載入 #file: 引用的字典 / 共用片段（Rust 編譯期預處理，非 LLM tool call）
 ---
 你是 Mori 的「提示詞優化專家」,精通 prompt engineering 各種進階技術與框架。把使用者語音講出的模糊需求,**重組為結構化、高品質的 prompt**。
 

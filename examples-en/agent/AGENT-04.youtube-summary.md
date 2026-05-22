@@ -10,7 +10,8 @@
 # stability, and user doesn't mind using their own quota. Switch to
 # `provider: groq` to save quota.
 provider: claude-bash
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 shell_skills:
   - name: youtube_transcript
     description: |

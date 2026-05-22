@@ -36,6 +36,22 @@ use crate::parser;
 use crate::scheduler::{OnFireCallback, ReminderScheduler, SchedulerError};
 use crate::schema::{Reminder, ReminderError, ReminderStore};
 
+/// 2026-05-22:on_fire 觸發時對外 emit 通知事件。設計成 trait 是為了讓 mori-time
+/// 不直接依賴 tauri(會循環依賴)— `mori-tauri` 那邊用 Tauri AppHandle 實作這個 trait,
+/// 測試環境可以 mock。
+pub trait EventEmitter: Send + Sync {
+    /// Emit `reminder-fire-show` event 帶 payload。失敗回 Err(只 log warn,不擋 mark_fired)。
+    fn emit_reminder_fire(&self, reminder: &Reminder) -> Result<(), String>;
+}
+
+/// no-op 實作,給沒 emit 需求的 caller(例如純 unit test)用。
+pub struct NoopEmitter;
+impl EventEmitter for NoopEmitter {
+    fn emit_reminder_fire(&self, _reminder: &Reminder) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// 對外錯誤類型 — 包 K4 parse / K1 store / K2 scheduler 三條 error。
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
@@ -75,7 +91,11 @@ impl ReminderService {
     /// `db_path` 通常是 `~/.mori/reminders.db`(對齊既有 mori_dir pattern)。
     /// `notifier` 由 caller 預先建好(`Notifier::new("Mori")`),這樣 caller 可
     /// `.with_icon()` 自訂。
-    pub async fn new(db_path: &Path, notifier: Notifier) -> Result<Self, CommandError> {
+    pub async fn new(
+        db_path: &Path,
+        notifier: Notifier,
+        emitter: Arc<dyn EventEmitter>,
+    ) -> Result<Self, CommandError> {
         // 1) Open store
         let store = ReminderStore::open(db_path)?;
         let store = Arc::new(Mutex::new(store));
@@ -97,20 +117,55 @@ impl ReminderService {
         //    能拿到。我們用這個。
         let store_for_cb = Arc::clone(&store);
         let notifier_for_cb = notifier.clone();
+        let emitter_for_cb = Arc::clone(&emitter); // 2026-05-22:capture for in-app popup emit
         let on_fire: OnFireCallback = Arc::new(move |reminder: Reminder| {
             let store_inner = Arc::clone(&store_for_cb);
             let notifier_inner = notifier_for_cb.clone();
+            let emitter_inner = Arc::clone(&emitter_for_cb);
             // 仰賴 tokio task 隔離:spawned task 內 panic 只殺那條 task,不傳染
             // scheduler。詳見模組 doc。
             tokio::spawn(async move {
                 // K3:發桌面通知。失敗 log warn,不 throw。
-                if let Err(e) = notifier_inner.fire(&reminder) {
-                    tracing::warn!(
+                //
+                // **必須走 spawn_blocking**:`notify_rust::Notification::show()` 在 Linux
+                // 內部跑 dbus async client → 自己 build 一個 tokio Runtime。如果直接在
+                // 既有 tokio worker thread 內呼叫,會 panic
+                // 「Cannot start a runtime from within a runtime」。
+                // 觀察點:tokio-1.52.2 multi_thread/mod.rs:91。
+                let reminder_for_blk = reminder.clone();
+                let fire_result = tokio::task::spawn_blocking(move || {
+                    notifier_inner.fire(&reminder_for_blk)
+                })
+                .await;
+                match fire_result {
+                    // 2026-05-22 debug:即使 Ok user 也回報沒看到通知,加 info log
+                    // 證明 fire 路徑跑完 + 通知有 send 進 dbus(否則早就吐 Err)。
+                    Ok(Ok(())) => tracing::info!(
+                        reminder_id = reminder.id,
+                        text = %reminder.text,
+                        "notifier.fire returned Ok — notification submitted to dbus",
+                    ),
+                    Ok(Err(e)) => tracing::warn!(
                         reminder_id = reminder.id,
                         error = %e,
                         "notifier.fire failed (reminder still mark_fired)",
+                    ),
+                    Err(join_err) => tracing::warn!(
+                        reminder_id = reminder.id,
+                        error = %join_err,
+                        "notifier.fire spawn_blocking join failed",
+                    ),
+                }
+
+                // 2026-05-22:in-app popup emit。失敗只 warn,不擋 mark_fired。
+                if let Err(e) = emitter_inner.emit_reminder_fire(&reminder) {
+                    tracing::warn!(
+                        reminder_id = reminder.id,
+                        error = %e,
+                        "emit reminder-fire-show failed (popup will catch up via active_queue query on next mount)",
                     );
                 }
+
                 // 一次性 reminder:fire 後 store 標 Fired。週期性(cron)保留 Pending。
                 if reminder.cron_expr.is_none() {
                     let store = store_inner.lock().await;
@@ -133,7 +188,42 @@ impl ReminderService {
         // 4) Reload pending — restart 後把 DB 裡未完成的 reminder 重新 schedule。
         //    用 due_at vs now 判斷:過去的 one-shot 立刻觸發(scheduler 內部處理)。
         let pending = store.lock().await.list_pending()?;
+        let now = Utc::now();
+        let grace_cutoff = now - chrono::Duration::days(7);
         for r in &pending {
+            // 2026-05-22:超過 7 天的 overdue one-shot reminder 自動標 dismissed,
+            // 不再 fire,避免 user 久未開 app 後被 spam。cron 不適用(週期性永遠不算 overdue)。
+            let is_super_overdue = r.cron_expr.is_none() && r.due_at < grace_cutoff;
+            if is_super_overdue {
+                let store_guard = store.lock().await;
+                let when = Utc::now();
+                if let Err(e) = store_guard.mark_fired(r.id, when) {
+                    tracing::warn!(
+                        reminder_id = r.id,
+                        error = %e,
+                        "failed to auto-mark super-overdue as fired"
+                    );
+                    continue;
+                }
+                if let Err(e) = store_guard.mark_dismissed(r.id, when) {
+                    tracing::warn!(
+                        reminder_id = r.id,
+                        error = %e,
+                        "failed to auto-mark super-overdue as dismissed"
+                    );
+                }
+                tracing::info!(
+                    reminder_id = r.id,
+                    text = %r.text,
+                    due_at = %r.due_at,
+                    "auto-dismissed super-overdue reminder (> 7d) — skipping fire to avoid spam"
+                );
+                // TODO(follow-up): log `reminder_auto_dismiss` event to mori_core::event_log
+                // here. Currently blocked because mori-time cannot depend on mori-core
+                // (cross-crate boundary). Options: move event_log to a leaf util crate, or
+                // pass an event callback through EventEmitter trait. Tracking: feat/reminder-popup.
+                continue;
+            }
             if let Err(e) = scheduler.schedule(r).await {
                 tracing::warn!(
                     reminder_id = r.id,
@@ -198,6 +288,37 @@ impl ReminderService {
         let store = self.store.lock().await;
         store.cancel(id)?;
         Ok(())
+    }
+
+    /// 2026-05-22:popup [稍後 5 分] 用 — 把 fired reminder「再提醒一次」。
+    /// 跟 snooze_reminder 不同:那個只動 due_at(僅限 Pending/Snoozed);
+    /// 這個是「原本 dismissed,新建一筆 N 分鐘後 fire」,給 fired-but-missed 的情境。
+    ///
+    /// 流程:
+    /// 1. 拿原本 reminder,確認 status=Fired(其他狀態 reject InvalidStatus)
+    /// 2. mark_dismissed 原本
+    /// 3. 建新 reminder 同 text、due_at = now + delay_minutes、cron_expr = None
+    /// 4. schedule 新 reminder
+    /// 5. 返回新 reminder
+    pub async fn reschedule_fired_reminder(
+        &self,
+        id: i64,
+        delay_minutes: i64,
+    ) -> Result<Reminder, CommandError> {
+        let store = self.store.lock().await;
+        let original = store.get(id)?;
+        if !matches!(original.status, crate::schema::ReminderStatus::Fired) {
+            return Err(CommandError::InvalidStatus {
+                id,
+                current: format!("{:?}", original.status),
+            });
+        }
+        store.mark_dismissed(id, Utc::now())?;
+        let new_due = Utc::now() + chrono::Duration::minutes(delay_minutes);
+        let new_r = store.create(original.text.clone(), new_due, None)?;
+        drop(store);
+        self.scheduler.schedule(&new_r).await?;
+        Ok(new_r)
     }
 
     /// 把現有 reminder snooze 到指定時間。`when_expr` 同 [`remind_me`] 走 NL parser。
@@ -269,12 +390,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn fresh_notifier() -> Notifier {
-        Notifier::new("Mori-Test")
+        Notifier::disabled("Mori-Test")
     }
 
     async fn service_in(dir: &TempDir) -> ReminderService {
         let db = dir.path().join("reminders.db");
-        ReminderService::new(&db, fresh_notifier())
+        ReminderService::new(&db, fresh_notifier(), Arc::new(NoopEmitter))
             .await
             .expect("new service")
     }
@@ -404,7 +525,7 @@ mod tests {
         let db = dir.path().join("reminders.db");
 
         let (r_id, snooze_until) = {
-            let svc = ReminderService::new(&db, fresh_notifier()).await.unwrap();
+            let svc = ReminderService::new(&db, fresh_notifier(), Arc::new(NoopEmitter)).await.unwrap();
             let r = svc
                 .remind_me("snz-reload".into(), "30 minutes".into())
                 .await
@@ -420,7 +541,7 @@ mod tests {
         };
 
         // drop svc → 重開
-        let svc2 = ReminderService::new(&db, fresh_notifier()).await.unwrap();
+        let svc2 = ReminderService::new(&db, fresh_notifier(), Arc::new(NoopEmitter)).await.unwrap();
         let pending = svc2.list_reminders().await.unwrap();
         let reloaded = pending.iter().find(|x| x.id == r_id).expect("reloaded");
         // reload 後 due_at 仍是 snooze until(~2h 後),不是原本 30min 後
@@ -440,7 +561,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = dir.path().join("reminders.db");
         let r_id = {
-            let svc = ReminderService::new(&db, fresh_notifier()).await.unwrap();
+            let svc = ReminderService::new(&db, fresh_notifier(), Arc::new(NoopEmitter)).await.unwrap();
             let r = svc
                 .remind_me("persistent".into(), "1 hour".into())
                 .await
@@ -448,11 +569,69 @@ mod tests {
             r.id
         };
         // 第二次:重新開 service,pending 應該被 reload
-        let svc2 = ReminderService::new(&db, fresh_notifier()).await.unwrap();
+        let svc2 = ReminderService::new(&db, fresh_notifier(), Arc::new(NoopEmitter)).await.unwrap();
         let pending = svc2.list_reminders().await.unwrap();
         assert_eq!(pending.len(), 1, "expected 1 reloaded pending, got {}", pending.len());
         assert_eq!(pending[0].id, r_id);
         assert_eq!(pending[0].text, "persistent");
+    }
+
+    #[tokio::test]
+    async fn reschedule_fired_reminder_dismisses_original_and_creates_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("r.db");
+        let svc = ReminderService::new(
+            &db,
+            Notifier::disabled("Mori-Test"),
+            Arc::new(NoopEmitter),
+        )
+        .await
+        .unwrap();
+
+        // 建 + 強制 fire
+        let original_id = {
+            let store = svc.store.lock().await;
+            let r = store
+                .create("test".to_string(), Utc::now() - Duration::minutes(1), None)
+                .unwrap();
+            store.mark_fired(r.id, Utc::now()).unwrap();
+            r.id
+        };
+
+        // reschedule
+        let new_r = svc.reschedule_fired_reminder(original_id, 5).await.unwrap();
+
+        // assert: original dismissed,新建 reminder due_at 約 5 分鐘後,同 text,Pending
+        let store = svc.store.lock().await;
+        let original = store.get(original_id).unwrap();
+        assert!(original.dismissed_at.is_some(), "original should be dismissed");
+        assert_eq!(new_r.text, "test");
+        assert_eq!(new_r.status, ReminderStatus::Pending);
+        let due_diff = (new_r.due_at - Utc::now()).num_minutes();
+        assert!(due_diff >= 4 && due_diff <= 5, "new due_at should be ~5 min from now, got {due_diff}");
+    }
+
+    #[tokio::test]
+    async fn reschedule_fired_reminder_rejects_non_fired() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("r.db");
+        let svc = ReminderService::new(
+            &db,
+            Notifier::disabled("Mori-Test"),
+            Arc::new(NoopEmitter),
+        )
+        .await
+        .unwrap();
+        // Pending reminder — 不該被 reschedule_fired
+        let r = {
+            let store = svc.store.lock().await;
+            store.create("pending".to_string(), Utc::now() + Duration::hours(1), None).unwrap()
+        };
+        let err = svc.reschedule_fired_reminder(r.id, 5).await.unwrap_err();
+        match err {
+            CommandError::InvalidStatus { id, .. } => assert_eq!(id, r.id),
+            other => panic!("expected InvalidStatus, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -511,6 +690,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn startup_auto_dismisses_super_overdue_reminders() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let db = dir.path().join("r.db");
+
+        // 先用一個 service 寫一筆 8 天前 overdue + status=Pending
+        {
+            let store = ReminderStore::open(&db).expect("open");
+            let past = Utc::now() - chrono::Duration::days(8);
+            store.create("stale".to_string(), past, None).expect("create");
+            // 不 mark_fired,留 Pending,模擬 user 一週多沒開 app
+        }
+
+        // 開 service → reload-pending 應該把 8 天前的標 dismissed_at + Fired
+        let _svc = ReminderService::new(&db, Notifier::disabled("Mori-Test"), Arc::new(NoopEmitter))
+            .await
+            .expect("service");
+        // 留一點時間給 1ms 觸發 + spawn task 處理 mark_fired 完成
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let store = ReminderStore::open(&db).expect("reopen");
+        let queue = store
+            .list_active_popup_queue(Utc::now())
+            .expect("list active");
+        assert!(queue.is_empty(), "super-overdue reminder should be auto-dismissed, not on popup queue");
+
+        // 而 status 應該是 fired(走完正常 fire path),dismissed_at 也填了
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT status, dismissed_at FROM reminders WHERE text = 'stale'")
+            .unwrap();
+        let (status, dismissed_at): (String, Option<String>) = stmt
+            .query_row([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(status, "fired", "super-overdue should be marked Fired");
+        assert!(dismissed_at.is_some(), "super-overdue should be marked dismissed");
+    }
+
+    #[tokio::test]
     async fn one_shot_reminder_fires_and_marks_store() {
         // 端對端 happy path:設 due 在 200ms 之後,等 ~2s 看 store 變 Fired。
         // notifier.fire 在 CI 沒 dbus 會 Err,但 service callback 內部 log warn
@@ -534,5 +751,46 @@ mod tests {
             after.status,
         );
         assert!(after.fired_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn on_fire_calls_emitter_emit_reminder_fire() {
+        use std::sync::Mutex as StdMutex;
+
+        // 收集 emit call 的 mock emitter
+        #[derive(Default)]
+        struct CapturingEmitter {
+            calls: StdMutex<Vec<i64>>,
+        }
+        impl EventEmitter for CapturingEmitter {
+            fn emit_reminder_fire(&self, r: &Reminder) -> Result<(), String> {
+                self.calls.lock().unwrap().push(r.id);
+                Ok(())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("r.db");
+        let emitter = Arc::new(CapturingEmitter::default());
+
+        let svc = ReminderService::new(
+            &db,
+            Notifier::disabled("Mori-Test"),
+            emitter.clone() as Arc<dyn EventEmitter>,
+        )
+        .await
+        .expect("svc");
+
+        // 排一個 100ms 後 fire 的 reminder
+        let when = Utc::now() + chrono::Duration::milliseconds(100);
+        let r = svc.store.lock().await.create("emit-probe".to_string(), when, None).unwrap();
+        svc.scheduler.schedule(&r).await.unwrap();
+
+        // 等 fire + spawn task 完成
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+        let calls = emitter.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "emit_reminder_fire should be called once");
+        assert_eq!(calls[0], r.id);
     }
 }

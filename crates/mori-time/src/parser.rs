@@ -109,7 +109,11 @@ fn parse_chinese(expr: &str, now: DateTime<Local>) -> Option<DateTime<Utc>> {
 
 /// `30 分鐘後` / `1 小時後` / `2 天後` / `5分鐘以後`
 fn parse_relative_later(s: &str, now: DateTime<Local>) -> Option<DateTime<Utc>> {
-    let suffixes = [("分鐘後", 60i64), ("分鐘以後", 60), ("分後", 60),
+    // 2026-05-22:加秒級支援。chrono-english 英文路徑不接「30 seconds」,中文路徑
+    // 原本也只到分鐘。user 講「30 秒後提醒我」原本走 Unrecognized,popup 設計能 fire
+    // 任意短時間 reminder,parser 不能變單位粒度瓶頸。
+    let suffixes = [("秒鐘後", 1i64), ("秒鐘以後", 1), ("秒後", 1), ("秒以後", 1),
+                    ("分鐘後", 60), ("分鐘以後", 60), ("分後", 60),
                     ("小時後", 3600), ("小時以後", 3600),
                     ("天後", 86400), ("天以後", 86400),
                     ("日後", 86400)];
@@ -396,6 +400,19 @@ mod tests {
     // ----- 英文 (chrono-english) -----
 
     #[test]
+    fn parse_english_seconds_relative() {
+        // chrono-english 接「30 seconds」 / 「30s」 — 比中文 fallback 更涵蓋(中文要
+        // parse_relative_later 才接)。確認 regression。
+        let now = fixed_now();
+        let expected = (now + ChronoDuration::seconds(30)).with_timezone(&Utc);
+        let got = parse_at("30 seconds", now).expect("30 seconds should parse");
+        assert_close(got, expected, 2);
+
+        let got2 = parse_at("30s", now).expect("30s should parse");
+        assert_close(got2, expected, 2);
+    }
+
+    #[test]
     fn parse_english_relative_minutes() {
         let now = fixed_now();
         let expected = (now + ChronoDuration::minutes(30)).with_timezone(&Utc);
@@ -461,6 +478,30 @@ mod tests {
     }
 
     // ----- 中文 -----
+
+    #[test]
+    fn parse_chinese_seconds_later() {
+        let now = fixed_now();
+        // 30 秒後
+        let got = parse_at("30 秒後", now).expect("30 秒後");
+        let expected = (now + ChronoDuration::seconds(30)).with_timezone(&Utc);
+        assert_close(got, expected, 2);
+
+        // 90 秒以後
+        let got2 = parse_at("90 秒以後", now).expect("90 秒以後");
+        let expected2 = (now + ChronoDuration::seconds(90)).with_timezone(&Utc);
+        assert_close(got2, expected2, 2);
+
+        // 無 space — 45秒後
+        let got3 = parse_at("45秒後", now).expect("45秒後");
+        let expected3 = (now + ChronoDuration::seconds(45)).with_timezone(&Utc);
+        assert_close(got3, expected3, 2);
+
+        // 秒鐘 — 30 秒鐘後
+        let got4 = parse_at("30 秒鐘後", now).expect("30 秒鐘後");
+        let expected4 = (now + ChronoDuration::seconds(30)).with_timezone(&Utc);
+        assert_close(got4, expected4, 2);
+    }
 
     #[test]
     fn parse_chinese_minutes_later() {
