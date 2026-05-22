@@ -445,6 +445,44 @@ pub fn registry() -> Vec<DepSpec> {
             },
             install_overrides: &[],
         },
+        // Obsidian CLI — bundled inside Obsidian app v1.12.4+(GA 2026/02),
+        // 不是獨立 binary。User 要先裝 app 再到 in-app Settings 啟用「Register CLI」,
+        // 啟用後 `obsidian` 才會在 PATH。沒啟用 → starter AGENT-06.obsidian 跑 shell_skill
+        // 會 spawn 失敗。
+        //
+        // detect 用 `which obsidian` 已足夠 — Register CLI 沒啟用 binary 就不在 PATH,
+        // 啟用了就會在。不需要再 spawn `obsidian --version` 之類二次驗證(會多 cold-start
+        // 延遲 + 可能拉起 app GUI)。
+        DepSpec {
+            id: "obsidian-cli",
+            name: "Obsidian CLI",
+            description: "Obsidian 官方 CLI(v1.12.4+,2026/02 GA),內建在 Obsidian app 內。\
+                          starter AGENT-06.obsidian 的 shell_skills(search / daily:append / \
+                          create note / read note)全靠這個 binary。\
+                          \n\nCLI 不是獨立 binary — 要在 app 內 Settings → General → \
+                          Command line interface → Register CLI 啟用,才會出現在 PATH。",
+            unlocks: "starter AGENT-06.obsidian 能跑(對 vault 搜尋 / 讀寫 daily note / 建筆記)",
+            size_hint: Some("Obsidian app ~150MB(CLI 內建,無額外大小)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "CLI 在 Obsidian app 內,要先在 app Settings 啟用 Register CLI 才會進 PATH。\
+                 沒啟用 → which obsidian 找不到。",
+            ),
+            check: CheckSpec::Which { bin: "obsidian" },
+            check_overrides: &[],
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# 1. 安裝 Obsidian app v1.12.4+:",
+                    "#    https://obsidian.md/download",
+                    "# 2. 開 Obsidian → Settings → General → Command line interface",
+                    "#    → 點「Register CLI」按鈕啟用",
+                    "# 3. 開新 terminal(讓 PATH 重載),跑 `obsidian --version` 確認",
+                    "# 詳見 https://obsidian.md/help/cli",
+                ],
+            },
+            install_overrides: &[],
+        },
         DepSpec {
             id: "ollama",
             name: "ollama",
