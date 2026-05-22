@@ -191,7 +191,15 @@ mod remind_me;
 // Stream I:Anthropic SKILL.md 格式 — 載入 `~/.mori/skills/<name>/SKILL.md`,
 // 把 markdown body 當 prompt-augmentation 給 LLM。對齊
 // https://agentskills.io/specification。D-light(只讀 body,不執行 scripts/)。
+//
+// Wave 6 DF-2 升級:`AnthropicScriptSkill` — 若 skill 目錄底下有 `scripts/`,
+// 額外註冊一個可呼叫 Python script 的 skill(走 `python_runner` 子模組)。
+// `discover_skills` 改回 `Vec<DiscoveredSkill>`(skill + 可選 scripts_dir)。
 pub mod anthropic_skill;
+
+// Wave 6 DF-2:Python subprocess runner(供 `AnthropicScriptSkill` 用)。
+// 直接 spawn `python3`,沒 venv / 沒沙箱;timeout / stdin / argv 帶齊。
+pub mod python_runner;
 
 // Wave 6 MCP-2:把 mori-mcp::McpRegistry 暴露的 MCP tool 包成 Skill trait,
 // LLM 可以透過 SkillRegistry::dispatch reach 到外部 MCP server。
@@ -217,7 +225,8 @@ pub use read_file::ReadFileSkill;
 pub use remind_me::RemindMeSkill;
 
 pub use anthropic_skill::{
-    discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicSkill,
+    discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicScriptSkill,
+    AnthropicSkill, DiscoveredSkill,
 };
 
 pub use mcp_tool::McpToolSkill;

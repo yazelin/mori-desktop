@@ -75,17 +75,20 @@ fn is_anthropic_skills_installed_at(skills_dir: &Path) -> bool {
     skills_dir.join(ANTHROPIC_SKILLS_SUBDIR).join(".git").exists()
 }
 
-/// 跑 `git clone --depth 1` 拉 Anthropic skills repo 到 `~/.mori/skills/anthropics-skills/`。
+/// 跑 `git clone --depth 1` 拉 Anthropic skills repo 到 `~/.mori/skills/anthropics-skills/`,
+/// 完成後對每個 `anthropics-skills/skills/<name>/` 建 symlink 到 `~/.mori/skills/<name>/`
+/// (DF-2 flatten step)。
 ///
-/// **不負責 discovery flatten** — 該事留 DF-2 補。本 fn 完成 → user 重啟 Mori,
-/// `discover_skills` 走原邏輯掃不到深層 `skills/<name>/SKILL.md`,需要前端 / loader
-/// 升級配合。
+/// **DF-2 升級**:clone 完自動 flatten。`discover_skills` 掃扁平
+/// `~/.mori/skills/<name>/SKILL.md`,symlink 走 follow,is_dir / is_file 全 work。
+/// user 已有同名 skill 時 skip(以 user 自寫為優先)。
 ///
 /// 失敗模式:
 /// - `git` 不在 PATH → [`SkillInstallError::GitMissing`]
 /// - `git clone` 退非 0 → [`SkillInstallError::CloneFailed`](exit code)
 /// - HOME / USERPROFILE 都沒設 → [`SkillInstallError::NoHome`]
 /// - mkdir parent / 其他 IO 錯 → [`SkillInstallError::Io`]
+/// - flatten 階段個別 symlink 失敗 → log warning 跳過(不擋整 install)
 pub fn install_anthropic_skills() -> Result<PathBuf, SkillInstallError> {
     let dest_root = skills_dir().ok_or(SkillInstallError::NoHome)?;
     install_anthropic_skills_at(&dest_root)
@@ -99,8 +102,10 @@ fn install_anthropic_skills_at(dest_root: &Path) -> Result<PathBuf, SkillInstall
 
     // 已經有 .git → 不重複 clone,直接回傳 path(idempotent)。
     // user 想更新走 `git pull`(deps.rs 內的 Shell variant 有 fallback path)。
+    // 但 flatten 步驟還是要跑(可能第一次 clone 完崩了沒 flatten,或新加的 skill)。
     if target.join(".git").exists() {
         tracing::info!(path = %target.display(), "anthropic skills already installed; skipping clone");
+        let _ = flatten_anthropic_skills(dest_root);
         return Ok(target);
     }
 
@@ -122,7 +127,97 @@ fn install_anthropic_skills_at(dest_root: &Path) -> Result<PathBuf, SkillInstall
     }
 
     tracing::info!(path = %target.display(), "anthropic skills installed");
+
+    // Flatten symlinks: anthropics-skills/skills/<name>/ → <dest_root>/<name>/
+    match flatten_anthropic_skills(dest_root) {
+        Ok(n) => tracing::info!(linked = n, "flattened anthropic skills"),
+        Err(e) => tracing::warn!(error = %e, "flatten step failed (skills cloned but not symlinked)"),
+    }
+
     Ok(target)
+}
+
+/// 對 `<dest_root>/anthropics-skills/skills/<name>/` 內每個 skill 目錄建一條
+/// symlink 到 `<dest_root>/<name>/`,讓 [`mori_core::skill::discover_anthropic_skills`]
+/// 掃扁平 layout 就能看到。
+///
+/// 行為:
+/// - `anthropics-skills/skills/` 不存在 → 回 `Ok(0)`(沒 clone 完就被 cancel 的場景)
+/// - 同名目錄已存在 → skip(user 自寫優先)
+/// - symlink 個別失敗 → log warning 跳過,繼續其他 entry,最後回成功 count
+///
+/// Windows symlink 需要 dev mode / admin。fallback 在某些 Windows env 會失敗
+/// (`ERROR_PRIVILEGE_NOT_HELD`);本 fn 把它當作普通 IO error 回傳,呼叫端 log
+/// warning 後繼續。Linux / macOS 沒這問題。
+fn flatten_anthropic_skills(dest_root: &Path) -> Result<usize, std::io::Error> {
+    let anthropic_dir = dest_root.join(ANTHROPIC_SKILLS_SUBDIR).join("skills");
+    if !anthropic_dir.exists() {
+        tracing::debug!(
+            path = %anthropic_dir.display(),
+            "anthropics-skills/skills/ not present; nothing to flatten"
+        );
+        return Ok(0);
+    }
+
+    let mut count = 0;
+    for entry in std::fs::read_dir(&anthropic_dir)? {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(error = %e, "skipping unreadable entry");
+                continue;
+            }
+        };
+        let link_target = entry.path();
+        // 只 link directories(每個 skill = 一個目錄)
+        if !link_target.is_dir() {
+            continue;
+        }
+        let skill_name = entry.file_name();
+        let link_path = dest_root.join(&skill_name);
+
+        // user 自寫同名 skill 在 → skip(對齊 PATH-style: user 優先)
+        // symlink 自身 .exists() follows link → 第二次跑也會 skip(idempotent)
+        if link_path.exists() {
+            tracing::debug!(
+                name = %skill_name.to_string_lossy(),
+                "skill already at flat path; skipping symlink"
+            );
+            continue;
+        }
+
+        let symlink_result = make_symlink(&link_target, &link_path);
+        match symlink_result {
+            Ok(()) => {
+                count += 1;
+                tracing::debug!(
+                    name = %skill_name.to_string_lossy(),
+                    target = %link_target.display(),
+                    "linked anthropic skill"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    name = %skill_name.to_string_lossy(),
+                    error = %e,
+                    "symlink failed (continuing)"
+                );
+            }
+        }
+    }
+    Ok(count)
+}
+
+/// 跨平台 symlink helper。Unix → `symlink`;Windows → `symlink_dir`(NTFS 對
+/// dir / file symlink 分兩種 API)。
+#[cfg(unix)]
+fn make_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn make_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
 }
 
 // ─── Tauri commands ────────────────────────────────────────────────
@@ -270,5 +365,95 @@ mod tests {
         // Stream I loader 跟 deps.rs 內的 check path_template 都依賴這個常數值。
         // 改了這個 = 同步要改 deps.rs 的 `$HOME/.mori/skills/anthropics-skills/.git`。
         assert_eq!(ANTHROPIC_SKILLS_SUBDIR, "anthropics-skills");
+    }
+
+    // ─── flatten_anthropic_skills ─────────────────────────────
+
+    #[test]
+    fn flatten_returns_zero_when_anthropic_dir_missing() {
+        // dest_root 完全空 → anthropics-skills/skills/ 不存在 → 0 link。
+        let dir = TempDir::new().unwrap();
+        let n = flatten_anthropic_skills(dir.path()).expect("should not error");
+        assert_eq!(n, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn flatten_creates_symlinks_for_each_skill() {
+        // mock: dest_root/anthropics-skills/skills/{pdf,docx}/SKILL.md
+        // expect: dest_root/{pdf,docx} symlink 出現
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path();
+        let skills_inner = dest.join(ANTHROPIC_SKILLS_SUBDIR).join("skills");
+        std::fs::create_dir_all(skills_inner.join("pdf")).unwrap();
+        std::fs::create_dir_all(skills_inner.join("docx")).unwrap();
+        std::fs::write(skills_inner.join("pdf").join("SKILL.md"), "x").unwrap();
+        std::fs::write(skills_inner.join("docx").join("SKILL.md"), "y").unwrap();
+
+        let n = flatten_anthropic_skills(dest).expect("flatten ok");
+        assert_eq!(n, 2);
+        assert!(dest.join("pdf").exists());
+        assert!(dest.join("docx").exists());
+        // symlink follows → SKILL.md 透過 link 可達
+        assert!(dest.join("pdf").join("SKILL.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn flatten_skips_existing_user_skill() {
+        // user 自寫 `~/.mori/skills/pdf/` 在 → flatten 不該覆蓋。
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path();
+        let skills_inner = dest.join(ANTHROPIC_SKILLS_SUBDIR).join("skills");
+        std::fs::create_dir_all(skills_inner.join("pdf")).unwrap();
+        std::fs::write(skills_inner.join("pdf").join("SKILL.md"), "anthropic-version").unwrap();
+
+        // pre-create user own pdf dir(非 symlink)
+        let user_pdf = dest.join("pdf");
+        std::fs::create_dir_all(&user_pdf).unwrap();
+        std::fs::write(user_pdf.join("SKILL.md"), "user-version").unwrap();
+
+        let _ = flatten_anthropic_skills(dest).expect("flatten ok");
+        // user 自寫不該被覆蓋:檔案內容仍是 user-version
+        let content = std::fs::read_to_string(user_pdf.join("SKILL.md")).unwrap();
+        assert_eq!(content, "user-version");
+        // 而且 user_pdf 不該變成 symlink
+        let meta = std::fs::symlink_metadata(&user_pdf).unwrap();
+        assert!(!meta.file_type().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn flatten_is_idempotent() {
+        // 跑兩次:第二次不該爆 + 結果不變
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path();
+        let skills_inner = dest.join(ANTHROPIC_SKILLS_SUBDIR).join("skills");
+        std::fs::create_dir_all(skills_inner.join("xlsx")).unwrap();
+        std::fs::write(skills_inner.join("xlsx").join("SKILL.md"), "x").unwrap();
+
+        let n1 = flatten_anthropic_skills(dest).expect("flatten 1");
+        let n2 = flatten_anthropic_skills(dest).expect("flatten 2");
+        assert_eq!(n1, 1);
+        assert_eq!(n2, 0, "second flatten should skip existing link");
+        assert!(dest.join("xlsx").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn flatten_skips_non_directory_entries() {
+        // anthropics-skills/skills/README.md 之類的檔案不要建 symlink
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path();
+        let skills_inner = dest.join(ANTHROPIC_SKILLS_SUBDIR).join("skills");
+        std::fs::create_dir_all(&skills_inner).unwrap();
+        std::fs::write(skills_inner.join("README.md"), "info").unwrap();
+        std::fs::create_dir_all(skills_inner.join("real-skill")).unwrap();
+        std::fs::write(skills_inner.join("real-skill").join("SKILL.md"), "x").unwrap();
+
+        let n = flatten_anthropic_skills(dest).expect("flatten ok");
+        assert_eq!(n, 1);
+        assert!(dest.join("real-skill").exists());
+        assert!(!dest.join("README.md").exists(), "files at top level shouldn't be linked");
     }
 }
