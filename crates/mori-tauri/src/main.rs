@@ -39,6 +39,11 @@ mod transcribe_cmds;
 mod tts;
 mod wake_sound;
 mod wake_word;
+// Wave 7 L-mori 記憶之森 — read `~/mori-universe/spirits/<name>/wiki/` 結構,
+// 把 wiki/index.md 注入 system prompt + 暴露 read_wiki_page LLM skill。
+// 純 READ;寫 wiki 是 future work(annuli reflection / curator,需 yazelin
+// per-dir auth)。
+mod wiki_reader;
 
 use std::sync::Arc;
 
@@ -55,8 +60,8 @@ use mori_core::paste::PasteController;
 use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill, PolishSkill,
-    ReadFileSkill, RecallMemorySkill, RememberSkill, RemindMeSkill, SetModeSkill, SkillRegistry,
-    SummarizeSkill, TranslateSkill,
+    ReadFileSkill, ReadWikiPageSkill, RecallMemorySkill, RememberSkill, RemindMeSkill,
+    SetModeSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_time::{Notifier, ReminderService};
 use mori_core::{PHASE, VERSION};
@@ -2165,6 +2170,18 @@ async fn skills_list(
     if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
     }
+    // Wave 7 L-mori 記憶之森:read_wiki_page LLM skill — UI Skills tab 也要列出。
+    // vault_root 跟 spirit_name 從 annuli config 拿(spirit_name 預設 "mori"),
+    // vault_root 失敗(沒 HOME)→ 跳過註冊(LLM 拿不到 skill,但 UI 不爆)。
+    if let Some(vault_root) = default_vault_root() {
+        let cfg = annuli_config::AnnuliConfig::load(&mori_dir().join("config.json"));
+        let spirit = if cfg.spirit_name.is_empty() {
+            "mori".to_string()
+        } else {
+            cfg.spirit_name
+        };
+        registry.register(Arc::new(ReadWikiPageSkill::new(vault_root, spirit)));
+    }
     registry.register(Arc::new(RememberSkill::new(mem_arc.clone())));
     registry.register(Arc::new(RecallMemorySkill::new(mem_arc.clone())));
     registry.register(Arc::new(ForgetMemorySkill::new(mem_arc.clone())));
@@ -3369,20 +3386,58 @@ async fn run_agent_pipeline(
         // spirit_name 從 annuli config 拿(default "mori"),空字串退到 "mori"。
         // 注意:這條走 vault 直接讀檔(不經 annuli HTTP)— vault 是 source of truth,
         // annuli 是 consumer 之一(跟 mori-desktop 同層讀同一份 vault,不互相依賴)。
-        let soul_text = {
+        let (vault_root_opt, spirit_name_for_wiki) = {
             let cfg = annuli_config::AnnuliConfig::load(&mori_dir().join("config.json"));
             let spirit = if cfg.spirit_name.is_empty() {
                 "mori".to_string()
             } else {
                 cfg.spirit_name
             };
-            default_vault_root().and_then(|root| load_soul_content(&root, &spirit))
+            (default_vault_root(), spirit)
         };
+        let soul_text = vault_root_opt
+            .as_deref()
+            .and_then(|root| load_soul_content(root, &spirit_name_for_wiki));
         let mut system_prompt = if body_expanded.trim().is_empty() {
             build_system_prompt(soul_text.as_deref(), &memory_index, &ctx)
         } else {
             format!("{}\n\n---\n\n{}", body_expanded, context_section)
         };
+
+        // Wave 7 L-mori 記憶之森(Karpathy LLM Wiki pattern)— 把 wiki/index.md
+        // 注入 system prompt,讓 LLM 知道 Mori 有哪些累積的 wiki page。需要拉
+        // specific page 時走 `read_wiki_page` skill。Wiki 還沒建(index.md 不存在
+        // / 空)→ 整段 skip,行為不破(graceful)。
+        //
+        // 注入點放這(build_system_prompt 之後、MCP append 之前):
+        // - 兩條 prompt branch(SOUL + build_system_prompt vs profile body_expanded)
+        //   都要吃到 → 在 caller append 而非進 build_system_prompt 參數
+        // - 在 MCP tools 之前 → wiki 是「內在知識」layer,MCP 是「外部工具」layer
+        if let Some(vault_root) = vault_root_opt.as_deref() {
+            if let Some(index) = wiki_reader::read_index(vault_root, &spirit_name_for_wiki) {
+                system_prompt.push_str(
+                    "\n\n# 我的 wiki(主動拉感興趣的 page)\n\n",
+                );
+                system_prompt.push_str(
+                    "下面是我累積的內在知識索引(`~/mori-universe/spirits/<name>/wiki/index.md`)。\
+                     看到 user 問題跟某個 page 相關時,呼叫 `read_wiki_page(page)` 把該 page \
+                     內容拉進 context 再答。page 是 wiki/ 內的相對路徑(eg \
+                     `people/yazelin.md`、`projects/mori.md`)。\n\n",
+                );
+                system_prompt.push_str(index.trim_end());
+                system_prompt.push_str("\n");
+
+                // AGENTS.md 是 user 寫的「Mori 怎麼用 wiki」規則,有就附在 index 後面。
+                if let Some(agents_md) =
+                    wiki_reader::read_agents_md(vault_root, &spirit_name_for_wiki)
+                {
+                    system_prompt.push_str("\n## Wiki 使用規則(AGENTS.md)\n\n");
+                    system_prompt.push_str(agents_md.trim_end());
+                    system_prompt.push_str("\n");
+                }
+                system_prompt.push_str("\n");
+            }
+        }
 
         // Wave 6 MCP-2:把目前連上的 MCP server / tool 描述附加到 system prompt 末尾。
         // - 不動 `build_system_prompt` 簽名,改在 caller append(讓 mori-core 不知道
@@ -3523,6 +3578,24 @@ async fn run_agent_pipeline(
         // LLM 知道工具存在但 reach 不到實作(SkillRegistry::dispatch 找不到 name)。
         if allows("read_file_text") {
             registry.register(Arc::new(mori_core::skill::ReadFileSkill));
+        }
+        // Wave 7 L-mori 記憶之森:`read_wiki_page` LLM tool dispatch 路徑。
+        // System prompt 上方已注入 wiki/index.md 內容讓 LLM 知道有哪些 page,
+        // 但沒這個 register LLM 叫 read_wiki_page 會吃 "unknown skill" error。
+        // vault_root 從 default_vault_root() 拿,spirit_name 從 annuli config
+        // 拿(同 SOUL 注入路徑)— 都失敗(沒 HOME)→ 跳過註冊。
+        if allows("read_wiki_page") {
+            if let Some(vault_root) = default_vault_root() {
+                let cfg = annuli_config::AnnuliConfig::load(&mori_dir().join("config.json"));
+                let spirit = if cfg.spirit_name.is_empty() {
+                    "mori".to_string()
+                } else {
+                    cfg.spirit_name
+                };
+                registry.register(Arc::new(mori_core::skill::ReadWikiPageSkill::new(
+                    vault_root, spirit,
+                )));
+            }
         }
         // §9 P1 「時之鳥」K5 — `remind_me` LLM tool dispatch 路徑。同上,system prompt
         // 已注入工具描述,沒 register LLM 叫 remind_me 會吃 "unknown skill" error。
@@ -4619,6 +4692,26 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
     );
     prompt.push_str(
         "  • 讀失敗會回 error message,**不要重試**或編造內容 — 直接告訴 user 失敗了\n\n",
+    );
+
+    // Wave 7 L-mori 記憶之森 — read_wiki_page。LLM 看 system prompt 上方的
+    // 「我的 wiki」section(index.md 內容)找到相關 page name 再呼叫。
+    prompt.push_str("**read_wiki_page(page)**:讀我的 wiki 內的某一 page 進 context。\n");
+    prompt.push_str(
+        "  • 觸發:user 問題跟「我的 wiki」section 列的某個 page 相關時,先拉該 page \
+         內容再答(對齊 Karpathy LLM Wiki pattern)\n",
+    );
+    prompt.push_str(
+        "  • page 是 wiki/ 內的相對路徑(eg `people/yazelin.md`、`projects/mori.md`、\
+         `concepts/transformer.md`)\n",
+    );
+    prompt.push_str(
+        "  • **wiki section 不存在時**(我剛被召喚出來、wiki 還沒建)— 此工具不會出現在 \
+         system prompt;當 prompt 沒「我的 wiki」段時別硬叫\n",
+    );
+    prompt.push_str(
+        "  • 一輪可叫多次(若多個 page 相關,各拉一次)。但只在必要時叫 — \
+         index 看不出相關的 page 別硬挖\n\n",
     );
 
     // §9 P1 「時之鳥」K5 — remind_me 工具描述。LLM 看 user 講「X 點提醒我 Y」「等等
