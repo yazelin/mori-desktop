@@ -12,6 +12,7 @@ import React, { useEffect, useMemo, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
@@ -502,6 +503,8 @@ function CharacterPicker() {
   const [characterDir, setCharacterDir] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -552,20 +555,72 @@ function CharacterPicker() {
     }
   };
 
+  const onImport = async () => {
+    const selected = await openDialog({
+      multiple: false,
+      filters: [{ name: "Mori character pack", extensions: ["zip", "moripack"] }],
+    });
+    if (!selected || typeof selected !== "string") return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const entry = await invoke<CharacterEntry>("character_pack_import_zip", {
+        zipPath: selected,
+      });
+      await refresh();
+      setActive(entry.stem);
+      setMsg(`✅ 已匯入:${entry.display_name} by ${entry.author}`);
+      setTimeout(() => setMsg(null), 4000);
+    } catch (e: any) {
+      setImportError(String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <>
       <FormRow
         label="character"
         hint={`${t("config_tab.rows.char_pack_hint")}${characterDir}`}
       >
-        <Select
-          value={active}
-          onChange={onSelect}
-          options={chars.map((c) => ({
-            value: c.stem,
-            label: `${c.display_name}${c.author ? ` · ${c.author}` : ""}`,
-          }))}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Select
+            value={active}
+            onChange={onSelect}
+            options={chars.map((c) => ({
+              value: c.stem,
+              label: `${c.display_name}${c.author ? ` · ${c.author}` : ""}`,
+            }))}
+          />
+          {(() => {
+            const cur = chars.find((c) => c.stem === active);
+            if (!cur) return null;
+            return (
+              <span style={{ color: "var(--c-text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+                {cur.author ? `by ${cur.author} · ` : ""}v{cur.version}
+              </span>
+            );
+          })()}
+        </div>
+      </FormRow>
+      <FormRow
+        label="匯入"
+        hint="從 Mori Sprite Studio 輸出的 .moripack.zip 匯入新角色包。"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="mori-btn" onClick={onImport} disabled={importing || busy}>
+              {importing ? "匯入中…" : "匯入 .moripack.zip"}
+            </button>
+            {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
+          </div>
+          {importError && (
+            <div style={{ color: "rgba(255, 160, 160, 0.95)", fontSize: 12 }}>
+              ❌ 匯入失敗:{importError}
+            </div>
+          )}
+        </div>
       </FormRow>
       <FormRow
         label=""
@@ -575,7 +630,6 @@ function CharacterPicker() {
           <button className="mori-btn" onClick={onUpgrade} disabled={busy}>
             {t("config_tab.rows.upgrade_pack_button")}
           </button>
-          {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
         </div>
       </FormRow>
     </>
