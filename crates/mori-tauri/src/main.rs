@@ -4294,6 +4294,101 @@ async fn run_voice_input_pipeline(
         "profile": profile.name,
     }));
 
+    // 2026-05-22:Correction audit — 對話結束後 background LLM 跑一次,把可能諧音錯字
+    // 候選寫進 inbox。失敗 silent(僅 log + event_log),不擋 voice pipeline。可在
+    // ConfigTab 校正 sub-tab toggle 關掉。
+    {
+        let cfg = correction_audit_config::CorrectionAuditConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if cfg.enabled {
+            let raw = transcript.clone();
+            let cleaned = cleaned_text.clone();
+            // SessionRecord 無 session_id() — 用 pipeline 完成時的 timestamp 當 id。
+            let session_id = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+            let corrections_md_path = mori_dir().join("corrections.md");
+            let inbox_path = mori_dir().join("correction_inbox.jsonl");
+
+            tauri::async_runtime::spawn(async move {
+                // build provider via routing(None = no groq retry callback;audit 失敗 silent)
+                let routing = match mori_core::llm::Routing::build_from_config(None) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(?e, "correction_audit: routing build failed, skip");
+                        return;
+                    }
+                };
+                // 未在 routing.skills 定義的 key 安全 fallback 到 skill_fallback。
+                let provider = routing.skill_provider("correction_audit");
+
+                // 讀 corrections.md 全文(缺檔 → 空字串,audit 仍繼續)
+                let corrections_md =
+                    std::fs::read_to_string(&corrections_md_path).unwrap_or_default();
+
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "correction_audit_started",
+                    "session_id": session_id,
+                }));
+
+                match mori_core::correction_audit::audit(
+                    provider,
+                    &raw,
+                    &cleaned,
+                    &corrections_md,
+                )
+                .await
+                {
+                    Ok(candidates) => {
+                        let mut written = 0usize;
+                        for c in &candidates {
+                            // 已 dismiss 過(同 wrong+suggested pair)→ skip
+                            let is_dismissed = mori_core::correction_inbox::is_dismissed(
+                                &inbox_path,
+                                &c.wrong,
+                                &c.suggested,
+                            )
+                            .unwrap_or(false);
+                            if is_dismissed {
+                                continue;
+                            }
+                            let entry =
+                                mori_core::correction_inbox::InboxEntry::new_pending(
+                                    &session_id,
+                                    mori_core::correction_inbox::InboxSource::LlmAudit,
+                                    &c.wrong,
+                                    &c.suggested,
+                                    c.confidence,
+                                    &c.reason,
+                                );
+                            if let Err(e) = mori_core::correction_inbox::append_entry(
+                                &inbox_path,
+                                &entry,
+                            ) {
+                                tracing::warn!(?e, "correction_audit: append inbox entry failed");
+                                continue;
+                            }
+                            written += 1;
+                        }
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_completed",
+                            "session_id": session_id,
+                            "candidates_total": candidates.len(),
+                            "candidates_written": written,
+                        }));
+                    }
+                    Err(e) => {
+                        tracing::warn!(?e, "correction_audit failed");
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_failed",
+                            "session_id": session_id,
+                            "error": format!("{e:#}"),
+                        }));
+                    }
+                }
+            });
+        }
+    }
+
     // Phase B:finalize session for voice_input pipeline
     if let Some(rec) = state.recording_session.lock().take() {
         let mut rec = rec;
