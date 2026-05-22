@@ -162,6 +162,27 @@ body.floating-window #root {
   justify-content: center;
 }
 
+/* ─── backdrop(可選背板:character pack > user global > shipped default) ─ */
+
+/* DOM 元素,跨平台。CSS variable 從 React 餵 — applyBackdrop 跑 resolveBackdropUrl
+   拿到 data URL 寫進 --mori-backdrop-{dark,light}。模式 "plain" 時 variable
+   被清,background-image 變 none(無背板)。
+   inset:0 蓋滿 sprite-area(160×160),也就是 sprite + drop-shadow + aura 全
+   蓋住 — X11 上 logo 模式可以順便緩解 WebKit half-alpha bug(整個 region
+   都是 opaque pixel)。 */
+.mori-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--mori-backdrop-dark);
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+html[data-theme-base="light"] .mori-backdrop {
+  background-image: var(--mori-backdrop-light);
+}
+
 /* ─── aura(背景環 / 光暈) ──────────────────────────────────────── */
 
 .mori-aura {

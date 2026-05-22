@@ -735,6 +735,8 @@ function FloatingMori() {
       {/* 5J: sprite-area — 永遠固定在 widget 左上 160×160,讓 sprite 不會
           因為 window 變寬 / 變高而跑位置。bubble / chip 浮在這之外。 */}
       <div className="mori-sprite-area">
+        {/* 背板:可選的角色背景圖(character pack / user global / shipped fallback) */}
+        <div className="mori-backdrop" />
         {/* 背景光暈：錄音中由音量驅動；其他狀態 CSS animation */}
         <div className="mori-aura" style={auraStyle} />
 
