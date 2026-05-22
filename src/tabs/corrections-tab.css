@@ -1,41 +1,23 @@
+/* CorrectionsTab — only inbox-specific layout; colours via --c-* vars */
+
 .corrections-tab {
+  /* no background: inherit from parent so theme switching works */
   padding: 16px;
   font-family: var(--font-sans);
   font-size: 14px;
-  color: var(--fg);
-  background: var(--bg);
+  color: var(--c-text);
 }
 
 .corrections-error {
-  background: rgba(248, 81, 73, 0.1);
-  border: 1px solid var(--error);
-  color: var(--error);
+  background: var(--c-danger-bg);
+  border: 1px solid var(--c-danger-border);
+  color: var(--c-danger-text);
   padding: 8px 12px;
   border-radius: 6px;
   margin-bottom: 12px;
 }
 
-.corrections-section {
-  margin-bottom: 24px;
-}
-
-.corrections-section h2 {
-  font-size: 16px;
-  margin: 0 0 12px 0;
-  color: var(--fg);
-}
-
-.corrections-count {
-  font-size: 12px;
-  color: var(--fg-dim);
-  font-weight: normal;
-  margin-left: 8px;
-}
-
-.corrections-empty {
-  color: var(--fg-dim);
-  font-style: italic;
-}
+/* ── Inbox list ─────────────────────────────────────────────── */
 
 .corrections-inbox-list {
   list-style: none;
@@ -47,8 +29,8 @@
 }
 
 .corrections-inbox-row {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: var(--c-surface-bg);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
@@ -57,7 +39,7 @@
 }
 
 .corrections-inbox-row.is-user-edit {
-  border-color: var(--accent);
+  border-color: var(--c-forest);
 }
 
 .corrections-row-head {
@@ -69,31 +51,44 @@
 
 .corrections-suggested {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--c-text-strong);
   font-size: 15px;
 }
 
 .corrections-suggested-edit {
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--accent);
+  background: var(--c-input-bg);
+  color: var(--c-text);
+  border: 1px solid var(--c-focus-border);
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 14px;
+  font-family: inherit;
+}
+
+.corrections-suggested-edit:focus {
+  outline: none;
+  background: var(--c-input-focus-bg);
 }
 
 .corrections-arrow {
-  color: var(--fg-dim);
+  color: var(--c-text-muted);
 }
 
 .corrections-variants {
-  color: var(--fg);
+  color: var(--c-text);
 }
 
 .corrections-count-badge {
   font-size: 11px;
-  color: var(--fg-dim);
+  color: var(--c-text-muted);
   margin-left: 2px;
+}
+
+.corrections-count {
+  font-size: 12px;
+  color: var(--c-text-muted);
+  font-weight: normal;
+  margin-left: 8px;
 }
 
 .corrections-row-actions {
@@ -102,45 +97,9 @@
   flex-wrap: wrap;
 }
 
-.corrections-row-actions button {
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.corrections-row-actions button:hover:not(:disabled) {
-  background: var(--bg-panel);
-  border-color: var(--accent);
-}
-
-.corrections-row-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .corrections-overflow-chip {
   font-size: 11px;
-  color: var(--fg-dim);
+  color: var(--c-text-muted);
   align-self: flex-start;
   margin-top: 4px;
-}
-
-.corrections-md-viewer {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 12px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  white-space: pre-wrap;
-  max-height: 60vh;
-  overflow-y: auto;
 }

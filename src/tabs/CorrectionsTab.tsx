@@ -107,16 +107,16 @@ function CorrectionsTab() {
     <div className="corrections-tab">
       {error && <div className="corrections-error">⚠ {error}</div>}
 
-      <section className="corrections-section">
-        <h2>
+      <section className="mori-config-section">
+        <h3 className="mori-config-section-title">
           校正盒
           {groups.length > 0 && (
             <span className="corrections-count">({groups.length} 個 pending)</span>
           )}
-        </h2>
+        </h3>
 
         {groups.length === 0 ? (
-          <p className="corrections-empty">沒有待處理候選。Mori 對話結束後會自動偵測諧音錯字放進來。</p>
+          <p className="mori-config-section-hint">沒有待處理候選。Mori 對話結束後會自動偵測諧音錯字放進來。</p>
         ) : (
           <ul className="corrections-inbox-list">
             {groups.map((group) => {
@@ -158,12 +158,14 @@ function CorrectionsTab() {
                     {isEditing ? (
                       <>
                         <button
+                          className="mori-btn small"
                           disabled={isBusy}
                           onClick={() => onAccept(group, editingValue)}
                         >
                           <IconCheck width={12} height={12} /> 接受新建議
                         </button>
                         <button
+                          className="mori-btn small ghost"
                           disabled={isBusy}
                           onClick={() =>
                             setEditing((s) => {
@@ -178,10 +180,11 @@ function CorrectionsTab() {
                       </>
                     ) : (
                       <>
-                        <button disabled={isBusy} onClick={() => onAccept(group)}>
+                        <button className="mori-btn small primary" disabled={isBusy} onClick={() => onAccept(group)}>
                           <IconCheck width={12} height={12} /> 接受
                         </button>
                         <button
+                          className="mori-btn small"
                           disabled={isBusy}
                           onClick={() =>
                             setEditing((s) => ({ ...s, [group.suggested]: group.suggested }))
@@ -189,7 +192,7 @@ function CorrectionsTab() {
                         >
                           改建議
                         </button>
-                        <button disabled={isBusy} onClick={() => onDismiss(group)}>
+                        <button className="mori-btn small ghost" disabled={isBusy} onClick={() => onDismiss(group)}>
                           <IconClose width={12} height={12} /> 忽略
                         </button>
                       </>
@@ -202,9 +205,14 @@ function CorrectionsTab() {
         )}
       </section>
 
-      <section className="corrections-section">
-        <h2>字典 corrections.md</h2>
-        <pre className="corrections-md-viewer">{corrections || "(空)"}</pre>
+      <section className="mori-config-section">
+        <h3 className="mori-config-section-title">字典 corrections.md</h3>
+        <textarea
+          className="mori-config-textarea"
+          readOnly
+          rows={16}
+          value={corrections || "(空)"}
+        />
       </section>
     </div>
   );
