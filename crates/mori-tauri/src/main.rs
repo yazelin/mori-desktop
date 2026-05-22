@@ -1856,15 +1856,6 @@ fn character_dir() -> String {
         .to_string()
 }
 
-/// 升級任意 character pack 內 single-frame sprite 到 4×4 placeholder。
-/// 主要給 user import 進來的 pack(非 default mori)用 — Config UI 按鈕呼叫。
-/// 回 (upgraded, skipped)。
-#[tauri::command]
-fn character_upgrade_pack_to_4x4(stem: String) -> Result<(usize, usize), String> {
-    crate::character_pack::upgrade_pack_to_4x4(&stem)
-        .map_err(|e| format!("upgrade pack {stem}: {e:#}"))
-}
-
 /// C — annuli 熱重載 command。
 ///
 /// 流程:
@@ -5677,7 +5668,6 @@ fn main() {
             character_set_active,
             character_sprite_data_url,
             character_dir,
-            character_upgrade_pack_to_4x4,
             file_loader_cmd::read_file_text_cmd,
             reminders_cmd::remind_me_cmd,
             reminders_cmd::list_reminders_cmd,
