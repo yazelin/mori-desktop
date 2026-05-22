@@ -215,6 +215,7 @@
     "label_thinking": "Thinking",
     "label_done": "Done",
     "label_error": "Error",
+    "label_dragging": "Dragged",
     "title_hint": "Drag: move / Double-click: toggle main window"
   },
   "quickstart": {

@@ -32,7 +32,8 @@ type Visual =
   | "thinking"
   | "done"
   | "error"
-  | "walking";   // 5P-7: wander toggle ON + idle 時走來走去
+  | "walking"   // 5P-7: wander toggle ON + idle 時走來走去
+  | "dragging"; // 2026-05-23:user 拖曳中。optional state — 缺 sprite fallback idle
 
 const TRANSIENT_DURATION_MS: Record<"done" | "error", number> = {
   done: 1500,
@@ -111,9 +112,15 @@ function visualFor(
   phase: Phase,
   transient: Visual | null,
   isWandering: boolean,
+  isDragging: boolean,
 ): Visual {
   if (mode === "background") return "sleeping";
   if (transient) return transient;
+  // 2026-05-23:被拖曳中 → dragging sprite。優先級高過 walking / phase
+  //(user 動手拉 Mori 是 explicit interaction,蓋過自動行為)。
+  // dragging.png 是 optional state,sprite_path fallback chain 若沒提供
+  // 自動接 idle.png(character pack 規格)。
+  if (isDragging) return "dragging";
   // 5P-7: 散步中 — 只在 idle phase + wander 開啟時走,其他 phase(錄音 / 思考
   // / 完成 / 錯誤)優先,避免 user 講話時 Mori 跑掉
   if (isWandering && phase.kind === "idle") return "walking";
@@ -318,7 +325,7 @@ function FloatingMori() {
         setActiveStem(stem);
         setManifest(m);
         // foreach state 抓 data URL
-        const allStates: Visual[] = ["idle", "sleeping", "recording", "thinking", "done", "error", "walking"];
+        const allStates: Visual[] = ["idle", "sleeping", "recording", "thinking", "done", "error", "walking", "dragging"];
         const entries = await Promise.all(
           allStates.map(async (state) => {
             try {
@@ -704,7 +711,7 @@ function FloatingMori() {
     }
   };
 
-  const visual = visualFor(mode, phase, transient, isWandering);
+  const visual = visualFor(mode, phase, transient, isWandering, isDragging);
 
   // 基底環不再 scale（避免 box-shadow 外溢出視窗被切），只用 --vol 控制
   // ::before 的發光強度。實際的「音量波動」由獨立的 ripple elements 表現。
@@ -725,7 +732,7 @@ function FloatingMori() {
 
   return (
     <div
-      className={`mori-stage mori-${visual}${isDragging ? " is-dragging" : ""}`}
+      className={`mori-stage mori-${visual}${isDragging ? " is-dragging" : ""}${visual === "walking" && walkFacingLeft ? " walk-left" : ""}`}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
@@ -756,7 +763,7 @@ function FloatingMori() {
             兩層分開避免 animation property 互相覆蓋。動畫 ON 預設(commit 4 接 toggle)。
             loop_durations_ms 從 manifest 拿,placeholder 階段 16 格全是同一張看似不閃。 */}
         <div
-          className={`mori-sprite mori-sprite-${visual}${visual === "walking" && walkFacingLeft ? " walk-left" : ""}`}
+          className={`mori-sprite mori-sprite-${visual}`}
           title={visualLabel(visual)}
         >
           <div
