@@ -1,0 +1,32 @@
+[package]
+name = "mori-mcp"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+description = "Mori 的 MCP(Model Context Protocol)client — 連外部 MCP server,拉 tool 給 LLM 用。Wave 6 MCP-1 foundation。"
+
+[dependencies]
+# rmcp(Rust SDK for Model Context Protocol)。crates.io 最新 stable 是 1.x;
+# default features 是 server-side(`[base64, macros, server]`),client 要顯式
+# opt-in。我們只開 client 跟兩條 transport:
+#   - transport-child-process:stdio MCP server(`npx -y @modelcontextprotocol/...`)
+#   - transport-streamable-http-client-reqwest:HTTP MCP server(Streamable HTTP)
+# 關掉 default 把 server-side / macros 等都剝掉,縮 dep tree。
+rmcp = { version = "1", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
+
+# 共用
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
