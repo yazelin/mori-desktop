@@ -1217,6 +1217,18 @@ function ConfigTab({
     }
   };
 
+  // correction_audit config(Task 11)
+  type CorrectionAuditConfig = {
+    enabled: boolean;
+    provider: string;
+    model: string;
+  };
+  const [auditCfg, setAuditCfg] = useState<CorrectionAuditConfig>({
+    enabled: true,
+    provider: "groq",
+    model: "openai/gpt-oss-120b",
+  });
+
   useEffect(() => {
     invoke<string>("config_read")
       .then((t) => { setRaw(t); setOrig(t); })
@@ -1226,7 +1238,20 @@ function ConfigTab({
       .catch(() => {
         setCorrText("# Mori STT 校正表\n\n# 看到左邊 → 改成右邊\n# 例:modem -> Markdown\n\n");
       });
+    invoke<CorrectionAuditConfig>("get_correction_audit_config")
+      .then(setAuditCfg)
+      .catch((e) => console.warn("get_correction_audit_config failed", e));
   }, []);
+
+  const saveAudit = async (next: CorrectionAuditConfig) => {
+    setAuditCfg(next);
+    try {
+      await invoke("set_correction_audit_config", { cfg: next });
+    } catch (e) {
+      console.error("set_correction_audit_config failed", e);
+      alert(`儲存失敗:${e}`);
+    }
+  };
 
   // Parse raw JSON for form view(失敗則保留 form 為 default,raw view 顯紅框)
   const cfg: AnyObj = useMemo(() => {
@@ -2257,6 +2282,18 @@ function ConfigTab({
 
           {/* ── Corrections.md(獨立檔,獨立 save) ────────── */}
           {subTab === "corrections" && <>
+          <Section
+            title="校正(LLM audit)"
+            hint="Mori 對話結束後跑一次 LLM(預設 Groq gpt-oss-120b 便宜),把可能的 STT 諧音錯字候選放進「校正盒」分頁,等你確認加入字典。關掉就不跑。"
+          >
+            <FormRow label="enabled" hint="ON → 對話結束後自動偵測諧音錯字,結果放進校正盒等確認。OFF → 不跑 LLM,不產生候選。">
+              <input
+                type="checkbox"
+                checked={auditCfg.enabled}
+                onChange={(e) => saveAudit({ ...auditCfg, enabled: e.target.checked })}
+              />
+            </FormRow>
+          </Section>
           <Section
             title={t("config_tab.sections.corrections_title")}
             hint={t("config_tab.sections.corrections_hint")}
