@@ -8,6 +8,7 @@ mod annuli_supervisor;
 mod character_pack;
 mod context_provider;
 mod correction_audit_config;
+mod correction_cmd;
 mod deps;
 mod file_loader_cmd;
 // Wave 8 Gm-2 「跨界之手」 — Gmail Tauri commands(OAuth start / status / list /
@@ -5479,6 +5480,14 @@ fn main() {
             annuli_quick_enable,
             notification_config::get_notification_config,
             notification_config::set_notification_config,
+            correction_audit_config::get_correction_audit_config,
+            correction_audit_config::set_correction_audit_config,
+            correction_cmd::correction_inbox_list,
+            correction_cmd::correction_inbox_accept,
+            correction_cmd::correction_inbox_dismiss,
+            correction_cmd::correction_inbox_change_suggestion,
+            correction_cmd::voice_feedback_set,
+            correction_cmd::corrections_md_content,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
