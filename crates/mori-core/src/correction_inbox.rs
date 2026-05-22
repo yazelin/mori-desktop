@@ -199,11 +199,24 @@ pub fn list_all(path: &Path) -> Result<Vec<InboxEntry>, InboxError> {
     Ok(out)
 }
 
-/// 只回 status=Pending 的 entries。
+/// 只回真正 pending 的 entries。
+///
+/// Append-only jsonl 裡,accept/dismiss 是寫新 marker entry(新 uuid),不改舊行。
+/// 所以要先收集所有已有 non-Pending marker 的 (wrong, suggested) pair,
+/// 再過濾掉同 pair 的舊 Pending entries,讓 UI refresh 後 entry 正確消失。
 pub fn list_pending(path: &Path) -> Result<Vec<InboxEntry>, InboxError> {
-    Ok(list_all(path)?
+    let all = list_all(path)?;
+    // 先收集所有已被標 Accepted/Dismissed 的 (wrong, suggested) pair
+    let resolved: std::collections::HashSet<(String, String)> = all
+        .iter()
+        .filter(|e| !matches!(e.status, InboxStatus::Pending))
+        .map(|e| (e.wrong.clone(), e.suggested.clone()))
+        .collect();
+    // 回 status=Pending 且 (wrong, suggested) 不在 resolved set 內的 entries
+    Ok(all
         .into_iter()
         .filter(|e| matches!(e.status, InboxStatus::Pending))
+        .filter(|e| !resolved.contains(&(e.wrong.clone(), e.suggested.clone())))
         .collect())
 }
 
@@ -344,5 +357,59 @@ mod tests {
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].suggested, "Y");
         assert_eq!(groups[1].suggested, "X");
+    }
+
+    #[test]
+    fn list_pending_excludes_pair_after_accepted_marker() {
+        let (_dir, path) = tmp_path();
+        // 1. Pending entry
+        let pending = InboxEntry::new_pending("s1", InboxSource::LlmAudit, "英檔", "音檔", 0.8, "");
+        append_entry(&path, &pending).unwrap();
+        assert_eq!(list_pending(&path).unwrap().len(), 1, "Pending 應該回 1");
+
+        // 2. 同 pair 加 Accepted marker
+        let mut accepted = InboxEntry::new_pending("marker", InboxSource::LlmAudit, "英檔", "音檔", 1.0, "");
+        accepted.status = InboxStatus::Accepted;
+        accepted.accepted_at = Some(Utc::now());
+        append_entry(&path, &accepted).unwrap();
+
+        // 3. list_pending 該回 0(舊 Pending 被新 Accepted marker 蓋掉)
+        assert_eq!(
+            list_pending(&path).unwrap().len(),
+            0,
+            "Pending entry for same pair should be filtered after Accepted marker exists"
+        );
+    }
+
+    #[test]
+    fn list_pending_excludes_pair_after_dismissed_marker() {
+        let (_dir, path) = tmp_path();
+        let pending = InboxEntry::new_pending("s1", InboxSource::LlmAudit, "馬當", "Markdown", 0.9, "");
+        append_entry(&path, &pending).unwrap();
+
+        let mut dismissed = InboxEntry::new_pending("marker", InboxSource::LlmAudit, "馬當", "Markdown", 0.0, "");
+        dismissed.status = InboxStatus::Dismissed;
+        dismissed.dismissed_at = Some(Utc::now());
+        append_entry(&path, &dismissed).unwrap();
+
+        assert_eq!(list_pending(&path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_pending_keeps_other_pairs_when_one_resolved() {
+        let (_dir, path) = tmp_path();
+        // 一筆 (a, X) Pending
+        append_entry(&path, &InboxEntry::new_pending("s1", InboxSource::LlmAudit, "a", "X", 0.5, "")).unwrap();
+        // 一筆 (b, Y) Pending
+        append_entry(&path, &InboxEntry::new_pending("s2", InboxSource::LlmAudit, "b", "Y", 0.5, "")).unwrap();
+        // (a, X) Accepted marker
+        let mut marker = InboxEntry::new_pending("marker", InboxSource::LlmAudit, "a", "X", 1.0, "");
+        marker.status = InboxStatus::Accepted;
+        marker.accepted_at = Some(Utc::now());
+        append_entry(&path, &marker).unwrap();
+
+        let result = list_pending(&path).unwrap();
+        assert_eq!(result.len(), 1, "另一個 pair 不該被影響");
+        assert_eq!(result[0].wrong, "b");
     }
 }
