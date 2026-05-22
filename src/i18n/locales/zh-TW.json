@@ -215,6 +215,7 @@
     "label_thinking": "想中",
     "label_done": "完成",
     "label_error": "出錯",
+    "label_dragging": "被拖中",
     "title_hint": "拖曳：移動 / 雙擊：切顯示主視窗"
   },
   "quickstart": {
