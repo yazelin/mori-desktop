@@ -13,6 +13,8 @@ sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,user imp
 ~/.mori/characters/
 ├── mori/                          ← 預設角色(app 啟動時 ensure 寫入)
 │   ├── manifest.json
+│   ├── backdrop-dark.png          ← optional,dark theme 時顯示
+│   ├── backdrop-light.png         ← optional,light theme 時顯示
 │   └── sprites/
 │       ├── idle.png                ← 1024×1024 4×4 sheet,16 frame
 │       ├── sleeping.png
@@ -62,7 +64,7 @@ sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,user imp
 
 ---
 
-## `manifest.json` schema(v1.0)
+## `manifest.json` schema(v1.x)
 
 ```json
 {
@@ -110,8 +112,41 @@ sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,user imp
 }
 ```
 
-`schema_version` 是 forward-compat 鑰匙:engine 讀到不認識的 version 會 warn
-+ 嘗試 best-effort 載入(沿用必含欄位)。將來 schema 改變時舊 pack 仍可讀。
+### Schema 版本規則
+
+`schema_version` 遵守 **1.x forward compat** 策略:
+
+- Engine 接受 `1.0`、`1.1`、`1.2` … 任何 `1.*` 版本 — 不認識的欄位 skip,缺少的 optional 欄位用預設值
+- Engine **拒絕** `2.x` 以上 — 顯示錯誤「此角色包需要更新版 Mori-desktop」
+- 舊 pack(schema 1.0)在新 engine 上永遠可讀
+
+---
+
+## Sprite states
+
+### Required(必須提供,共 6 個)
+
+| State | 用途 | loop 模式 |
+|---|---|---|
+| `idle` | 預設待機 | loop |
+| `sleeping` | 待機超時或休眠 | loop |
+| `recording` | 語音 / 文字輸入中 | loop |
+| `thinking` | LLM 處理中 | loop |
+| `done` | 回應完成,短暫慶祝 | one-shot |
+| `error` | 發生錯誤 | one-shot |
+
+### Optional(選填,共 2 個)
+
+| State | 用途 | 沒提供時的 fallback |
+|---|---|---|
+| `walking` | 角色移動到新位置時 | 無動畫,直接跳位 |
+| `dragging` | 使用者滑鼠拖拽中 | `idle.png` + CSS scale 放大 |
+
+`walking.png` 設計向**右**走即可,engine 用 CSS `transform: scaleX(-1)` 鏡像
+向左方向。**注意**:Mori 若手上有不對稱物件(如燈籠),鏡像後會「換手」
+— 通常 99% user 不會注意。要 100% 對稱,設計時讓角色雙手都拿 / 或胸前抱。
+
+`dragging.png` 建議姿勢:**腳離地、輕微擺盪、表情驚訝或開心**。
 
 ---
 
@@ -160,17 +195,66 @@ sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,user imp
 
 ---
 
-## 設計建議(給 generator app + sprite 作者)
+## Import flow
 
-### 「placeholder 階段」過渡技巧
+### `.moripack.zip` 結構
 
-開發中 sprite 還沒畫完?**16 格全填同張 frame 1**:
-- 視覺看起來靜止(每 frame 都長一樣)
-- 動畫 ON 跑兩軸 step 不會 visible jump
-- 等正式 16-frame motion sheet 上來,覆蓋同檔名就動了
+```
+<package_name>.moripack.zip
+├── manifest.json               ← 必須在 zip root
+├── sprites/
+│   ├── idle.png
+│   ├── sleeping.png
+│   ├── recording.png
+│   ├── thinking.png
+│   ├── done.png
+│   ├── error.png
+│   └── (optional) walking.png / dragging.png
+├── backdrop-dark.png           ← optional
+└── backdrop-light.png          ← optional
+```
 
-`character_upgrade_pack_to_4x4(stem)` IPC 把 single-frame 256×256 PNG 升 1024×1024
-就用這策略(Config tab → Floating section →「升級此 pack 為 4×4 placeholder」按鈕)。
+### 操作路徑
+
+Config tab → Floating sub-tab → Character → **「匯入 .moripack.zip」** 按鈕
+
+### 後台流程
+
+1. **驗 schema**:`schema_version` 必須是 `1.*`,否則 reject
+2. **驗 package_name**:只允許 `[a-z0-9_-]`(snake_case),且不得是 `mori`(保護預設角色)
+3. **驗 6 required sprites**:每張必須存在且為有效 PNG
+4. **驗 sprite 規格**:grid = `4x4`、total_size = `1024×1024`(寬容:4×4 構型正確即接受)
+5. **備份舊同名 pack**:若 `~/.mori/characters/<name>/` 已存在,先 rename 成
+   `<name>_backup_<timestamp>/`
+6. **Extract**:解壓到 `~/.mori/characters/<name>/`
+7. **Auto set-active**:寫 `~/.mori/characters/active` 為 `<name>`,並觸發
+   `character-changed` event → FloatingMori 即時 reload
+
+### Validation rules 摘要
+
+| 欄位 | 規則 |
+|---|---|
+| `schema_version` | 必須匹配 `^1\\.` |
+| `package_name` | `[a-z0-9_-]+`,不得為 `mori` |
+| `grid` | 必須為 `"4x4"` |
+| `total_size` | 必須為 `"1024x1024"` |
+| required sprites | `idle` / `sleeping` / `recording` / `thinking` / `done` / `error` 全部存在 |
+| 每張 PNG | 有效 PNG 格式 |
+
+---
+
+## Migration 保護
+
+**既有 `~/.mori/characters/mori/` 永遠不被 import 覆蓋。**
+
+import 流程拒絕 `package_name = "mori"` 的 zip。預設角色由 app 啟動時 ensure
+寫入(只要比較 bundled hash,需要時覆蓋),不受 user import 操作影響。
+
+User import 只會建立 / 更新 `mori/` 以外的目錄。
+
+---
+
+## 設計建議(給 sprite 作者)
 
 ### Frame 之間連續性
 
@@ -184,37 +268,28 @@ One-shot 模式(done / error):
 - engine 跑完一輪停在 frame 16(`animation-iteration-count: 1, fill-mode: forwards`,
   目前未啟用 — 一律 infinite。Future commit 接)
 
-### Walk sprite 左右問題
-
-`walking.png` 設計向**右**走即可,engine 用 CSS `transform: scaleX(-1)` 鏡像
-向左方向。**注意**:Mori 若手上有不對稱物件(如燈籠),鏡像後會「換手」
-— 通常 99% user 不會注意。要 100% 對稱,設計時讓角色雙手都拿 / 或胸前抱。
-
-### Dragging sprite
-
-被滑鼠拎起來的視覺。引擎在 user 滑鼠按住 + 拖曳超過 4px 時切到此 state。
-建議姿勢:**腳離地、輕微擺盪、表情驚訝或開心**。沒設計就走 fallback 顯示
-idle.png + CSS scale 變大效果。
-
 ---
 
-## Import / Export(下版做)
+## Creating character packs
 
-Future:
-- ConfigTab Floating section 加「Import character pack」按鈕讀 `.moripack.zip`
-- 「Export」按鈕把當前 active pack 打包成 `.moripack.zip`(含 manifest.json +
-  sprites/ + 選填 README.md)
-- Validate CLI:`mori validate-pack <path>` 給 generator app 整合驗證
-- 規範 `.moripack.zip` 結構即 ~/.mori/characters/<name>/ 內檔,壓縮 distribute
+**Mori Sprite Studio** 是 yazelin 開發的可視化 character pack 編輯器,直接輸出
+符合規格的 `.moripack.zip`(4×4 1024×1024 sprite sheet + manifest.json + backdrop)。
+
+- Repo:https://github.com/yazelin/mori-sprite-studio
+- 輸出格式:`.moripack.zip`(可直接拖入 Mori-desktop 匯入)
+- 無需手動組裝目錄結構或跑任何轉換腳本
+
+手工製作角色包也完全支援,只要符合上述規格即可。
 
 ---
 
 ## 給角色設計師的快速開始
 
 1. **參考 default mori**:`~/.mori/characters/mori/` 抓 manifest 結構 + sprite size
-2. **設計 6 個 state**:每張 1024×1024 4×4(16 frame,frame 1 = static rest pose)
-3. **複製目錄結構**:`~/.mori/characters/<your-pack>/manifest.json` + sprites/
-4. **重啟 mori-desktop**:Config tab → Floating → Character picker 看到你的 pack
-5. **切到該 pack**:`character-changed` event 觸發 FloatingMori 即時 reload sprite
+2. **設計 6 個 required state**:每張 1024×1024 4×4(16 frame,frame 1 = static rest pose)
+3. **選填 2 個 optional state**:walking / dragging(沒有走 fallback,不強制)
+4. **打包成 `.moripack.zip`**:zip root 放 manifest.json + sprites/ + 選填 backdrop-*.png
+5. **匯入**:Config tab → Floating → Character → 「匯入 .moripack.zip」
+6. **自動切到新角色**:`character-changed` event 觸發 FloatingMori 即時 reload sprite
 
 完成。
