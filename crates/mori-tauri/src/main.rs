@@ -25,6 +25,11 @@ mod x11_shape;
 #[cfg_attr(target_os = "windows", path = "selection_windows.rs")]
 mod selection;
 mod shell_skill;
+// Wave 6 DF-1:Anthropic skills install commands(`install_anthropic_skills_cmd` /
+// `anthropic_skills_status_cmd`)+ internal helpers。對比 deps.rs 內的
+// `anthropic-skills` DepSpec(走 InstallSpec::Shell git clone),這個 module 是
+// 更乾淨的 Rust path(不 spawn sh,直接 git clone + 明確錯誤 chain)。
+mod skill_install_cmd;
 mod skill_server;
 mod recordings;
 mod soul_distribution;
@@ -5210,6 +5215,10 @@ fn main() {
             reminders_cmd::snooze_reminder_cmd,
             mcp_cmd::mcp_list_tools_cmd,
             mcp_cmd::mcp_call_tool_cmd,
+            // Wave 6 DF-1:Anthropic skills install commands。前端可選用(也可走
+            // DepsTab 內的 `anthropic-skills` entry)— 兩條路徑 install 結果一致。
+            skill_install_cmd::install_anthropic_skills_cmd,
+            skill_install_cmd::anthropic_skills_status_cmd,
             transcribe_cmds::transcribe_check_deps,
             transcribe_cmds::transcribe_file_cmd,
             transcribe_cmds::transcribe_paths_cmd,

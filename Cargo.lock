@@ -3020,6 +3020,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-single-instance",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
