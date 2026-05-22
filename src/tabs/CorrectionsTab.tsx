@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconCheck, IconClose } from "../icons";
 import "./corrections-tab.css";
 
 type InboxVariant = {
@@ -108,7 +109,7 @@ function CorrectionsTab() {
 
       <section className="corrections-section">
         <h2>
-          🔔 校正盒
+          校正盒
           {groups.length > 0 && (
             <span className="corrections-count">({groups.length} 個 pending)</span>
           )}
@@ -160,7 +161,7 @@ function CorrectionsTab() {
                           disabled={isBusy}
                           onClick={() => onAccept(group, editingValue)}
                         >
-                          ✓ 接受新建議
+                          <IconCheck width={12} height={12} /> 接受新建議
                         </button>
                         <button
                           disabled={isBusy}
@@ -178,7 +179,7 @@ function CorrectionsTab() {
                     ) : (
                       <>
                         <button disabled={isBusy} onClick={() => onAccept(group)}>
-                          ✓ 接受
+                          <IconCheck width={12} height={12} /> 接受
                         </button>
                         <button
                           disabled={isBusy}
@@ -189,7 +190,7 @@ function CorrectionsTab() {
                           改建議
                         </button>
                         <button disabled={isBusy} onClick={() => onDismiss(group)}>
-                          ✗ 忽略
+                          <IconClose width={12} height={12} /> 忽略
                         </button>
                       </>
                     )}
@@ -202,7 +203,7 @@ function CorrectionsTab() {
       </section>
 
       <section className="corrections-section">
-        <h2>📖 字典 corrections.md</h2>
+        <h2>字典 corrections.md</h2>
         <pre className="corrections-md-viewer">{corrections || "(空)"}</pre>
       </section>
     </div>

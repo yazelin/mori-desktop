@@ -3963,6 +3963,100 @@ async fn run_agent_pipeline(
                 rec.finalize();
             }
 
+            // Correction audit — Agent mode 也跑一次 background LLM,把可能諧音錯字
+            // 候選寫進 inbox。Agent mode 沒有 raw/cleaned 兩個版本,兩邊都傳同一條
+            // transcript(LLM 仍可走 corrections.md 模糊匹配 + 語義推測)。
+            // 失敗 silent(僅 log + event_log),不擋 agent pipeline。
+            {
+                let cfg = correction_audit_config::CorrectionAuditConfig::load(
+                    &mori_dir().join("config.json"),
+                );
+                if cfg.enabled {
+                    let raw = transcript.clone();
+                    let cleaned = transcript.clone(); // Agent mode 無 cleanup step,用 raw 當 cleaned
+                    let session_id = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+                    let corrections_md_path = mori_dir().join("corrections.md");
+                    let inbox_path = mori_dir().join("correction_inbox.jsonl");
+
+                    tauri::async_runtime::spawn(async move {
+                        let routing = match mori_core::llm::Routing::build_from_config(None) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::warn!(?e, "correction_audit(agent): routing build failed, skip");
+                                return;
+                            }
+                        };
+                        let provider = routing.skill_provider("correction_audit");
+
+                        let corrections_md =
+                            std::fs::read_to_string(&corrections_md_path).unwrap_or_default();
+
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_started",
+                            "session_id": session_id,
+                            "pipeline": "agent",
+                        }));
+
+                        match mori_core::correction_audit::audit(
+                            provider,
+                            &raw,
+                            &cleaned,
+                            &corrections_md,
+                        )
+                        .await
+                        {
+                            Ok(candidates) => {
+                                let mut written = 0usize;
+                                for c in &candidates {
+                                    let is_dismissed = mori_core::correction_inbox::is_dismissed(
+                                        &inbox_path,
+                                        &c.wrong,
+                                        &c.suggested,
+                                    )
+                                    .unwrap_or(false);
+                                    if is_dismissed {
+                                        continue;
+                                    }
+                                    let entry =
+                                        mori_core::correction_inbox::InboxEntry::new_pending(
+                                            &session_id,
+                                            mori_core::correction_inbox::InboxSource::LlmAudit,
+                                            &c.wrong,
+                                            &c.suggested,
+                                            c.confidence,
+                                            &c.reason,
+                                        );
+                                    if let Err(e) = mori_core::correction_inbox::append_entry(
+                                        &inbox_path,
+                                        &entry,
+                                    ) {
+                                        tracing::warn!(?e, "correction_audit(agent): append inbox entry failed");
+                                        continue;
+                                    }
+                                    written += 1;
+                                }
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "correction_audit_completed",
+                                    "session_id": session_id,
+                                    "pipeline": "agent",
+                                    "candidates_total": candidates.len(),
+                                    "candidates_written": written,
+                                }));
+                            }
+                            Err(e) => {
+                                tracing::warn!(?e, "correction_audit(agent) failed");
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "correction_audit_failed",
+                                    "session_id": session_id,
+                                    "pipeline": "agent",
+                                    "error": format!("{e:#}"),
+                                }));
+                            }
+                        }
+                    });
+                }
+            }
+
             state.set_phase(
                 &app,
                 Phase::Done {

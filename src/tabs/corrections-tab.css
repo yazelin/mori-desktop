@@ -1,13 +1,15 @@
 .corrections-tab {
   padding: 16px;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
-  color: var(--text-color, #f1eee0);
+  color: var(--fg);
+  background: var(--bg);
 }
 
 .corrections-error {
-  background: rgba(200, 80, 80, 0.2);
-  border: 1px solid rgba(200, 80, 80, 0.5);
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid var(--error);
+  color: var(--error);
   padding: 8px 12px;
   border-radius: 6px;
   margin-bottom: 12px;
@@ -20,19 +22,18 @@
 .corrections-section h2 {
   font-size: 16px;
   margin: 0 0 12px 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+  color: var(--fg);
 }
 
 .corrections-count {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--fg-dim);
   font-weight: normal;
+  margin-left: 8px;
 }
 
 .corrections-empty {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--fg-dim);
   font-style: italic;
 }
 
@@ -46,8 +47,8 @@
 }
 
 .corrections-inbox-row {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
@@ -56,7 +57,7 @@
 }
 
 .corrections-inbox-row.is-user-edit {
-  border-color: rgba(201, 162, 77, 0.4);
+  border-color: var(--accent);
 }
 
 .corrections-row-head {
@@ -68,30 +69,30 @@
 
 .corrections-suggested {
   font-weight: 600;
-  color: #c9a24d;
+  color: var(--accent);
   font-size: 15px;
 }
 
 .corrections-suggested-edit {
-  background: rgba(255, 255, 255, 0.08);
-  color: inherit;
-  border: 1px solid rgba(201, 162, 77, 0.6);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--accent);
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 14px;
 }
 
 .corrections-arrow {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--fg-dim);
 }
 
 .corrections-variants {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--fg);
 }
 
 .corrections-count-badge {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--fg-dim);
   margin-left: 2px;
 }
 
@@ -102,17 +103,21 @@
 }
 
 .corrections-row-actions button {
-  background: rgba(255, 255, 255, 0.08);
-  color: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 10px;
   cursor: pointer;
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .corrections-row-actions button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--bg-panel);
+  border-color: var(--accent);
 }
 
 .corrections-row-actions button:disabled {
@@ -120,12 +125,20 @@
   cursor: not-allowed;
 }
 
+.corrections-overflow-chip {
+  font-size: 11px;
+  color: var(--fg-dim);
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 .corrections-md-viewer {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
   border-radius: 6px;
   padding: 12px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   white-space: pre-wrap;
   max-height: 60vh;
