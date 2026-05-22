@@ -218,6 +218,10 @@ impl ReminderService {
                     due_at = %r.due_at,
                     "auto-dismissed super-overdue reminder (> 7d) — skipping fire to avoid spam"
                 );
+                // TODO(follow-up): log `reminder_auto_dismiss` event to mori_core::event_log
+                // here. Currently blocked because mori-time cannot depend on mori-core
+                // (cross-crate boundary). Options: move event_log to a leaf util crate, or
+                // pass an event callback through EventEmitter trait. Tracking: feat/reminder-popup.
                 continue;
             }
             if let Err(e) = scheduler.schedule(r).await {

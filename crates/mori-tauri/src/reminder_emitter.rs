@@ -40,6 +40,15 @@ impl EventEmitter for TauriEventEmitter {
             "TauriEventEmitter: about to emit reminder-fire-show to popup window",
         );
 
+        mori_core::event_log::append(serde_json::json!({
+            "kind": "reminder_fire",
+            "reminder_id": reminder.id,
+            "text": reminder.text,
+            "due_at": reminder.due_at.to_rfc3339(),
+            "fired_at": reminder.fired_at.map(|t| t.to_rfc3339()),
+            "popup_enabled": true,
+        }));
+
         // 加在 emit_to 前:記錄 popup window 狀態,診斷 setPosition/setSize 是否生效
         use tauri::Manager;
         if let Some(popup_win) = self.handle.get_webview_window("reminder_popup") {
@@ -70,6 +79,14 @@ impl EventEmitter for TauriEventEmitter {
             .emit_to("reminder_popup", "reminder-fire-show", payload)
             .map_err(|e| e.to_string());
         tracing::info!(?result, "emit_to reminder-fire-show result");
+
+        mori_core::event_log::append(serde_json::json!({
+            "kind": "reminder_popup_emit",
+            "reminder_id": reminder.id,
+            "ok": result.is_ok(),
+            "error": result.as_ref().err().map(|e| e.as_str()),
+        }));
+
         result
     }
 }

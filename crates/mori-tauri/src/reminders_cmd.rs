@@ -156,7 +156,13 @@ pub async fn reminder_dismiss(
     svc: tauri::State<'_, Arc<ReminderService>>,
 ) -> Result<(), String> {
     let store = svc.store.lock().await;
-    store.mark_dismissed(id, Utc::now()).map_err(|e| e.to_string())
+    let result = store.mark_dismissed(id, Utc::now()).map_err(|e| e.to_string());
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "reminder_dismiss",
+        "reminder_id": id,
+        "ok": result.is_ok(),
+    }));
+    result
 }
 
 /// `reminder_snooze(id, minutes)` — popup [稍後 N 分] 用。
@@ -168,10 +174,18 @@ pub async fn reminder_snooze(
     minutes: u32,
     svc: tauri::State<'_, Arc<ReminderService>>,
 ) -> Result<(), String> {
-    svc.reschedule_fired_reminder(id, minutes as i64)
+    let result = svc
+        .reschedule_fired_reminder(id, minutes as i64)
         .await
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "reminder_reschedule",
+        "original_id": id,
+        "delay_minutes": minutes,
+        "ok": result.is_ok(),
+    }));
+    result
 }
 
 // ─────────────────────────────────────────────────────────────────────
