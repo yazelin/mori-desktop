@@ -13,6 +13,7 @@ pub mod agent;
 pub mod agent_profile;
 pub mod annuli;
 pub mod context;
+pub mod correction_audit;
 pub mod correction_inbox;
 pub mod corrections;
 pub mod corrections_writer;
