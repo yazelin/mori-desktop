@@ -47,5 +47,11 @@ mori-file-loader = { path = "../mori-file-loader" }
 # scheduler / notify-rust / chrono-english,跟 mori-core 各自獨立)。
 mori-time = { path = "../mori-time" }
 
+# Wave 6 MCP-2:`McpToolSkill` 把 mori-mcp::McpRegistry 暴露的 MCP tool 包成
+# Skill trait,LLM 對 Mori 講「幫我用 GitHub 查 issues」就會走這條 dispatch path。
+# 純 path dep — mori-mcp 是 leaf crate(只依 rmcp / serde / tokio / tracing),
+# 不 depend mori-core,無 cycle 風險。
+mori-mcp = { path = "../mori-mcp" }
+
 [dev-dependencies]
 tempfile = "3"

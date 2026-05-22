@@ -193,6 +193,11 @@ mod remind_me;
 // https://agentskills.io/specification。D-light(只讀 body,不執行 scripts/)。
 pub mod anthropic_skill;
 
+// Wave 6 MCP-2:把 mori-mcp::McpRegistry 暴露的 MCP tool 包成 Skill trait,
+// LLM 可以透過 SkillRegistry::dispatch reach 到外部 MCP server。
+// `name()` 格式 `mcp_<server>_<tool>`,避免跟既有 skill collision。
+mod mcp_tool;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -214,6 +219,8 @@ pub use remind_me::RemindMeSkill;
 pub use anthropic_skill::{
     discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicSkill,
 };
+
+pub use mcp_tool::McpToolSkill;
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 
