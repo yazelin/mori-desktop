@@ -68,7 +68,7 @@ use mori_core::skill::{
     RecallMemorySkill, RememberSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
     SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
-use mori_time::{Notifier, ReminderService};
+use mori_time::{NoopEmitter, Notifier, ReminderService};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -5271,6 +5271,7 @@ fn main() {
         tauri::async_runtime::block_on(ReminderService::new(
             &reminders_db_path,
             Notifier::new("Mori"),
+            Arc::new(NoopEmitter), // Task 5 換成真實的 TauriEventEmitter
         ))
         .unwrap_or_else(|e| {
             panic!(

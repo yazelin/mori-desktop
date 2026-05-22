@@ -113,14 +113,14 @@ mod tests {
     //! Notifier 在 CI 沒 dbus 會 fire-err,但 service callback 內部只 log warn,
     //! `do_*` helpers 不會受影響(我們只測 happy + error paths,不等 fire)。
     use super::*;
-    use mori_time::Notifier;
+    use mori_time::{NoopEmitter, Notifier};
     use tempfile::TempDir;
 
     async fn make_test_service(dir: &TempDir) -> Arc<ReminderService> {
         let db = dir.path().join("test.db");
         let notifier = Notifier::new("MoriTauriTest");
         Arc::new(
-            ReminderService::new(&db, notifier)
+            ReminderService::new(&db, notifier, Arc::new(NoopEmitter))
                 .await
                 .expect("new service"),
         )
