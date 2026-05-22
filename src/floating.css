@@ -153,12 +153,12 @@ html[data-theme-base="light"] .mori-backdrop {
 
 .mori-aura {
   position: absolute;
-  /* Window is 200×200. Aura 160 + blur 8 means the visual halo
-     extends to ~176px diameter at scale 1, leaving ~12px on each
-     side. At max animation scale 1.1 → 176 + blur 8 = ~192px,
-     just inside the window with no clip. */
-  width: 160px;
-  height: 160px;
+  /* Window is 200×200. Aura 130 + blur 8 means the visual halo
+     extends to ~146px diameter at scale 1, leaving ~27px on each
+     side(從 window 200 邊緣)。Sprite 也 130 — aura 跟 sprite 同 size
+     讓光暈剛好圍 sprite。 */
+  width: 130px;
+  height: 130px;
   border-radius: 50%;
   pointer-events: none;
   opacity: 0;
