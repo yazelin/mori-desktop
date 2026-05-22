@@ -156,7 +156,38 @@ impl ReminderService {
         // 4) Reload pending — restart 後把 DB 裡未完成的 reminder 重新 schedule。
         //    用 due_at vs now 判斷:過去的 one-shot 立刻觸發(scheduler 內部處理)。
         let pending = store.lock().await.list_pending()?;
+        let now = Utc::now();
+        let grace_cutoff = now - chrono::Duration::days(7);
         for r in &pending {
+            // 2026-05-22:超過 7 天的 overdue one-shot reminder 自動標 dismissed,
+            // 不再 fire,避免 user 久未開 app 後被 spam。cron 不適用(週期性永遠不算 overdue)。
+            let is_super_overdue = r.cron_expr.is_none() && r.due_at < grace_cutoff;
+            if is_super_overdue {
+                let store_guard = store.lock().await;
+                let when = Utc::now();
+                if let Err(e) = store_guard.mark_fired(r.id, when) {
+                    tracing::warn!(
+                        reminder_id = r.id,
+                        error = %e,
+                        "failed to auto-mark super-overdue as fired"
+                    );
+                    continue;
+                }
+                if let Err(e) = store_guard.mark_dismissed(r.id, when) {
+                    tracing::warn!(
+                        reminder_id = r.id,
+                        error = %e,
+                        "failed to auto-mark super-overdue as dismissed"
+                    );
+                }
+                tracing::info!(
+                    reminder_id = r.id,
+                    text = %r.text,
+                    due_at = %r.due_at,
+                    "auto-dismissed super-overdue reminder (> 7d) — skipping fire to avoid spam"
+                );
+                continue;
+            }
             if let Err(e) = scheduler.schedule(r).await {
                 tracing::warn!(
                     reminder_id = r.id,
@@ -531,6 +562,44 @@ mod tests {
         }
         let after = svc.store.lock().await.get(r.id).unwrap();
         assert_eq!(after.status, ReminderStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn startup_auto_dismisses_super_overdue_reminders() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let db = dir.path().join("r.db");
+
+        // 先用一個 service 寫一筆 8 天前 overdue + status=Pending
+        {
+            let store = ReminderStore::open(&db).expect("open");
+            let past = Utc::now() - chrono::Duration::days(8);
+            store.create("stale".to_string(), past, None).expect("create");
+            // 不 mark_fired,留 Pending,模擬 user 一週多沒開 app
+        }
+
+        // 開 service → reload-pending 應該把 8 天前的標 dismissed_at + Fired
+        let _svc = ReminderService::new(&db, Notifier::new("Mori-Test"))
+            .await
+            .expect("service");
+        // 留一點時間給 1ms 觸發 + spawn task 處理 mark_fired 完成
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let store = ReminderStore::open(&db).expect("reopen");
+        let queue = store
+            .list_active_popup_queue(Utc::now())
+            .expect("list active");
+        assert!(queue.is_empty(), "super-overdue reminder should be auto-dismissed, not on popup queue");
+
+        // 而 status 應該是 fired(走完正常 fire path),dismissed_at 也填了
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT status, dismissed_at FROM reminders WHERE text = 'stale'")
+            .unwrap();
+        let (status, dismissed_at): (String, Option<String>) = stmt
+            .query_row([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(status, "fired", "super-overdue should be marked Fired");
+        assert!(dismissed_at.is_some(), "super-overdue should be marked dismissed");
     }
 
     #[tokio::test]
