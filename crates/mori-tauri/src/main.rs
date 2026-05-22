@@ -15,6 +15,7 @@ mod file_loader_cmd;
 mod gmail_cmd;
 mod hotkey_config;
 mod mcp_cmd;
+mod notification_config;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
