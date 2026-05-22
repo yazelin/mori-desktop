@@ -5432,6 +5432,8 @@ fn main() {
             wake_word_restart_listener,
             annuli_runtime_installed,
             annuli_quick_enable,
+            notification_config::get_notification_config,
+            notification_config::set_notification_config,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
@@ -5461,10 +5463,18 @@ fn main() {
                 }
             }
             let app_handle_for_emitter = app.handle().clone();
+            // 2026-05-22:讀 notification config,設定 notifier 的 os_notification_enabled 開關。
+            let notification_cfg =
+                notification_config::NotificationConfig::load(&mori_dir().join("config.json"));
+            let notifier = Notifier::new("Mori");
+            notifier
+                .enabled
+                .store(notification_cfg.os_notification_enabled, std::sync::atomic::Ordering::Relaxed);
+            let notifier_enabled_handle = notifier.enabled_handle();
             let reminder_service: Arc<ReminderService> = Arc::new(
                 tauri::async_runtime::block_on(ReminderService::new(
                     &reminders_db_path,
-                    Notifier::new("Mori"),
+                    notifier,
                     std::sync::Arc::new(reminder_emitter::TauriEventEmitter {
                         handle: app_handle_for_emitter,
                     }),
@@ -5483,6 +5493,9 @@ fn main() {
             // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
             // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
             app.manage(reminder_service);
+            // 2026-05-22:把 notifier enabled handle 存進 Tauri State,
+            // set_notification_config command 可透過 State 推 os_notification_enabled toggle。
+            app.manage(notifier_enabled_handle);
 
             // Wave 8 Gm-2「跨界之手」:GmailClient 若啟動時 init 成功就註冊到 Manager;
             // None 就跳過(Gmail OAuth 還沒跑),Gmail skill registry 那邊也會看 try_state

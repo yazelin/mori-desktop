@@ -21,6 +21,8 @@
 
 use crate::schema::Reminder;
 use notify_rust::Notification;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Notifier 發通知時可能出的錯。
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +51,9 @@ pub struct Notifier {
     /// 或 absolute path;Windows/macOS 多半 ignore。`None` = 不設,讓 desktop env
     /// 用 default。
     icon_path: Option<String>,
+    /// 2026-05-22:OS 桌面通知開關。caller(mori-tauri)持同一 Arc,
+    /// 在 user 切 toggle 時更新。fire() 先檢查再走 .show()。
+    pub enabled: Arc<AtomicBool>,
 }
 
 impl Notifier {
@@ -57,7 +62,13 @@ impl Notifier {
         Self {
             app_name: app_name.into(),
             icon_path: None,
+            enabled: Arc::new(AtomicBool::new(true)),
         }
+    }
+
+    /// 取得共用的 enabled flag handle,給 caller 切 toggle 用。
+    pub fn enabled_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.enabled)
     }
 
     /// Builder:設 icon 路徑 / freedesktop icon 名。
@@ -81,6 +92,14 @@ impl Notifier {
     /// summary 用 reminder text、body 是 "Mori 提醒你"。會真的呼叫 `.show()`,
     /// 在沒 dbus / 沒 display 的環境會 Err。
     pub fn fire(&self, reminder: &Reminder) -> Result<(), NotifyError> {
+        // 2026-05-22:os_notification_enabled toggle off → 直接 Ok 不發送
+        if !self.enabled.load(Ordering::Relaxed) {
+            tracing::debug!(
+                reminder_id = reminder.id,
+                "notifier.fire skipped — os_notification_enabled toggle off"
+            );
+            return Ok(());
+        }
         let n = self.build_for_reminder(reminder);
         Self::show(&n)
     }
@@ -224,5 +243,14 @@ mod tests {
         assert_eq!(built.summary, "吃藥");
         assert_eq!(built.body, "別忘記吃晚餐後的藥");
         assert_eq!(built.appname, "Mori");
+    }
+
+    #[test]
+    fn fire_returns_ok_when_disabled() {
+        // enabled=false 時 fire() return Ok 而不 attempt dbus
+        let n = Notifier::new("Mori-Test");
+        n.enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+        let r = sample_reminder("disabled-test");
+        assert!(n.fire(&r).is_ok());
     }
 }

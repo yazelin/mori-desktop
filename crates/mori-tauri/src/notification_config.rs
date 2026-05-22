@@ -65,6 +65,30 @@ impl NotificationConfig {
     }
 }
 
+/// 取得目前的通知 toggle 設定。
+#[tauri::command]
+pub fn get_notification_config() -> NotificationConfig {
+    NotificationConfig::load(&crate::mori_dir().join("config.json"))
+}
+
+/// 寫入通知 toggle 設定,並同步推進 notifier os_notification_enabled flag。
+///
+/// popup_enabled 是 read-on-call(emitter 每次 fire 都讀 config.json),
+/// os_notification_enabled 透過 AtomicBool State 即時推進 Notifier。
+#[tauri::command]
+pub fn set_notification_config(
+    cfg: NotificationConfig,
+    notifier_enabled: tauri::State<'_, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<(), String> {
+    cfg.write(&crate::mori_dir().join("config.json"))?;
+    // 同步推進 notifier flag(popup_enabled emitter 是 read-on-call 不用推)
+    notifier_enabled.store(
+        cfg.os_notification_enabled,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

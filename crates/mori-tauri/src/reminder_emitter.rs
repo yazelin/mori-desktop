@@ -22,6 +22,17 @@ struct ReminderFirePayload<'a> {
 
 impl EventEmitter for TauriEventEmitter {
     fn emit_reminder_fire(&self, reminder: &Reminder) -> Result<(), String> {
+        // 讀當前設定 — load 是 read-on-call,user 切 toggle 即時生效
+        let cfg = crate::notification_config::NotificationConfig::load(
+            &crate::mori_dir().join("config.json"),
+        );
+        if !cfg.popup_enabled {
+            tracing::debug!(
+                reminder_id = reminder.id,
+                "skip popup emit — popup_enabled toggle off"
+            );
+            return Ok(());
+        }
         let payload = ReminderFirePayload {
             id: reminder.id,
             text: &reminder.text,
