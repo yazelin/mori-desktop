@@ -233,13 +233,16 @@ mod tests {
             .expect("create cron reminder");
         sched.schedule(&r).await.expect("schedule cron ok");
 
-        // 等 3 秒,該觸發 ≥ 2 次
-        tokio::time::sleep(StdDuration::from_millis(3200)).await;
+        // 等 5 秒,該觸發 ≥ 2 次。
+        // 之前是 3.2s 期望 ≥2 次 — tokio-cron-scheduler 的 worker tick 是 500ms,
+        // 第一次 fire 可能要等 0.5-1.5s 才落到 worker,慢 CI(尤其 cold cargo run)
+        // 第二次 fire 卡到 3s 邊界很常見。延到 5s 留充裕 margin,assert 邏輯不變。
+        tokio::time::sleep(StdDuration::from_secs(5)).await;
 
         let n_fires = log.lock().unwrap().len();
         assert!(
             n_fires >= 2,
-            "expected ≥2 cron fires, got {n_fires}"
+            "expected ≥2 cron fires in 5s, got {n_fires}"
         );
 
         sched.shutdown().await.expect("shutdown ok");
