@@ -265,6 +265,43 @@ impl ReminderStore {
         }
         Ok(())
     }
+
+    /// 標 reminder 為 user 已 dismiss(從 popup 點 [關閉] 後寫入)。
+    /// 寫入時間,reminder.status 不動(`Fired` 不變),只是 popup 不再列出。
+    pub fn mark_dismissed(&self, id: i64, at: DateTime<Utc>) -> Result<(), ReminderError> {
+        let affected = self.conn.execute(
+            "UPDATE reminders SET dismissed_at = ?1 WHERE id = ?2",
+            params![at.to_rfc3339(), id],
+        )?;
+        if affected == 0 {
+            return Err(ReminderError::NotFound(id));
+        }
+        Ok(())
+    }
+
+    /// 給 in-app popup 用的 active queue:
+    /// - status = Fired
+    /// - dismissed_at IS NULL
+    /// - fired_at > now - 7 days(grace,超過自動忽略,不再 popup)
+    /// 排序 fired_at DESC(最新先)。
+    pub fn list_active_popup_queue(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Reminder>, ReminderError> {
+        let grace_cutoff = now - chrono::Duration::days(7);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
+             FROM reminders
+             WHERE status = 'fired'
+               AND dismissed_at IS NULL
+               AND fired_at > ?1
+             ORDER BY fired_at DESC",
+        )?;
+        let rows = stmt.query_map(params![grace_cutoff.to_rfc3339()], row_to_reminder)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(ReminderError::from)
+            .and_then(|v| v.into_iter().collect::<Result<Vec<_>, _>>())
+    }
 }
 
 /// 把 sqlite row 拆成 `Reminder`。回傳 nested Result 因為 status 解析可能失敗。
@@ -493,5 +530,41 @@ mod tests {
             .create("test".to_string(), Utc::now(), None)
             .expect("create");
         assert!(r.dismissed_at.is_none(), "new reminder dismissed_at should be None");
+    }
+
+    #[test]
+    fn mark_dismissed_sets_timestamp() {
+        let store = ReminderStore::open_in_memory().expect("open");
+        let r = store
+            .create("hello".to_string(), Utc::now(), None)
+            .expect("create");
+        store.mark_fired(r.id, Utc::now()).expect("mark fired");
+        let when = Utc::now();
+        store.mark_dismissed(r.id, when).expect("mark dismissed");
+        let got = store.get(r.id).expect("get");
+        assert!(got.dismissed_at.is_some(), "dismissed_at should be Some after mark_dismissed");
+    }
+
+    #[test]
+    fn list_active_popup_queue_filters_dismissed_and_super_overdue() {
+        let store = ReminderStore::open_in_memory().expect("open");
+        let now = Utc::now();
+        let week_plus_one = now - chrono::Duration::days(8);
+        let recent = now - chrono::Duration::minutes(5);
+
+        // 一筆 7 天前 fired 沒 dismiss → 不算 active(超過 grace)
+        let stale = store.create("stale".to_string(), week_plus_one, None).unwrap();
+        store.mark_fired(stale.id, week_plus_one).unwrap();
+        // 一筆 5 分鐘前 fired 沒 dismiss → active
+        let active = store.create("active".to_string(), recent, None).unwrap();
+        store.mark_fired(active.id, recent).unwrap();
+        // 一筆 fired + dismissed → 不算 active
+        let done = store.create("done".to_string(), recent, None).unwrap();
+        store.mark_fired(done.id, recent).unwrap();
+        store.mark_dismissed(done.id, now).unwrap();
+
+        let queue = store.list_active_popup_queue(now).expect("list");
+        let ids: Vec<i64> = queue.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![active.id], "only the recent unsmissed reminder should appear");
     }
 }
