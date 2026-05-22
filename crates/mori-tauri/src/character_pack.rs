@@ -108,13 +108,52 @@ pub fn backdrop_path(stem: &str, theme: &str) -> PathBuf {
 }
 
 /// 啟動時:確保 ~/.mori/characters/mori/ 存在 + 寫入 bundled 內容。
-/// 已存在的 manifest.json 不覆蓋(尊重 user state)。
+///
+/// 行為:
+/// - 完全沒 manifest → fresh install,extract 整個 bundled pack
+/// - 既有 manifest → 尊重 user state(不覆蓋既有 manifest / sprites — user 可能改過)
+/// - 但**補寫缺檔**:既有 mori/ 缺 `backdrop-light.png` / `backdrop-dark.png` 等新規格檔
+///   → 從 bundled extract 對應檔(因 backdrop 是新加 schema,舊 user 沒有,
+///   想看新版自帶 backdrop 不該要 user rm -rf 整個 mori/)
 pub fn ensure_default() -> Result<()> {
     let dir = pack_dir(DEFAULT_PACKAGE_NAME);
-    if manifest_path(DEFAULT_PACKAGE_NAME).exists() {
+    if !manifest_path(DEFAULT_PACKAGE_NAME).exists() {
+        // fresh install:全 extract
+        extract_bundled_default_pack(&dir)?;
         return Ok(());
     }
-    extract_bundled_default_pack(&dir)?;
+    // 既有 user state:只補寫缺檔(不動 manifest + 既有 sprites)
+    backfill_missing_bundled_files(&dir)?;
+    Ok(())
+}
+
+/// 對既有 character pack 目錄補寫 bundled 內有但目錄沒的檔(skip 已存在的)。
+/// 不動 manifest.json — 假設既有 user state 想保留。
+fn backfill_missing_bundled_files(dir: &Path) -> Result<()> {
+    backfill_dir_recursively(&BUNDLED_DEFAULT_PACK, dir)
+}
+
+fn backfill_dir_recursively(src: &include_dir::Dir<'_>, dest: &Path) -> Result<()> {
+    for file in src.files() {
+        let rel_path = file.path();
+        // 跳過 manifest.json(user 可能改過)
+        if rel_path == Path::new("manifest.json") {
+            continue;
+        }
+        let out_path = dest.join(rel_path);
+        if out_path.exists() {
+            continue; // 既有檔不覆蓋
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&out_path, file.contents())
+            .with_context(|| format!("backfill {}", out_path.display()))?;
+        tracing::info!(path = %out_path.display(), "character_pack: backfilled missing bundled file");
+    }
+    for subdir in src.dirs() {
+        backfill_dir_recursively(subdir, dest)?;
+    }
     Ok(())
 }
 
