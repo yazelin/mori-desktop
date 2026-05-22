@@ -15,6 +15,7 @@ pub mod annuli;
 pub mod context;
 pub mod correction_inbox;
 pub mod corrections;
+pub mod corrections_writer;
 pub mod evaluator;
 pub mod event_log;
 pub mod installed_apps;
