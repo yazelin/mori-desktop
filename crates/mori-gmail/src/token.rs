@@ -71,6 +71,17 @@ impl GmailToken {
         self.expires_at <= threshold
     }
 
+    /// 此 token 是否包含某個 OAuth scope。Google 在 token endpoint 回的 `scope`
+    /// 欄位是 **space-separated 完整 URL**(eg
+    /// `"https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send"`),
+    /// 我們直接 split-whitespace + 等值比對。
+    ///
+    /// Gm-2 在 `SendGmailSkill::execute` 進場前先 check `has_scope(GMAIL_SEND_SCOPE)`,
+    /// false 就回 "需要重新 OAuth" 給 LLM,LLM 再轉達給 user。
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.scope.split_whitespace().any(|s| s == scope)
+    }
+
     /// 從 disk load。檔案不存在 → [`TokenError::Io`](kind = NotFound);
     /// 內容不合 JSON → [`TokenError::Json`]。
     pub fn load(path: &Path) -> Result<Self, TokenError> {
@@ -166,6 +177,23 @@ mod tests {
             token.is_expired(),
             "within-30s expiry should be flagged as expired (buffer)"
         );
+    }
+
+    #[test]
+    fn has_scope_detects_individual_scope_in_space_separated_list() {
+        let mut t = sample_token(Utc::now() + Duration::hours(1));
+        // 單一 scope
+        t.scope = "https://www.googleapis.com/auth/gmail.readonly".into();
+        assert!(t.has_scope("https://www.googleapis.com/auth/gmail.readonly"));
+        assert!(!t.has_scope("https://www.googleapis.com/auth/gmail.send"));
+
+        // 雙 scope(Gm-2 升級後)
+        t.scope = "https://www.googleapis.com/auth/gmail.readonly \
+                   https://www.googleapis.com/auth/gmail.send"
+            .into();
+        assert!(t.has_scope("https://www.googleapis.com/auth/gmail.readonly"));
+        assert!(t.has_scope("https://www.googleapis.com/auth/gmail.send"));
+        assert!(!t.has_scope("https://www.googleapis.com/auth/gmail.compose"));
     }
 
     #[test]

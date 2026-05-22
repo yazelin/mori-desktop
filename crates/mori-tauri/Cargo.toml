@@ -27,6 +27,12 @@ mori-time = { path = "../mori-time" }
 # dispatch tool call;mcp_cmd.rs 內的 Tauri commands 也 share 同一份。
 # 純 leaf crate(只 depend rmcp / serde / tokio / tracing),無 cycle 風險。
 mori-mcp = { path = "../mori-mcp" }
+# Wave 8 Gm-2 「跨界之手」 — mori-gmail::GmailClient + OAuth flow。Tauri 端啟動時
+# 嘗試從 ~/.mori/gmail-config.json + ~/.mori/gmail-token.json 建一份 client(沒設
+# 就 skip,Gmail skill 不註冊)。`gmail_cmd.rs` 提供 OAuth start / status / list /
+# read / send 等 Tauri commands;`SharedGmailClient`(mori-core)註冊進 Tauri
+# Manager,Gmail 系列 skill 共用同一份 Arc<Mutex<GmailClient>>。
+mori-gmail = { path = "../mori-gmail" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
@@ -129,3 +135,6 @@ custom-protocol = ["tauri/custom-protocol"]
 [dev-dependencies]
 # Wave 4 annuli_config tests 用 NamedTempFile 寫測試用 config.json
 tempfile = "3"
+# Wave 8 Gm-2:`gmail_cmd::tests` 走 wiremock mock Gmail REST endpoint,
+# 對齊 mori-gmail / mori-core 內部 client tests 風格。
+wiremock = "0.6"

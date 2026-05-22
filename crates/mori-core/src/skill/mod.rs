@@ -212,6 +212,12 @@ pub mod python_runner;
 // `name()` 格式 `mcp_<server>_<tool>`,避免跟既有 skill collision。
 mod mcp_tool;
 
+// Wave 8 Gm-2「跨界之手」:Gmail 系列 skill — `list_gmail` / `read_gmail` /
+// `send_gmail`。共用一份 `Arc<Mutex<mori_gmail::GmailClient>>`,Tauri 端啟動時
+// 從 `~/.mori/gmail-config.json` + `~/.mori/gmail-token.json` 建,沒 init 成功
+// 整組 skill 都不註冊(LLM 看不到工具)。
+pub mod gmail;
+
 pub use echo::EchoSkill;
 pub use edit::EditMemorySkill;
 pub use forget::ForgetMemorySkill;
@@ -237,6 +243,8 @@ pub use anthropic_skill::{
 };
 
 pub use mcp_tool::McpToolSkill;
+
+pub use gmail::{ListGmailSkill, ReadGmailSkill, SendGmailSkill, SharedGmailClient};
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 

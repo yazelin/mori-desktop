@@ -45,6 +45,12 @@ use crate::token::{home_dir, GmailToken, TokenError};
 /// Gm-1 唯一 scope。Gm-2 接 send 時會擴成 `"gmail.readonly gmail.send"`。
 pub const GMAIL_READONLY_SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
 
+/// Gm-2 升 scope:`gmail.send`(POST /messages/send 需要)。
+pub const GMAIL_SEND_SCOPE: &str = "https://www.googleapis.com/auth/gmail.send";
+
+/// Gm-2 預設組合 scope — readonly + send。Mori 對 Gmail 的標準授權集合。
+pub const GMAIL_DEFAULT_SCOPES: &[&str] = &[GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE];
+
 /// Google OAuth2 endpoints。獨立常數方便測試時改寫(client 層走 mock server)。
 pub const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -136,18 +142,20 @@ struct TokenResponse {
 /// `state` 是 caller 提供的 CSRF token,callback 必須回相同 state。Caller 自己生
 /// 隨機字串(不在這層引 rand crate)。
 ///
-/// Scope 由 caller 控制(Gm-1 固定 [`GMAIL_READONLY_SCOPE`])— 留參數以便 Gm-2
-/// 升 scope 時不用改 API。
-pub fn build_auth_url(config: &OAuthConfig, scope: &str, state: &str) -> String {
+/// Scopes 由 caller 控制 — Gm-1 用 `[GMAIL_READONLY_SCOPE]`,Gm-2 升級成
+/// `[GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE]`(也就是 `GMAIL_DEFAULT_SCOPES`)。
+/// Google 對 scope 的格式是 single string、space-separated;這層把 slice join 起來。
+pub fn build_auth_url(config: &OAuthConfig, scopes: &[&str], state: &str) -> String {
     // 標準 OAuth2 query。`access_type=offline` 才會回 refresh_token;
     // `prompt=consent` 強制每次都跑 consent UI(避免 user 已給過 readonly 但要升 scope 時
     // Google 跳過 consent)。Gm-1 兩者都加,Gm-2 升 scope 也照樣 work。
+    let scope_joined = scopes.join(" ");
     let mut url = Url::parse(GOOGLE_AUTH_URL).expect("hard-coded URL must parse");
     url.query_pairs_mut()
         .append_pair("client_id", &config.client_id)
         .append_pair("redirect_uri", &config.redirect_uri)
         .append_pair("response_type", "code")
-        .append_pair("scope", scope)
+        .append_pair("scope", &scope_joined)
         .append_pair("access_type", "offline")
         .append_pair("prompt", "consent")
         .append_pair("state", state);
@@ -215,7 +223,7 @@ fn redirect_port(redirect_uri: &str) -> Result<u16, OAuthError> {
 pub async fn run_oauth_flow(
     config: &OAuthConfig,
     expected_state: &str,
-    scope: &str,
+    scopes: &[&str],
 ) -> Result<GmailToken, OAuthError> {
     let port = redirect_port(&config.redirect_uri)?;
     let expected_state_owned = expected_state.to_string();
@@ -233,7 +241,9 @@ pub async fn run_oauth_flow(
     })??;
 
     // 2. exchange code → token
-    exchange_code(config, &code, scope).await
+    //    scope 在 exchange_code 內目前用不到(Google 從 authorization code 自身解出
+    //    granted scope),參數保留供未來 PKCE / scope-down-grade 場景擴用。
+    exchange_code(config, &code, scopes).await
 }
 
 /// 阻塞等 listener 接到第一筆 callback,parse code,回應 user 一頁簡單 HTML 後關 socket。
@@ -327,7 +337,7 @@ fn callback_response_body(message: &str) -> String {
 async fn exchange_code(
     config: &OAuthConfig,
     code: &str,
-    _scope: &str,
+    _scopes: &[&str],
 ) -> Result<GmailToken, OAuthError> {
     exchange_code_at(config, code, GOOGLE_TOKEN_URL).await
 }
@@ -457,7 +467,7 @@ mod tests {
             client_secret: "secret".into(),
             redirect_uri: "http://localhost:8765/oauth/callback".into(),
         };
-        let url = build_auth_url(&cfg, GMAIL_READONLY_SCOPE, "state-abc");
+        let url = build_auth_url(&cfg, &[GMAIL_READONLY_SCOPE], "state-abc");
 
         // 不假設 query order,只 assert 必要參數都在。
         assert!(url.starts_with(GOOGLE_AUTH_URL), "url: {url}");
@@ -474,6 +484,26 @@ mod tests {
         assert!(
             url.contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly"),
             "url should contain encoded scope: {url}"
+        );
+    }
+
+    #[test]
+    fn build_auth_url_joins_multi_scope_with_space() {
+        let cfg = OAuthConfig {
+            client_id: "cid".into(),
+            client_secret: "secret".into(),
+            redirect_uri: "http://localhost:8765/oauth/callback".into(),
+        };
+        let url = build_auth_url(&cfg, GMAIL_DEFAULT_SCOPES, "s");
+
+        // 兩個 scope 用 `+`(url-encoded space)分隔。
+        // Order = caller-provided slice order → readonly first, send second。
+        assert!(
+            url.contains(
+                "scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly+\
+                 https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send"
+            ),
+            "url should contain both scopes joined with space: {url}"
         );
     }
 

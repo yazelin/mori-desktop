@@ -987,6 +987,51 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
         },
+        // Wave 8 Gm-2「跨界之手」:Gmail 整合 OAuth setup。check 看 token 檔是否存在
+        // ;install 是 manual 引導(user 需要在 Google Cloud Console 自建 OAuth client,
+        // 沒辦法 one-click — Mori 不能用 yazelin 的 client_id 代收 token,違反
+        // user-owned data 原則)。Tauri command `gmail_oauth_start_cmd` 跑 listener,
+        // 但 client_id / client_secret 必須先擺進 ~/.mori/gmail-config.json。
+        DepSpec {
+            id: "gmail-oauth",
+            name: "Gmail OAuth(跨界之手)",
+            description: "Gmail 整合 — 代亞澤讀 / 發 email。需 user 自己在 Google Cloud \
+                          Console 建 OAuth client(Desktop type),拿到 client_id / \
+                          client_secret 後寫進 ~/.mori/gmail-config.json,Mori 重啟跑 \
+                          gmail_oauth_start_cmd 觸發 consent flow。**沒有中央 OAuth \
+                          relay** — token 直接放 user 本機,Mori binary 跟 Google 直連。",
+            unlocks: "list_gmail / read_gmail / send_gmail LLM skill + Tauri commands",
+            size_hint: None,
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "OAuth flow 需要瀏覽器 — Mori 會 spawn localhost:8765 接 callback。\
+                 第一次 consent 需要 user 在 Google Cloud Console「OAuth 同意畫面」加\
+                 自己 email 為 test user(否則 Google 拒絕陌生 client)。",
+            ),
+            check: CheckSpec::File {
+                path_template: "$HOME/.mori/gmail-token.json",
+            },
+            check_overrides: &[
+                ("windows", CheckSpec::File {
+                    path_template: "$USERPROFILE\\.mori\\gmail-token.json",
+                }),
+            ],
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# 1. 開 https://console.cloud.google.com → 建 project → 啟用 Gmail API",
+                    "# 2. 「API 與服務」→ 「OAuth 同意畫面」→ 加你自己 email 為 test user",
+                    "# 3. 「憑證」→ 建 OAuth 用戶端 → Desktop app type → 下載 JSON",
+                    "# 4. 改名 ~/.mori/gmail-config.json,內容改成這格式:",
+                    "#    {\"client_id\":\"...\", \"client_secret\":\"...\", \
+                       \"redirect_uri\":\"http://localhost:8765/oauth/callback\"}",
+                    "# 5. 重啟 Mori,跑 Tauri command gmail_oauth_start_cmd(前端 \
+                       OAuth 按鈕 / 或開 devtools invoke『gmail_oauth_start_cmd』)",
+                    "# 6. 瀏覽器跑完 consent → token 自動存 ~/.mori/gmail-token.json",
+                ],
+            },
+            install_overrides: &[],
+        },
     ]
 }
 

@@ -9,6 +9,10 @@ mod character_pack;
 mod context_provider;
 mod deps;
 mod file_loader_cmd;
+// Wave 8 Gm-2 「跨界之手」 — Gmail Tauri commands(OAuth start / status / list /
+// get / send)+ 啟動時 try-init GmailClient(沒 config / 沒 token 就 skip,Gmail
+// 系列 skill 不註冊)。對齊既有 `reminders_cmd` / `file_loader_cmd` 模組風格。
+mod gmail_cmd;
 mod hotkey_config;
 mod mcp_cmd;
 #[cfg(target_os = "linux")]
@@ -59,9 +63,10 @@ use mori_core::mode::{Mode, ModeController};
 use mori_core::paste::PasteController;
 use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
-    ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill, PolishSkill,
-    ReadFileSkill, ReadWikiPageSkill, RecallMemorySkill, RememberSkill, RemindMeSkill,
-    SetModeSkill, SkillRegistry, SummarizeSkill, TranslateSkill,
+    ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill,
+    ListGmailSkill, PolishSkill, ReadFileSkill, ReadGmailSkill, ReadWikiPageSkill,
+    RecallMemorySkill, RememberSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
+    SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_time::{Notifier, ReminderService};
 use mori_core::{PHASE, VERSION};
@@ -2170,6 +2175,14 @@ async fn skills_list(
     if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
     }
+    // Wave 8 Gm-2「跨界之手」— Gmail skill。SharedGmailClient 是 optional state
+    // (沒 OAuth / token 沒裝 → 撈不到,Gmail skill 不出現在 Skills tab)。
+    if let Some(shared) = app.try_state::<SharedGmailClient>() {
+        let client = shared.0.clone();
+        registry.register(Arc::new(ListGmailSkill::new(client.clone())));
+        registry.register(Arc::new(ReadGmailSkill::new(client.clone())));
+        registry.register(Arc::new(SendGmailSkill::new(client)));
+    }
     // Wave 7 L-mori 記憶之森:read_wiki_page LLM skill — UI Skills tab 也要列出。
     // vault_root 跟 spirit_name 從 annuli config 拿(spirit_name 預設 "mori"),
     // vault_root 失敗(沒 HOME)→ 跳過註冊(LLM 拿不到 skill,但 UI 不爆)。
@@ -3439,6 +3452,46 @@ async fn run_agent_pipeline(
             }
         }
 
+        // Wave 8 Gm-2「跨界之手」— Gmail 工具描述。只在 SharedGmailClient init 成功
+        // 時注入(避免 LLM 看到沒法用的 tool)。對齊 wiki / MCP block 的 caller-append
+        // pattern(build_system_prompt 不知道 mori-gmail 存在)。
+        if app.try_state::<SharedGmailClient>().is_some() {
+            system_prompt.push_str(
+                "\n\n# Gmail 工具(跨界之手,Wave 8 Gm-2)\n\n",
+            );
+            system_prompt.push_str(
+                "我可以代亞澤讀 / 發 email。OAuth 已設好(token 在 `~/.mori/gmail-token.json`)。\n\n",
+            );
+            system_prompt.push_str(
+                "- `list_gmail(query?, max?)`:列我最近的 thread。`query` 可用 Gmail \
+                 搜尋語法(`is:unread`、`from:alice`、`subject:meeting`、`after:2026/01/01`)。\
+                 預設 max=10。\n",
+            );
+            system_prompt.push_str(
+                "- `read_gmail(thread_id)`:展開某條 thread 全文(`thread_id` 通常從 \
+                 `list_gmail` 結果拿)。\n",
+            );
+            system_prompt.push_str(
+                "- `send_gmail(to, subject, body, reply_to_thread_id?, in_reply_to?)`:\
+                 寄信(或回某條 thread)。**destructive — 寄出收不回**,寫之前先口頭跟亞澤確認內容。\
+                 需要 `gmail.send` scope;沒授權會回 error 提示重跑 OAuth。\n\n",
+            );
+            system_prompt.push_str(
+                "使用守則:\n",
+            );
+            system_prompt.push_str(
+                "- 亞澤講「看一下我今天 email」/「有沒有 X 的信」→ 先 `list_gmail` 拿 \
+                 thread summary,挑相關的講給他聽。\n",
+            );
+            system_prompt.push_str(
+                "- 亞澤講「那封展開來看」/「details」→ `read_gmail(thread_id)` 拉全文後摘要。\n",
+            );
+            system_prompt.push_str(
+                "- 亞澤講「幫我回 X」/「寫信給 Y」→ **先草擬內容跟他確認**,確認後才 \
+                 `send_gmail`。回 thread 時帶 `reply_to_thread_id`。\n\n",
+            );
+        }
+
         // Wave 6 MCP-2:把目前連上的 MCP server / tool 描述附加到 system prompt 末尾。
         // - 不動 `build_system_prompt` 簽名,改在 caller append(讓 mori-core 不知道
         //   mori-mcp 存在,layer 維持乾淨)。
@@ -3606,6 +3659,23 @@ async fn run_agent_pipeline(
                 registry.register(Arc::new(mori_core::skill::RemindMeSkill::new(
                     svc.inner().clone(),
                 )));
+            }
+        }
+        // Wave 8 Gm-2「跨界之手」— Gmail 系列 skill dispatch path。SharedGmailClient
+        // 是 Tauri Manager 註冊的 optional state(沒 OAuth / token 沒裝 → 整組
+        // skip,LLM 看不到 Gmail 工具)。對齊 `RemindMeSkill` 的 try_state pattern;
+        // 全部受 `allows()` filter(agent profile 可逐 skill 過濾 / agent_disabled
+        // 整盤 false)。
+        if let Some(shared) = app.try_state::<SharedGmailClient>() {
+            let client = shared.0.clone();
+            if allows("list_gmail") {
+                registry.register(Arc::new(ListGmailSkill::new(client.clone())));
+            }
+            if allows("read_gmail") {
+                registry.register(Arc::new(ReadGmailSkill::new(client.clone())));
+            }
+            if allows("send_gmail") {
+                registry.register(Arc::new(SendGmailSkill::new(client)));
             }
         }
         // set_mode 永遠註冊(「晚安」「醒醒」是核心功能,無法被 disable)
@@ -5239,6 +5309,20 @@ fn main() {
         "McpRegistry ready (Wave 6 MCP-2)",
     );
 
+    // Wave 8 Gm-2「跨界之手」:啟動時 try-init GmailClient(沒 config / 沒 token
+    // 就 None,Gmail 系列 skill 不註冊;Gmail 對外 commands `gmail_oauth_start_cmd`
+    // 仍可呼叫,讓 user 跑首次 consent)。
+    let gmail_client: Option<SharedGmailClient> =
+        tauri::async_runtime::block_on(gmail_cmd::init_gmail_client_optional());
+    if gmail_client.is_some() {
+        tracing::info!("Gmail client initialised (Wave 8 Gm-2 — token present)");
+    } else {
+        tracing::info!(
+            "Gmail client NOT initialised — Gmail skills disabled. \
+             Run `gmail_oauth_start_cmd` after creating ~/.mori/gmail-config.json.",
+        );
+    }
+
     tauri::Builder::default()
         // 5J-followup: 防止 mori-tauri orphan + 新實例並存的搶 tray / hotkey 戰。
         // 第二個 instance 啟動時觸發此 callback:把焦點還給第一個然後自殺。
@@ -5339,6 +5423,12 @@ fn main() {
             reminders_cmd::snooze_reminder_cmd,
             mcp_cmd::mcp_list_tools_cmd,
             mcp_cmd::mcp_call_tool_cmd,
+            // Wave 8 Gm-2「跨界之手」— Gmail Tauri commands(OAuth + list / get / send)。
+            gmail_cmd::gmail_oauth_start_cmd,
+            gmail_cmd::gmail_oauth_status_cmd,
+            gmail_cmd::gmail_list_threads_cmd,
+            gmail_cmd::gmail_get_thread_cmd,
+            gmail_cmd::gmail_send_cmd,
             // Wave 6 DF-1:Anthropic skills install commands。前端可選用(也可走
             // DepsTab 內的 `anthropic-skills` entry)— 兩條路徑 install 結果一致。
             skill_install_cmd::install_anthropic_skills_cmd,
@@ -5385,6 +5475,14 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // Wave 8 Gm-2「跨界之手」:GmailClient 若啟動時 init 成功就註冊到 Manager;
+            // None 就跳過(Gmail OAuth 還沒跑),Gmail skill registry 那邊也會看 try_state
+            // 撈不到就 skip。OAuth start command 仍可呼叫,user 跑完 → 重啟 Mori → init OK。
+            if let Some(client) = gmail_client.clone() {
+                app.manage(client);
+                tracing::info!("SharedGmailClient registered into Tauri Manager");
+            }
+
             // brand-3: ensure ~/.mori/themes/ + 內建 dark.json / light.json
             // 啟動時寫入(已存在則保留 user 編輯)
             if let Err(e) = crate::theme::ensure_builtin() {
