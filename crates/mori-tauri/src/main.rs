@@ -1803,11 +1803,46 @@ fn character_get_active() -> Result<(String, crate::character_pack::CharacterMan
 }
 
 #[tauri::command]
-fn character_set_active(stem: String) -> Result<crate::character_pack::CharacterManifest, String> {
+fn character_set_active(
+    app: tauri::AppHandle,
+    stem: String,
+) -> Result<crate::character_pack::CharacterManifest, String> {
     crate::character_pack::set_active(&stem).map_err(|e| format!("set active: {e:#}"))?;
     let m = crate::character_pack::load_manifest(&stem)
         .map_err(|e| format!("load manifest {stem}: {e:#}"))?;
+    // 2026-05-23:emit 給 FloatingMori reload sprite + backdrop,無需重啟
+    let _ = app.emit("character-changed", &stem);
     Ok(m)
+}
+
+/// 從 zip 檔匯入角色包,完成後自動 set_active 切換到新角色。
+///
+/// `zip_path` 是本機絕對路徑(frontend 透過 file picker 取得)。
+/// 成功後 emit:
+///   - `character-pack-imported` (payload: CharacterEntry)
+///   - `character-changed`       (payload: stem string)
+/// 並寫 event_log 供 LogsTab 顯示。
+#[tauri::command]
+fn character_pack_import_zip(
+    app: tauri::AppHandle,
+    zip_path: String,
+) -> Result<crate::character_pack::CharacterEntry, String> {
+    let bytes = std::fs::read(&zip_path).map_err(|e| format!("read zip: {e}"))?;
+    let entry =
+        crate::character_pack::import_zip(&bytes).map_err(|e| e.to_string())?;
+    // import 完自動 set_active(spec §4.5 success flow — UI 預期 import 後立刻顯示新角色)
+    crate::character_pack::set_active(&entry.stem)
+        .map_err(|e| format!("set_active after import: {e}"))?;
+    let _ = app.emit("character-pack-imported", &entry);
+    let _ = app.emit("character-changed", &entry.stem);
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "character_pack_imported",
+        "stem": entry.stem,
+        "display_name": entry.display_name,
+        "author": entry.author,
+        "version": entry.version,
+    }));
+    Ok(entry)
 }
 
 /// 讀 sprite 檔成 data URL(`data:image/png;base64,...`)讓 frontend `<img>` /
@@ -5666,6 +5701,7 @@ fn main() {
             character_list,
             character_get_active,
             character_set_active,
+            character_pack_import_zip,
             character_sprite_data_url,
             character_dir,
             file_loader_cmd::read_file_text_cmd,
