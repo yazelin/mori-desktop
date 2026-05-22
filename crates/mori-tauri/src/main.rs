@@ -10,6 +10,7 @@ mod context_provider;
 mod deps;
 mod file_loader_cmd;
 mod hotkey_config;
+mod mcp_cmd;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
@@ -2187,6 +2188,17 @@ async fn skills_list(
     for skill in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
         registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
     }
+    // Wave 6 MCP-2:把已 connect 的 MCP server 提供的所有 tool 都列進 UI 的
+    // SkillsTab。registry / all_tools 失敗只 log,不擋 UI 顯示其他 skill。
+    if let Some(mcp_reg) = app.try_state::<Arc<mori_mcp::McpRegistry>>() {
+        let mcp_arc = mcp_reg.inner().clone();
+        for tool in mcp_arc.all_tools().await {
+            registry.register(Arc::new(mori_core::skill::McpToolSkill::new(
+                mcp_arc.clone(),
+                tool,
+            )));
+        }
+    }
     let _ = state; // suppress unused warning (state above is only used through .memory)
 
     // 走 registry.names() 而不是 tool_definitions(),因為要拿到 Skill object
@@ -3348,11 +3360,44 @@ async fn run_agent_pipeline(
             };
             default_vault_root().and_then(|root| load_soul_content(&root, &spirit))
         };
-        let system_prompt = if body_expanded.trim().is_empty() {
+        let mut system_prompt = if body_expanded.trim().is_empty() {
             build_system_prompt(soul_text.as_deref(), &memory_index, &ctx)
         } else {
             format!("{}\n\n---\n\n{}", body_expanded, context_section)
         };
+
+        // Wave 6 MCP-2:把目前連上的 MCP server / tool 描述附加到 system prompt 末尾。
+        // - 不動 `build_system_prompt` 簽名,改在 caller append(讓 mori-core 不知道
+        //   mori-mcp 存在,layer 維持乾淨)。
+        // - 兩條 prompt branch(build_system_prompt vs body_expanded)都會吃到。
+        // - registry / all_tools 失敗只 log;沒任何 MCP tool 時整段不 emit。
+        if let Some(mcp_reg) = app.try_state::<Arc<mori_mcp::McpRegistry>>() {
+            let mcp_arc = mcp_reg.inner().clone();
+            let mcp_tools = mcp_arc.all_tools().await;
+            if !mcp_tools.is_empty() {
+                system_prompt.push_str(
+                    "\n\n# MCP 工具（外部 server,從 ~/.mori/mcp.json 連接)\n\n",
+                );
+                system_prompt.push_str(
+                    "下列工具來自外部 Model Context Protocol server(GitHub / Slack / \
+                     Notion / 自架 server 等)。呼叫格式 `mcp_<server>_<tool>(...)`,\
+                     參數依各 tool 的 schema 填。\n\n",
+                );
+                for tool in &mcp_tools {
+                    let desc = if tool.description.is_empty() {
+                        "(no description from server)"
+                    } else {
+                        tool.description.as_str()
+                    };
+                    system_prompt.push_str(&format!(
+                        "- `mcp_{}_{}`:[{}] {}\n",
+                        tool.server, tool.name, tool.server, desc
+                    ));
+                }
+                system_prompt.push('\n');
+            }
+        }
+
         tracing::debug!(
             index_chars = memory_index.chars().count(),
             history_msgs = history_snapshot.len(),
@@ -3530,6 +3575,38 @@ async fn run_agent_pipeline(
             for skill in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
                 tracing::info!(skill = %skill.name, "registering anthropic SKILL.md (prompt-augmentation)");
                 registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
+            }
+        }
+
+        // Wave 6 MCP-2:從 Tauri Manager 拿 McpRegistry Arc(main 啟動已 .manage),
+        // iterate `all_tools()` 把每個 MCP tool 包成 McpToolSkill 註冊。
+        //
+        // - `allows(&skill_name)` gate:同一條 enabled_skills filter 也作用在 MCP
+        //   tools 上,user 可以在 agent profile 內精細過濾(`mcp_github_create_issue`
+        //   等具體名)。沒設 enabled_skills 就全開。
+        // - `agent_disabled` 直接 skip:Mori 沒分到靈力,不掛任何 skill。
+        // - `all_tools()` 是 async(從每個 connected server `list_tools` RPC 拉,
+        //   但結果通常 cached) — 跟著 run_agent_pipeline 自身的 async 直接 await。
+        //   每輪 turn 重 list 一次,讓中途 reconfigure 的 MCP tool 變動能即時反映;
+        //   server fail 不影響 — discovery layer 已 graceful。
+        if !agent_disabled {
+            if let Some(mcp_reg) = app.try_state::<Arc<mori_mcp::McpRegistry>>() {
+                let mcp_arc = mcp_reg.inner().clone();
+                let mcp_tools = mcp_arc.all_tools().await;
+                for tool in mcp_tools {
+                    let skill_name = format!("mcp_{}_{}", tool.server, tool.name);
+                    if allows(&skill_name) {
+                        tracing::info!(
+                            skill = %skill_name,
+                            server = %tool.server,
+                            "registering MCP tool skill",
+                        );
+                        registry.register(Arc::new(mori_core::skill::McpToolSkill::new(
+                            mcp_arc.clone(),
+                            tool,
+                        )));
+                    }
+                }
             }
         }
 
@@ -5002,6 +5079,37 @@ fn main() {
         "ReminderService ready (時之鳥)",
     );
 
+    // Wave 6 MCP-2:啟動 McpRegistry — 從 `~/.mori/mcp.json` 載 config + 依序
+    // connect 各 server。config 不存在 / 讀失敗 / 個別 server connect 失敗都不
+    // 擋啟動(個別失敗只 log warn,registry 保留其餘成功的)。
+    //
+    // 跟 ReminderService 走同一條 `block_on` 啟動 pattern:McpRegistry::from_config
+    // 是 async(connect 每個 server 走 rmcp 的 InitializeRequest),啟動 sync main
+    // 內用 Tauri 的 async runtime 包起來跑完才繼續。
+    let mcp_config = mori_mcp::default_config_path()
+        .and_then(|p| match mori_mcp::load_config(&p) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                // 讀失敗(檔不存在 / JSON 壞 / schema 不符)只 log,空 registry 繼續。
+                // 對齊「沒裝 = 正常狀態」— user 沒寫 mcp.json 也能用 Mori 其他功能。
+                tracing::warn!(
+                    path = %p.display(),
+                    error = %e,
+                    "MCP config load failed — proceeding with empty registry",
+                );
+                None
+            }
+        })
+        .unwrap_or_default();
+    let mcp_registry: Arc<mori_mcp::McpRegistry> = Arc::new(
+        tauri::async_runtime::block_on(mori_mcp::McpRegistry::from_config(&mcp_config)),
+    );
+    tracing::info!(
+        connected = mcp_registry.connected_servers().len(),
+        configured = mcp_config.servers.len(),
+        "McpRegistry ready (Wave 6 MCP-2)",
+    );
+
     tauri::Builder::default()
         // 5J-followup: 防止 mori-tauri orphan + 新實例並存的搶 tray / hotkey 戰。
         // 第二個 instance 啟動時觸發此 callback:把焦點還給第一個然後自殺。
@@ -5016,6 +5124,9 @@ fn main() {
         // 「時之鳥」K5:把 ReminderService 註冊進 Tauri Manager。
         // commands(remind_me_cmd 等)+ RemindMeSkill 都從這裡拿 Arc clone。
         .manage(reminder_service.clone())
+        // Wave 6 MCP-2:把 McpRegistry 註冊進 Manager。
+        // mcp_cmd 內 list / call command + agent loop 內 McpToolSkill 註冊都從這裡拿 clone。
+        .manage(mcp_registry.clone())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // 轉錄頁:native file/folder picker(WebView <input type=file> 給不到絕對路徑)
@@ -5097,6 +5208,8 @@ fn main() {
             reminders_cmd::list_reminders_cmd,
             reminders_cmd::cancel_reminder_cmd,
             reminders_cmd::snooze_reminder_cmd,
+            mcp_cmd::mcp_list_tools_cmd,
+            mcp_cmd::mcp_call_tool_cmd,
             transcribe_cmds::transcribe_check_deps,
             transcribe_cmds::transcribe_file_cmd,
             transcribe_cmds::transcribe_paths_cmd,
