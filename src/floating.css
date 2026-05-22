@@ -58,41 +58,6 @@ body.floating-window.x11-fallback {
     ) !important;
   position: relative;
 }
-/* logo 模式(config: floating.x11_backplate = "logo"):疊一張 backplate PNG。
-   URL 由 React 從 CSS variable 餵 — user 自訂優先讀 ~/.mori/floating/
-   backplate-{dark,light}.png 經 base64 data URL,沒有 fallback 到 shipped
-   public/floating/backplate-x11-{dark,light}.png。fallback url 直接寫在
-   CSS variable 裡讓「沒登入 react 也能 graceful」(雖然實際不會發生)。 */
-body.floating-window.x11-fallback.backplate-logo {
-  background:
-    radial-gradient(
-      circle at 75% 80%,
-      rgba(0, 0, 0, 0.20) 0%,
-      rgba(0, 0, 0, 0.06) 40%,
-      transparent 70%
-    ),
-    var(--floating-backplate-dark, url('/floating/backplate-x11-dark.png')) center center / cover no-repeat,
-    linear-gradient(
-      135deg,
-      var(--c-page-bg) 0%,
-      var(--c-surface-bg) 100%
-    ) !important;
-}
-html[data-theme-base="light"] body.floating-window.x11-fallback.backplate-logo {
-  background:
-    radial-gradient(
-      circle at 75% 80%,
-      rgba(0, 0, 0, 0.12) 0%,
-      rgba(0, 0, 0, 0.03) 40%,
-      transparent 70%
-    ),
-    var(--floating-backplate-light, url('/floating/backplate-x11-light.png')) center center / cover no-repeat,
-    linear-gradient(
-      135deg,
-      var(--c-page-bg) 0%,
-      var(--c-surface-bg) 100%
-    ) !important;
-}
 /* X11 floating 的 border ring + 內部光暈。多層 inset shadow 模擬玻璃球
    邊緣高光、底側陰影。border-radius 跟 XShape config(circle / rounded /
    square)同步,由 React 從 config 算 --floating-shape-radius CSS variable
