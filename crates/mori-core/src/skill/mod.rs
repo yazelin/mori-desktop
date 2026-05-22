@@ -188,6 +188,10 @@ mod read_file;
 // §9 P1 「時之鳥」K5:remind_me LLM tool dispatch path — 接 mori_time::ReminderService
 mod remind_me;
 
+// 2026-05-22:remind_me_cron — 週期性 reminder(LLM 直接給 6-field cron string)。
+// 跟 remind_me 不同 path,後者吃 NL 時間給 one-shot reminder,這個吃 cron 給週期性。
+mod remind_me_cron;
+
 // Wave 7 L-mori 記憶之森(Karpathy LLM Wiki pattern):read_wiki_page LLM tool
 // dispatch path。LLM 看 system prompt 開頭的 wiki/index.md 知道 page 清單,
 // 需要時呼叫此 skill 把 specific page 內容拉進 context。**純 READ** — 寫 wiki
@@ -236,6 +240,7 @@ pub use fetch_url::FetchUrlSkill;
 pub use read_file::ReadFileSkill;
 pub use read_wiki_page::ReadWikiPageSkill;
 pub use remind_me::RemindMeSkill;
+pub use remind_me_cron::RemindMeCronSkill;
 
 pub use anthropic_skill::{
     discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicScriptSkill,

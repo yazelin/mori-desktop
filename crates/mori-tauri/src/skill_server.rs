@@ -38,7 +38,7 @@ use mori_core::context::Context as MoriContext;
 use mori_core::runtime::{generate_auth_token, RuntimeInfo};
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, ForgetMemorySkill, ListGmailSkill, PolishSkill, ReadFileSkill,
-    ReadGmailSkill, ReadWikiPageSkill, RecallMemorySkill, RememberSkill, RemindMeSkill,
+    ReadGmailSkill, ReadWikiPageSkill, RecallMemorySkill, RememberSkill, RemindMeCronSkill, RemindMeSkill,
     SendGmailSkill, SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_time::ReminderService;
@@ -161,6 +161,8 @@ async fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistr
     // (LLM 拿不到 remind_me skill,但其他不會炸)。
     if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
+        // 2026-05-22:remind_me_cron 同 ReminderService 共用 — bash-cli-agent 也要看得到
+        registry.register(Arc::new(RemindMeCronSkill::new(svc.inner().clone())));
     }
 
     // Wave 8 Gm-2 Gmail — optional state,沒設不註冊

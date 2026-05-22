@@ -67,7 +67,7 @@ use mori_core::skill::PasteSelectionBackSkill;
 use mori_core::skill::{
     ComposeSkill, EditMemorySkill, FetchUrlSkill, ForgetMemorySkill,
     ListGmailSkill, PolishSkill, ReadFileSkill, ReadGmailSkill, ReadWikiPageSkill,
-    RecallMemorySkill, RememberSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
+    RecallMemorySkill, RememberSkill, RemindMeCronSkill, RemindMeSkill, SendGmailSkill, SetModeSkill,
     SharedGmailClient, SkillRegistry, SummarizeSkill, TranslateSkill,
 };
 use mori_time::{Notifier, ReminderService};
@@ -2176,6 +2176,9 @@ async fn skills_list(
     // 不撈到時就跳過註冊,後續若 LLM 真叫 remind_me 也會吃 "unknown skill" 而非 crash)。
     if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
+        // 2026-05-22:remind_me_cron 共用同一 ReminderService(cron job 也是它管),
+        // 一起註冊。LLM 自己 NL → 6-field cron string,skill 端把 cron 餵 service。
+        registry.register(Arc::new(RemindMeCronSkill::new(svc.inner().clone())));
     }
     // Wave 8 Gm-2「跨界之手」— Gmail skill。SharedGmailClient 是 optional state
     // (沒 OAuth / token 沒裝 → 撈不到,Gmail skill 不出現在 Skills tab)。
@@ -3663,6 +3666,16 @@ async fn run_agent_pipeline(
                 )));
             }
         }
+        // 2026-05-22:remind_me_cron 跟 remind_me 同 ReminderService,但 LLM 角度是
+        // 完全不同 skill(一個 one-shot NL、一個週期性 6-field cron string),分開
+        // allows() gate 給 user 細粒度過濾。
+        if allows("remind_me_cron") {
+            if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
+                registry.register(Arc::new(mori_core::skill::RemindMeCronSkill::new(
+                    svc.inner().clone(),
+                )));
+            }
+        }
         // Wave 8 Gm-2「跨界之手」— Gmail 系列 skill dispatch path。SharedGmailClient
         // 是 Tauri Manager 註冊的 optional state(沒 OAuth / token 沒裝 → 整組
         // skip,LLM 看不到 Gmail 工具)。對齊 `RemindMeSkill` 的 try_state pattern;
@@ -4800,6 +4813,32 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
     );
     prompt.push_str(
         "  • 解析失敗(不認得時間格式)/ 過去時間會回 error message,直接告訴 user 不認得時間格式並請他換個說法\n\n",
+    );
+
+    // 2026-05-22 remind_me_cron — 週期性 reminder。LLM 自己 NL → 6-field cron string。
+    // 一次性 reminder 走 remind_me;「每天 / 每週 / 每月」「每隔 N 分」這類週期性走這個。
+    prompt.push_str("**remind_me_cron(text, cron)**:設週期性提醒(cron schedule)。\n");
+    prompt.push_str(
+        "  • 觸發:user 說「每天 8 點提醒我喝水」「每週一 9 點提醒我開會」「每月 1 號提醒我繳費」「每隔 30 分提醒我站起來」這類**週期性**\n",
+    );
+    prompt.push_str("  • text:要提醒的內容(短句),跟 remind_me 同\n");
+    prompt.push_str(
+        "  • cron:**6-field** cron expression(秒在前):`sec min hour day month weekday`。\
+         你自己從 user 的中文 / 英文時間描述生 cron string。\n",
+    );
+    prompt.push_str("  • 範例對照:\n");
+    prompt.push_str("    - 每天 8 點 → `0 0 8 * * *`\n");
+    prompt.push_str("    - 每天早上 8 點半 → `0 30 8 * * *`\n");
+    prompt.push_str("    - 每週一 9 點 → `0 0 9 * * 1`(週日 = 0,週一 = 1,週日也可用 7)\n");
+    prompt.push_str("    - 每週末 14:30(週六+週日)→ `0 30 14 * * 0,6`\n");
+    prompt.push_str("    - 每月 1 號 0 點 → `0 0 0 1 * *`\n");
+    prompt.push_str("    - 每 30 分 → `0 */30 * * * *`\n");
+    prompt.push_str("    - 每小時整點 → `0 0 * * * *`\n");
+    prompt.push_str(
+        "  • 一次性提醒(「等等」「明天 9 點」之類)走 `remind_me` 不要用 cron\n",
+    );
+    prompt.push_str(
+        "  • cron 格式錯會回 error,看 error message 自己修(常見錯:5-field 漏秒、weekday 寫成 7 但 schedule 不接、月份用文字而非數字)\n\n",
     );
 
     prompt.push_str(
