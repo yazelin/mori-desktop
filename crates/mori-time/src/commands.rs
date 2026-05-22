@@ -104,12 +104,29 @@ impl ReminderService {
             // scheduler。詳見模組 doc。
             tokio::spawn(async move {
                 // K3:發桌面通知。失敗 log warn,不 throw。
-                if let Err(e) = notifier_inner.fire(&reminder) {
-                    tracing::warn!(
+                //
+                // **必須走 spawn_blocking**:`notify_rust::Notification::show()` 在 Linux
+                // 內部跑 dbus async client → 自己 build 一個 tokio Runtime。如果直接在
+                // 既有 tokio worker thread 內呼叫,會 panic
+                // 「Cannot start a runtime from within a runtime」。
+                // 觀察點:tokio-1.52.2 multi_thread/mod.rs:91。
+                let reminder_for_blk = reminder.clone();
+                let fire_result = tokio::task::spawn_blocking(move || {
+                    notifier_inner.fire(&reminder_for_blk)
+                })
+                .await;
+                match fire_result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::warn!(
                         reminder_id = reminder.id,
                         error = %e,
                         "notifier.fire failed (reminder still mark_fired)",
-                    );
+                    ),
+                    Err(join_err) => tracing::warn!(
+                        reminder_id = reminder.id,
+                        error = %join_err,
+                        "notifier.fire spawn_blocking join failed",
+                    ),
                 }
                 // 一次性 reminder:fire 後 store 標 Fired。週期性(cron)保留 Pending。
                 if reminder.cron_expr.is_none() {
