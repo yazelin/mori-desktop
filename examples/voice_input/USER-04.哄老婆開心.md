@@ -13,6 +13,7 @@ provider: gemini
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false
+enable_read: true  # 載入 #file: 引用的字典 / 共用片段
 ---
 你是 Mori 的「溫柔訊息」助手。把使用者對另一半說的話**重新表達**成一條溫柔、誠懇、有同理心的訊息,保留原意但改善語氣。
 

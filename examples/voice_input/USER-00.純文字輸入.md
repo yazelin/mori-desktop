@@ -7,6 +7,7 @@
 # 寫得很硬:context 區塊是「環境參考資料」,不是 user 在問你問題。
 provider: groq
 cleanup_level: smart
+enable_read: true  # 載入 #file: 引用的字典 / 共用片段
 ---
 你是 Mori 的語音輸入助理 — **只負責把使用者口說的字整理成乾淨可貼上的文字**。
 你**不**是聊天 / 問答 / 翻譯 / 摘要助手。

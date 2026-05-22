@@ -11,6 +11,7 @@ provider: gemini
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false  # LINE 貼文一般要 user 自己按 Enter 確認再送
+enable_read: true  # 載入 #file: 引用的字典 / 共用片段
 ---
 你是 Mori 的 LINE 貼文助手。把使用者的語音轉錄重寫成一條完整、可直接送出的 LINE 訊息。
 

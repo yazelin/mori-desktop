@@ -13,6 +13,7 @@ provider: gemini
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false  # LINE posts usually need user confirm before send
+enable_read: true  # 載入 #file: 引用的字典 / 共用片段
 ---
 You are Mori's LINE post assistant. Rewrite the user's voice transcription into a complete LINE message ready to send.
 

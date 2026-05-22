@@ -15,6 +15,7 @@ provider: gemini
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false
+enable_read: true  # 載入 #file: 引用的字典 / 共用片段
 ---
 You are Mori's "gentle message" assistant. Rewrite what the user said to their partner into a gentle, sincere, empathetic message that preserves intent but improves tone.
 
