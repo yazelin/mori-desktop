@@ -30,7 +30,9 @@
     "recording": "loop",
     "thinking": "loop",
     "done": "one-shot",
-    "error": "one-shot"
+    "error": "one-shot",
+    "walking": "loop",
+    "dragging": "loop"
   },
   "loop_durations_ms": {
     "idle": 3000,
@@ -38,7 +40,9 @@
     "recording": 1500,
     "thinking": 2000,
     "done": 1000,
-    "error": 2000
+    "error": 2000,
+    "walking": 1500,
+    "dragging": 1600
   },
   "sprite_spec": {
     "format": "PNG-32",
