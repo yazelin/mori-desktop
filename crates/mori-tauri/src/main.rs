@@ -7,6 +7,7 @@ mod annuli_config;
 mod annuli_supervisor;
 mod character_pack;
 mod context_provider;
+mod correction_audit_config;
 mod deps;
 mod file_loader_cmd;
 // Wave 8 Gm-2 「跨界之手」 — Gmail Tauri commands(OAuth start / status / list /
