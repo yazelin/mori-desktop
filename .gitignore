@@ -54,3 +54,6 @@ crates/mori-tauri/icons/StoreLogo.png
 crates/mori-tauri/icons/icon.icns
 crates/mori-tauri/icons/android/
 crates/mori-tauri/icons/ios/
+
+# Local git worktrees (created via superpowers:using-git-worktrees)
+.worktrees/
