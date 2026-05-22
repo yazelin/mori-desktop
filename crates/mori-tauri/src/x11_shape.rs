@@ -10,7 +10,7 @@
 //! through。Compositor 不參與,沒 AA、沒半透明,完全避開 WebKit 問題。
 //!
 //! 實作:用 [`shape_rectangles`] 把目標形狀拆成水平 scanline rectangles 逼近。
-//! 圓 160×160 → 160 條 1px-tall rectangles,每條 width = 2 × sqrt(r² - dy²)。
+//! 圓 200×200 → 200 條 1px-tall rectangles,每條 width = 2 × sqrt(r² - dy²)。
 //! X server 端組合成 region,效能 OK(一次性 setup 不是每幀)。
 
 use anyhow::{Context as _, Result};
@@ -176,10 +176,10 @@ mod tests {
 
     #[test]
     fn circle_scanlines_count() {
-        let rects = circle_scanlines(80.0, 80.0, 80.0, 160);
-        // 整圓垂直跨 160 行,中間每行都有 rect,邊緣 row 可能因為 dx≈0 被
-        // 過濾。預期 ~160 條,不能少於 100。
-        assert!(rects.len() > 100, "got {} rects", rects.len());
+        let rects = circle_scanlines(100.0, 100.0, 100.0, 200);
+        // 整圓垂直跨 200 行,中間每行都有 rect,邊緣 row 可能因為 dx≈0 被
+        // 過濾。預期 ~200 條,不能少於 120。
+        assert!(rects.len() > 120, "got {} rects", rects.len());
     }
 
     #[test]

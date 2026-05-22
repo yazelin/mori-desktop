@@ -17,7 +17,7 @@ body.floating-window {
   margin: 0;
   padding: 0;
   /* 5J: 跟著 window 的實際大小走(FloatingMori.tsx 會 setSize):
-     idle = 160×160,有 chat bubble 時拉到 360 寬 + 動態高 */
+     idle = 200×200,有 chat bubble 時拉到 360 寬 + 動態高 */
   width: 100vw;
   height: 100vh;
   background: transparent !important;
@@ -80,7 +80,7 @@ body.floating-window.x11-fallback::before {
     inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-/* X11 上強制 sprite-area 置中 — 原本 fixed top-left 假設 window 剛好 160×160,
+/* X11 上強制 sprite-area 置中 — 原本 fixed top-left 假設 window 剛好 200×200,
    但 mutter 對 transparent+decorationless 視窗的 inner/outer size 有時差幾 px,
    sprite 就跑位。translate(-50%,-50%) 配 top/left 50% 不管 body 大小都置中。 */
 body.floating-window.x11-fallback .mori-sprite-area {
@@ -90,7 +90,7 @@ body.floating-window.x11-fallback .mori-sprite-area {
 }
 /* X11 上 floating 是 XShape 圓形 clip — chip 在 top:4 那麼上方圓很窄(~50px)
    會被切。下移到圓較寬處 + 配合圓的弧度橫向延伸,完整可見。
-   top:30 處圓內寬 ~125px(dx = sqrt(80²-50²) × 2),left/right:18 給 124px
+   top:30 處圓內寬 ~155px(dx = sqrt(100²-70²) × 2),left/right:22 給 156px
    chip 剛好填滿。Wayland 維持原本 top:4 緊貼上緣。 */
 body.floating-window.x11-fallback .mori-info-label {
   top: 22px;
@@ -112,7 +112,7 @@ body.floating-window #root {
 /* ─── stage(整個 96×96 容器) ───────────────────────────────────── */
 
 .mori-stage {
-  /* 5J: stage 是整個視窗的 click target;sprite-area 內部固定 160×160,
+  /* 5J: stage 是整個視窗的 click target;sprite-area 內部固定 200×200,
      bubble 從 sprite-area 下方延伸出去(window 動態長大時)。 */
   position: absolute;
   inset: 0;
@@ -121,8 +121,8 @@ body.floating-window #root {
   position: absolute;
   top: 0;
   left: 0;
-  width: 160px;
-  height: 160px;
+  width: 200px;
+  height: 200px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -133,7 +133,7 @@ body.floating-window #root {
 /* DOM 元素,跨平台。CSS variable 從 React 餵 — applyBackdrop 跑 resolveBackdropUrl
    拿到 data URL 寫進 --mori-backdrop-{dark,light}。模式 "plain" 時 variable
    被清,background-image 變 none(無背板)。
-   inset:0 蓋滿 sprite-area(160×160),也就是 sprite + drop-shadow + aura 全
+   inset:0 蓋滿 sprite-area(200×200),也就是 sprite + drop-shadow + aura 全
    蓋住 — X11 上 logo 模式可以順便緩解 WebKit half-alpha bug(整個 region
    都是 opaque pixel)。 */
 .mori-backdrop {
@@ -153,10 +153,10 @@ html[data-theme-base="light"] .mori-backdrop {
 
 .mori-aura {
   position: absolute;
-  /* Window is 160×160. Aura 130 + blur 8 means the visual halo
-     extends to ~146px diameter at scale 1, leaving ~7px on each
-     side. At max animation scale 1.1 → 143 + blur 8 = ~159px,
-     just inside the window with no clip. */
+  /* Window is 200×200. Aura 130 + blur 8 means the visual halo
+     extends to ~146px diameter at scale 1, leaving ~27px on each
+     side(從 window 200 邊緣)。Sprite 也 130 — aura 跟 sprite 同 size
+     讓光暈剛好圍 sprite。 */
   width: 130px;
   height: 130px;
   border-radius: 50%;
@@ -172,8 +172,8 @@ html[data-theme-base="light"] .mori-backdrop {
 
 .mori-sprite {
   position: relative;
-  width: 124px;
-  height: 124px;
+  width: 130px;
+  height: 130px;
   object-fit: contain;
   pointer-events: none; /* drag/click handled by .mori-stage */
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.4));
@@ -409,8 +409,8 @@ html[data-theme-base="light"] .mori-backdrop {
 }
 
 @keyframes mori-listen-pulse {
-  /* 130px aura at scale 1.1 = 143px + ~8px blur extension = ~159px,
-     comfortably inside the 160px window. */
+  /* 160px aura at scale 1.1 = 176px + ~8px blur extension = ~184px,
+     comfortably inside the 200px window. */
   0%   { transform: scale(0.9);  opacity: 0.85; }
   100% { transform: scale(1.1);  opacity: 0; }
 }
@@ -425,8 +425,8 @@ html[data-theme-base="light"] .mori-backdrop {
 }
 
 @keyframes mori-done-glow {
-  /* 130px aura at scale 1.1 = 143px + blur 8 = ~159px, fits inside
-     the 160px window so the warm glow fades out cleanly past the
+  /* 160px aura at scale 1.1 = 176px + blur 8 = ~184px, fits inside
+     the 200px window so the warm glow fades out cleanly past the
      character without clipping. */
   0%   { transform: scale(0.8); opacity: 0; }
   30%  { transform: scale(1.0); opacity: 1; }
@@ -461,7 +461,7 @@ html[data-theme-base="light"] .mori-backdrop {
 }
 
 /* 從基底環大小（130px）擴張到 145px，opacity 同時淡出。
-   145/130 = 1.115，乘以 130 = 144.95px；視窗 160px，邊界留 ~7.5px 不會被切。 */
+   145/130 = 1.115，乘以 130 = 144.95px；視窗 200px，邊界留 ~27px 不會被切。 */
 @keyframes mori-ripple-out {
   0%   { transform: scale(1.00); opacity: var(--ripple-intensity, 0.5); }
   100% { transform: scale(1.115); opacity: 0; }

@@ -239,7 +239,7 @@ function FloatingMori() {
   const [currentProfileLabel, setCurrentProfileLabel] = useState<string>("");
 
   // 5J: 完整 chat bubble 改用獨立 chat_bubble window 顯示
-  // (sprite window 永遠 160×160 不動,bubble 走另一個 Tauri window)。
+  // (sprite window 永遠 200×200 不動,bubble 走另一個 Tauri window)。
   // 這裡只保留「目前是否有 bubble」的旗標 + dwell timer 控制。
   const [hasChatBubble, setHasChatBubble] = useState(false);
 
@@ -435,10 +435,10 @@ function FloatingMori() {
   // - VoiceInput mode: 短轉錄(≤40 字)→ infoLabel(頂端 chip);長轉錄 → chat_bubble window
   // - Agent mode: Mori 完整回應一律走 chat_bubble window(獨立 window,不受 sprite 限制)
 
-  // sprite 視窗在 tauri.conf.json 寫死 160×160 且 resizable:false。
+  // sprite 視窗在 tauri.conf.json 寫死 200×200 且 resizable:false。
   // 不問 outerSize() — GNOME mutter 對 transparent+decorationless 視窗的 outerSize
   // 在不同時刻可能加上不同 shadow margin,會讓 bubble 每次距離 sprite 越來越遠。
-  const SPRITE_SIZE = 160;
+  const SPRITE_SIZE = 200;
   const BUBBLE_WIDTH = 360;
   const BUBBLE_GAP_PX = 8;
 
@@ -551,8 +551,8 @@ function FloatingMori() {
         const sx = pos.x / factor;
         const sy = pos.y / factor;
 
-        const WIN_W = 160;
-        const WIN_H = 160;
+        const WIN_W = 200;
+        const WIN_H = 200;
         const PAD = 40;
 
         // 多螢幕:用 Mori 中心點找目前在哪台螢幕,wander 限制在那台範圍內。
@@ -732,7 +732,7 @@ function FloatingMori() {
       onDoubleClick={onDoubleClick}
       title={`Mori — ${visualLabel(visual)}\n${t("floating.title_hint")}`}
     >
-      {/* 5J: sprite-area — 永遠固定在 widget 左上 160×160,讓 sprite 不會
+      {/* 5J: sprite-area — 永遠固定在 widget 左上 200×200,讓 sprite 不會
           因為 window 變寬 / 變高而跑位置。bubble / chip 浮在這之外。 */}
       <div className="mori-sprite-area">
         {/* 背板:可選的角色背景圖(character pack / user global / shipped fallback) */}
@@ -741,7 +741,7 @@ function FloatingMori() {
         <div className="mori-aura" style={auraStyle} />
 
         {/* 5F-3A: 音量波紋層 — 音量超過門檻時 spawn ripple，向外擴散後 fade。
-            最大擴張到 145px（< 160px 視窗），不會被切。 */}
+            最大擴張到 145px（< 200px 視窗），不會被切。 */}
         {visual === "recording" &&
           ripples.map((r) => (
             <div
