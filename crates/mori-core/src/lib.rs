@@ -31,6 +31,7 @@ pub mod tokenize;
 pub mod transcribe_media;
 pub mod url_detect;
 pub mod voice_cleanup;
+pub mod voice_feedback;
 pub mod voice_input_profile;
 
 /// crate 版本(供 UI 顯示)

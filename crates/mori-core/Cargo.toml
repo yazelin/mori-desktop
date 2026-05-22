@@ -36,6 +36,7 @@ uuid = { version = "1", features = ["v4"] }
 # API key / Bearer token 樣式,自動遮蔽。regex 在 Cargo.lock 已是傳遞依賴
 # (tracing-subscriber / reqwest 都用),這裡顯式宣告便於直接 use。
 regex = "1"
+similar = "2"
 
 # Stream E:`read_file_text` LLM-callable skill(`skill/read_file.rs`)包
 # mori-file-loader 公開 API。純 path dep,無 cycle 風險 — mori-file-loader
