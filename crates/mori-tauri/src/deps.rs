@@ -491,6 +491,111 @@ pub fn registry() -> Vec<DepSpec> {
             },
             install_overrides: &[],
         },
+        // Wave 6 D-full(DF-1):Python 3 runtime for Anthropic skills 的 scripts/ 執行。
+        //
+        // Stream I (#79) 已 ship SKILL.md markdown body 載入(D-light:純 prompt-augmentation,
+        // 不執行 scripts/)。D-full 上線後,執行型 skill(pdf / docx / xlsx / pptx /
+        // canvas-design / theme-factory / webapp-testing 7 個)會 spawn Python 跑
+        // `scripts/<entry>.py` — 沒 Python → 那些 skill 無法執行。
+        //
+        // 多數 Linux 發行版 / macOS / Windows installer 都把 binary 名稱定為 `python3`
+        // (Windows 也常有 python3 alias);用 `python3` 一個 binary 偵測足夠,Windows
+        // 上沒 alias 的少數情況 user 可看 install_caveat 指引。
+        DepSpec {
+            id: "python3",
+            name: "Python 3",
+            description: "Python 3.10+ runtime + pip。Wave 6 D-full Anthropic skills 的 \
+                          執行型 skill(pdf / docx / xlsx / pptx / 等)走 `python3 \
+                          <skill>/scripts/*.py`,沒裝就只剩 prompt-augmentation(body 餵 \
+                          LLM 但 scripts/ 跑不起來)。",
+            unlocks: "D-full Anthropic skills 執行型 skill(pypdf / openpyxl / python-docx / \
+                      python-pptx 等 Python script 能跑)",
+            size_hint: Some("~30-100MB(依平台)"),
+            needs_sudo: true,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "Windows installer 預設 binary 是 `python` 而非 `python3`,但官方 \
+                 installer 同時 alias `python3`。沒 alias 的少數情況請在 Settings → Apps \
+                 → Python 加 PATH 或安裝時勾「Add python.exe to PATH」。",
+            ),
+            check: CheckSpec::Which { bin: "python3" },
+            check_overrides: &[],
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# Ubuntu / Debian:",
+                    "sudo apt install python3 python3-pip",
+                    "# Fedora / RHEL:",
+                    "# sudo dnf install python3 python3-pip",
+                    "# Arch / Manjaro:",
+                    "# sudo pacman -S python python-pip",
+                    "# macOS(homebrew):",
+                    "# brew install python3",
+                    "# Windows:從官網下載 installer(記得勾「Add python.exe to PATH」):",
+                    "# https://www.python.org/downloads/",
+                    "# 確認:`python3 --version` + `pip3 --version`",
+                ],
+            },
+            install_overrides: &[],
+        },
+        // Wave 6 D-full(DF-1):Anthropic 官方 17 個 skills 庫(github.com/anthropics/skills)。
+        //
+        // 一鍵 install:`git clone --depth 1` 到 `~/.mori/skills/anthropics-skills/`。Stream I
+        // 的 `discover_skills` 掃的是扁平 `~/.mori/skills/<name>/SKILL.md`,Anthropic repo
+        // 結構是 `anthropics-skills/skills/<name>/`,需要走 symlink-flatten 或改 loader 邏輯
+        // (本 stream 只先 install + 文件指引,flatten 留 DF-2 補)。
+        //
+        // 對齊 annuli-runtime 的 git clone pattern(Linux/macOS Shell + Windows Manual)。
+        // 也可走 `install_anthropic_skills_cmd` Tauri command 拿到更精細的錯誤訊息,
+        // 但走 InstallSpec 能直接吃既有 DepsTab UI(install 按鈕 + status 圖示),
+        // 不需要新前端 schema 變動 — minimal viable path。
+        DepSpec {
+            id: "anthropic-skills",
+            name: "Anthropic Skills 庫",
+            description: "Anthropic 官方 17 個 skills(github.com/anthropics/skills):brand-guidelines / \
+                          internal-comms / pdf / docx / xlsx / pptx / canvas-design / 等。\
+                          一鍵 `git clone` 到 `~/.mori/skills/anthropics-skills/`。\
+                          \n\n安裝後重啟 Mori 才會 discover(Stream I SKILL.md loader 在 \
+                          startup 一次性掃),目前 loader 掃 `~/.mori/skills/<name>/` 扁平 \
+                          路徑,而 Anthropic repo 是 `anthropics-skills/skills/<name>/` — \
+                          完整 discovery 整合留 DF-2 做(可走 symlink flatten 或 loader \
+                          多掃一層)。",
+            unlocks: "discover 到 17 個 Anthropic 官方 skill(SKILL.md body 進 system prompt)",
+            size_hint: Some("~10-50MB(repo + scripts/)"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "需要 git 在 PATH。安裝後需重啟 Mori。Stream I loader 路徑 ↔ Anthropic repo \
+                 結構差一層 — 完整 discovery 整合留 DF-2(symlink flatten 或 loader 補)。",
+            ),
+            check: CheckSpec::File {
+                path_template: "$HOME/.mori/skills/anthropics-skills/.git",
+            },
+            check_overrides: &[],
+            install: InstallSpec::Shell {
+                script: "set -e; \
+                         DEST=\"$HOME/.mori/skills/anthropics-skills\"; \
+                         mkdir -p \"$HOME/.mori/skills\"; \
+                         if [ -d \"$DEST/.git\" ]; then \
+                            echo '已有 anthropics-skills repo,跑 git pull 更新...'; \
+                            cd \"$DEST\" && git pull --ff-only; \
+                         else \
+                            echo '從 GitHub 拉 anthropics/skills(--depth 1)...'; \
+                            git clone --depth 1 https://github.com/anthropics/skills.git \"$DEST\"; \
+                         fi; \
+                         echo '✓ Anthropic skills 裝好 — 重啟 Mori 才會 discover。'; \
+                         echo '  (DF-2 上線後會自動 flatten 17 個 skill 到 ~/.mori/skills/<name>/)'",
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# Windows(PowerShell / cmd,需要 git for Windows):",
+                        "mkdir %USERPROFILE%\\.mori\\skills 2>NUL",
+                        "git clone --depth 1 https://github.com/anthropics/skills.git %USERPROFILE%\\.mori\\skills\\anthropics-skills",
+                        "# 安裝後重啟 Mori。完整 discovery 整合留 DF-2。",
+                    ],
+                }),
+            ],
+        },
         // Obsidian CLI — bundled inside Obsidian app v1.12.4+(GA 2026/02),
         // 不是獨立 binary。User 要先裝 app 再到 in-app Settings 啟用「Register CLI」,
         // 啟用後 `obsidian` 才會在 PATH。沒啟用 → starter AGENT-06.obsidian 跑 shell_skill
