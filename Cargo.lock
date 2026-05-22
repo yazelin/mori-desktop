@@ -3090,7 +3090,6 @@ dependencies = [
  "cpal",
  "futures-util",
  "hound",
- "image",
  "include_dir",
  "mori-core",
  "mori-file-loader",
