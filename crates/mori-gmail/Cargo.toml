@@ -1,0 +1,31 @@
+[package]
+name = "mori-gmail"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+description = "Mori 的 Gmail 整合(「跨界之手」之一) — OAuth2 + token storage + read-only REST API。Wave 8 Gm-1 foundation。"
+
+[dependencies]
+# Gm-1 純 read-only;workspace reqwest 已開 json + rustls-tls。
+reqwest = { workspace = true }
+
+# 共用
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+# OAuth redirect URL 解析(query string code 取出)
+url = "2"
+
+# Gmail message body 是 base64url(RFC 4648 §5)— `URL_SAFE_NO_PAD`。
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"
+# Mock HTTP server(Gmail REST API / Google token endpoint),async / hyper based。
+wiremock = "0.6"
