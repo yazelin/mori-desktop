@@ -103,11 +103,28 @@ impl Notifier {
     }
 
     /// 組純文字通知對應的 [`Notification`] 物件 — 不發送。
+    ///
+    /// **Sticky by default**:freedesktop `Timeout::Never` + Linux Resident hint +
+    /// Critical urgency,user 必須手動點關才會消(2026-05-22 user 需求:reminder
+    /// 不能彈一下就消失,user 在錄音/講話時錯過就找不回來)。GNOME 預設對 Normal
+    /// urgency 會強制 auto-dismiss,所以一定要 Critical 才留得住;KDE 對 Resident
+    /// hint 就聽話,不一定要 Critical。三層下去最穩。
+    ///
+    /// Windows/macOS:.timeout() / .urgency() / .hint() 在那兩平台是 no-op
+    /// (notify-rust 在 cfg 上會 strip 掉 Linux 專屬的 hint / urgency)。
     pub(crate) fn build_text(&self, summary: &str, body: &str) -> Notification {
         let mut n = Notification::new();
         n.appname(&self.app_name).summary(summary).body(body);
         if let Some(icon) = &self.icon_path {
             n.icon(icon);
+        }
+        // freedesktop 標準「永不超時」— 0 = 不自動關
+        n.timeout(notify_rust::Timeout::Never);
+        // Linux/BSD 才有 Hint / Urgency type,Windows/macOS 沒這個概念
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            n.hint(notify_rust::Hint::Resident(true));
+            n.urgency(notify_rust::Urgency::Critical);
         }
         n.finalize()
     }
