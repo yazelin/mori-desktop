@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import { RatingButtons } from "../RatingButtons";
 
 type SessionSummary = {
   timestamp: string;
@@ -412,6 +413,14 @@ function RecordingsTab() {
                       {/* Transcript / response */}
                       {detail.transcript && (
                         <DetailField label="Transcript" content={detail.transcript} />
+                      )}
+                      {detail.transcript && (
+                        <div style={{ marginTop: 4, marginBottom: 8 }}>
+                          <RatingButtons
+                            sessionId={s.timestamp}
+                            originalTranscript={detail.transcript}
+                          />
+                        </div>
                       )}
                       {detail.response && (
                         <DetailField label="Response" content={detail.response} />
