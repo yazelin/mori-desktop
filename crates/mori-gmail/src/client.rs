@@ -254,6 +254,138 @@ impl GmailClient {
         let parsed: ListResp = resp.json().await?;
         Ok(parsed.labels)
     }
+
+    /// `POST /gmail/v1/users/me/messages/send` — 寄一封新 message。
+    ///
+    /// `to` 是 recipient list,`subject` / `body` 是 plain text 內容。Body 是
+    /// RFC 822 格式 + base64url encode 後塞到 `raw` 欄位。
+    ///
+    /// 需要 `gmail.send` scope。Token 沒這個 scope 會被 Google 401 / 403,
+    /// caller(`SendGmailSkill`)應在進場前先 `token.has_scope(...)` check。
+    ///
+    /// 回傳 `SendOutcome { id, thread_id }` — Google 在 send 成功後告訴你新 message
+    /// 在哪條 thread 上(send 沒指定 threadId 時 Google 自己 assign 一條新 thread)。
+    pub async fn send_message(
+        &mut self,
+        to: &[String],
+        subject: &str,
+        body: &str,
+    ) -> Result<SendOutcome, GmailError> {
+        let raw = build_rfc822_message(to, subject, body, None, None);
+        self.send_raw(&raw, None).await
+    }
+
+    /// `POST /gmail/v1/users/me/messages/send` — 回某條既有 thread。
+    ///
+    /// 相較於 [`send_message`]:
+    /// - body 內加 `In-Reply-To: <in_reply_to>` + `References: <in_reply_to>` headers,
+    ///   讓 Gmail / 對方 mail client 認得這是 thread 內回覆
+    /// - request body 加 `threadId` 欄位讓 Gmail 把 message 接到正確 thread
+    ///
+    /// `subject` 通常 caller 已加 "Re: " prefix(這層不自動加 — 讓 caller 決定
+    /// 「Re:」「回覆:」「Fwd:」等格式)。
+    pub async fn send_reply(
+        &mut self,
+        thread_id: &str,
+        to: &[String],
+        subject: &str,
+        body: &str,
+        in_reply_to: &str,
+    ) -> Result<SendOutcome, GmailError> {
+        let raw = build_rfc822_message(to, subject, body, Some(in_reply_to), Some(in_reply_to));
+        self.send_raw(&raw, Some(thread_id)).await
+    }
+
+    /// 共用底層:`POST /messages/send`,body `{ raw, threadId? }`。
+    async fn send_raw(
+        &mut self,
+        raw_rfc822: &str,
+        thread_id: Option<&str>,
+    ) -> Result<SendOutcome, GmailError> {
+        self.ensure_fresh_token().await?;
+        let url = format!("{}/gmail/v1/users/me/messages/send", self.api_base);
+
+        let encoded =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw_rfc822.as_bytes());
+        let mut body_json = serde_json::json!({ "raw": encoded });
+        if let Some(tid) = thread_id {
+            body_json["threadId"] = serde_json::Value::String(tid.to_string());
+        }
+
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.token.access_token)
+            .json(&body_json)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(GmailError::Api {
+                status: status.as_u16(),
+                message: body,
+            });
+        }
+
+        // Gmail 對 send 成功回 `{ "id": "...", "threadId": "...", "labelIds": [...] }`。
+        // 只取我們關心的兩個欄位。
+        #[derive(Deserialize)]
+        struct SendResp {
+            id: String,
+            #[serde(default, rename = "threadId")]
+            thread_id: String,
+        }
+        let parsed: SendResp = resp.json().await?;
+        Ok(SendOutcome {
+            id: parsed.id,
+            thread_id: parsed.thread_id,
+        })
+    }
+}
+
+/// `send_message` / `send_reply` 成功回傳。Gmail 對 send 的 response 是
+/// `{ id, threadId, labelIds }`,我們只 surface 前兩個給 caller / LLM。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SendOutcome {
+    pub id: String,
+    pub thread_id: String,
+}
+
+/// 拼一封純文字 RFC 822 message(headers + 空行 + body)。
+///
+/// 公開出來供測試 + Skill caller debug 用。實際上不直接送 — `send_message` /
+/// `send_reply` 內部呼叫並 base64url encode。
+///
+/// 規則:
+/// - `To` 是 comma-separated(多人收件)
+/// - 沒指定 `From` — Gmail 會自動填認證的 user email
+/// - body 一律 `Content-Type: text/plain; charset=UTF-8`(LLM 多半也只會寫純文字)
+/// - reply 時帶 `In-Reply-To` + `References`(同個 Message-ID;簡化處理 — Google
+///   會再幫 thread 串好。RFC 5322 嚴格上 References 應該是整條 chain,但 Gmail
+///   thread 是用 thread_id 串的,header 主要給對方 mail client 認 reply 關係)
+pub fn build_rfc822_message(
+    to: &[String],
+    subject: &str,
+    body: &str,
+    in_reply_to: Option<&str>,
+    references: Option<&str>,
+) -> String {
+    let to_joined = to.join(", ");
+    let mut out = String::new();
+    out.push_str(&format!("To: {to_joined}\r\n"));
+    out.push_str(&format!("Subject: {subject}\r\n"));
+    out.push_str("Content-Type: text/plain; charset=UTF-8\r\n");
+    out.push_str("MIME-Version: 1.0\r\n");
+    if let Some(irt) = in_reply_to {
+        out.push_str(&format!("In-Reply-To: {irt}\r\n"));
+    }
+    if let Some(refs) = references {
+        out.push_str(&format!("References: {refs}\r\n"));
+    }
+    out.push_str("\r\n");
+    out.push_str(body);
+    out
 }
 
 // =================== 解析 Gmail JSON ===================
@@ -665,5 +797,205 @@ mod tests {
         // "Hi" -> "SGk"(沒 = padding)
         let got = decode_base64url("SGk").expect("ok");
         assert_eq!(got, "Hi");
+    }
+
+    // ────────────────────────── Gm-2 send tests ──────────────────────────
+
+    fn send_scoped_token() -> GmailToken {
+        // 模擬完成 Gm-2 升 scope 後拿到的 token(含 readonly + send 兩個 scope)。
+        GmailToken {
+            access_token: "ya29.send-ok".into(),
+            refresh_token: "1//refresh".into(),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            scope: format!(
+                "{} {}",
+                crate::oauth::GMAIL_READONLY_SCOPE,
+                crate::oauth::GMAIL_SEND_SCOPE,
+            ),
+            token_type: "Bearer".into(),
+        }
+    }
+
+    #[test]
+    fn build_rfc822_message_renders_headers_and_body() {
+        let to = vec!["bob@example.com".to_string(), "carol@example.com".to_string()];
+        let raw = build_rfc822_message(&to, "Hi Bob", "Hello from Mori", None, None);
+
+        assert!(raw.contains("To: bob@example.com, carol@example.com\r\n"));
+        assert!(raw.contains("Subject: Hi Bob\r\n"));
+        assert!(raw.contains("Content-Type: text/plain; charset=UTF-8\r\n"));
+        assert!(raw.contains("MIME-Version: 1.0\r\n"));
+        // headers / body 之間應該有空行(\r\n\r\n)
+        assert!(raw.contains("\r\n\r\nHello from Mori"));
+        // 沒指定 reply headers 時不應出現
+        assert!(!raw.contains("In-Reply-To"));
+        assert!(!raw.contains("References"));
+    }
+
+    #[test]
+    fn build_rfc822_message_includes_reply_headers() {
+        let to = vec!["alice@example.com".to_string()];
+        let raw = build_rfc822_message(
+            &to,
+            "Re: hi",
+            "Sure thing.",
+            Some("<msg-abc@mail.gmail.com>"),
+            Some("<msg-abc@mail.gmail.com>"),
+        );
+
+        assert!(raw.contains("In-Reply-To: <msg-abc@mail.gmail.com>\r\n"));
+        assert!(raw.contains("References: <msg-abc@mail.gmail.com>\r\n"));
+        assert!(raw.contains("\r\n\r\nSure thing."));
+    }
+
+    #[tokio::test]
+    async fn send_message_builds_rfc822_and_posts_to_send_endpoint() {
+        let mock = MockServer::start().await;
+
+        // 攔 send endpoint 並驗 body 結構
+        let send_body = serde_json::json!({
+            "id": "msg-newly-sent",
+            "threadId": "thread-fresh",
+            "labelIds": ["SENT"]
+        });
+        Mock::given(method("POST"))
+            .and(path("/gmail/v1/users/me/messages/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(send_body))
+            .mount(&mock)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = GmailClient::with_base(
+            send_scoped_token(),
+            dummy_config(),
+            dir.path().join("gmail-token.json"),
+            mock.uri(),
+            format!("{}/token", mock.uri()),
+        );
+
+        let to = vec!["bob@example.com".to_string()];
+        let outcome = client
+            .send_message(&to, "Test subj", "Test body")
+            .await
+            .expect("send ok");
+        assert_eq!(outcome.id, "msg-newly-sent");
+        assert_eq!(outcome.thread_id, "thread-fresh");
+
+        // 也檢 mock 確實收到 1 個 POST(wiremock 內建 verify_received)
+        let received = mock.received_requests().await.unwrap_or_default();
+        let send_req = received
+            .iter()
+            .find(|r| r.url.path() == "/gmail/v1/users/me/messages/send")
+            .expect("send request recorded");
+        // body 是 JSON `{ raw: base64url(rfc822) }`,decode 應含我們的 headers + body
+        let json: serde_json::Value =
+            serde_json::from_slice(&send_req.body).expect("body json");
+        let raw_b64 = json["raw"].as_str().expect("raw field");
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(raw_b64)
+            .expect("base64 decode");
+        let decoded_str = String::from_utf8(decoded).expect("utf-8");
+        assert!(decoded_str.contains("To: bob@example.com"));
+        assert!(decoded_str.contains("Subject: Test subj"));
+        assert!(decoded_str.contains("\r\n\r\nTest body"));
+        // send_message 沒 threadId 欄位
+        assert!(json.get("threadId").is_none(), "send_message must not include threadId");
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_api_error_for_4xx() {
+        let mock = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/gmail/v1/users/me/messages/send"))
+            .respond_with(
+                ResponseTemplate::new(403).set_body_string(
+                    r#"{"error":{"code":403,"message":"Request had insufficient authentication scopes."}}"#,
+                ),
+            )
+            .mount(&mock)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = GmailClient::with_base(
+            // 故意只給 readonly scope — 但實際上這層不 check,Google 端會 403
+            fresh_token(),
+            dummy_config(),
+            dir.path().join("gmail-token.json"),
+            mock.uri(),
+            format!("{}/token", mock.uri()),
+        );
+
+        let err = client
+            .send_message(&["x@y.z".into()], "s", "b")
+            .await
+            .expect_err("403 expected");
+        match err {
+            GmailError::Api { status, message } => {
+                assert_eq!(status, 403);
+                assert!(
+                    message.contains("insufficient"),
+                    "expected scope error, got: {message}"
+                );
+            }
+            other => panic!("expected Api 403, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_reply_includes_thread_id_and_reply_headers() {
+        let mock = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/gmail/v1/users/me/messages/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "msg-reply-789",
+                "threadId": "thread-original",
+                "labelIds": ["SENT"]
+            })))
+            .mount(&mock)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = GmailClient::with_base(
+            send_scoped_token(),
+            dummy_config(),
+            dir.path().join("gmail-token.json"),
+            mock.uri(),
+            format!("{}/token", mock.uri()),
+        );
+
+        let to = vec!["alice@example.com".into()];
+        let outcome = client
+            .send_reply(
+                "thread-original",
+                &to,
+                "Re: hello",
+                "ack.",
+                "<orig-msg-id@mail.gmail.com>",
+            )
+            .await
+            .expect("reply ok");
+
+        assert_eq!(outcome.id, "msg-reply-789");
+        assert_eq!(outcome.thread_id, "thread-original");
+
+        // 驗 send request body:應含 threadId + In-Reply-To header
+        let received = mock.received_requests().await.unwrap_or_default();
+        let send_req = received
+            .iter()
+            .find(|r| r.url.path() == "/gmail/v1/users/me/messages/send")
+            .expect("send request recorded");
+        let json: serde_json::Value =
+            serde_json::from_slice(&send_req.body).expect("body json");
+        assert_eq!(json["threadId"], "thread-original");
+        let raw_b64 = json["raw"].as_str().expect("raw");
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(raw_b64)
+            .expect("decode");
+        let decoded_str = String::from_utf8(decoded).expect("utf-8");
+        assert!(decoded_str.contains("In-Reply-To: <orig-msg-id@mail.gmail.com>"));
+        assert!(decoded_str.contains("References: <orig-msg-id@mail.gmail.com>"));
+        assert!(decoded_str.contains("Subject: Re: hello"));
     }
 }

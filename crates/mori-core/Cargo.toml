@@ -53,5 +53,16 @@ mori-time = { path = "../mori-time" }
 # 不 depend mori-core,無 cycle 風險。
 mori-mcp = { path = "../mori-mcp" }
 
+# Wave 8 Gm-2 「跨界之手」:`ListGmailSkill` / `ReadGmailSkill` / `SendGmailSkill`
+# 接 mori-gmail::GmailClient(OAuth2 + Gmail REST API,Gm-1 提供)。純 path dep —
+# mori-gmail 是 leaf crate(reqwest + serde + chrono + url + base64),不 depend
+# mori-core,無 cycle 風險。Skill 用 Arc<Mutex<GmailClient>> 共享 client(send
+# 需要 mut self for ensure_fresh_token,Mutex 提供 interior mutability)。
+mori-gmail = { path = "../mori-gmail" }
+
 [dev-dependencies]
 tempfile = "3"
+# Wave 8 Gm-2:`skill/gmail.rs` tests 走 wiremock 模擬 Gmail REST endpoint,
+# 對齊 mori-gmail crate 內部 client tests 風格(不打真 Google,不要 OAuth)。
+wiremock = "0.6"
+base64 = "0.22"

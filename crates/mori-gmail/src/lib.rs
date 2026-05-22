@@ -33,7 +33,7 @@
 //!
 //! // 第一次 consent
 //! let config = OAuthConfig::load(&OAuthConfig::default_path().unwrap())?;
-//! let token = run_oauth_flow(&config, "csrf-state-token", GMAIL_READONLY_SCOPE).await?;
+//! let token = run_oauth_flow(&config, "csrf-state-token", &[GMAIL_READONLY_SCOPE]).await?;
 //! token.save(&default_token_path().unwrap())?;
 //!
 //! // 之後 API 用
@@ -58,9 +58,13 @@ pub mod client;
 pub mod oauth;
 pub mod token;
 
-pub use client::{GmailClient, GmailError, Label, Message, Thread, ThreadSummary, GMAIL_API_BASE};
+pub use client::{
+    build_rfc822_message, GmailClient, GmailError, Label, Message, SendOutcome, Thread,
+    ThreadSummary, GMAIL_API_BASE,
+};
 pub use oauth::{
     build_auth_url, refresh_token, run_oauth_flow, OAuthConfig, OAuthError,
-    GMAIL_READONLY_SCOPE, GOOGLE_AUTH_URL, GOOGLE_TOKEN_URL,
+    GMAIL_DEFAULT_SCOPES, GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE, GOOGLE_AUTH_URL,
+    GOOGLE_TOKEN_URL,
 };
 pub use token::{default_token_path, GmailToken, TokenError};
