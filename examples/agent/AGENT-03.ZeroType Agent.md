@@ -25,7 +25,8 @@
 # 4. 重啟 mori dev,Ctrl+Alt+3 切到 ZeroType profile,Chrome focus + 講話
 
 provider: groq
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 enabled_skills: []
 agent_mode: dispatch
 

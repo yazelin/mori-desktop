@@ -31,7 +31,9 @@
     "logs": "Logs",
     "logs_sub": "事件 / 除錯",
     "recordings": "Recordings",
-    "recordings_sub": "語音 session 回顧"
+    "recordings_sub": "語音 session 回顧",
+    "corrections": "Corrections",
+    "corrections_sub": "STT 校正盒 / 字典"
   },
   "logs_tab": {
     "title": "Logs",

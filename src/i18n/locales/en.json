@@ -31,7 +31,9 @@
     "logs": "Logs",
     "logs_sub": "Events / debug",
     "recordings": "Recordings",
-    "recordings_sub": "Voice session replay"
+    "recordings_sub": "Voice session replay",
+    "corrections": "Corrections",
+    "corrections_sub": "STT inbox / dictionary"
   },
   "logs_tab": {
     "title": "Logs",

@@ -1,0 +1,55 @@
+/* 2026-05-23: RatingButtons — voice message / session 旁的 👍/👎/✏️ 評分按鈕。 */
+
+.rating-buttons {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.rating-buttons button {
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.rating-buttons button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.rating-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rating-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.rating-edit-box textarea {
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.rating-edit-box button {
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-right: 4px;
+}

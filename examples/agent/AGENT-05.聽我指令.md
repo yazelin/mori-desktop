@@ -24,7 +24,8 @@
 # 純 API(`gemini` / `groq` / `ollama`)tool calling 在簡單意圖 OK,複雜的失敗率較高。
 
 # provider: claude-bash    # 進階:有裝 Claude Code 才打開
-enable_read: true
+enable_file_include: true
+enable_read_skill: true
 enabled_skills:
   - ask_gemini
   - find_youtube

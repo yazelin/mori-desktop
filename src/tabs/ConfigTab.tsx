@@ -1217,6 +1217,26 @@ function ConfigTab({
     }
   };
 
+  // correction_audit config(Task 11)
+  type CorrectionAuditConfig = {
+    enabled: boolean;
+    provider: string;
+    model: string;
+  };
+  const [auditCfg, setAuditCfg] = useState<CorrectionAuditConfig>({
+    enabled: true,
+    provider: "groq",
+    model: "openai/gpt-oss-120b",
+  });
+
+  // correction_substitute config — deterministic string replace toggle
+  type CorrectionSubstituteConfig = {
+    enabled: boolean;
+  };
+  const [substituteCfg, setSubstituteCfg] = useState<CorrectionSubstituteConfig>({
+    enabled: true,
+  });
+
   useEffect(() => {
     invoke<string>("config_read")
       .then((t) => { setRaw(t); setOrig(t); })
@@ -1226,7 +1246,32 @@ function ConfigTab({
       .catch(() => {
         setCorrText("# Mori STT 校正表\n\n# 看到左邊 → 改成右邊\n# 例:modem -> Markdown\n\n");
       });
+    invoke<CorrectionAuditConfig>("get_correction_audit_config")
+      .then(setAuditCfg)
+      .catch((e) => console.warn("get_correction_audit_config failed", e));
+    invoke<CorrectionSubstituteConfig>("get_correction_substitute_config")
+      .then(setSubstituteCfg)
+      .catch((e) => console.warn("get_correction_substitute_config failed", e));
   }, []);
+
+  const saveAudit = async (next: CorrectionAuditConfig) => {
+    setAuditCfg(next);
+    try {
+      await invoke("set_correction_audit_config", { cfg: next });
+    } catch (e) {
+      console.error("set_correction_audit_config failed", e);
+      alert(`儲存失敗:${e}`);
+    }
+  };
+
+  const saveSubstitute = async (next: CorrectionSubstituteConfig) => {
+    setSubstituteCfg(next);
+    try {
+      await invoke("set_correction_substitute_config", { cfg: next });
+    } catch (e) {
+      alert(`儲存失敗:${e}`);
+    }
+  };
 
   // Parse raw JSON for form view(失敗則保留 form 為 default,raw view 顯紅框)
   const cfg: AnyObj = useMemo(() => {
@@ -2257,6 +2302,30 @@ function ConfigTab({
 
           {/* ── Corrections.md(獨立檔,獨立 save) ────────── */}
           {subTab === "corrections" && <>
+          <Section
+            title="校正(LLM audit)"
+            hint="Mori 對話結束後跑一次 LLM(預設 Groq gpt-oss-120b 便宜),把可能的 STT 諧音錯字候選放進「校正盒」分頁,等你確認加入字典。關掉就不跑。"
+          >
+            <FormRow label="enabled" hint="ON → 對話結束後自動偵測諧音錯字,結果放進校正盒等確認。OFF → 不跑 LLM,不產生候選。">
+              <input
+                type="checkbox"
+                checked={auditCfg.enabled}
+                onChange={(e) => saveAudit({ ...auditCfg, enabled: e.target.checked })}
+              />
+            </FormRow>
+          </Section>
+          <Section
+            title="字典硬轉"
+            hint="LLM cleanup 完之後,程式直接套 corrections.md 字典條目進 cleaned 文字(strict string replace)。100% reliable 但 context-free(類似 OpenCC 簡繁硬轉)。關掉的話完全靠 LLM cleanup,漏率高但有上下文判斷。"
+          >
+            <FormRow label="enabled" hint="ON(預設):字典條目 100% 套用,context-free。OFF:不硬轉,完全靠 LLM cleanup(漏率高但 context-aware)。">
+              <input
+                type="checkbox"
+                checked={substituteCfg.enabled}
+                onChange={(e) => saveSubstitute({ enabled: e.target.checked })}
+              />
+            </FormRow>
+          </Section>
           <Section
             title={t("config_tab.sections.corrections_title")}
             hint={t("config_tab.sections.corrections_hint")}

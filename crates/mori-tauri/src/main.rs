@@ -7,6 +7,9 @@ mod annuli_config;
 mod annuli_supervisor;
 mod character_pack;
 mod context_provider;
+mod correction_audit_config;
+mod correction_cmd;
+mod correction_substitute_config;
 mod deps;
 mod file_loader_cmd;
 // Wave 8 Gm-2 「跨界之手」 — Gmail Tauri commands(OAuth start / status / list /
@@ -3329,6 +3332,27 @@ async fn run_agent_pipeline(
     );
 
     let memory = state.memory_handle();
+
+    // Deterministic corrections substitute — transcript 是 user STT 輸出,
+    // 送進 LLM 前先套 corrections.md 字典,讓 LLM 看到正字(兜底 LLM 自身漏套)。
+    // config correction_substitute.enabled = false 時跳過,完全靠 LLM cleanup。
+    let transcript = {
+        let sub_cfg = correction_substitute_config::CorrectionSubstituteConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if sub_cfg.enabled {
+            let corrections_md =
+                std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+            if !corrections_md.is_empty() {
+                mori_core::corrections_apply::apply_corrections(&transcript, &corrections_md)
+            } else {
+                transcript
+            }
+        } else {
+            transcript
+        }
+    };
+
     // history snapshot 給 LLM 看,**過濾掉 voice_input role**(語音輸入 dictation
     // 是 user 給其他 app 用的,不該被當作對話 history)。其他 role(user / assistant
     // / tool / system)照吃。
@@ -3391,10 +3415,10 @@ async fn run_agent_pipeline(
 
     let chat_result: anyhow::Result<(String, Vec<SkillCallSummary>)> = async {
         let memory_index = memory.read_index_as_context().await.unwrap_or_default();
-        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_read=true 才生效）
+        // 5G-8: 預處理 #file: 引用（profile.frontmatter.enable_file_include=true 才生效）
         let body_expanded = mori_core::agent_profile::preprocess_file_includes(
             &agent_profile.body,
-            agent_profile.frontmatter.enable_read,
+            agent_profile.frontmatter.enable_file_include,
         );
         // 5J: profile body 為「persona + 行為指示」，Rust 統一注入 context section
         let win_ctx_snapshot = state.hotkey_window_context.lock().clone();
@@ -3961,6 +3985,100 @@ async fn run_agent_pipeline(
                 rec.finalize();
             }
 
+            // Correction audit — Agent mode 也跑一次 background LLM,把可能諧音錯字
+            // 候選寫進 inbox。Agent mode 沒有 raw/cleaned 兩個版本,兩邊都傳同一條
+            // transcript(LLM 仍可走 corrections.md 模糊匹配 + 語義推測)。
+            // 失敗 silent(僅 log + event_log),不擋 agent pipeline。
+            {
+                let cfg = correction_audit_config::CorrectionAuditConfig::load(
+                    &mori_dir().join("config.json"),
+                );
+                if cfg.enabled {
+                    let raw = transcript.clone();
+                    let cleaned = transcript.clone(); // Agent mode 無 cleanup step,用 raw 當 cleaned
+                    let session_id = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+                    let corrections_md_path = mori_dir().join("corrections.md");
+                    let inbox_path = mori_dir().join("correction_inbox.jsonl");
+
+                    tauri::async_runtime::spawn(async move {
+                        let routing = match mori_core::llm::Routing::build_from_config(None) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::warn!(?e, "correction_audit(agent): routing build failed, skip");
+                                return;
+                            }
+                        };
+                        let provider = routing.skill_provider("correction_audit");
+
+                        let corrections_md =
+                            std::fs::read_to_string(&corrections_md_path).unwrap_or_default();
+
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_started",
+                            "session_id": session_id,
+                            "pipeline": "agent",
+                        }));
+
+                        match mori_core::correction_audit::audit(
+                            provider,
+                            &raw,
+                            &cleaned,
+                            &corrections_md,
+                        )
+                        .await
+                        {
+                            Ok(candidates) => {
+                                let mut written = 0usize;
+                                for c in &candidates {
+                                    let is_dismissed = mori_core::correction_inbox::is_dismissed(
+                                        &inbox_path,
+                                        &c.wrong,
+                                        &c.suggested,
+                                    )
+                                    .unwrap_or(false);
+                                    if is_dismissed {
+                                        continue;
+                                    }
+                                    let entry =
+                                        mori_core::correction_inbox::InboxEntry::new_pending(
+                                            &session_id,
+                                            mori_core::correction_inbox::InboxSource::LlmAudit,
+                                            &c.wrong,
+                                            &c.suggested,
+                                            c.confidence,
+                                            &c.reason,
+                                        );
+                                    if let Err(e) = mori_core::correction_inbox::append_entry(
+                                        &inbox_path,
+                                        &entry,
+                                    ) {
+                                        tracing::warn!(?e, "correction_audit(agent): append inbox entry failed");
+                                        continue;
+                                    }
+                                    written += 1;
+                                }
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "correction_audit_completed",
+                                    "session_id": session_id,
+                                    "pipeline": "agent",
+                                    "candidates_total": candidates.len(),
+                                    "candidates_written": written,
+                                }));
+                            }
+                            Err(e) => {
+                                tracing::warn!(?e, "correction_audit(agent) failed");
+                                mori_core::event_log::append(serde_json::json!({
+                                    "kind": "correction_audit_failed",
+                                    "session_id": session_id,
+                                    "pipeline": "agent",
+                                    "error": format!("{e:#}"),
+                                }));
+                            }
+                        }
+                    });
+                }
+            }
+
             state.set_phase(
                 &app,
                 Phase::Done {
@@ -4046,7 +4164,7 @@ async fn run_voice_input_pipeline(
 
     let body_expanded = mori_core::agent_profile::preprocess_file_includes(
         &profile.body,
-        profile.frontmatter.enable_read,
+        profile.frontmatter.enable_file_include,
     );
     // VoiceInput 不傳 memory_index（單輪 dictation 不需要長期記憶索引）
     let context_section = build_context_section(&win_ctx, &mori_ctx, None);
@@ -4216,6 +4334,36 @@ async fn run_voice_input_pipeline(
         }
     };
 
+    // Step 3:deterministic corrections substitute — LLM 漏套字典率 ~50%,
+    // 這步兜底保證 corrections.md 條目 100% 套用。長 variant 先套(避免 substring conflict)。
+    // config correction_substitute.enabled = false 時跳過,完全靠 LLM cleanup。
+    let cleaned_text = {
+        let sub_cfg = correction_substitute_config::CorrectionSubstituteConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if sub_cfg.enabled {
+            let corrections_md =
+                std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+            if !corrections_md.is_empty() {
+                let before_chars = cleaned_text.chars().count();
+                let applied =
+                    mori_core::corrections_apply::apply_corrections(&cleaned_text, &corrections_md);
+                let after_chars = applied.chars().count();
+                tracing::debug!(
+                    chars_before = before_chars,
+                    chars_after = after_chars,
+                    "voice-input corrections substitute applied"
+                );
+                applied
+            } else {
+                cleaned_text
+            }
+        } else {
+            tracing::debug!("voice-input corrections substitute skipped (disabled in config)");
+            cleaned_text
+        }
+    };
+
     if cleaned_text.is_empty() {
         state.set_phase(
             &app,
@@ -4291,6 +4439,101 @@ async fn run_voice_input_pipeline(
         "target_process": win_ctx.process_name,
         "profile": profile.name,
     }));
+
+    // 2026-05-22:Correction audit — 對話結束後 background LLM 跑一次,把可能諧音錯字
+    // 候選寫進 inbox。失敗 silent(僅 log + event_log),不擋 voice pipeline。可在
+    // ConfigTab 校正 sub-tab toggle 關掉。
+    {
+        let cfg = correction_audit_config::CorrectionAuditConfig::load(
+            &mori_dir().join("config.json"),
+        );
+        if cfg.enabled {
+            let raw = transcript.clone();
+            let cleaned = cleaned_text.clone();
+            // SessionRecord 無 session_id() — 用 pipeline 完成時的 timestamp 當 id。
+            let session_id = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+            let corrections_md_path = mori_dir().join("corrections.md");
+            let inbox_path = mori_dir().join("correction_inbox.jsonl");
+
+            tauri::async_runtime::spawn(async move {
+                // build provider via routing(None = no groq retry callback;audit 失敗 silent)
+                let routing = match mori_core::llm::Routing::build_from_config(None) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(?e, "correction_audit: routing build failed, skip");
+                        return;
+                    }
+                };
+                // 未在 routing.skills 定義的 key 安全 fallback 到 skill_fallback。
+                let provider = routing.skill_provider("correction_audit");
+
+                // 讀 corrections.md 全文(缺檔 → 空字串,audit 仍繼續)
+                let corrections_md =
+                    std::fs::read_to_string(&corrections_md_path).unwrap_or_default();
+
+                mori_core::event_log::append(serde_json::json!({
+                    "kind": "correction_audit_started",
+                    "session_id": session_id,
+                }));
+
+                match mori_core::correction_audit::audit(
+                    provider,
+                    &raw,
+                    &cleaned,
+                    &corrections_md,
+                )
+                .await
+                {
+                    Ok(candidates) => {
+                        let mut written = 0usize;
+                        for c in &candidates {
+                            // 已 dismiss 過(同 wrong+suggested pair)→ skip
+                            let is_dismissed = mori_core::correction_inbox::is_dismissed(
+                                &inbox_path,
+                                &c.wrong,
+                                &c.suggested,
+                            )
+                            .unwrap_or(false);
+                            if is_dismissed {
+                                continue;
+                            }
+                            let entry =
+                                mori_core::correction_inbox::InboxEntry::new_pending(
+                                    &session_id,
+                                    mori_core::correction_inbox::InboxSource::LlmAudit,
+                                    &c.wrong,
+                                    &c.suggested,
+                                    c.confidence,
+                                    &c.reason,
+                                );
+                            if let Err(e) = mori_core::correction_inbox::append_entry(
+                                &inbox_path,
+                                &entry,
+                            ) {
+                                tracing::warn!(?e, "correction_audit: append inbox entry failed");
+                                continue;
+                            }
+                            written += 1;
+                        }
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_completed",
+                            "session_id": session_id,
+                            "candidates_total": candidates.len(),
+                            "candidates_written": written,
+                        }));
+                    }
+                    Err(e) => {
+                        tracing::warn!(?e, "correction_audit failed");
+                        mori_core::event_log::append(serde_json::json!({
+                            "kind": "correction_audit_failed",
+                            "session_id": session_id,
+                            "error": format!("{e:#}"),
+                        }));
+                    }
+                }
+            });
+        }
+    }
 
     // Phase B:finalize session for voice_input pipeline
     if let Some(rec) = state.recording_session.lock().take() {
@@ -5478,6 +5721,17 @@ fn main() {
             annuli_quick_enable,
             notification_config::get_notification_config,
             notification_config::set_notification_config,
+            correction_audit_config::get_correction_audit_config,
+            correction_audit_config::set_correction_audit_config,
+            correction_substitute_config::get_correction_substitute_config,
+            correction_substitute_config::set_correction_substitute_config,
+            correction_cmd::correction_inbox_list,
+            correction_cmd::correction_inbox_accept,
+            correction_cmd::correction_inbox_dismiss,
+            correction_cmd::correction_inbox_delete,
+            correction_cmd::correction_inbox_change_suggestion,
+            correction_cmd::voice_feedback_set,
+            correction_cmd::corrections_md_content,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)

@@ -13,6 +13,7 @@ provider: gemini
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false  # LINE posts usually need user confirm before send
+enable_file_include: true  # load #file: dictionary / shared prompt snippets (Rust compile-time preprocessing, not LLM tool call)
 ---
 You are Mori's LINE post assistant. Rewrite the user's voice transcription into a complete LINE message ready to send.
 

@@ -13,6 +13,7 @@ provider: claude-bash
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false
+enable_file_include: true  # load #file: dictionary / shared prompt snippets (Rust compile-time preprocessing, not LLM tool call)
 ---
 You are Mori's "prompt optimization expert", proficient in advanced prompt engineering techniques and frameworks. Reorganize the user's vague spoken request into a structured high-quality prompt.
 
