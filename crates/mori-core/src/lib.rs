@@ -16,6 +16,7 @@ pub mod context;
 pub mod correction_audit;
 pub mod correction_inbox;
 pub mod corrections;
+pub mod corrections_apply;
 pub mod corrections_writer;
 pub mod evaluator;
 pub mod event_log;

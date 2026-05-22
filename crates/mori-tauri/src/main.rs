@@ -3331,6 +3331,19 @@ async fn run_agent_pipeline(
     );
 
     let memory = state.memory_handle();
+
+    // Deterministic corrections substitute — transcript 是 user STT 輸出,
+    // 送進 LLM 前先套 corrections.md 字典,讓 LLM 看到正字(兜底 LLM 自身漏套)。
+    let transcript = {
+        let corrections_md =
+            std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+        if !corrections_md.is_empty() {
+            mori_core::corrections_apply::apply_corrections(&transcript, &corrections_md)
+        } else {
+            transcript
+        }
+    };
+
     // history snapshot 給 LLM 看,**過濾掉 voice_input role**(語音輸入 dictation
     // 是 user 給其他 app 用的,不該被當作對話 history)。其他 role(user / assistant
     // / tool / system)照吃。
@@ -4309,6 +4322,27 @@ async fn run_voice_input_pipeline(
                 "voice-input programmatic cleanup",
             );
             after
+        }
+    };
+
+    // Step 3:deterministic corrections substitute — LLM 漏套字典率 ~50%,
+    // 這步兜底保證 corrections.md 條目 100% 套用。長 variant 先套(避免 substring conflict)。
+    let cleaned_text = {
+        let corrections_md =
+            std::fs::read_to_string(mori_dir().join("corrections.md")).unwrap_or_default();
+        if !corrections_md.is_empty() {
+            let before_chars = cleaned_text.chars().count();
+            let applied =
+                mori_core::corrections_apply::apply_corrections(&cleaned_text, &corrections_md);
+            let after_chars = applied.chars().count();
+            tracing::debug!(
+                chars_before = before_chars,
+                chars_after = after_chars,
+                "voice-input corrections substitute applied"
+            );
+            applied
+        } else {
+            cleaned_text
         }
     };
 
