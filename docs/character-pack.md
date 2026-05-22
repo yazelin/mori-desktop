@@ -29,6 +29,39 @@ sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,user imp
 
 ---
 
+## Backdrop(optional)
+
+角色作者可以在 pack 根目錄(跟 `manifest.json` 同層,**不在** `sprites/` 下)
+放兩張 PNG 當作角色專屬背板:
+
+```
+~/.mori/characters/<stem>/
+├── manifest.json
+├── sprites/...
+├── backdrop-dark.png    ← optional,dark theme 時顯示
+└── backdrop-light.png   ← optional,light theme 時顯示
+```
+
+兩張都是 optional;只有一張也行(對應 theme 沒檔就走下一層 fallback)。
+
+### 顯示條件
+
+使用者 `~/.mori/config.json` 的 `floating.backplate` 必須是 `"logo"`。`"plain"` 模式下不論角色提不提供背板都不顯示。
+
+### Fallback chain(高優先到低)
+
+1. character pack 自帶的 `backdrop-{dark,light}.png`
+2. 使用者全域 `~/.mori/floating/backplate-{dark,light}.png`
+3. 內建預設(shipped)
+
+### 規格建議
+
+- 尺寸:建議 320×320 或更大的方形 PNG(會 `background-size: cover` 縮放填滿 160×160 sprite-area)
+- 格式:PNG-32(透明背景 OK,但這層通常做不透明 — 整個區域是 opaque 才能緩解 X11 + WebKit2GTK 的 half-alpha 渲染問題)
+- 風格:留 sprite 中央區域空白 / 柔光,避免角色被背板蓋住
+
+---
+
 ## `manifest.json` schema(v1.0)
 
 ```json
