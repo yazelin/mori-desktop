@@ -2188,9 +2188,22 @@ async fn skills_list(
         registry.register(Arc::new(crate::shell_skill::ShellSkill::new(def.clone())));
     }
     // Stream I:Anthropic SKILL.md — `~/.mori/skills/<name>/SKILL.md` 的 body
-    // 當 prompt-augmentation 給 LLM。D-light(不執行 scripts/)。
+    // 當 prompt-augmentation 給 LLM。
+    //
+    // Wave 6 DF-2:`scripts/` 子資料夾若存在,額外註冊 `AnthropicScriptSkill`
+    // (LLM 可呼叫 `anthropic_script_<name>` 跑 Python script,例 `pdf` 整合)。
     let anthropic_dir = mori_core::skill::anthropic_skill::default_skills_dir();
-    for skill in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
+    for discovered in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
+        let mori_core::skill::DiscoveredSkill {
+            skill,
+            scripts_dir,
+        } = discovered;
+        if let Some(sd) = scripts_dir {
+            registry.register(Arc::new(mori_core::skill::AnthropicScriptSkill::new(
+                skill.clone(),
+                sd,
+            )));
+        }
         registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
     }
     // Wave 6 MCP-2:把已 connect 的 MCP server 提供的所有 tool 都列進 UI 的
@@ -3571,14 +3584,32 @@ async fn run_agent_pipeline(
         }
 
         // Stream I:Anthropic SKILL.md — `~/.mori/skills/<name>/SKILL.md` 的 body
-        // 當 prompt-augmentation 給 LLM。D-light(不執行 scripts/)。同樣受
-        // agent_disabled 鎖:Mori 沒分到靈力時所有額外 skill 都不掛。
-        // 不受 enabled_skills filter 影響(對齊 shell_skills:user 放進 skills/
-        // 目錄就是要用的)。
+        // 當 prompt-augmentation 給 LLM。同樣受 agent_disabled 鎖:Mori 沒分到
+        // 靈力時所有額外 skill 都不掛。不受 enabled_skills filter 影響(對齊
+        // shell_skills:user 放進 skills/ 目錄就是要用的)。
+        //
+        // Wave 6 DF-2:scripts/ 子資料夾若存在,額外註冊 `AnthropicScriptSkill`
+        // (LLM 可呼叫 `anthropic_script_<name>` 跑 Python script)。prompt 型 +
+        // script 型並存:LLM 先 invoke `<name>` 讀指引,再 invoke
+        // `anthropic_script_<name>` 跑實際工具。
         if !agent_disabled {
             let anthropic_dir = mori_core::skill::anthropic_skill::default_skills_dir();
-            for skill in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
-                tracing::info!(skill = %skill.name, "registering anthropic SKILL.md (prompt-augmentation)");
+            for discovered in mori_core::skill::discover_anthropic_skills(&anthropic_dir) {
+                let mori_core::skill::DiscoveredSkill {
+                    skill,
+                    scripts_dir,
+                } = discovered;
+                tracing::info!(
+                    skill = %skill.name,
+                    has_scripts = scripts_dir.is_some(),
+                    "registering anthropic SKILL.md"
+                );
+                if let Some(sd) = scripts_dir {
+                    registry.register(Arc::new(mori_core::skill::AnthropicScriptSkill::new(
+                        skill.clone(),
+                        sd,
+                    )));
+                }
                 registry.register(Arc::new(mori_core::skill::AnthropicPromptSkill::new(skill)));
             }
         }

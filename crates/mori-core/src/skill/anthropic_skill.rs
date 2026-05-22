@@ -42,12 +42,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
+use super::python_runner::{run_python_script, RunError};
 use super::{ExecutionTarget, Privacy, Skill, SkillOutput};
 use crate::context::Context;
 
@@ -158,11 +159,26 @@ pub fn load_skill_from_path(path: &Path) -> Result<AnthropicSkill, LoadError> {
     })
 }
 
+/// 掃出來的單個 skill descriptor。
+///
+/// `scripts_dir` 為 `Some(path)` 表示 skill 目錄底下有 `scripts/`(可執行型),
+/// 主 module 看到這條會額外註冊一個 [`AnthropicScriptSkill`]。
+/// `None` 表示純 prompt-augmentation skill,只有 SKILL.md。
+#[derive(Debug, Clone)]
+pub struct DiscoveredSkill {
+    pub skill: AnthropicSkill,
+    pub scripts_dir: Option<PathBuf>,
+}
+
 /// 掃 `skills_dir/<name>/SKILL.md`,parse 成功的全收。
 ///
 /// 失敗的個別 skill(壞 frontmatter / IO error)會 log warning 跳過,不會 crash
 /// 整個 discover。`skills_dir` 不存在直接回空 vec(對齊「沒裝 skill 是正常狀態」)。
-pub fn discover_skills(skills_dir: &Path) -> Vec<AnthropicSkill> {
+///
+/// **DF-2 升級**:回 [`DiscoveredSkill`] 而非裸 [`AnthropicSkill`],額外帶
+/// `scripts_dir`(若 skill 目錄含 `scripts/` 子資料夾)。caller 可以判斷是否該
+/// 另外註冊一個 [`AnthropicScriptSkill`] 給 LLM 跑 Python script。
+pub fn discover_skills(skills_dir: &Path) -> Vec<DiscoveredSkill> {
     let entries = match fs::read_dir(skills_dir) {
         Ok(e) => e,
         Err(e) => {
@@ -178,6 +194,8 @@ pub fn discover_skills(skills_dir: &Path) -> Vec<AnthropicSkill> {
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
+        // path.is_dir() follows symlinks(對齊 DF-1 install flatten:Anthropic
+        // skills 是 symlink → 也算 dir)。
         if !path.is_dir() {
             continue;
         }
@@ -187,8 +205,21 @@ pub fn discover_skills(skills_dir: &Path) -> Vec<AnthropicSkill> {
         }
         match load_skill_from_path(&skill_md) {
             Ok(skill) => {
-                tracing::debug!(name = %skill.name, "loaded anthropic skill");
-                out.push(skill);
+                let scripts_path = path.join("scripts");
+                let scripts_dir = if scripts_path.is_dir() {
+                    Some(scripts_path)
+                } else {
+                    None
+                };
+                tracing::debug!(
+                    name = %skill.name,
+                    has_scripts = scripts_dir.is_some(),
+                    "loaded anthropic skill"
+                );
+                out.push(DiscoveredSkill {
+                    skill,
+                    scripts_dir,
+                });
             }
             Err(e) => {
                 tracing::warn!(
@@ -286,6 +317,213 @@ impl Skill for AnthropicPromptSkill {
             data: Some(serde_json::json!({
                 "skill": self.leaked_name,
                 "kind": "anthropic_prompt",
+            })),
+        })
+    }
+}
+
+// ─── AnthropicScriptSkill ──────────────────────────────────────────
+
+/// 把 Anthropic skill 內的 `scripts/` 子資料夾暴露成單一可呼叫 LLM tool。
+///
+/// # 跟 [`AnthropicPromptSkill`] 並存,不取代
+///
+/// 一個 Anthropic skill 可能有兩種互補形態:
+/// 1. **SKILL.md body**:給 LLM 「讀」的指引(`AnthropicPromptSkill`)
+/// 2. **scripts/**:給 LLM 「跑」的 Python 程式(本 struct)
+///
+/// 兩個都會註冊到 [`SkillRegistry`](super::SkillRegistry)。LLM 在 tool list
+/// 同時看到:
+/// - `pdf` — Use this skill when working with PDFs.(prompt-augmentation)
+/// - `anthropic_script_pdf` — [scripts] Use this skill when working with PDFs.
+///   (subprocess execution)
+///
+/// LLM 流程通常:先 invoke `pdf`(讀指引,知道有哪些 script、用法),再 invoke
+/// `anthropic_script_pdf` 加 `script: "merge_pdfs.py", args: [...]`。
+///
+/// # 為什麼 name 加 `anthropic_script_` prefix?
+///
+/// 避免跟 prompt skill 同名 collision(都來自同一個 SKILL.md 的 `name` 欄,例
+/// `pdf`)。SkillRegistry 名字 unique;同名後註冊會 warn + replace,行為亂跳。
+///
+/// # 參數 schema
+///
+/// LLM 拿到一個 generic 的「跑某 script」介面:
+/// - `script`(required):script 檔名,例 `extract_text.py`
+/// - `args`(optional):CLI argv list
+/// - `stdin`(optional):餵給 script stdin 的內容
+///
+/// SKILL.md body 內會描述 `scripts/` 內各 script 的用法,LLM 從那邊學;這個
+/// schema 故意保簡單,不替 individual script 編 wrapper(那是 follow-up)。
+///
+/// # 安全 / 信任邊界
+///
+/// 走 `python3` direct subprocess,沒沙箱、沒 venv。user 安裝官方 Anthropic
+/// skill 即同意跑(對齊 DF-1 install 邏輯:user 點 install button = 同意)。
+/// 自訂 skill 放進 `~/.mori/skills/<name>/scripts/` 也會被 expose;user 對自己
+/// 的 ~/.mori 內容負責。
+pub struct AnthropicScriptSkill {
+    /// 原 SKILL.md 解析結果。保留 `body` / `name` / `description` 給 introspection。
+    skill: AnthropicSkill,
+    /// `<skill_dir>/scripts/` 絕對路徑。execute 時 join script filename。
+    scripts_dir: PathBuf,
+    /// `anthropic_script_<name>`,leaked 成 `'static`(對齊 `McpToolSkill` /
+    /// `AnthropicPromptSkill` pattern)。
+    leaked_name: &'static str,
+    /// `[scripts] <description>`,leaked 成 `'static`。
+    leaked_description: &'static str,
+}
+
+impl AnthropicScriptSkill {
+    /// Build wrapper。`leak` name / description 到 `'static`。
+    pub fn new(skill: AnthropicSkill, scripts_dir: PathBuf) -> Self {
+        let name_string = format!("anthropic_script_{}", skill.name);
+        let desc_string = format!("[scripts] {}", skill.description);
+        let leaked_name: &'static str = Box::leak(name_string.into_boxed_str());
+        let leaked_description: &'static str = Box::leak(desc_string.into_boxed_str());
+        Self {
+            skill,
+            scripts_dir,
+            leaked_name,
+            leaked_description,
+        }
+    }
+
+    /// Convenience constructor — 包成 `Arc<dyn Skill>` 給 main.rs 註冊。
+    pub fn into_arc_skill(self) -> Arc<dyn Skill> {
+        Arc::new(self)
+    }
+
+    /// 給 introspection / debug 用:回 scripts dir path。
+    pub fn scripts_dir(&self) -> &Path {
+        &self.scripts_dir
+    }
+
+    /// 給 introspection / debug 用:回原 Anthropic skill name(無 prefix)。
+    pub fn skill_name(&self) -> &str {
+        &self.skill.name
+    }
+}
+
+#[async_trait]
+impl Skill for AnthropicScriptSkill {
+    fn name(&self) -> &'static str {
+        self.leaked_name
+    }
+
+    fn description(&self) -> &'static str {
+        self.leaked_description
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "script": {
+                    "type": "string",
+                    "description": "Script filename inside the skill's scripts/ directory (e.g. `extract_text.py`)."
+                },
+                "args": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Optional CLI arguments forwarded to the script (sys.argv[1:])."
+                },
+                "stdin": {
+                    "type": "string",
+                    "description": "Optional stdin content piped into the script."
+                }
+            },
+            "required": ["script"],
+            "additionalProperties": false
+        })
+    }
+
+    fn target_capability(&self) -> ExecutionTarget {
+        // python3 subprocess 跑在本機 — 不像 prompt-augmentation 那樣
+        // device-agnostic。對齊 ShellSkill / ReadFileSkill 等 process-bound skill。
+        ExecutionTarget::Local
+    }
+
+    fn privacy(&self) -> Privacy {
+        // script 輸出會餵回 LLM 做 multi-turn(LLM 接著解 result);user 想完全
+        // local 自己選 local provider。
+        Privacy::Cloud
+    }
+
+    async fn execute(&self, args: Value, _context: &Context) -> Result<SkillOutput> {
+        let script = args
+            .get("script")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("missing required argument `script`"))?;
+
+        // 防 path traversal:script 不能含 `..` 或絕對路徑(LLM 不該跳出 scripts_dir)。
+        if script.contains("..") || Path::new(script).is_absolute() {
+            return Err(anyhow!(
+                "invalid script path `{script}` (no `..` or absolute paths allowed)"
+            ));
+        }
+
+        let cli_args: Vec<String> = args
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let stdin = args
+            .get("stdin")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let script_path = self.scripts_dir.join(script);
+        if !script_path.is_file() {
+            return Err(anyhow!(
+                "script not found: {} (under {})",
+                script,
+                self.scripts_dir.display()
+            ));
+        }
+
+        tracing::info!(
+            skill = self.leaked_name,
+            script = %script,
+            args_count = cli_args.len(),
+            has_stdin = stdin.is_some(),
+            "anthropic script dispatch",
+        );
+
+        let output = run_python_script(&script_path, &cli_args, stdin.as_deref())
+            .await
+            .map_err(|e| match e {
+                RunError::PythonMissing => anyhow!(
+                    "python3 not in PATH — install Python 3 to run Anthropic script skills"
+                ),
+                other => anyhow!("script execution failed: {other}"),
+            })?;
+
+        // user_message 給 LLM 看的:script stdout 為主。若 exit_code != 0,把
+        // stderr 一起塞進去讓 LLM 看到錯誤詳情(否則 LLM 只看到空 stdout 會困惑)。
+        let user_message = if output.exit_code == 0 {
+            output.stdout.clone()
+        } else {
+            format!(
+                "Script exited with code {}.\n\nstdout:\n{}\n\nstderr:\n{}",
+                output.exit_code, output.stdout, output.stderr
+            )
+        };
+
+        Ok(SkillOutput {
+            user_message,
+            data: Some(serde_json::json!({
+                "skill": self.skill.name,
+                "script": script,
+                "stdout": output.stdout,
+                "stderr": output.stderr,
+                "exit_code": output.exit_code,
+                "kind": "anthropic_script",
             })),
         })
     }
@@ -451,10 +689,13 @@ mod tests {
         .unwrap();
 
         let mut got = discover_skills(root);
-        got.sort_by(|x, y| x.name.cmp(&y.name));
+        got.sort_by(|x, y| x.skill.name.cmp(&y.skill.name));
         assert_eq!(got.len(), 2);
-        assert_eq!(got[0].name, "brand-guidelines");
-        assert_eq!(got[1].name, "internal-comms");
+        assert_eq!(got[0].skill.name, "brand-guidelines");
+        assert_eq!(got[1].skill.name, "internal-comms");
+        // Neither has scripts/ subdir.
+        assert!(got[0].scripts_dir.is_none());
+        assert!(got[1].scripts_dir.is_none());
     }
 
     #[test]
@@ -475,7 +716,7 @@ mod tests {
 
         let got = discover_skills(root);
         assert_eq!(got.len(), 1, "bad skill should be skipped, not crash");
-        assert_eq!(got[0].name, "good");
+        assert_eq!(got[0].skill.name, "good");
     }
 
     #[test]
@@ -491,7 +732,7 @@ mod tests {
         .unwrap();
         let got = discover_skills(root);
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].name, "real");
+        assert_eq!(got[0].skill.name, "real");
     }
 
     #[test]
@@ -517,7 +758,7 @@ mod tests {
         .unwrap();
         let got = discover_skills(root);
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].name, "ok");
+        assert_eq!(got[0].skill.name, "ok");
     }
 
     // ─── AnthropicPromptSkill ─────────────────────────────────
@@ -558,5 +799,193 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"].is_object());
         assert_eq!(schema["properties"].as_object().unwrap().len(), 0);
+    }
+
+    // ─── discover_skills scripts/ enrichment ──────────────────
+
+    #[test]
+    fn discover_skills_detects_scripts_subdir() {
+        // skill 目錄底下有 `scripts/` 子資料夾 → DiscoveredSkill.scripts_dir = Some
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let pdf = root.join("pdf");
+        fs::create_dir(&pdf).unwrap();
+        fs::write(
+            pdf.join("SKILL.md"),
+            "---\nname: pdf\ndescription: PDF tools\n---\n\nbody\n",
+        )
+        .unwrap();
+        fs::create_dir(pdf.join("scripts")).unwrap();
+        fs::write(pdf.join("scripts").join("extract.py"), "print('x')\n").unwrap();
+
+        let got = discover_skills(root);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].skill.name, "pdf");
+        let sd = got[0].scripts_dir.as_ref().expect("scripts_dir should be Some");
+        assert!(sd.ends_with("scripts"));
+        assert!(sd.is_dir());
+    }
+
+    #[test]
+    fn discover_skills_no_scripts_dir_when_only_skill_md() {
+        // 純 prompt skill — `scripts_dir` 必須 None。
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let brand = root.join("brand-guidelines");
+        fs::create_dir(&brand).unwrap();
+        fs::write(
+            brand.join("SKILL.md"),
+            "---\nname: brand-guidelines\ndescription: X\n---\n\nbody\n",
+        )
+        .unwrap();
+
+        let got = discover_skills(root);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].scripts_dir.is_none());
+    }
+
+    // ─── AnthropicScriptSkill ─────────────────────────────────
+
+    /// 整環境是否裝 python3。CI 若沒裝就 skip 相關 test。
+    fn python3_available() -> bool {
+        std::process::Command::new("python3")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn make_script_skill(scripts_dir: PathBuf) -> AnthropicScriptSkill {
+        let skill = AnthropicSkill {
+            name: "pdf".to_string(),
+            description: "Use this skill when working with PDFs.".to_string(),
+            body: "# PDF body".to_string(),
+            license: None,
+        };
+        AnthropicScriptSkill::new(skill, scripts_dir)
+    }
+
+    #[test]
+    fn script_skill_name_has_prefix() {
+        let dir = TempDir::new().unwrap();
+        let s = make_script_skill(dir.path().to_path_buf());
+        assert_eq!(s.name(), "anthropic_script_pdf");
+        assert_eq!(s.skill_name(), "pdf");
+        assert!(s.description().starts_with("[scripts]"));
+    }
+
+    #[test]
+    fn script_skill_schema_requires_script() {
+        let dir = TempDir::new().unwrap();
+        let s = make_script_skill(dir.path().to_path_buf());
+        let schema = s.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["script"].is_object());
+        assert!(schema["properties"]["args"].is_object());
+        assert!(schema["properties"]["stdin"].is_object());
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "script"));
+    }
+
+    #[tokio::test]
+    async fn script_skill_execute_errors_on_missing_script_arg() {
+        let dir = TempDir::new().unwrap();
+        let s = make_script_skill(dir.path().to_path_buf());
+        let ctx = Context::default();
+        let err = s
+            .execute(serde_json::json!({}), &ctx)
+            .await
+            .expect_err("missing script arg should error");
+        assert!(err.to_string().contains("script"));
+    }
+
+    #[tokio::test]
+    async fn script_skill_execute_errors_on_traversal() {
+        let dir = TempDir::new().unwrap();
+        let s = make_script_skill(dir.path().to_path_buf());
+        let ctx = Context::default();
+        let err = s
+            .execute(serde_json::json!({ "script": "../etc/passwd" }), &ctx)
+            .await
+            .expect_err("path traversal should be blocked");
+        assert!(err.to_string().to_lowercase().contains("invalid"));
+    }
+
+    #[tokio::test]
+    async fn script_skill_execute_errors_when_script_missing() {
+        let dir = TempDir::new().unwrap();
+        let s = make_script_skill(dir.path().to_path_buf());
+        let ctx = Context::default();
+        let err = s
+            .execute(serde_json::json!({ "script": "nope.py" }), &ctx)
+            .await
+            .expect_err("missing script file should error");
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn script_skill_execute_runs_python() {
+        if !python3_available() {
+            eprintln!("python3 not available; skipping");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        // 建一個 scripts/ 子目錄 + 一個 Python script
+        let scripts_dir = dir.path().join("scripts");
+        fs::create_dir(&scripts_dir).unwrap();
+        fs::write(
+            scripts_dir.join("hello.py"),
+            "import sys\nprint('hi', sys.argv[1] if len(sys.argv) > 1 else '')\n",
+        )
+        .unwrap();
+
+        let s = make_script_skill(scripts_dir);
+        let ctx = Context::default();
+        let out = s
+            .execute(
+                serde_json::json!({
+                    "script": "hello.py",
+                    "args": ["world"],
+                }),
+                &ctx,
+            )
+            .await
+            .expect("script should run");
+        assert!(out.user_message.contains("hi world"));
+        let data = out.data.expect("data present");
+        assert_eq!(data["skill"], "pdf");
+        assert_eq!(data["script"], "hello.py");
+        assert_eq!(data["exit_code"], 0);
+        assert_eq!(data["kind"], "anthropic_script");
+    }
+
+    #[tokio::test]
+    async fn script_skill_execute_surfaces_nonzero_exit() {
+        if !python3_available() {
+            eprintln!("python3 not available; skipping");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let scripts_dir = dir.path().join("scripts");
+        fs::create_dir(&scripts_dir).unwrap();
+        fs::write(
+            scripts_dir.join("fail.py"),
+            "import sys\nsys.stderr.write('oops\\n')\nsys.exit(3)\n",
+        )
+        .unwrap();
+
+        let s = make_script_skill(scripts_dir);
+        let ctx = Context::default();
+        let out = s
+            .execute(serde_json::json!({ "script": "fail.py" }), &ctx)
+            .await
+            .expect("script runtime ok even if it exits non-zero");
+        assert!(out.user_message.contains("exited with code 3"));
+        assert!(out.user_message.contains("oops"));
+        let data = out.data.unwrap();
+        assert_eq!(data["exit_code"], 3);
+        assert!(data["stderr"].as_str().unwrap().contains("oops"));
     }
 }
