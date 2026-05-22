@@ -1,0 +1,98 @@
+/* 2026-05-22:in-app reminder popup 樣式 — 對齊 chat-bubble.css 既有風格 */
+
+.reminder-card {
+  background: rgba(20, 24, 28, 0.96);
+  color: #f1eee0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 320px;
+}
+
+.reminder-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reminder-row:last-child {
+  border-bottom: none;
+}
+
+.reminder-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reminder-bell {
+  font-size: 16px;
+}
+
+.reminder-text {
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.reminder-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.reminder-due {
+  color: #c9a24d;
+  margin-right: auto;
+}
+
+.reminder-row-meta button {
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.reminder-row-meta button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.reminder-overflow-chip {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.reminder-chip {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(201, 162, 77, 0.95);
+  color: #1a1410;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+html.reminder-popup-window,
+body.reminder-popup-window {
+  background: transparent !important;
+  margin: 0;
+  padding: 0;
+}

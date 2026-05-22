@@ -24,6 +24,7 @@ import {
   IconClipboard,
   IconPencil,
   IconAnnuli,
+  IconLightning,
 } from "../icons";
 
 // 5P-6: character pack picker
@@ -245,6 +246,7 @@ type SubTabId =
   | "x11"
   | "annuli"
   | "corrections"
+  | "notifications"
   | "raw";
 
 interface SubTabSpec {
@@ -581,7 +583,7 @@ function CharacterPicker() {
 }
 
 const ALL_SUBTAB_IDS: SubTabId[] = [
-  "quick", "llm", "voice", "appearance", "hotkey", "x11", "annuli", "corrections", "raw",
+  "quick", "llm", "voice", "appearance", "hotkey", "x11", "annuli", "corrections", "notifications", "raw",
 ];
 
 // ── Wake-ack 音效設定(Phase 3A.1.2)──────────────────────────────────────
@@ -1190,6 +1192,31 @@ function ConfigTab({
   const [corrOrig, setCorrOrig] = useState<string>("");
   const [corrStatus, setCorrStatus] = useState<SaveStatus>({ kind: "idle" });
 
+  // 通知區段 — 2026-05-22 新增(Task 11)
+  // i18n follow-up:目前 inline 中文字串,對齊本檔其他 hardcode 中文 section 的 pattern。
+  type NotificationConfig = {
+    popup_enabled: boolean;
+    os_notification_enabled: boolean;
+  };
+  const [notifCfg, setNotifCfg] = useState<NotificationConfig>({
+    popup_enabled: true,
+    os_notification_enabled: true,
+  });
+  useEffect(() => {
+    invoke<NotificationConfig>("get_notification_config")
+      .then(setNotifCfg)
+      .catch((e) => console.warn("get_notification_config failed", e));
+  }, []);
+  const saveNotif = async (next: NotificationConfig) => {
+    setNotifCfg(next);
+    try {
+      await invoke("set_notification_config", { cfg: next });
+    } catch (e) {
+      console.error("set_notification_config failed", e);
+      alert(`儲存失敗:${e}`);
+    }
+  };
+
   useEffect(() => {
     invoke<string>("config_read")
       .then((t) => { setRaw(t); setOrig(t); })
@@ -1311,6 +1338,8 @@ function ConfigTab({
     ...(isX11 ? [{ id: "x11" as SubTabId, label: t("config_tab.subtabs.x11"), Icon: IconKeyboard }] : []),
     { id: "annuli" as SubTabId, label: t("config_tab.subtabs.annuli"), Icon: IconAnnuli },
     { id: "corrections" as SubTabId, label: t("config_tab.subtabs.corrections"), Icon: IconClipboard },
+    // i18n follow-up:通知 sub-tab label 暫用 inline 中文
+    { id: "notifications" as SubTabId, label: "通知", Icon: IconLightning },
     { id: "raw", label: t("config_tab.subtabs.raw"), Icon: IconPencil },
   ];
 
@@ -2253,6 +2282,37 @@ function ConfigTab({
               >{t("common.revert")}</button>
               <StatusBadge status={corrStatus} />
             </div>
+          </Section>
+          </>}
+
+          {/* ── 通知(popup / OS notification)── 2026-05-22 Task 11 ── */}
+          {subTab === "notifications" && <>
+          <Section
+            title="通知"
+            hint="Reminder 到期時要如何告訴你。In-app popup 是主路徑(最可靠);OS 桌面通知為輔。"
+          >
+            <FormRow label="In-app popup" hint="Reminder fire 時在 Mori 視窗內彈出 popup 視窗。建議保持開啟作為主通知路徑。">
+              <input
+                type="checkbox"
+                checked={notifCfg.popup_enabled}
+                onChange={(e) => saveNotif({ ...notifCfg, popup_enabled: e.target.checked })}
+              />
+            </FormRow>
+            <FormRow
+              label="OS 桌面通知"
+              hint="透過作業系統通知中心顯示通知。⚠ 在 Linux GNOME 上若 Mori 有 alwaysOnTop 視窗可能被 shell 抑制。建議 in-app popup 保持開啟為主路徑。"
+            >
+              <input
+                type="checkbox"
+                checked={notifCfg.os_notification_enabled}
+                onChange={(e) => saveNotif({ ...notifCfg, os_notification_enabled: e.target.checked })}
+              />
+            </FormRow>
+            {!notifCfg.popup_enabled && !notifCfg.os_notification_enabled && (
+              <p className="mori-config-section-hint" style={{ marginTop: "0.4em", borderLeft: "3px solid var(--mori-danger, #c66)", paddingLeft: "0.6em", color: "var(--mori-danger, #c66)" }}>
+                ⚠ 你關掉了所有通知方式 — reminder fire 後不會主動告訴你。
+              </p>
+            )}
           </Section>
           </>}
 

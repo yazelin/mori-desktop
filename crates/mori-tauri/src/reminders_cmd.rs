@@ -23,7 +23,35 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use mori_time::{Reminder, ReminderService};
+use serde::Serialize;
+use tauri::Manager;
+
+// ─────────────────────────────────────────────────────────────────────
+// Popup-queue 型別 — 給前端 reminder popup 用的精簡 view
+// ─────────────────────────────────────────────────────────────────────
+
+/// 前端 popup 收到的 reminder 快照。camelCase → TS 端 `dueAt` / `firedAt`。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveReminder {
+    pub id: i64,
+    pub text: String,
+    pub due_at: String,   // ISO8601 RFC3339
+    pub fired_at: String, // ISO8601 RFC3339(若 fired_at 為 None,填 Utc::now())
+}
+
+impl From<&Reminder> for ActiveReminder {
+    fn from(r: &Reminder) -> Self {
+        Self {
+            id: r.id,
+            text: r.text.clone(),
+            due_at: r.due_at.to_rfc3339(),
+            fired_at: r.fired_at.unwrap_or_else(Utc::now).to_rfc3339(),
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // 內部 helpers — 無 Tauri 依賴,可直接 unit test
@@ -103,6 +131,128 @@ pub async fn snooze_reminder_cmd(
     do_snooze_reminder(state.inner(), id, when).await
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Popup-queue commands — in-app reminder popup 系列
+// ─────────────────────────────────────────────────────────────────────
+
+/// `reminder_active_queue()` — 回傳已 fired 但尚未 dismissed 的 reminders
+/// (由 `ReminderStore::list_active_popup_queue` 過濾)。
+#[tauri::command]
+pub async fn reminder_active_queue(
+    svc: tauri::State<'_, Arc<ReminderService>>,
+) -> Result<Vec<ActiveReminder>, String> {
+    let store = svc.store.lock().await;
+    let now = Utc::now();
+    let reminders = store
+        .list_active_popup_queue(now)
+        .map_err(|e| e.to_string())?;
+    Ok(reminders.iter().map(ActiveReminder::from).collect())
+}
+
+/// `reminder_dismiss(id)` — 標記 reminder 為 user 已 dismiss(寫 `dismissed_at`)。
+#[tauri::command]
+pub async fn reminder_dismiss(
+    id: i64,
+    svc: tauri::State<'_, Arc<ReminderService>>,
+) -> Result<(), String> {
+    let store = svc.store.lock().await;
+    let result = store.mark_dismissed(id, Utc::now()).map_err(|e| e.to_string());
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "reminder_dismiss",
+        "reminder_id": id,
+        "ok": result.is_ok(),
+    }));
+    result
+}
+
+/// `reminder_snooze(id, minutes)` — popup [稍後 N 分] 用。
+/// 對 fired reminder 做 reschedule:dismiss 原本 + 建新一筆 N 分鐘後 fire。
+/// 使用 `ReminderService::reschedule_fired_reminder`,語義對齊「我錯過了,再提醒一次」。
+#[tauri::command]
+pub async fn reminder_snooze(
+    id: i64,
+    minutes: u32,
+    svc: tauri::State<'_, Arc<ReminderService>>,
+) -> Result<(), String> {
+    let result = svc
+        .reschedule_fired_reminder(id, minutes as i64)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string());
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "reminder_reschedule",
+        "original_id": id,
+        "delay_minutes": minutes,
+        "ok": result.is_ok(),
+    }));
+    result
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Sprite position query — popup mount 時主動拿 sprite 位置
+// ─────────────────────────────────────────────────────────────────────
+
+/// `get_sprite_position()` — 回傳 floating sprite window 的目前邏輯座標。
+///
+/// ReminderPopup mount 時用這個補抓 sprite 位置(只在拖動後才 emit sprite-moved,
+/// mount 時 spritePos 預設 (0,0),anchor 算成 (0, 212) → 不在任何 monitor 範圍)。
+///
+/// 失敗(floating window 不存在或 Tauri API 失敗)→ 回 Err,前端 fallback 用 (0,0)。
+#[tauri::command]
+pub fn get_sprite_position(
+    app: tauri::AppHandle,
+) -> Result<SpritePosition, String> {
+    let win = app
+        .get_webview_window("floating")
+        .ok_or_else(|| "floating window not found".to_string())?;
+    let phys = win.outer_position().map_err(|e| e.to_string())?;
+    let scale = win.scale_factor().unwrap_or(1.0);
+    Ok(SpritePosition {
+        x: phys.x as f64 / scale,
+        y: phys.y as f64 / scale,
+    })
+}
+
+#[derive(Serialize)]
+pub struct SpritePosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Debug command — popup window state from Tauri's perspective
+// ─────────────────────────────────────────────────────────────────────
+
+/// `debug_reminder_popup_state()` — 從 Tauri 視角回傳 popup window 的實際位置/大小/可見性。
+/// 診斷用:可與 X11/mutter 所見對比,找出 setPosition/setSize 是否真的生效。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PopupDebugState {
+    pub label: String,
+    pub is_visible: bool,
+    pub outer_position: (i32, i32), // physical px
+    pub outer_size: (u32, u32),     // physical px
+    pub scale_factor: f64,
+}
+
+#[tauri::command]
+pub fn debug_reminder_popup_state(app: tauri::AppHandle) -> Result<PopupDebugState, String> {
+    let win = app
+        .get_webview_window("reminder_popup")
+        .ok_or_else(|| "reminder_popup window not found".to_string())?;
+    let pos = win.outer_position().map_err(|e| e.to_string())?;
+    let size = win.outer_size().map_err(|e| e.to_string())?;
+    let visible = win.is_visible().map_err(|e| e.to_string())?;
+    let scale = win.scale_factor().map_err(|e| e.to_string())?;
+    Ok(PopupDebugState {
+        label: "reminder_popup".to_string(),
+        is_visible: visible,
+        outer_position: (pos.x, pos.y),
+        outer_size: (size.width, size.height),
+        scale_factor: scale,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     //! 對齊 `file_loader_cmd::tests` 的風格 — Tauri State / runtime mock 麻煩,
@@ -113,14 +263,14 @@ mod tests {
     //! Notifier 在 CI 沒 dbus 會 fire-err,但 service callback 內部只 log warn,
     //! `do_*` helpers 不會受影響(我們只測 happy + error paths,不等 fire)。
     use super::*;
-    use mori_time::Notifier;
+    use mori_time::{NoopEmitter, Notifier};
     use tempfile::TempDir;
 
     async fn make_test_service(dir: &TempDir) -> Arc<ReminderService> {
         let db = dir.path().join("test.db");
         let notifier = Notifier::new("MoriTauriTest");
         Arc::new(
-            ReminderService::new(&db, notifier)
+            ReminderService::new(&db, notifier, Arc::new(NoopEmitter))
                 .await
                 .expect("new service"),
         )
@@ -216,5 +366,76 @@ mod tests {
             err.contains("can't be snoozed"),
             "expected guard message, got: {err}",
         );
+    }
+
+    // ── popup-queue command integration tests ────────────────────────
+
+    #[tokio::test]
+    async fn dismiss_writes_dismissed_at_and_filter_takes_effect() {
+        let dir = TempDir::new().unwrap();
+        let svc = make_test_service(&dir).await;
+
+        // 建 reminder 並強迫 mark_fired(模擬排程觸發)
+        let r = {
+            let store = svc.store.lock().await;
+            let r = store
+                .create(
+                    "popup-test".to_string(),
+                    Utc::now() - chrono::Duration::minutes(1),
+                    None,
+                )
+                .unwrap();
+            store.mark_fired(r.id, Utc::now()).unwrap();
+            r
+        };
+
+        // dismiss 前,active_queue 應包含 r
+        {
+            let store = svc.store.lock().await;
+            let before = store.list_active_popup_queue(Utc::now()).unwrap();
+            assert!(
+                before.iter().any(|x| x.id == r.id),
+                "fired reminder should appear in active queue before dismiss"
+            );
+        }
+
+        // 呼叫 store.mark_dismissed — 等價 reminder_dismiss command 邏輯
+        {
+            let store = svc.store.lock().await;
+            store.mark_dismissed(r.id, Utc::now()).unwrap();
+        }
+
+        // dismiss 後,active_queue 應不含 r
+        let store = svc.store.lock().await;
+        let after = store.list_active_popup_queue(Utc::now()).unwrap();
+        assert!(
+            !after.iter().any(|x| x.id == r.id),
+            "dismissed reminder should NOT appear in active queue after dismiss"
+        );
+    }
+
+    #[tokio::test]
+    async fn active_reminder_from_converts_fields_correctly() {
+        use mori_time::schema::Reminder;
+        use chrono::TimeZone;
+
+        let due = Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap();
+        let fired = Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 5).unwrap();
+        let r = Reminder {
+            id: 42,
+            text: "hello".to_string(),
+            due_at: due,
+            cron_expr: None,
+            created_at: due,
+            fired_at: Some(fired),
+            snoozed_until: None,
+            status: mori_time::ReminderStatus::Fired,
+            dismissed_at: None,
+        };
+        let ar = ActiveReminder::from(&r);
+        assert_eq!(ar.id, 42);
+        assert_eq!(ar.text, "hello");
+        assert_eq!(ar.due_at, due.to_rfc3339());
+        assert_eq!(ar.fired_at, fired.to_rfc3339());
     }
 }
