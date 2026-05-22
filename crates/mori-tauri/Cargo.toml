@@ -56,7 +56,12 @@ chrono = { workspace = true }
 base64 = "0.22"
 # 5P-2: ensure_default 內把 256×256 single-frame PNG tile 成 1024×1024 4×4 placeholder
 # (動畫 ON 看起來不閃,等正式 sprite 上來覆蓋同檔名)。不依賴 ImageMagick。
+# 2026-05-23:character pack overhaul 後 placeholder upgrader 已砍,image 可能不需要了 —
+# Task 5 verify 後從這裡刪。暫保留避免 Task 4 重寫過程編譯爆。
 image = { version = "0.25", default-features = false, features = ["png"] }
+# 2026-05-23:character pack overhaul — bundle examples/characters/mori/ 進 binary
+# 取代 8 個 include_bytes!,ensure_default 從這 dir extract。
+include_dir = "0.7"
 
 # Phase 5D — local HTTP skill server for Bash CLI proxy。
 # 啟動時 bind 127.0.0.1:RANDOM,把 port + token 寫到 ~/.mori/runtime.json,
