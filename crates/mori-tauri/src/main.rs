@@ -486,13 +486,6 @@ fn read_floating_shape(config_path: &std::path::Path) -> (String, u32) {
     (shape, radius)
 }
 
-/// 讀使用者 `~/.mori/floating/backplate-{dark,light}.png`,有的話以 base64
-/// data URL 回給 React 餵 CSS;沒有就回 null,讓 React 用 shipped fallback。
-///
-/// 為什麼用 data URL 而不是 Tauri asset protocol:asset protocol 需要 in
-/// tauri.conf.json security 開啟 + 設 scope,加 capabilities 規則才能跨
-/// window 用。data URL 直接是字串,React → CSS variable → background-image
-/// 一條龍,不動 Tauri 設定。檔案 ~500KB,base64 後 ~700KB,記憶體 OK。
 /// 即時套用 floating window XShape clip。React ConfigTab save 後 invoke
 /// 這個 → user 改 shape / radius 不用重啟 Mori。
 ///
@@ -533,35 +526,54 @@ fn apply_floating_shape(app: AppHandle, shape: String, radius: u32) -> Result<()
     Ok(())
 }
 
+/// 讀使用者全域 `~/.mori/floating/backplate-{dark,light}.png`,有的話以 base64
+/// data URL 回給 React。沒有就 Ok(None),React 端 fallback 到 shipped default。
+///
+/// 用 data URL 而不是 Tauri asset protocol:asset protocol 需要 in tauri.conf.json
+/// security 開啟 + 設 scope。data URL 直接是字串,React → CSS variable → background-image
+/// 一條龍,不動 Tauri 設定。檔案 ~500KB,base64 ~700KB,記憶體 OK。
 #[tauri::command]
 fn read_floating_backplate(theme: String) -> Result<Option<String>, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use base64::Engine as _;
-        let Some(home) = std::env::var("HOME").ok() else {
-            return Err("HOME not set".to_string());
-        };
-        let allowed_theme = matches!(theme.as_str(), "dark" | "light");
-        if !allowed_theme {
-            return Err(format!(
-                "invalid theme '{theme}', expected 'dark' or 'light'"
-            ));
-        }
-        let path = std::path::PathBuf::from(home)
-            .join(".mori/floating")
-            .join(format!("backplate-{theme}.png"));
-        if !path.exists() {
-            return Ok(None);
-        }
-        let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        Ok(Some(format!("data:image/png;base64,{b64}")))
+    use base64::Engine as _;
+    if !matches!(theme.as_str(), "dark" | "light") {
+        return Err(format!(
+            "invalid theme '{theme}', expected 'dark' or 'light'"
+        ));
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = theme;
-        Ok(None)
+    let path = crate::mori_dir()
+        .join("floating")
+        .join(format!("backplate-{theme}.png"));
+    if !path.exists() {
+        return Ok(None);
     }
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:image/png;base64,{b64}")))
+}
+
+/// 讀 character pack 的 `~/.mori/characters/<stem>/backdrop-{dark,light}.png`,
+/// 有的話以 base64 data URL 回給 React。沒有就 Ok(None) — React 端 fallback
+/// 到 user global,再 fallback 到 shipped default。
+///
+/// 跟 `read_floating_backplate` 並列(後者讀 user global `~/.mori/floating/`),
+/// 拆兩支 command 是因為 input 不同(stem+theme vs theme),分開比加 Option<stem>
+/// 分支清楚。
+#[tauri::command]
+fn read_character_backdrop(stem: String, theme: String) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+    if !matches!(theme.as_str(), "dark" | "light") {
+        return Err(format!(
+            "invalid theme '{theme}', expected 'dark' or 'light'"
+        ));
+    }
+    let path = crate::character_pack::pack_dir(&stem)
+        .join(format!("backdrop-{theme}.png"));
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:image/png;base64,{b64}")))
 }
 
 #[tauri::command]
@@ -5601,6 +5613,7 @@ fn main() {
             force_raise_window,
             apply_floating_shape,
             read_floating_backplate,
+            read_character_backdrop,
             build_info,
             chat_provider_info,
             current_phase,
@@ -7139,5 +7152,22 @@ mod tests {
             load_soul_content(vault_root, "aoi").as_deref(),
             Some("我是 Aoi。")
         );
+    }
+}
+
+#[cfg(test)]
+mod backdrop_ipc_tests {
+    use super::*;
+
+    #[test]
+    fn read_character_backdrop_rejects_unknown_theme() {
+        let err = read_character_backdrop("mori".into(), "neon".into()).unwrap_err();
+        assert!(err.contains("invalid theme"), "got: {err}");
+    }
+
+    #[test]
+    fn read_character_backdrop_missing_file_returns_none() {
+        let out = read_character_backdrop("__nonexistent_pack__".into(), "dark".into()).unwrap();
+        assert!(out.is_none(), "expected None for missing file, got Some");
     }
 }
