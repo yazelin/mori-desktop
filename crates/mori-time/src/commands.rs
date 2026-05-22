@@ -116,7 +116,13 @@ impl ReminderService {
                 })
                 .await;
                 match fire_result {
-                    Ok(Ok(())) => {}
+                    // 2026-05-22 debug:即使 Ok user 也回報沒看到通知,加 info log
+                    // 證明 fire 路徑跑完 + 通知有 send 進 dbus(否則早就吐 Err)。
+                    Ok(Ok(())) => tracing::info!(
+                        reminder_id = reminder.id,
+                        text = %reminder.text,
+                        "notifier.fire returned Ok — notification submitted to dbus",
+                    ),
                     Ok(Err(e)) => tracing::warn!(
                         reminder_id = reminder.id,
                         error = %e,

@@ -5049,8 +5049,14 @@ fn main() {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mori_tauri=debug,mori_core=debug".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                // Default filter:涵蓋整組 mori-* crate。漏 sub-crate 等於它們的
+                // tracing log 整個被吃掉(2026-05-22 踩過:reminder fire 加了 info
+                // log 結果看不到,原來 mori_time 沒在 filter 內)。
+                "mori_tauri=debug,mori_core=debug,\
+                 mori_time=info,mori_mcp=info,mori_gmail=info,mori_file_loader=info"
+                    .into()
+            }),
         )
         .init();
 
