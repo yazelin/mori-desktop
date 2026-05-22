@@ -188,6 +188,12 @@ mod read_file;
 // §9 P1 「時之鳥」K5:remind_me LLM tool dispatch path — 接 mori_time::ReminderService
 mod remind_me;
 
+// Wave 7 L-mori 記憶之森(Karpathy LLM Wiki pattern):read_wiki_page LLM tool
+// dispatch path。LLM 看 system prompt 開頭的 wiki/index.md 知道 page 清單,
+// 需要時呼叫此 skill 把 specific page 內容拉進 context。**純 READ** — 寫 wiki
+// 是 future work(annuli reflection / curator,需 yazelin per-dir auth)。
+mod read_wiki_page;
+
 // Stream I:Anthropic SKILL.md 格式 — 載入 `~/.mori/skills/<name>/SKILL.md`,
 // 把 markdown body 當 prompt-augmentation 給 LLM。對齊
 // https://agentskills.io/specification。D-light(只讀 body,不執行 scripts/)。
@@ -222,6 +228,7 @@ pub use paste_selection::PasteSelectionBackSkill;
 
 pub use fetch_url::FetchUrlSkill;
 pub use read_file::ReadFileSkill;
+pub use read_wiki_page::ReadWikiPageSkill;
 pub use remind_me::RemindMeSkill;
 
 pub use anthropic_skill::{
