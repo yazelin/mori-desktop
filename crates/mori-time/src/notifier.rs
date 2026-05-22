@@ -71,6 +71,17 @@ impl Notifier {
         Arc::clone(&self.enabled)
     }
 
+    /// Builder:建立 OS 通知預設**關閉**的 Notifier。
+    ///
+    /// 用在 tests / CI 避免 `.fire()` 真的走 dbus 污染 user desktop。
+    /// Production code 請用 [`Self::new`](預設 enabled=true)。
+    /// 名字故意寫長以防誤用在 production。
+    pub fn disabled(app_name: impl Into<String>) -> Self {
+        let n = Self::new(app_name);
+        n.enabled.store(false, Ordering::Relaxed);
+        n
+    }
+
     /// Builder:設 icon 路徑 / freedesktop icon 名。
     pub fn with_icon(mut self, icon_path: impl Into<String>) -> Self {
         self.icon_path = Some(icon_path.into());
@@ -248,8 +259,7 @@ mod tests {
     #[test]
     fn fire_returns_ok_when_disabled() {
         // enabled=false 時 fire() return Ok 而不 attempt dbus
-        let n = Notifier::new("Mori-Test");
-        n.enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+        let n = Notifier::disabled("Mori-Test");
         let r = sample_reminder("disabled-test");
         assert!(n.fire(&r).is_ok());
     }

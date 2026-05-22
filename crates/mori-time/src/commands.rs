@@ -386,7 +386,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn fresh_notifier() -> Notifier {
-        Notifier::new("Mori-Test")
+        Notifier::disabled("Mori-Test")
     }
 
     async fn service_in(dir: &TempDir) -> ReminderService {
@@ -578,7 +578,7 @@ mod tests {
         let db = dir.path().join("r.db");
         let svc = ReminderService::new(
             &db,
-            Notifier::new("Mori-Test"),
+            Notifier::disabled("Mori-Test"),
             Arc::new(NoopEmitter),
         )
         .await
@@ -613,7 +613,7 @@ mod tests {
         let db = dir.path().join("r.db");
         let svc = ReminderService::new(
             &db,
-            Notifier::new("Mori-Test"),
+            Notifier::disabled("Mori-Test"),
             Arc::new(NoopEmitter),
         )
         .await
@@ -699,7 +699,7 @@ mod tests {
         }
 
         // 開 service → reload-pending 應該把 8 天前的標 dismissed_at + Fired
-        let _svc = ReminderService::new(&db, Notifier::new("Mori-Test"), Arc::new(NoopEmitter))
+        let _svc = ReminderService::new(&db, Notifier::disabled("Mori-Test"), Arc::new(NoopEmitter))
             .await
             .expect("service");
         // 留一點時間給 1ms 觸發 + spawn task 處理 mark_fired 完成
@@ -771,7 +771,7 @@ mod tests {
 
         let svc = ReminderService::new(
             &db,
-            Notifier::new("Mori-Test"),
+            Notifier::disabled("Mori-Test"),
             emitter.clone() as Arc<dyn EventEmitter>,
         )
         .await

@@ -147,7 +147,7 @@ mod tests {
     async fn service_in(dir: &TempDir) -> Arc<ReminderService> {
         let db = dir.path().join("reminders.db");
         Arc::new(
-            ReminderService::new(&db, Notifier::new("Mori-Test"), Arc::new(NoopEmitter))
+            ReminderService::new(&db, Notifier::disabled("Mori-Test"), Arc::new(NoopEmitter))
                 .await
                 .expect("new service"),
         )
