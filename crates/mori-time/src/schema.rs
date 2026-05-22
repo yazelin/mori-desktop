@@ -27,6 +27,9 @@ pub struct Reminder {
     pub created_at: DateTime<Utc>,
     /// 上次實際觸發時間;`None` = 還沒響過。
     pub fired_at: Option<DateTime<Utc>>,
+    /// 用戶明確關掉 popup 的時間;`None` = 還沒 dismiss 過。
+    /// 區分「fired 但 user 沒看」vs「user 已關掉」。
+    pub dismissed_at: Option<DateTime<Utc>>,
     /// 暫緩到何時(snooze 後 status = Snoozed,到時間才繼續排程)。
     pub snoozed_until: Option<DateTime<Utc>>,
     pub status: ReminderStatus,
@@ -120,6 +123,21 @@ impl ReminderStore {
             CREATE INDEX IF NOT EXISTS idx_reminders_due_at ON reminders(due_at);
             "#,
         )?;
+
+        // 2026-05-22: dismissed_at 區分「fired 但 user 沒看」vs「user 已關掉」
+        // SQLite 沒 ADD COLUMN IF NOT EXISTS,用 table_info pragma 檢查
+        let has_dismissed_at: bool = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('reminders') WHERE name = 'dismissed_at'")
+            .and_then(|mut s| s.query_row([], |_| Ok(true)))
+            .unwrap_or(false);
+        if !has_dismissed_at {
+            self.conn.execute(
+                "ALTER TABLE reminders ADD COLUMN dismissed_at TEXT",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -151,6 +169,7 @@ impl ReminderStore {
             cron_expr: cron,
             created_at: now,
             fired_at: None,
+            dismissed_at: None,
             snoozed_until: None,
             status,
         })
@@ -159,7 +178,7 @@ impl ReminderStore {
     /// 列出仍需排程的 reminder(status = Pending 或 Snoozed)。
     pub fn list_pending(&self) -> Result<Vec<Reminder>, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
                FROM reminders
                WHERE status IN ('pending', 'snoozed')
                ORDER BY due_at ASC"#,
@@ -173,7 +192,7 @@ impl ReminderStore {
     /// 列出所有 reminder(含 fired / cancelled),由舊到新。
     pub fn list_all(&self) -> Result<Vec<Reminder>, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
                FROM reminders
                ORDER BY id ASC"#,
         )?;
@@ -186,7 +205,7 @@ impl ReminderStore {
     /// 拿單筆。找不到回 `NotFound(id)`。
     pub fn get(&self, id: i64) -> Result<Reminder, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
                FROM reminders
                WHERE id = ?1"#,
         )?;
@@ -249,6 +268,10 @@ impl ReminderStore {
 }
 
 /// 把 sqlite row 拆成 `Reminder`。回傳 nested Result 因為 status 解析可能失敗。
+///
+/// 欄位順序(對應 SELECT 的 column 位置):
+/// 0=id, 1=text, 2=due_at, 3=cron_expr, 4=created_at,
+/// 5=fired_at, 6=dismissed_at, 7=snoozed_until, 8=status
 fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderError>> {
     let id: i64 = row.get(0)?;
     let text: String = row.get(1)?;
@@ -256,8 +279,9 @@ fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderE
     let cron_expr: Option<String> = row.get(3)?;
     let created_at: String = row.get(4)?;
     let fired_at: Option<String> = row.get(5)?;
-    let snoozed_until: Option<String> = row.get(6)?;
-    let status: String = row.get(7)?;
+    let dismissed_at: Option<String> = row.get(6)?;
+    let snoozed_until: Option<String> = row.get(7)?;
+    let status: String = row.get(8)?;
 
     Ok((|| -> Result<Reminder, ReminderError> {
         Ok(Reminder {
@@ -267,6 +291,7 @@ fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderE
             cron_expr,
             created_at: parse_rfc3339(&created_at)?,
             fired_at: fired_at.as_deref().map(parse_rfc3339).transpose()?,
+            dismissed_at: dismissed_at.as_deref().map(parse_rfc3339).transpose()?,
             snoozed_until: snoozed_until.as_deref().map(parse_rfc3339).transpose()?,
             status: ReminderStatus::from_db_str(&status)?,
         })
@@ -456,5 +481,17 @@ mod tests {
             .unwrap();
         let fetched = s.get(r.id).unwrap();
         assert_eq!(fetched.cron_expr.as_deref(), Some("0 0 8 * * *"));
+    }
+
+    #[test]
+    fn migration_adds_dismissed_at_idempotent() {
+        let store = ReminderStore::open_in_memory().expect("open");
+        // 二次 migrate 不爆
+        store.migrate().expect("migrate 2nd time");
+        // 寫進去之後讀得到 None
+        let r = store
+            .create("test".to_string(), Utc::now(), None)
+            .expect("create");
+        assert!(r.dismissed_at.is_none(), "new reminder dismissed_at should be None");
     }
 }

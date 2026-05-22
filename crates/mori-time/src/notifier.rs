@@ -165,6 +165,7 @@ mod tests {
             cron_expr: None,
             created_at: now,
             fired_at: None,
+            dismissed_at: None,
             snoozed_until: None,
             status: ReminderStatus::Pending,
         }
