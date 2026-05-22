@@ -100,7 +100,12 @@ function ChatBubble() {
       // + border)走;不然短文字時 window > card 會看到底部 body bg 條,
       // 長文字逐漸縮短時 window 也不會跟著縮。MAX_HEIGHT 上限保留,避免
       // 超長 transcript / response 鋪滿整個螢幕。
-      const h = Math.min(MAX_HEIGHT, bubble.offsetHeight);
+      // 第一次 mount 時 layout 還沒跑完,offsetHeight=0 → setSize(W,0) 會被
+      // GTK 拒絕並 spam `Gtk-CRITICAL: gtk_window_resize: assertion 'height > 0'`。
+      // ResizeObserver 馬上會再 fire 拿到真值,所以這邊直接 skip 0 即可。
+      const measured = bubble.offsetHeight;
+      if (measured <= 0) return;
+      const h = Math.min(MAX_HEIGHT, measured);
       win.setSize(new LogicalSize(WIDTH, h)).catch(() => {});
     };
     sync();
