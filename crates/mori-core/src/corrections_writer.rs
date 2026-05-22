@@ -41,6 +41,9 @@ pub fn append_correction(
         String::new()
     };
 
+    // 修復可能既有的雙 ## User bug(自動 cleanup,idempotent)
+    let content = repair_duplicate_user_section(&content);
+
     let new_content = merge_into_user_section(&content, wrong_variants, suggested)?;
 
     // atomic write
@@ -58,7 +61,10 @@ pub(crate) fn merge_into_user_section(
 ) -> Result<String, WriterError> {
     // 找 ## User heading 跟 ### 用戶自加 subsection 位置
     let lines: Vec<&str> = content.lines().collect();
-    let user_h2_idx = lines.iter().position(|l| l.trim() == "## User");
+    let user_h2_idx = lines.iter().position(|l| {
+        let t = l.trim();
+        t == "## User" || t == "## User(以下你自己加)"
+    });
 
     if user_h2_idx.is_none() {
         // ## User heading 不存在,在檔尾建整段
@@ -152,6 +158,65 @@ pub(crate) fn merge_into_user_section(
     Ok(join_lines(&out_lines))
 }
 
+/// 修復雙 User heading bug。若 corrections.md 有兩個 `## User*` heading,
+/// 把第二個整段內容搬到第一個之下,刪除第二個 heading。
+/// Idempotent — 沒重複的話 noop。
+pub fn repair_duplicate_user_section(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let user_h2_indices: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| {
+            let t = l.trim();
+            if t == "## User" || t == "## User(以下你自己加)" {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if user_h2_indices.len() < 2 {
+        return content.to_string(); // 沒重複,noop
+    }
+
+    let _first_user = user_h2_indices[0];
+    let second_user = user_h2_indices[1];
+
+    // 找 second_user 段結尾(下一個 ## heading 或 EOF)
+    let second_end = lines
+        .iter()
+        .enumerate()
+        .skip(second_user + 1)
+        .find(|(_, l)| l.trim().starts_with("## "))
+        .map(|(i, _)| i)
+        .unwrap_or(lines.len());
+
+    // 拷貝 second_user+1..second_end 的內容
+    let second_body: Vec<String> = lines[second_user + 1..second_end]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    // 組裝:lines[0..second_user](即 first 段完整含內容) + second_body + lines[second_end..]
+    let mut out: Vec<String> = lines[..second_user].iter().map(|s| s.to_string()).collect();
+
+    // first 段尾若不是 empty line,加空行隔開
+    if let Some(last) = out.last() {
+        if !last.trim().is_empty() {
+            out.push(String::new());
+        }
+    }
+    out.extend(second_body);
+    out.extend(lines[second_end..].iter().map(|s| s.to_string()));
+
+    let mut joined = out.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
+}
+
 fn format_line(wrong_variants: &[String], suggested: &str) -> String {
     format!("- {} -> {}", wrong_variants.join(", "), suggested)
 }
@@ -224,6 +289,41 @@ mod tests {
         // baseline 馬當 line 該完整存在,且不該有 baseline 內被改動
         let baseline_line = result.lines().find(|l| l.contains("馬當")).unwrap();
         assert_eq!(baseline_line.trim(), "- 馬當 -> Markdown");
+    }
+
+    #[test]
+    fn merges_into_user_section_with_baseline_template_heading() {
+        // Baseline corrections.md 用 "## User(以下你自己加)" 不是純 "## User"
+        let content = "## Baseline\n\n- 馬當 -> Markdown\n\n## User(以下你自己加)\n\n<!-- 範例 -->\n";
+        let result = merge_into_user_section(content, &["英檔".into()], "音檔").unwrap();
+        // 不該生第二個 ## User
+        let user_heading_count = result
+            .lines()
+            .filter(|l| l.trim().starts_with("## User"))
+            .count();
+        assert_eq!(user_heading_count, 1, "只該有一個 ## User heading,不該重複");
+        // 該寫進 entries
+        assert!(result.contains("- 英檔 -> 音檔"));
+        assert!(result.contains("### 用戶自加"));
+    }
+
+    #[test]
+    fn repair_merges_duplicate_user_sections() {
+        let bad = "## User(以下你自己加)\n\n<!-- 範例 -->\n\n## User\n\n### 用戶自加\n\n- 英檔 -> 音檔\n";
+        let fixed = repair_duplicate_user_section(bad);
+        let h_count = fixed
+            .lines()
+            .filter(|l| l.trim().starts_with("## User"))
+            .count();
+        assert_eq!(h_count, 1);
+        assert!(fixed.contains("- 英檔 -> 音檔"));
+        assert!(fixed.contains("### 用戶自加"));
+    }
+
+    #[test]
+    fn repair_idempotent_when_no_duplicate() {
+        let good = "## Baseline\n\n## User(以下你自己加)\n\n### 用戶自加\n\n- a -> b\n";
+        assert_eq!(repair_duplicate_user_section(good), good);
     }
 
     #[test]
