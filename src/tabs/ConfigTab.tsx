@@ -494,8 +494,11 @@ function ConfigMemoryTypeChips({
   );
 }
 
-// 5P-6: Character pack picker — Floating section 內,讓 user 切換 / 列出 / 升級
-// 4×4 placeholder。換 active 後 emit "character-changed" 讓 FloatingMori 即時 re-fetch。
+// Character pack picker — Floating section 內,讓 user 切換 / 列出角色。
+// 換 active 後 emit "character-changed" 讓 FloatingMori 即時 re-fetch。
+//
+// 註:過去有「升級 4×4 placeholder」按鈕(`character_upgrade_pack_to_4x4`),
+// 現在 Mori Sprite Studio 直接輸出 4×4 sheet,placeholder 升級不再需要,已砍。
 function CharacterPicker() {
   const { t } = useTranslation();
   const [chars, setChars] = useState<CharacterEntry[]>([]);
@@ -533,23 +536,6 @@ function CharacterPicker() {
       setTimeout(() => setMsg(null), 2000);
     } catch (e: any) {
       setMsg(t("config_tab.rows.char_switch_fail", { e: String(e) }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onUpgrade = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const [up, sk] = await invoke<[number, number]>("character_upgrade_pack_to_4x4", {
-        stem: active,
-      });
-      await emit("character-changed");
-      setMsg(t("config_tab.rows.char_upgrade_ok", { up, sk }));
-      setTimeout(() => setMsg(null), 4000);
-    } catch (e: any) {
-      setMsg(t("config_tab.rows.char_upgrade_fail", { e: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -620,16 +606,6 @@ function CharacterPicker() {
               ❌ 匯入失敗:{importError}
             </div>
           )}
-        </div>
-      </FormRow>
-      <FormRow
-        label=""
-        hint={t("config_tab.rows.char_upgrade_hint")}
-      >
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="mori-btn" onClick={onUpgrade} disabled={busy}>
-            {t("config_tab.rows.upgrade_pack_button")}
-          </button>
         </div>
       </FormRow>
     </>
