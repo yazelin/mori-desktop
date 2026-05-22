@@ -90,6 +90,41 @@ pub fn correction_inbox_dismiss(suggested: String, wrong_variants: Vec<String>) 
     Ok(())
 }
 
+/// 「刪除」一筆 inbox entry — 從 pending list 移走,但**不**加進 dismissed 白名單,也**不**寫
+/// corrections.md。等同「這次跳過,別留痕跡」,下次 audit 再標同 (wrong, suggested) 還是會
+/// 進 inbox(不像 dismiss 會永久過濾)。
+///
+/// 實作:對每個 (wrong, suggested) 寫 status=Accepted 但 **不 call append_correction**。
+/// 因為 list_pending filter 只看 Pending,所以 entry 從 UI 消失;is_dismissed 只看
+/// Dismissed,所以下次 audit 不 filter 掉。
+#[tauri::command]
+pub fn correction_inbox_delete(suggested: String, wrong_variants: Vec<String>) -> Result<(), String> {
+    if wrong_variants.is_empty() {
+        return Err("wrong_variants 空".into());
+    }
+    let now = Utc::now();
+    for wrong in &wrong_variants {
+        let mut deleted = InboxEntry::new_pending(
+            "marker",
+            InboxSource::LlmAudit,
+            wrong,
+            &suggested,
+            0.0,
+            "user deleted (skip once, no whitelist)",
+        );
+        deleted.status = InboxStatus::Accepted; // 用 Accepted 讓 list_pending 不再顯示
+        deleted.accepted_at = Some(now);
+        correction_inbox::append_entry(&inbox_path(), &deleted)
+            .map_err(|e| format!("append deleted entry: {e}"))?;
+    }
+    mori_core::event_log::append(serde_json::json!({
+        "kind": "correction_inbox_deleted",
+        "suggested": suggested,
+        "wrong_variants": wrong_variants,
+    }));
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct ChangeSuggestionArgs {
     pub suggested: String,

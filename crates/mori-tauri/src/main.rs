@@ -5674,6 +5674,7 @@ fn main() {
             correction_cmd::correction_inbox_list,
             correction_cmd::correction_inbox_accept,
             correction_cmd::correction_inbox_dismiss,
+            correction_cmd::correction_inbox_delete,
             correction_cmd::correction_inbox_change_suggestion,
             correction_cmd::voice_feedback_set,
             correction_cmd::corrections_md_content,

@@ -101,6 +101,22 @@ function CorrectionsTab() {
     }
   };
 
+  const onDelete = async (group: InboxGroup) => {
+    setBusy((b) => ({ ...b, [group.suggested]: true }));
+    try {
+      const wrongs = group.variants.map((v) => v.wrong);
+      await invoke("correction_inbox_delete", {
+        suggested: group.suggested,
+        wrongVariants: wrongs,
+      });
+      await refresh();
+    } catch (e) {
+      alert(`刪除失敗:${e}`);
+    } finally {
+      setBusy((b) => ({ ...b, [group.suggested]: false }));
+    }
+  };
+
   if (loading) return <div className="corrections-tab">載入中...</div>;
 
   return (
@@ -191,6 +207,9 @@ function CorrectionsTab() {
                           }
                         >
                           改建議
+                        </button>
+                        <button className="mori-btn small" disabled={isBusy} onClick={() => onDelete(group)}>
+                          刪除
                         </button>
                         <button className="mori-btn small ghost" disabled={isBusy} onClick={() => onDismiss(group)}>
                           <IconClose width={12} height={12} /> 忽略
