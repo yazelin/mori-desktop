@@ -445,6 +445,52 @@ pub fn registry() -> Vec<DepSpec> {
             },
             install_overrides: &[],
         },
+        // Wave 6 MCP-2:MCP server 多數官方實作走 `npx -y @modelcontextprotocol/server-*`
+        // (chrome-devtools / github / slack / filesystem / playwright / 等),動態
+        // pull npm package 跑 stdio MCP server。沒裝 Node.js → spawn `npx` 直接失敗,
+        // mori-tauri 啟動時 McpRegistry::from_config 內個別 server connect 全 warn skip,
+        // 結果 LLM 看不到任何 mcp_*_* tool。
+        //
+        // HTTP MCP server(自架 endpoint)不依賴 Node;只有 stdio + npx 走 Node。
+        // 列出來讓 user 知道想用 npx-based MCP server 必須先裝。
+        DepSpec {
+            id: "nodejs",
+            name: "Node.js + npx",
+            description: "Node.js 18+(含 npx)。Wave 6 MCP-2:大多數官方 MCP server \
+                          透過 npx 動態載入(`npx -y @modelcontextprotocol/server-*`),\
+                          沒裝 Node 就連不上。\n\n\
+                          也是 Claude Code / Gemini CLI / Codex CLI 等 AI coding CLI 的 \
+                          runtime(它們透過 `npm install -g` 安裝)。",
+            unlocks: "stdio MCP server(GitHub / Slack / Notion / chrome-devtools / \
+                      filesystem / playwright 等官方實作)能連上 + AI coding CLI 能安裝",
+            size_hint: Some("~70-100MB"),
+            needs_sudo: true,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some(
+                "MCP server 透過 npx 動態載入,user 沒裝 Node 會 connect 失敗 \
+                 (McpRegistry log warn skip)。HTTP MCP server(自架 endpoint)\
+                 不依賴 Node。",
+            ),
+            check: CheckSpec::Which { bin: "node" },
+            check_overrides: &[],
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# Ubuntu / Debian(NodeSource 官方 LTS):",
+                    "curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -",
+                    "sudo apt install -y nodejs",
+                    "# Fedora / RHEL:",
+                    "# curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo -E bash -",
+                    "# sudo dnf install -y nodejs",
+                    "# Arch / Manjaro:",
+                    "# sudo pacman -S nodejs npm",
+                    "# macOS(homebrew):",
+                    "# brew install node",
+                    "# Windows:從 https://nodejs.org/download 下載 installer",
+                    "# 確認:`node --version`(需 18+)+ `npx --version`",
+                ],
+            },
+            install_overrides: &[],
+        },
         // Obsidian CLI — bundled inside Obsidian app v1.12.4+(GA 2026/02),
         // 不是獨立 binary。User 要先裝 app 再到 in-app Settings 啟用「Register CLI」,
         // 啟用後 `obsidian` 才會在 PATH。沒啟用 → starter AGENT-06.obsidian 跑 shell_skill

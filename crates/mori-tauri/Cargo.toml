@@ -22,6 +22,11 @@ mori-file-loader = { path = "../mori-file-loader" }
 # RemindMeSkill 都從 AppState 拿這份 Arc。mori-time 不 depend mori-core /
 # mori-tauri,純 leaf crate。
 mori-time = { path = "../mori-time" }
+# Wave 6 MCP-2 — mori-mcp::McpRegistry。Tauri 端啟動時從 ~/.mori/mcp.json 載 config
+# + 建一份 Arc<McpRegistry> 註冊進 Manager。McpToolSkill(mori-core)透過此 Arc
+# dispatch tool call;mcp_cmd.rs 內的 Tauri commands 也 share 同一份。
+# 純 leaf crate(只 depend rmcp / serde / tokio / tracing),無 cycle 風險。
+mori-mcp = { path = "../mori-mcp" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
