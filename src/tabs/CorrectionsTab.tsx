@@ -145,6 +145,18 @@ function CorrectionsTab() {
                   className={`corrections-inbox-row ${group.has_user_edit ? "is-user-edit" : ""}`}
                 >
                   <div className="corrections-row-head">
+                    <span className="corrections-variants">
+                      {group.variants.map((v, i) => (
+                        <span key={v.wrong}>
+                          {i > 0 && ", "}
+                          {v.wrong}
+                          {v.count > 1 && (
+                            <span className="corrections-count-badge">×{v.count}</span>
+                          )}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="corrections-arrow">→</span>
                     {isEditing ? (
                       <input
                         type="text"
@@ -157,18 +169,6 @@ function CorrectionsTab() {
                     ) : (
                       <span className="corrections-suggested">{group.suggested}</span>
                     )}
-                    <span className="corrections-arrow">←</span>
-                    <span className="corrections-variants">
-                      {group.variants.map((v, i) => (
-                        <span key={v.wrong}>
-                          {i > 0 && ", "}
-                          {v.wrong}
-                          {v.count > 1 && (
-                            <span className="corrections-count-badge">×{v.count}</span>
-                          )}
-                        </span>
-                      ))}
-                    </span>
                   </div>
                   <div className="corrections-row-actions">
                     {isEditing ? (
