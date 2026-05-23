@@ -528,23 +528,53 @@ function FloatingMori() {
   const [isDragging, setIsDragging] = useState(false);
   const dragEndTimerRef = useRef<number | null>(null);
   const dragMovedUnlistenRef = useRef<(() => void) | null>(null);
+  const dragStartTimeRef = useRef<number | null>(null);
+
+  // 2026-05-23 — 老實 debug 路線:#110/#111/#112 都猜錯 root cause。這版加:
+  // 1. console.log 在 setIsDragging 任何切換 + onMoved fire(看實際時序)
+  // 2. Minimum display 1500ms — 即使所有 signals 立刻 reset,也強保 visual 顯示
+  //    一輪完整 sprite animation loop。User 看得到才可信。
+  // 3. 不 listen blur(WM drag 期間 window 可能短暫 blur → race source)
+  // 4. 不 listen mouseup(同 race)
+  // 5. onMoved debounce + 5s safety timeout
+  const MIN_DRAG_DISPLAY_MS = 1500;
+
+  const setDragging = (next: boolean, reason: string) => {
+    console.log(`[Mori dragging] setIsDragging(${next}) — ${reason}, elapsed=${dragStartTimeRef.current ? Date.now() - dragStartTimeRef.current : 'N/A'}ms`);
+    if (next) {
+      dragStartTimeRef.current = Date.now();
+      setIsDragging(true);
+    } else {
+      // Honor minimum display duration
+      const start = dragStartTimeRef.current;
+      const elapsed = start === null ? Infinity : Date.now() - start;
+      if (elapsed < MIN_DRAG_DISPLAY_MS) {
+        const remaining = MIN_DRAG_DISPLAY_MS - elapsed;
+        console.log(`[Mori dragging] hold ${remaining}ms more (min display)`);
+        if (dragEndTimerRef.current !== null) window.clearTimeout(dragEndTimerRef.current);
+        dragEndTimerRef.current = window.setTimeout(() => {
+          console.log(`[Mori dragging] min display elapsed,真正 reset`);
+          setIsDragging(false);
+          dragStartTimeRef.current = null;
+          dragMovedUnlistenRef.current?.();
+          dragMovedUnlistenRef.current = null;
+          dragEndTimerRef.current = null;
+        }, remaining);
+      } else {
+        setIsDragging(false);
+        dragStartTimeRef.current = null;
+        dragMovedUnlistenRef.current?.();
+        dragMovedUnlistenRef.current = null;
+        if (dragEndTimerRef.current !== null) {
+          window.clearTimeout(dragEndTimerRef.current);
+          dragEndTimerRef.current = null;
+        }
+      }
+    }
+  };
 
   useEffect(() => {
-    // blur defensive fallback:window 失焦 = drag 中斷,reset 避免卡 true。
-    // 不 listen `mouseup`(OS drag start 瞬間 fire synthetic mouseup → race
-    // setIsDragging(false))。
-    const reset = () => {
-      if (dragEndTimerRef.current !== null) {
-        window.clearTimeout(dragEndTimerRef.current);
-        dragEndTimerRef.current = null;
-      }
-      dragMovedUnlistenRef.current?.();
-      dragMovedUnlistenRef.current = null;
-      setIsDragging(false);
-    };
-    window.addEventListener("blur", reset);
     return () => {
-      window.removeEventListener("blur", reset);
       // cleanup on unmount
       if (dragEndTimerRef.current !== null) {
         window.clearTimeout(dragEndTimerRef.current);
@@ -686,37 +716,30 @@ function FloatingMori() {
     const dy = Math.abs(e.clientY - d.y);
     if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
       d.armed = false;
-      setIsDragging(true);
+      setDragging(true, "mousemove>threshold");
       invoke("plugin:window|start_dragging", { label: "floating" }).catch(
         (err) => console.error("start_dragging failed", err),
       );
-      // 2026-05-23:用 window.onMoved debounce 偵測 OS drag 真正結束 —
-      // WM 拖期間持續 emit moved event,user 放手後 200ms 沒新 event = drag done。
-      // safety timeout 5s 避免 onMoved 卡死的話 isDragging 永遠 true。
-      // (取代 PR #111 的 await start_dragging promise — 那個 GTK begin_move_drag
-      //  是 fire-and-forget,promise 立刻 resolve,finally 跟原本 mouseup race 一樣早。)
+      // 2026-05-23 v5:onMoved 監聽 + 5s safety timeout。`setDragging(false, ...)`
+      // 內部會自動 honor minimum 1500ms display duration(setDragging helper)。
       const scheduleEnd = () => {
+        console.log(`[Mori dragging] onMoved fired,schedule end in 200ms`);
         if (dragEndTimerRef.current !== null) {
           window.clearTimeout(dragEndTimerRef.current);
         }
         dragEndTimerRef.current = window.setTimeout(() => {
-          setIsDragging(false);
-          dragMovedUnlistenRef.current?.();
-          dragMovedUnlistenRef.current = null;
-          dragEndTimerRef.current = null;
+          setDragging(false, "onMoved debounce");
         }, 200);
       };
-      // 立即 attach onMoved listener + safety timeout
       const win = getCurrentWindow();
       win.onMoved(scheduleEnd).then((unlisten) => {
+        console.log(`[Mori dragging] onMoved listener attached`);
         dragMovedUnlistenRef.current = unlisten;
       });
       // safety:若 5 秒內沒任何 onMoved fire(drag canceled / WM 沒 fire),強制 reset
       dragEndTimerRef.current = window.setTimeout(() => {
-        setIsDragging(false);
-        dragMovedUnlistenRef.current?.();
-        dragMovedUnlistenRef.current = null;
-        dragEndTimerRef.current = null;
+        console.log(`[Mori dragging] 5s safety timeout`);
+        setDragging(false, "5s safety");
       }, 5000);
     }
   };
