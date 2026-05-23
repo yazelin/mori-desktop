@@ -752,7 +752,15 @@ function FloatingMori() {
         invoke("plugin:window|start_dragging", { label: "floating" })
           .then(() => trace("start_dragging_invoked", {}))
           .catch((err) => trace("start_dragging_failed", { err: String(err) }));
-        // onMoved debounce + 5s safety timeout
+
+        // 2026-05-23 v8 — Bug 1 fix: 先 unsubscribe 前一個 listener,避免 leak。
+        // Bug 2 fix: 200ms 太短(實證 user pause > 200ms 觀察目標時誤判 drag 結束)。
+        // 提到 1000ms — user 拖中 pause 不到 1 秒視為仍在拖。
+        if (dragMovedUnlistenRef.current) {
+          try { dragMovedUnlistenRef.current(); } catch {}
+          dragMovedUnlistenRef.current = null;
+        }
+        const DRAG_END_DEBOUNCE_MS = 1000;
         const scheduleEnd = () => {
           trace("onMoved_fired", {});
           if (dragEndTimerRef.current !== null) {
@@ -760,12 +768,17 @@ function FloatingMori() {
           }
           dragEndTimerRef.current = window.setTimeout(() => {
             setDragging(false, "onMoved debounce");
-          }, 200);
+          }, DRAG_END_DEBOUNCE_MS);
         };
         const win = getCurrentWindow();
         win.onMoved(scheduleEnd).then((unlisten) => {
           trace("onMoved_listener_attached", {});
-          dragMovedUnlistenRef.current = unlisten;
+          // 萬一 setDragging(false) 已先 fire,把 unlisten 立刻跑掉
+          if (dragRef.current?.armed === false && !dragEndTimerRef.current) {
+            unlisten();
+          } else {
+            dragMovedUnlistenRef.current = unlisten;
+          }
         });
         dragEndTimerRef.current = window.setTimeout(() => {
           trace("safety_5s_timeout", {});
