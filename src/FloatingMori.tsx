@@ -518,24 +518,38 @@ function FloatingMori() {
 
   const dragRef = useRef<{ x: number; y: number; armed: boolean } | null>(null);
   const DRAG_THRESHOLD_PX = 4;
-  // 5P-5: 拖曳中 — 套 .is-dragging class 讓 CSS 做「被拎起來懸空」視覺
-  // (sprite scale up + shadow 變大 + 微 tilt)。正式 dragging sprite 上來
-  // 後可在 character pack manifest 加 dragging state,這裡再切 visual。
-  // 5P-7 fix: Tauri start_dragging 接管 mouse 後,React onMouseUp 不一定 fire。
-  // 加 window-level mouseup / blur listener 確保 isDragging 一定 reset。
+  // 5P-5: 拖曳中 — 套 .is-dragging class + visual="dragging" 跑真 sprite 動畫。
+  // 2026-05-23:dragging visual persists 修法走 `window.onMoved` debounce —
+  // Linux GTK 的 begin_move_drag (Tauri `start_dragging` 後端) 是 fire-and-forget,
+  // WM 接管後 promise 立刻 resolve(不代表 drag 結束),window mouseup 也 race
+  // 因 OS drag start 瞬間可能 fire synthetic mouseup。
+  // 真實信號:WM 拖 window 期間持續 emit `moved` event,user 放手後 ~200ms
+  // 沒新 event = drag 結束。debounce 200ms + safety timeout 5s。
   const [isDragging, setIsDragging] = useState(false);
+  const dragEndTimerRef = useRef<number | null>(null);
+  const dragMovedUnlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    // 2026-05-23:不再 listen `mouseup` — Tauri start_dragging 啟動瞬間 OS 可能 fire
-    // mouseup race condition,React batching 兩 setState 同 tick → dragging 視覺
-    // 從未 render。改 await invoke promise 控 reset(onMouseMove 內,promise 在 OS
-    // drag 真結束才 resolve)。
-    // 留 `blur` defensive fallback:若 OS drag 卡 / window 失焦,reset 避免 isDragging
-    // 永遠 true 卡住 wander。
-    const reset = () => setIsDragging(false);
+    // blur defensive fallback:window 失焦 = drag 中斷,reset 避免卡 true。
+    // 不 listen `mouseup`(OS drag start 瞬間 fire synthetic mouseup → race
+    // setIsDragging(false))。
+    const reset = () => {
+      if (dragEndTimerRef.current !== null) {
+        window.clearTimeout(dragEndTimerRef.current);
+        dragEndTimerRef.current = null;
+      }
+      dragMovedUnlistenRef.current?.();
+      dragMovedUnlistenRef.current = null;
+      setIsDragging(false);
+    };
     window.addEventListener("blur", reset);
     return () => {
       window.removeEventListener("blur", reset);
+      // cleanup on unmount
+      if (dragEndTimerRef.current !== null) {
+        window.clearTimeout(dragEndTimerRef.current);
+      }
+      dragMovedUnlistenRef.current?.();
     };
   }, []);
 
@@ -673,27 +687,43 @@ function FloatingMori() {
     if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
       d.armed = false;
       setIsDragging(true);
-      // 2026-05-23:start_dragging 的 Promise 在 OS-level drag 真正結束時才 resolve。
-      // 必須 await + finally setIsDragging(false),否則 .catch() fire-and-forget +
-      // window-level mouseup listener 會在 OS drag start 瞬間 race 把 isDragging
-      // 立刻 reset → dragging sprite 只閃一格不 animate。
-      (async () => {
-        try {
-          await invoke("plugin:window|start_dragging", { label: "floating" });
-        } catch (err) {
-          console.error("start_dragging failed", err);
-        } finally {
-          setIsDragging(false);
+      invoke("plugin:window|start_dragging", { label: "floating" }).catch(
+        (err) => console.error("start_dragging failed", err),
+      );
+      // 2026-05-23:用 window.onMoved debounce 偵測 OS drag 真正結束 —
+      // WM 拖期間持續 emit moved event,user 放手後 200ms 沒新 event = drag done。
+      // safety timeout 5s 避免 onMoved 卡死的話 isDragging 永遠 true。
+      // (取代 PR #111 的 await start_dragging promise — 那個 GTK begin_move_drag
+      //  是 fire-and-forget,promise 立刻 resolve,finally 跟原本 mouseup race 一樣早。)
+      const scheduleEnd = () => {
+        if (dragEndTimerRef.current !== null) {
+          window.clearTimeout(dragEndTimerRef.current);
         }
-      })();
+        dragEndTimerRef.current = window.setTimeout(() => {
+          setIsDragging(false);
+          dragMovedUnlistenRef.current?.();
+          dragMovedUnlistenRef.current = null;
+          dragEndTimerRef.current = null;
+        }, 200);
+      };
+      // 立即 attach onMoved listener + safety timeout
+      const win = getCurrentWindow();
+      win.onMoved(scheduleEnd).then((unlisten) => {
+        dragMovedUnlistenRef.current = unlisten;
+      });
+      // safety:若 5 秒內沒任何 onMoved fire(drag canceled / WM 沒 fire),強制 reset
+      dragEndTimerRef.current = window.setTimeout(() => {
+        setIsDragging(false);
+        dragMovedUnlistenRef.current?.();
+        dragMovedUnlistenRef.current = null;
+        dragEndTimerRef.current = null;
+      }, 5000);
     }
   };
 
   const onMouseUp = async () => {
     dragRef.current = null;
-    // 2026-05-23:不在這 setIsDragging(false) — Tauri start_dragging promise 才是
-    // 真的 OS drag 結束 signal,在 onMouseMove 內 finally 反映。React onMouseUp 在
-    // OS drag 期間可能 race(被 Wayland / X11 mouse capture 影響)。
+    // 2026-05-23:不在此 setIsDragging(false) — OS drag 用 onMoved debounce 反映。
     // 拖動結束,通知 chat_bubble window 跟著移動到新位置(用 hardcoded sprite 尺寸算)
     if (hasChatBubble) {
       try {
