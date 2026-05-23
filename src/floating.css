@@ -204,14 +204,16 @@ html[data-theme-base="light"] .mori-backdrop {
    變大變遠 + 微 tilt(像被拎起來搖晃)。pause sprite frame animation 讓
    user 聚焦在被抓住的狀態(等 dragging.png 正式上來再切 visual)。 */
 .mori-stage.is-dragging .mori-sprite {
-  transform: scale(1.08) rotate(-3deg);
+  /* 2026-05-23:有真 dragging.png 4×4 sheet 後 — 移除 scale/rotate placeholder
+     視覺,讓 user 自己畫的 dragging frame 完全表達被拖狀態(避免雙 effect)。
+     drop-shadow 保留(被拎起來懸空感)。animation-play-state 不再 pause
+     (sprite-level animation 在 .mori-dragging 內由 dragging visual class 控,
+      不會跟 idle bob 衝突)。 */
   filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.45));
-  transition: transform 120ms ease-out, filter 120ms ease-out;
-  animation-play-state: paused;
+  transition: filter 120ms ease-out;
 }
-.mori-stage.is-dragging .mori-sprite-frame {
-  animation-play-state: paused;
-}
+/* sprite-frame sheet animation 在 is-dragging 期間繼續 loop —
+   讓 dragging.png 4×4 frames 動起來(不再 paused)。 */
 .mori-stage.is-dragging .mori-aura {
   opacity: 0.4;
   transition: opacity 120ms ease;
