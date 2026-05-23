@@ -1381,6 +1381,14 @@ fn log_dates() -> Vec<String> {
     mori_core::event_log::list_dates()
 }
 
+/// 2026-05-23:Frontend diagnostic — JS 端可 invoke 寫一筆 event 進 event_log。
+/// 用途:當 console.log 不可靠 / 沒人讀時,frontend 把 trace event 寫進
+/// ~/.mori/logs/mori-YYYY-MM-DD.jsonl,Rust 端 / agent 直接 cat 讀。
+#[tauri::command]
+fn log_append(payload: serde_json::Value) {
+    mori_core::event_log::append(payload);
+}
+
 #[tauri::command]
 fn active_profiles() -> ActiveProfiles {
     ActiveProfiles {
@@ -5678,6 +5686,7 @@ fn main() {
             active_profiles,
             log_tail,
             log_dates,
+            log_append,
             memory_list,
             memory_read,
             memory_write,

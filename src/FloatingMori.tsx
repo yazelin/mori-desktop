@@ -536,6 +536,15 @@ function FloatingMori() {
   const dragMovedUnlistenRef = useRef<(() => void) | null>(null);
   const dragStartTimeRef = useRef<number | null>(null);
 
+  // 2026-05-23 v7:[Mori dragging] event log diagnostic — invoke log_append 寫進
+  // ~/.mori/logs/mori-YYYY-MM-DD.jsonl,不依賴 console.log(devtools 沒接 / WebView
+  // 重 load 時 log 看不見的問題)。Rust 端 + agent 直接 cat 讀。
+  const trace = (event: string, data: Record<string, unknown> = {}) => {
+    const payload = { kind: `mori_drag.${event}`, ts_local_ms: Date.now(), ...data };
+    invoke("log_append", { payload }).catch(() => {});
+    console.log(`[Mori dragging] ${event}`, data);
+  };
+
   // 2026-05-23 — 老實 debug 路線:#110/#111/#112 都猜錯 root cause。這版加:
   // 1. console.log 在 setIsDragging 任何切換 + onMoved fire(看實際時序)
   // 2. Minimum display 1500ms — 即使所有 signals 立刻 reset,也強保 visual 顯示
@@ -546,7 +555,7 @@ function FloatingMori() {
   const MIN_DRAG_DISPLAY_MS = 1500;
 
   const setDragging = (next: boolean, reason: string) => {
-    console.log(`[Mori dragging] setIsDragging(${next}) — ${reason}, elapsed=${dragStartTimeRef.current ? Date.now() - dragStartTimeRef.current : 'N/A'}ms`);
+    trace("setIsDragging", { next, reason, elapsed_ms: dragStartTimeRef.current ? Date.now() - dragStartTimeRef.current : null });
     if (next) {
       dragStartTimeRef.current = Date.now();
       setIsDragging(true);
@@ -556,10 +565,10 @@ function FloatingMori() {
       const elapsed = start === null ? Infinity : Date.now() - start;
       if (elapsed < MIN_DRAG_DISPLAY_MS) {
         const remaining = MIN_DRAG_DISPLAY_MS - elapsed;
-        console.log(`[Mori dragging] hold ${remaining}ms more (min display)`);
+        trace("hold_for_min_display", { remaining_ms: remaining });
         if (dragEndTimerRef.current !== null) window.clearTimeout(dragEndTimerRef.current);
         dragEndTimerRef.current = window.setTimeout(() => {
-          console.log(`[Mori dragging] min display elapsed,真正 reset`);
+          trace("min_display_elapsed_reset", {});
           setIsDragging(false);
           dragStartTimeRef.current = null;
           dragMovedUnlistenRef.current?.();
@@ -719,15 +728,16 @@ function FloatingMori() {
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) {
-      console.warn("[Mori dragging] stageRef not yet mounted");
+      trace("stageRef_not_mounted", {});
       return;
     }
-    console.log("[Mori dragging] native listeners attached to .mori-stage");
+    trace("native_listeners_attached", {});
 
     const handleMouseDown = (e: MouseEvent) => {
+      trace("mousedown_fired", { buttons: e.buttons, x: e.clientX, y: e.clientY });
       if (e.buttons !== 1) return;
-      console.log("[Mori dragging] mousedown @", e.clientX, e.clientY);
       dragRef.current = { x: e.clientX, y: e.clientY, armed: true };
+      trace("dragRef_armed", { x: e.clientX, y: e.clientY });
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -737,14 +747,14 @@ function FloatingMori() {
       const dy = Math.abs(e.clientY - d.y);
       if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
         d.armed = false;
-        console.log("[Mori dragging] threshold crossed (dx=" + dx + ", dy=" + dy + ")");
+        trace("threshold_crossed", { dx, dy });
         setDragging(true, "native mousemove>threshold");
-        invoke("plugin:window|start_dragging", { label: "floating" }).catch(
-          (err) => console.error("start_dragging failed", err),
-        );
+        invoke("plugin:window|start_dragging", { label: "floating" })
+          .then(() => trace("start_dragging_invoked", {}))
+          .catch((err) => trace("start_dragging_failed", { err: String(err) }));
         // onMoved debounce + 5s safety timeout
         const scheduleEnd = () => {
-          console.log("[Mori dragging] onMoved fired, schedule end in 200ms");
+          trace("onMoved_fired", {});
           if (dragEndTimerRef.current !== null) {
             window.clearTimeout(dragEndTimerRef.current);
           }
@@ -754,17 +764,18 @@ function FloatingMori() {
         };
         const win = getCurrentWindow();
         win.onMoved(scheduleEnd).then((unlisten) => {
-          console.log("[Mori dragging] onMoved listener attached");
+          trace("onMoved_listener_attached", {});
           dragMovedUnlistenRef.current = unlisten;
         });
         dragEndTimerRef.current = window.setTimeout(() => {
-          console.log("[Mori dragging] 5s safety timeout");
+          trace("safety_5s_timeout", {});
           setDragging(false, "5s safety");
         }, 5000);
       }
     };
 
     const handleMouseUp = async () => {
+      trace("mouseup_fired", {});
       dragRef.current = null;
       if (hasChatBubbleRef.current) {
         try {
