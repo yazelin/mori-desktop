@@ -249,6 +249,12 @@ function FloatingMori() {
   // (sprite window 永遠 200×200 不動,bubble 走另一個 Tauri window)。
   // 這裡只保留「目前是否有 bubble」的旗標 + dwell timer 控制。
   const [hasChatBubble, setHasChatBubble] = useState(false);
+  // 2026-05-23:hasChatBubble ref mirror — drag native event listener 用 useEffect
+  // 內定義(empty deps),拿 ref 而非 state 才看得到最新值。
+  const hasChatBubbleRef = useRef(false);
+  useEffect(() => {
+    hasChatBubbleRef.current = hasChatBubble;
+  }, [hasChatBubble]);
 
   // 5P-3: Character pack — manifest + 各 state 的 sprite data URL
   const [manifest, setManifest] = useState<CharacterManifest | null>(null);
@@ -704,81 +710,103 @@ function FloatingMori() {
     };
   }, [floatingCfg.wander, floatingCfg.animated, mode, phase.kind, isDragging]);
 
-  const onMouseDown = (e: React.MouseEvent) => {
-    if (e.buttons !== 1) return;
-    dragRef.current = { x: e.clientX, y: e.clientY, armed: true };
-  };
+  // 2026-05-23 v6:改 native addEventListener attach 在 .mori-stage(用 ref)。
+  // 原因:React JSX onMouseDown/onMouseMove prop **沒接到 events**(實測 NATIVE
+  // addEventListener 可接,React handler 從未 fire)。可能 vite HMR / React 內
+  // event delegation 同步問題。Native listener 不依賴 React reconciliation。
+  const stageRef = useRef<HTMLDivElement | null>(null);
 
-  const onMouseMove = (e: React.MouseEvent) => {
-    const d = dragRef.current;
-    if (!d || !d.armed) return;
-    const dx = Math.abs(e.clientX - d.x);
-    const dy = Math.abs(e.clientY - d.y);
-    if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
-      d.armed = false;
-      setDragging(true, "mousemove>threshold");
-      invoke("plugin:window|start_dragging", { label: "floating" }).catch(
-        (err) => console.error("start_dragging failed", err),
-      );
-      // 2026-05-23 v5:onMoved 監聽 + 5s safety timeout。`setDragging(false, ...)`
-      // 內部會自動 honor minimum 1500ms display duration(setDragging helper)。
-      const scheduleEnd = () => {
-        console.log(`[Mori dragging] onMoved fired,schedule end in 200ms`);
-        if (dragEndTimerRef.current !== null) {
-          window.clearTimeout(dragEndTimerRef.current);
-        }
-        dragEndTimerRef.current = window.setTimeout(() => {
-          setDragging(false, "onMoved debounce");
-        }, 200);
-      };
-      const win = getCurrentWindow();
-      win.onMoved(scheduleEnd).then((unlisten) => {
-        console.log(`[Mori dragging] onMoved listener attached`);
-        dragMovedUnlistenRef.current = unlisten;
-      });
-      // safety:若 5 秒內沒任何 onMoved fire(drag canceled / WM 沒 fire),強制 reset
-      dragEndTimerRef.current = window.setTimeout(() => {
-        console.log(`[Mori dragging] 5s safety timeout`);
-        setDragging(false, "5s safety");
-      }, 5000);
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) {
+      console.warn("[Mori dragging] stageRef not yet mounted");
+      return;
     }
-  };
+    console.log("[Mori dragging] native listeners attached to .mori-stage");
 
-  const onMouseUp = async () => {
-    dragRef.current = null;
-    // 2026-05-23:不在此 setIsDragging(false) — OS drag 用 onMoved debounce 反映。
-    // 拖動結束,通知 chat_bubble window 跟著移動到新位置(用 hardcoded sprite 尺寸算)
-    if (hasChatBubble) {
-      try {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.buttons !== 1) return;
+      console.log("[Mori dragging] mousedown @", e.clientX, e.clientY);
+      dragRef.current = { x: e.clientX, y: e.clientY, armed: true };
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d || !d.armed) return;
+      const dx = Math.abs(e.clientX - d.x);
+      const dy = Math.abs(e.clientY - d.y);
+      if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
+        d.armed = false;
+        console.log("[Mori dragging] threshold crossed (dx=" + dx + ", dy=" + dy + ")");
+        setDragging(true, "native mousemove>threshold");
+        invoke("plugin:window|start_dragging", { label: "floating" }).catch(
+          (err) => console.error("start_dragging failed", err),
+        );
+        // onMoved debounce + 5s safety timeout
+        const scheduleEnd = () => {
+          console.log("[Mori dragging] onMoved fired, schedule end in 200ms");
+          if (dragEndTimerRef.current !== null) {
+            window.clearTimeout(dragEndTimerRef.current);
+          }
+          dragEndTimerRef.current = window.setTimeout(() => {
+            setDragging(false, "onMoved debounce");
+          }, 200);
+        };
         const win = getCurrentWindow();
-        // 跟 showChatBubble 同 reason — innerPosition 是 content 真實 top-left,
-        // outerPosition 在 mutter X11 會把 shadow margin 算進去造成 bubble 偏移。
-        const pos = await win.innerPosition();
-        const scale = await win.scaleFactor();
-        const sprite_x = pos.x / scale;
-        const sprite_y = pos.y / scale;
-        await emit("sprite-moved", {
-          x: Math.max(0, sprite_x + SPRITE_SIZE / 2 - BUBBLE_WIDTH / 2),
-          y: sprite_y + SPRITE_SIZE + BUBBLE_GAP_PX,
+        win.onMoved(scheduleEnd).then((unlisten) => {
+          console.log("[Mori dragging] onMoved listener attached");
+          dragMovedUnlistenRef.current = unlisten;
         });
-      } catch (e) {
-        console.error("sync chat_bubble position after drag failed", e);
+        dragEndTimerRef.current = window.setTimeout(() => {
+          console.log("[Mori dragging] 5s safety timeout");
+          setDragging(false, "5s safety");
+        }, 5000);
       }
-    }
-  };
+    };
 
-  const onDoubleClick = async () => {
-    try {
-      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      const main = await WebviewWindow.getByLabel("main");
-      if (!main) return;
-      const visible = await main.isVisible();
-      if (visible) { await main.hide(); }
-      else { await main.show(); await main.setFocus(); }
-    } catch (e) {
-      console.error("toggle main from floating failed", e);
-    }
-  };
+    const handleMouseUp = async () => {
+      dragRef.current = null;
+      if (hasChatBubbleRef.current) {
+        try {
+          const win = getCurrentWindow();
+          const pos = await win.innerPosition();
+          const scale = await win.scaleFactor();
+          const sprite_x = pos.x / scale;
+          const sprite_y = pos.y / scale;
+          await emit("sprite-moved", {
+            x: Math.max(0, sprite_x + SPRITE_SIZE / 2 - BUBBLE_WIDTH / 2),
+            y: sprite_y + SPRITE_SIZE + BUBBLE_GAP_PX,
+          });
+        } catch (e) {
+          console.error("sync chat_bubble position after drag failed", e);
+        }
+      }
+    };
+
+    const handleDoubleClick = async () => {
+      try {
+        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        const main = await WebviewWindow.getByLabel("main");
+        if (!main) return;
+        const visible = await main.isVisible();
+        if (visible) { await main.hide(); }
+        else { await main.show(); await main.setFocus(); }
+      } catch (e) {
+        console.error("toggle main from floating failed", e);
+      }
+    };
+
+    stage.addEventListener("mousedown", handleMouseDown);
+    stage.addEventListener("mousemove", handleMouseMove);
+    stage.addEventListener("mouseup", handleMouseUp);
+    stage.addEventListener("dblclick", handleDoubleClick);
+    return () => {
+      stage.removeEventListener("mousedown", handleMouseDown);
+      stage.removeEventListener("mousemove", handleMouseMove);
+      stage.removeEventListener("mouseup", handleMouseUp);
+      stage.removeEventListener("dblclick", handleDoubleClick);
+    };
+  }, []);
 
   const visual = visualFor(mode, phase, transient, isWandering, isDragging);
 
@@ -801,11 +829,8 @@ function FloatingMori() {
 
   return (
     <div
+      ref={stageRef}
       className={`mori-stage mori-${visual}${isDragging ? " is-dragging" : ""}${visual === "walking" && walkFacingLeft ? " walk-left" : ""}`}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onDoubleClick={onDoubleClick}
       title={`Mori — ${visualLabel(visual)}\n${t("floating.title_hint")}`}
     >
       {/* 5J: sprite-area — 永遠固定在 widget 左上 200×200,讓 sprite 不會
