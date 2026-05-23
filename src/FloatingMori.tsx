@@ -526,11 +526,15 @@ function FloatingMori() {
   const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
+    // 2026-05-23:不再 listen `mouseup` — Tauri start_dragging 啟動瞬間 OS 可能 fire
+    // mouseup race condition,React batching 兩 setState 同 tick → dragging 視覺
+    // 從未 render。改 await invoke promise 控 reset(onMouseMove 內,promise 在 OS
+    // drag 真結束才 resolve)。
+    // 留 `blur` defensive fallback:若 OS drag 卡 / window 失焦,reset 避免 isDragging
+    // 永遠 true 卡住 wander。
     const reset = () => setIsDragging(false);
-    window.addEventListener("mouseup", reset);
     window.addEventListener("blur", reset);
     return () => {
-      window.removeEventListener("mouseup", reset);
       window.removeEventListener("blur", reset);
     };
   }, []);
@@ -669,15 +673,27 @@ function FloatingMori() {
     if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
       d.armed = false;
       setIsDragging(true);
-      invoke("plugin:window|start_dragging", { label: "floating" }).catch(
-        (err) => console.error("start_dragging failed", err),
-      );
+      // 2026-05-23:start_dragging 的 Promise 在 OS-level drag 真正結束時才 resolve。
+      // 必須 await + finally setIsDragging(false),否則 .catch() fire-and-forget +
+      // window-level mouseup listener 會在 OS drag start 瞬間 race 把 isDragging
+      // 立刻 reset → dragging sprite 只閃一格不 animate。
+      (async () => {
+        try {
+          await invoke("plugin:window|start_dragging", { label: "floating" });
+        } catch (err) {
+          console.error("start_dragging failed", err);
+        } finally {
+          setIsDragging(false);
+        }
+      })();
     }
   };
 
   const onMouseUp = async () => {
     dragRef.current = null;
-    setIsDragging(false);
+    // 2026-05-23:不在這 setIsDragging(false) — Tauri start_dragging promise 才是
+    // 真的 OS drag 結束 signal,在 onMouseMove 內 finally 反映。React onMouseUp 在
+    // OS drag 期間可能 race(被 Wayland / X11 mouse capture 影響)。
     // 拖動結束,通知 chat_bubble window 跟著移動到新位置(用 hardcoded sprite 尺寸算)
     if (hasChatBubble) {
       try {
