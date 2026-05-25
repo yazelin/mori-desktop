@@ -301,3 +301,7 @@ Wayland 是主力環境(Ubuntu 26.04 + GNOME)。5Q 起 Wayland 透過
 - **Annuli**(private):長期記憶 + 人格演化系統。Phase 7+ 透過 MCP 接,Mori 變成 MCP client。Phase 1-6 用 `LocalMarkdownMemoryStore`,等 Annuli 那邊穩定再切換。
 - **world-tree**:Mori / Annuli 的世界觀根基。
 - **mori-journal / mori-field-notes**:Mori 的內容產出 repo,記憶機制成熟後可自動寫入。
+
+## 自我開發 / 自舉
+
+關於讓 Mori 在安全邊界內自我改進 mori-desktop 的分層設計,請見 [`docs/self-hosting-bootstrap.md`](self-hosting-bootstrap.md)。

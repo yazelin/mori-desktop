@@ -59,6 +59,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use mori_core::agent::{Agent, AgentMode, SkillCallSummary};
+use mori_core::dev_orchestrator::DevOrchestrator;
 use mori_core::context::{Context as MoriContext, ContextProvider};
 use mori_core::llm::groq::{GroqProvider, RetryEvent};
 use mori_core::llm::ChatMessage;
@@ -177,6 +178,8 @@ pub struct AppState {
     /// 外層用 `Arc<Mutex<…>>` 是為了讓 `speak_async` 可以 clone 出去帶進
     /// spawn_blocking。
     pub tts_sink: Arc<Mutex<Option<Arc<rodio::Sink>>>>,
+    /// Phase A: self-hosting development task orchestrator(in-memory + isolated workspace).
+    pub dev_orchestrator: Arc<DevOrchestrator>,
 }
 
 impl AppState {
@@ -384,6 +387,163 @@ impl ModeController for StateModeController {
 
 // ─── IPC commands ───────────────────────────────────────────────────
 
+
+#[derive(Debug, serde::Deserialize)]
+struct StartDevTaskInput {
+    prompt: String,
+    verify_profile: Option<mori_core::dev_orchestrator::VerifyProfile>,
+}
+
+#[tauri::command]
+async fn start_dev_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    input: StartDevTaskInput,
+) -> Result<mori_core::dev_orchestrator::DevTask, String> {
+    let repo_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    Ok(state
+        .dev_orchestrator
+        .start_task(
+            input.prompt,
+            input.verify_profile.unwrap_or_default(),
+            &repo_root,
+        )
+        .await)
+}
+
+#[tauri::command]
+async fn get_dev_report(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<Option<mori_core::dev_orchestrator::DevReport>, String> {
+    Ok(state.dev_orchestrator.get_report(&task_id).await)
+}
+
+
+
+#[tauri::command]
+async fn delete_completed_dev_tasks(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<usize, String> {
+    Ok(state.dev_orchestrator.delete_completed_tasks().await)
+}
+
+#[tauri::command]
+async fn delete_dev_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<bool, String> {
+    Ok(state.dev_orchestrator.delete_task(&task_id).await)
+}
+
+#[tauri::command]
+async fn abort_dev_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<bool, String> {
+    Ok(state.dev_orchestrator.abort_task(&task_id).await)
+}
+
+
+#[tauri::command]
+async fn rerun_dev_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<mori_core::dev_orchestrator::DevTask, String> {
+    let repo_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    state
+        .dev_orchestrator
+        .rerun_task(&task_id, &repo_root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+
+
+
+#[tauri::command]
+async fn export_dev_tasks_dump(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<mori_core::dev_orchestrator::DevOrchestratorDump, String> {
+    Ok(state.dev_orchestrator.export_dump().await)
+}
+
+#[tauri::command]
+async fn import_dev_tasks_dump(
+    state: tauri::State<'_, Arc<AppState>>,
+    dump: mori_core::dev_orchestrator::DevOrchestratorDump,
+) -> Result<(), String> {
+    state.dev_orchestrator.import_dump(dump).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_dev_task_stats(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<mori_core::dev_orchestrator::DevTaskStats, String> {
+    Ok(state.dev_orchestrator.stats().await)
+}
+
+
+#[tauri::command]
+async fn draft_dev_pr(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<Option<mori_core::dev_orchestrator::DevPrDraft>, String> {
+    Ok(state.dev_orchestrator.draft_pr_for_task(&task_id).await)
+}
+
+#[tauri::command]
+async fn get_dev_task_snapshot(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<Option<mori_core::dev_orchestrator::DevTaskSnapshot>, String> {
+    Ok(state.dev_orchestrator.task_snapshot(&task_id).await)
+}
+
+#[tauri::command]
+async fn get_dev_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<Option<mori_core::dev_orchestrator::DevTask>, String> {
+    Ok(state.dev_orchestrator.get_task(&task_id).await)
+}
+
+#[tauri::command]
+async fn list_dev_tasks(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<mori_core::dev_orchestrator::DevTask>, String> {
+    Ok(state.dev_orchestrator.list_tasks().await)
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DevCapabilityInput {
+    allow_verify: bool,
+    max_auto_iterations: Option<u32>,
+    max_runtime_ms: Option<u64>,
+}
+
+#[tauri::command]
+async fn approve_dev_capability(
+    state: tauri::State<'_, Arc<AppState>>,
+    input: DevCapabilityInput,
+) -> Result<(), String> {
+    state
+        .dev_orchestrator
+        .set_capability(mori_core::dev_orchestrator::DevCapability {
+            allow_verify: input.allow_verify,
+            max_auto_iterations: input.max_auto_iterations.unwrap_or(1),
+            max_runtime_ms: input.max_runtime_ms.unwrap_or(120_000),
+        })
+        .await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_dev_capability(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<mori_core::dev_orchestrator::DevCapability, String> {
+    Ok(state.dev_orchestrator.get_capability().await)
+}
 #[tauri::command]
 fn mori_version() -> String {
     VERSION.to_string()
@@ -5550,6 +5710,7 @@ fn main() {
         // 實際值(見下方 hotkey_config 載入處)。
         toggle_mode: Mutex::new(hotkey_config::ToggleMode::default()),
         tts_sink: Arc::new(Mutex::new(None)),
+        dev_orchestrator: DevOrchestrator::new(),
     });
 
     if let Some(key) = GroqProvider::discover_api_key() {
@@ -5771,6 +5932,21 @@ fn main() {
             correction_cmd::correction_inbox_change_suggestion,
             correction_cmd::voice_feedback_set,
             correction_cmd::corrections_md_content,
+            start_dev_task,
+            get_dev_report,
+            get_dev_task,
+            get_dev_task_snapshot,
+            draft_dev_pr,
+            get_dev_task_stats,
+            export_dev_tasks_dump,
+            import_dev_tasks_dump,
+            list_dev_tasks,
+            rerun_dev_task,
+            abort_dev_task,
+            delete_dev_task,
+            delete_completed_dev_tasks,
+            approve_dev_capability,
+            get_dev_capability,
         ])
         .on_window_event(|window, event| {
             // 關視窗時不殺 app — 隱藏到系統匣繼續跑(像 Slack / Discord)
