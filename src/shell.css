@@ -2041,17 +2041,10 @@
   min-width: 180px;
 }
 
-.mori-self-dev-controls select.mori-select {
+.mori-self-dev-controls .mori-self-dev-select {
   flex: 0 1 160px;
   width: auto;
   min-width: 140px;
-  background: var(--c-input-bg);
-  border: 1px solid var(--c-border);
-  border-radius: 6px;
-  color: var(--c-text);
-  padding: 6px 10px;
-  font-family: system-ui, "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
-  font-size: 12px;
 }
 
 .mori-self-dev-capability {
