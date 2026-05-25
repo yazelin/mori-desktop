@@ -15,6 +15,7 @@ pub mod annuli;
 pub mod context;
 pub mod correction_audit;
 pub mod correction_inbox;
+pub mod dev_orchestrator;
 pub mod corrections;
 pub mod corrections_apply;
 pub mod corrections_writer;
