@@ -544,6 +544,60 @@ async fn get_dev_capability(
 ) -> Result<mori_core::dev_orchestrator::DevCapability, String> {
     Ok(state.dev_orchestrator.get_capability().await)
 }
+
+const LINUX_BUILD_PACKAGES: &str = include_str!("../../../scripts/linux-build-packages.txt");
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct SelfDevPreflightDepInfo {
+    id: String,
+    label: String,
+    installed: bool,
+    install_hint: String,
+}
+
+fn linux_build_package_names() -> Vec<&'static str> {
+    LINUX_BUILD_PACKAGES
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect()
+}
+
+fn deb_package_installed(package: &str) -> bool {
+    let output = std::process::Command::new("dpkg-query")
+        .args(["-W", "-f=${Status}", package])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).contains("install ok installed")
+        }
+        _ => false,
+    }
+}
+
+#[tauri::command]
+async fn self_dev_preflight_deps(force: Option<bool>) -> Vec<SelfDevPreflightDepInfo> {
+    let _ = force;
+
+    if std::env::consts::OS != "linux" {
+        return Vec::new();
+    }
+
+    tokio::task::spawn_blocking(|| {
+        linux_build_package_names()
+            .into_iter()
+            .map(|package| SelfDevPreflightDepInfo {
+                id: package.to_string(),
+                label: package.to_string(),
+                installed: deb_package_installed(package),
+                install_hint: format!("sudo apt install {package}"),
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
 #[tauri::command]
 fn mori_version() -> String {
     VERSION.to_string()
@@ -5851,6 +5905,7 @@ fn main() {
             annuli_reload,
             memory_search,
             skills_list,
+            self_dev_preflight_deps,
             deps_list,
             deps_install,
             theme_list,

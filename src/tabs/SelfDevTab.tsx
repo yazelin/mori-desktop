@@ -58,6 +58,8 @@ type DevReport = {
 };
 
 const fmtTime = (ms?: number | null) => (ms ? new Date(ms).toLocaleString() : "-");
+const depDisplayLabel = (dep: DepInfo) => dep.label || dep.id;
+const depInstallHint = (dep: DepInfo) => dep.install_hint || "sudo bash scripts/install-linux-deps.sh";
 
 export default function SelfDevTab() {
   const { t } = useTranslation();
@@ -82,7 +84,7 @@ export default function SelfDevTab() {
   const refreshDeps = async (force = false) => {
     try {
       setDepsLoading(true);
-      const next = await invoke<DepInfo[]>("deps_list", { force });
+      const next = await invoke<DepInfo[]>("self_dev_preflight_deps", { force });
       setDeps(next);
     } catch (e) {
       setError(String(e));
@@ -360,26 +362,28 @@ export default function SelfDevTab() {
   };
 
   return (
-    <section className="mori-panel">
-      <h2 className="mori-panel-title">{t("self_dev_tab.title")}</h2>
-      <p className="mori-panel-hint">{t("self_dev_tab.hint")}</p>
-      <p className="mori-panel-hint">{t("self_dev_tab.summary", { total: statusSummary.total, running: statusSummary.running })}</p>
+    <section className="mori-tab mori-self-dev-tab">
+      <h2 className="mori-tab-title">{t("self_dev_tab.title")}</h2>
+      <p className="mori-tab-hint">{t("self_dev_tab.hint")}</p>
+      <p className="mori-self-dev-hint">{t("self_dev_tab.summary", { total: statusSummary.total, running: statusSummary.running })}</p>
       {stats && (
-        <p className="mori-panel-hint">
+        <p className="mori-self-dev-hint">
           q:{stats.queued} p:{stats.planning} x:{stats.executing} ok:{stats.succeeded} fail:{stats.failed} abort:{stats.aborted}
         </p>
       )}
 
-      <div className="mori-panel" style={{ marginBottom: 12 }}>
-        <div className="mori-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <strong>{t("self_dev_tab.preflight_title")}</strong>
-          <span className="mori-panel-hint">{t("self_dev_tab.preflight_platform", { platform: platformName })}</span>
+      <div className="mori-self-dev-section">
+        <div className="mori-self-dev-section-header">
+          <div className="mori-self-dev-section-title">
+            <strong>{t("self_dev_tab.preflight_title")}</strong>
+            <span className="mori-self-dev-hint">{t("self_dev_tab.preflight_platform", { platform: platformName })}</span>
+          </div>
           <button className="mori-btn" onClick={() => refreshDeps(true)}>{depsLoading ? t("self_dev_tab.preflight_checking") : t("self_dev_tab.preflight_refresh")}</button>
         </div>
         {missingDeps.length === 0 ? (
-          <div>
-            <p className="mori-panel-hint">{t("self_dev_tab.preflight_ok")}</p>
-            <p className="mori-panel-hint">{t("self_dev_tab.preflight_next_step_ok")}</p>
+          <div className="mori-self-dev-ok">
+            <p className="mori-self-dev-hint">{t("self_dev_tab.preflight_ok")}</p>
+            <p className="mori-self-dev-hint">{t("self_dev_tab.preflight_next_step_ok")}</p>
           </div>
         ) : (
           <div className="mori-warning" role="alert">
@@ -387,22 +391,22 @@ export default function SelfDevTab() {
             <ul>
               {missingDeps.slice(0, 6).map((d) => (
                 <li key={d.id}>
-                  <strong>{d.label}</strong> — <code>{d.install_hint}</code>
+                  <strong>{depDisplayLabel(d)}</strong> — <code>{depInstallHint(d)}</code>
                 </li>
               ))}
             </ul>
-            <p className="mori-panel-hint">{t("self_dev_tab.preflight_note")}</p>
-            <p className="mori-panel-hint">{t("self_dev_tab.preflight_next_step_fix")}</p>
+            <p className="mori-self-dev-hint">{t("self_dev_tab.preflight_note")}</p>
+            <p className="mori-self-dev-hint">{t("self_dev_tab.preflight_next_step_fix")}</p>
             {isLinux ? (
-              <div className="mori-row" style={{ gap: 8, alignItems: "center" }}>
-                <code>sudo bash scripts/install-linux-deps.sh</code>
+              <div className="mori-self-dev-actions">
+                <code className="mori-self-dev-command">sudo bash scripts/install-linux-deps.sh</code>
                 <button className="mori-btn" onClick={copyLinuxInstallCmd}>{t("self_dev_tab.copy_linux_install")}</button>
               </div>
             ) : (
               <div>
-                <p className="mori-panel-hint">{t("self_dev_tab.non_linux_setup_hint")}</p>
-                <div className="mori-row" style={{ gap: 8, alignItems: "center" }}>
-                  <code>{nonLinuxSetupCmd}</code>
+                <p className="mori-self-dev-hint">{t("self_dev_tab.non_linux_setup_hint")}</p>
+                <div className="mori-self-dev-actions">
+                  <code className="mori-self-dev-command">{nonLinuxSetupCmd}</code>
                   <button
                     className="mori-btn"
                     onClick={() => copySetupHint(nonLinuxSetupCmd)}
@@ -417,12 +421,12 @@ export default function SelfDevTab() {
       </div>
       {error && <div className="mori-error" role="alert">{t("self_dev_tab.error_prefix")}{error}</div>}
 
-      <div className="mori-panel" style={{ marginBottom: 12 }}>
+      <div className="mori-self-dev-section">
         <strong>{t("self_dev_tab.gate_title")}</strong>
-        <p className="mori-panel-hint">deps: {gateSummary.deps} · build: {gateSummary.build} · core: {gateSummary.core}</p>
-        <p className="mori-panel-hint">{t("self_dev_tab.gate_hint")}</p>
-        <p className="mori-panel-hint">{t("self_dev_tab.release_gate_status", { status: releaseStatus })}</p>
-        <div className="mori-row" style={{ gap: 8 }}>
+        <p className="mori-self-dev-hint">deps: {gateSummary.deps} · build: {gateSummary.build} · core: {gateSummary.core}</p>
+        <p className="mori-self-dev-hint">{t("self_dev_tab.gate_hint")}</p>
+        <p className="mori-self-dev-hint">{t("self_dev_tab.release_gate_status", { status: releaseStatus })}</p>
+        <div className="mori-self-dev-actions">
           <button className="mori-btn" onClick={copyGateSummary}>{t("self_dev_tab.copy_gate_summary")}</button>
           <button className="mori-btn" onClick={copyPrReadySummary}>{t("self_dev_tab.copy_pr_ready_summary")}</button>
           <button className="mori-btn" onClick={copyReviewNoteTemplate}>{t("self_dev_tab.copy_review_template")}</button>
@@ -432,7 +436,7 @@ export default function SelfDevTab() {
         </div>
       </div>
 
-      <div className="mori-row" style={{ gap: 8, marginBottom: 12 }}>
+      <div className="mori-self-dev-controls">
         <input className="mori-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t("self_dev_tab.prompt_placeholder")} />
         <select className="mori-select" value={verify} onChange={(e) => { setVerify(e.target.value as VerifyProfile); setConfirmFull(false); }}>
           <option value="none">{t("self_dev_tab.verify_none")}</option>
@@ -453,14 +457,14 @@ export default function SelfDevTab() {
         </div>
       )}
 
-      <div className="mori-row" style={{ gap: 8, marginBottom: 12 }}>
+      <div className="mori-self-dev-actions mori-self-dev-capability">
         <span>{t("self_dev_tab.verify_cap")}: <strong>{cap.allow_verify ? t("self_dev_tab.enabled") : t("self_dev_tab.disabled")}</strong></span>
         <button className="mori-btn" onClick={() => setVerifyCapability(true)}>{t("self_dev_tab.enable_verify")}</button>
         <button className="mori-btn" onClick={() => setVerifyCapability(false)}>{t("self_dev_tab.disable_verify")}</button>
       </div>
 
 
-      <div className="mori-row" style={{ gap: 8, marginBottom: 12 }}>
+      <div className="mori-self-dev-controls">
         <input
           className="mori-input"
           value={query}
@@ -476,15 +480,15 @@ export default function SelfDevTab() {
 
       <div className="mori-list">
         {filteredTasks.map((task) => (
-          <div key={task.id} className="mori-item" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
+          <div key={task.id} className="mori-item mori-self-dev-task">
+            <div className="mori-self-dev-task-body">
               <strong>{task.id}</strong> · {task.status} · {task.verify_profile}
               <div style={{ opacity: 0.75 }}>{task.prompt}</div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>
                 {t("self_dev_tab.created_at")}: {fmtTime(task.created_at_ms)} · {t("self_dev_tab.finished_at")}: {fmtTime(task.finished_at_ms)}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="mori-self-dev-actions">
               <button className="mori-btn" onClick={() => openReport(task.id)}>{t("self_dev_tab.report")}</button>
               <button className="mori-btn" onClick={() => rerun(task.id)}>{t("self_dev_tab.rerun")}</button>
               <button className="mori-btn" onClick={() => abort(task.id)}>{t("self_dev_tab.abort")}</button>
@@ -496,27 +500,27 @@ export default function SelfDevTab() {
       </div>
 
       {prDraft && (
-        <section className="mori-panel" style={{ marginTop: 12 }}>
-          <h3 className="mori-panel-title">{t("self_dev_tab.pr_draft")}</h3>
+        <section className="mori-self-dev-output">
+          <h3 className="mori-self-dev-output-title">{t("self_dev_tab.pr_draft")}</h3>
           <div><strong>{prDraft.title}</strong></div>
-          <pre className="mori-code" style={{ marginTop: 8 }}>{prDraft.body}</pre>
+          <pre className="mori-code">{prDraft.body}</pre>
         </section>
       )}
 
       {report && (
-        <section className="mori-panel" style={{ marginTop: 12 }}>
-          <h3 className="mori-panel-title">{t("self_dev_tab.report")}</h3>
-          <div className="mori-panel-hint">{report.summary}</div>
-          <div className="mori-panel-hint">{t("self_dev_tab.changed_files")}: {report.changed_files.length}</div>
+        <section className="mori-self-dev-output">
+          <h3 className="mori-self-dev-output-title">{t("self_dev_tab.report")}</h3>
+          <div className="mori-self-dev-hint">{report.summary}</div>
+          <div className="mori-self-dev-hint">{t("self_dev_tab.changed_files")}: {report.changed_files.length}</div>
           <ul>
             {report.changed_files.map((f) => <li key={f}><code>{f}</code></li>)}
           </ul>
           {report.verify_command && (
-            <div className="mori-panel-hint">
+            <div className="mori-self-dev-hint">
               {t("self_dev_tab.verify_command")}: <code>{report.verify_command}</code> · {report.verify_ok ? t("self_dev_tab.verify_pass") : t("self_dev_tab.verify_fail")}
             </div>
           )}
-          <div className="mori-panel-hint">Quality score: {report.quality_score ?? "-"}</div>
+          <div className="mori-self-dev-hint">Quality score: {report.quality_score ?? "-"}</div>
           {report.replay_log && report.replay_log.length > 0 && (
             <details>
               <summary>Replay log ({report.replay_log.length})</summary>
@@ -528,7 +532,7 @@ export default function SelfDevTab() {
               <button className="mori-btn" onClick={() => setShowVerifyOutput((v) => !v)}>
                 {showVerifyOutput ? t("self_dev_tab.hide_verify_output") : t("self_dev_tab.show_verify_output")}
               </button>
-              {showVerifyOutput && <pre className="mori-code" style={{ marginTop: 8 }}>{report.verify_output}</pre>}
+              {showVerifyOutput && <pre className="mori-code">{report.verify_output}</pre>}
             </div>
           )}
         </section>
