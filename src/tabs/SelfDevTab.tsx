@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import { Select } from "../Select";
 
 type VerifyProfile = "none" | "quick" | "full";
 
@@ -438,11 +439,19 @@ export default function SelfDevTab() {
 
       <div className="mori-self-dev-controls">
         <input className="mori-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t("self_dev_tab.prompt_placeholder")} />
-        <select className="mori-select" value={verify} onChange={(e) => { setVerify(e.target.value as VerifyProfile); setConfirmFull(false); }}>
-          <option value="none">{t("self_dev_tab.verify_none")}</option>
-          <option value="quick">{t("self_dev_tab.verify_quick")}</option>
-          <option value="full">{t("self_dev_tab.verify_full")}</option>
-        </select>
+        <Select
+          className="mori-self-dev-select"
+          value={verify}
+          onChange={(value) => {
+            setVerify(value as VerifyProfile);
+            setConfirmFull(false);
+          }}
+          options={[
+            { value: "none", label: t("self_dev_tab.verify_none") },
+            { value: "quick", label: t("self_dev_tab.verify_quick") },
+            { value: "full", label: t("self_dev_tab.verify_full") },
+          ]}
+        />
         <button className="mori-btn" onClick={start} disabled={!prompt.trim()}>{busy ? t("self_dev_tab.busy") : t("self_dev_tab.start")}</button>
         <button className="mori-btn" onClick={refresh}>{t("self_dev_tab.refresh")}</button>
         <button className="mori-btn" onClick={() => setAutoRefresh((v) => !v)}>
@@ -471,11 +480,16 @@ export default function SelfDevTab() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("self_dev_tab.search_placeholder")}
         />
-        <select className="mori-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | "running" | "done")}>
-          <option value="all">{t("self_dev_tab.filter_all")}</option>
-          <option value="running">{t("self_dev_tab.filter_running")}</option>
-          <option value="done">{t("self_dev_tab.filter_done")}</option>
-        </select>
+        <Select
+          className="mori-self-dev-select"
+          value={statusFilter}
+          onChange={(value) => setStatusFilter(value as "all" | "running" | "done")}
+          options={[
+            { value: "all", label: t("self_dev_tab.filter_all") },
+            { value: "running", label: t("self_dev_tab.filter_running") },
+            { value: "done", label: t("self_dev_tab.filter_done") },
+          ]}
+        />
       </div>
 
       <div className="mori-list">
