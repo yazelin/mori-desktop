@@ -170,3 +170,4 @@ Mori Desktop UI
 這份草案重點是:先把「**可控的自動化開發回路**」做穩,再追求更高自主。這樣 Mori 才能在不背離資料主權與安全邊界下,逐步走向真正自舉。
 
 - 若你在執行層面要開始實作,請先看 [`docs/self-hosting-phase-a.md`](self-hosting-phase-a.md) 的下一步執行清單。
+- 若你要做 Self-Dev Beta 上線前驗證,請直接跑 [`docs/self-dev-beta-checklist.md`](self-dev-beta-checklist.md)。

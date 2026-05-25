@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::process::Command;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,7 +125,7 @@ impl DevOrchestrator {
     }
 
     pub async fn start_task(&self, prompt: String, verify_profile: VerifyProfile, repo_root: &Path) -> DevTask {
-        let id = format!("dev-{}", now_ms());
+        let id = next_task_id();
         let mut task = DevTask {
             id: id.clone(),
             prompt,
@@ -385,6 +386,13 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+static NEXT_TASK_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn next_task_id() -> String {
+    let seq = NEXT_TASK_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("dev-{}-{seq}", now_ms())
 }
 
 fn relativize(root: &Path, target: &PathBuf) -> String {

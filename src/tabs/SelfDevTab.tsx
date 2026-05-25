@@ -351,7 +351,7 @@ export default function SelfDevTab() {
   };
 
   const copyLinuxInstallCmd = async () => {
-    const cmd = "bash scripts/install-linux-deps.sh";
+    const cmd = "sudo bash scripts/install-linux-deps.sh";
     try {
       await copySetupHint(cmd);
     } catch (e) {
@@ -395,7 +395,7 @@ export default function SelfDevTab() {
             <p className="mori-panel-hint">{t("self_dev_tab.preflight_next_step_fix")}</p>
             {isLinux ? (
               <div className="mori-row" style={{ gap: 8, alignItems: "center" }}>
-                <code>bash scripts/install-linux-deps.sh</code>
+                <code>sudo bash scripts/install-linux-deps.sh</code>
                 <button className="mori-btn" onClick={copyLinuxInstallCmd}>{t("self_dev_tab.copy_linux_install")}</button>
               </div>
             ) : (
