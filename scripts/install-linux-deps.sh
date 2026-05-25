@@ -18,19 +18,15 @@
 #
 # ─── What gets installed ─────────────────────────────────────────────
 #
-#   libwebkit2gtk-4.1-dev          WebView (WebKitGTK 4.1, current standard)
-#   libssl-dev                     TLS for HTTPS calls
-#   libayatana-appindicator3-dev   System tray icon support
-#   librsvg2-dev                   SVG rendering for icons
-#   libsoup-3.0-dev                HTTP client used by WebKitGTK
-#   libjavascriptcoregtk-4.1-dev   JS runtime headers
-#   libasound2-dev                 ALSA headers (cpal — Mori 麥克風用)
-#   ffmpeg                         音/影片 → WAV 抽取(轉錄功能執行期用)
-#   pkg-config build-essential curl wget file   build glue
+#   See scripts/linux-build-packages.txt. Keep that package list explicit so
+#   Codex Cloud, CI, and humans can provision the same Ubuntu build image.
 #
 # Reference: https://v2.tauri.app/start/prerequisites/#linux
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGE_FILE="$SCRIPT_DIR/linux-build-packages.txt"
 
 for arg in "$@"; do
     if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
@@ -52,24 +48,16 @@ for arg in "$@"; do
     esac
 done
 
-PACKAGES=(
-    libwebkit2gtk-4.1-dev
-    libssl-dev
-    libayatana-appindicator3-dev
-    librsvg2-dev
-    libsoup-3.0-dev
-    libjavascriptcoregtk-4.1-dev
-    # ALSA headers — needed by cpal (mic capture in mori-tauri)
-    libasound2-dev
-    # ffmpeg — 執行期工具,音/影片檔抽 WAV 給 whisper-local 用(轉錄功能)
-    # 不算 Tauri build dep,但放這裡讓 dev 一鍵裝齊,免去 transcribe 失敗的「找不到 ffmpeg」
-    ffmpeg
-    pkg-config
-    build-essential
-    curl
-    wget
-    file
-)
+if [ ! -f "$PACKAGE_FILE" ]; then
+    echo "Missing package list: $PACKAGE_FILE" >&2
+    exit 1
+fi
+
+mapfile -t PACKAGES < <(grep -Ev '^[[:space:]]*(#|$)' "$PACKAGE_FILE")
+if [ "${#PACKAGES[@]}" -eq 0 ]; then
+    echo "No packages listed in $PACKAGE_FILE" >&2
+    exit 1
+fi
 
 if [ "$ACTION" = "uninstall" ]; then
     echo "==> Removing Tauri build dependencies"
@@ -82,7 +70,7 @@ fi
 echo "==> 1/2  apt update"
 DEBIAN_FRONTEND=noninteractive apt-get update
 
-echo "==> 2/2  Installing Tauri build dependencies"
+echo "==> 2/2  Installing Tauri build dependencies from $PACKAGE_FILE"
 DEBIAN_FRONTEND=noninteractive apt-get install -y "${PACKAGES[@]}"
 
 echo ""

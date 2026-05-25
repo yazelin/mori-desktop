@@ -33,6 +33,25 @@ On Ubuntu/Linux runners, install native Tauri dependencies first:
 sudo bash scripts/install-linux-deps.sh
 ```
 
+Canonical Ubuntu apt packages for Codex Cloud / CI image provisioning are listed
+one-per-line in `scripts/linux-build-packages.txt`:
+
+```text
+libwebkit2gtk-4.1-dev
+libssl-dev
+libayatana-appindicator3-dev
+librsvg2-dev
+libsoup-3.0-dev
+libjavascriptcoregtk-4.1-dev
+libasound2-dev
+ffmpeg
+pkg-config
+build-essential
+curl
+wget
+file
+```
+
 Install Node dependencies:
 
 ```bash
@@ -69,7 +88,7 @@ If strict mode fails only on pre-existing formatting or clippy findings outside 
 - Windows command/path behavior is fragile. Check `mori.exe` explicitly where relevant; `PathBuf::exists()` will not append `.exe`.
 - On Windows, prefer native shell APIs already used by the repo over `cmd /c start`.
 - `HOME` may be unset on Windows; preserve existing `USERPROFILE` fallbacks.
-- Linux native dependencies for Tauri/WebKit/ALSA come from `scripts/install-linux-deps.sh`.
+- Linux native dependencies for Tauri/WebKit/ALSA come from `scripts/linux-build-packages.txt`, installed by `scripts/install-linux-deps.sh`.
 
 ## Pull Requests
 

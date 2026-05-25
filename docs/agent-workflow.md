@@ -36,7 +36,28 @@ sudo bash scripts/install-linux-deps.sh
 npm ci
 ```
 
-If the Codex environment does not allow `sudo`, configure the environment image/dependencies outside the task setup, then keep setup to:
+Canonical Ubuntu apt packages for Codex Cloud image/dependency provisioning are
+listed one-per-line in `scripts/linux-build-packages.txt`:
+
+```text
+libwebkit2gtk-4.1-dev
+libssl-dev
+libayatana-appindicator3-dev
+librsvg2-dev
+libsoup-3.0-dev
+libjavascriptcoregtk-4.1-dev
+libasound2-dev
+ffmpeg
+pkg-config
+build-essential
+curl
+wget
+file
+```
+
+If the Codex environment does not allow `sudo`, configure the environment image
+with the packages from `scripts/linux-build-packages.txt` outside the task setup,
+then keep setup to:
 
 ```bash
 npm ci

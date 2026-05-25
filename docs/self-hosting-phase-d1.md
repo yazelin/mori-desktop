@@ -17,7 +17,7 @@
 ## Linux / Ubuntu 驗證流程
 
 ```bash
-bash scripts/install-linux-deps.sh
+sudo bash scripts/install-linux-deps.sh
 npm ci
 bash scripts/verify.sh
 ```

@@ -11,7 +11,7 @@ D3 目標：讓 Self-Dev preflight 從「看得懂」走到「可驗證與可收
 ## 建議驗證矩陣
 
 - Linux (Ubuntu)
-  - `bash scripts/install-linux-deps.sh`
+  - `sudo bash scripts/install-linux-deps.sh`
   - `npm ci`
   - `bash scripts/verify.sh`
 - Windows
