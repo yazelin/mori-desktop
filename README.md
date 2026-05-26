@@ -9,7 +9,7 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-🌲 **Latest** — [**v0.7.0**](https://github.com/yazelin/mori-desktop/releases/tag/v0.7.0):**Windows port 全面修補**(乾淨 Windows 機跑完整 Hey Mori 流程踩出來的一整排 fix:wake-listener auto-deploy / Windows uv-based install / openwakeword pipeline auto-download / Deps tab cross-platform 偵測 / Codex Windows hang fix / re-entrancy guard / listener auto-respawn)+ **bundled hey-mori.onnx 換成 verifier-trained v1**(命中率提升)· v0.6.6 → Annuli transparent setup + 召喚師身分 · v0.6.0 → Hey Mori 喚醒生態 · v0.5.x → Docs sync / STT corrections / Installed apps catalog · v0.4.0 → Windows 開箱即用基礎 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+🌲 **Latest** — [**v0.7.3**](https://github.com/yazelin/mori-desktop/releases/tag/v0.7.3):**Annuli token setup + FLAC recordings 修補**(Annuli 一鍵啟用會自動產生 / 同步 soul token,錄音 cleanup/deps 對齊 FLAC,提醒取消/稍後提醒後不再觸發過期 callback)· v0.7.2 → Release gate + 角色背板預設修正 · v0.7.0 → Windows port 全面修補 + verifier-trained wake-word · v0.6.6 → Annuli transparent setup + 召喚師身分 · v0.6.0 → Hey Mori 喚醒生態 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 
