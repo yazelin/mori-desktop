@@ -46,7 +46,10 @@ jobs:
 
       # ── Rust toolchain + cache ──────────────────────────────────────────
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2

@@ -33,7 +33,10 @@ jobs:
 
       # ── Rust toolchain ──────────────────────────────────────────────────
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       # 快取 target/ 跟 ~/.cargo/registry,後續 PR / push 走 incremental。
       # key 自動含 OS + Cargo.lock hash,Linux 跟 Windows 各自獨立。
