@@ -6,10 +6,10 @@
 #   2. cp examples/scripts/mori-youtube-transcript.sh ~/bin/
 #      chmod +x ~/bin/mori-youtube-transcript.sh
 #
-# Uses claude-bash because summary task needs reasoning depth + tool calling
+# Uses codex-bash because summary task needs reasoning depth + tool calling
 # stability, and user doesn't mind using their own quota. Switch to
 # `provider: groq` to save quota.
-provider: claude-bash
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 shell_skills:

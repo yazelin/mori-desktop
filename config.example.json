@@ -83,7 +83,6 @@
   "floating": {
     "animated": true,
     "show_mode": "always",
-    "backplate": "plain",
     "x11_shape": "circle",
     "x11_shape_radius": 16
   },

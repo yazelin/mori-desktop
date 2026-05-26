@@ -18,10 +18,10 @@
 # - Keyboard action → send_keys
 # - Paste content to current cursor → paste_selection_back
 #
-# Uses claude-bash because multi-step reasoning (which tool + how to wrap
+# Uses codex-bash because multi-step reasoning (which tool + how to wrap
 # args) is stable. Switch to `provider: groq` to save quota; tool calling
 # works for simple intents but failure rate is higher for complex ones.
-provider: claude-bash
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 enabled_skills:

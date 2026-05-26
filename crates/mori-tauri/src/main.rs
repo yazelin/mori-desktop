@@ -391,6 +391,7 @@ impl ModeController for StateModeController {
 #[derive(Debug, serde::Deserialize)]
 struct StartDevTaskInput {
     prompt: String,
+    #[serde(alias = "verifyProfile")]
     verify_profile: Option<mori_core::dev_orchestrator::VerifyProfile>,
 }
 
@@ -399,7 +400,7 @@ async fn start_dev_task(
     state: tauri::State<'_, Arc<AppState>>,
     input: StartDevTaskInput,
 ) -> Result<mori_core::dev_orchestrator::DevTask, String> {
-    let repo_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let repo_root = dev_repo_root().map_err(|e| e.to_string())?;
     Ok(state
         .dev_orchestrator
         .start_task(
@@ -449,7 +450,7 @@ async fn rerun_dev_task(
     state: tauri::State<'_, Arc<AppState>>,
     task_id: String,
 ) -> Result<mori_core::dev_orchestrator::DevTask, String> {
-    let repo_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let repo_root = dev_repo_root().map_err(|e| e.to_string())?;
     state
         .dev_orchestrator
         .rerun_task(&task_id, &repo_root)
@@ -493,6 +494,19 @@ async fn draft_dev_pr(
 }
 
 #[tauri::command]
+async fn apply_reviewed_dev_diff(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<mori_core::dev_orchestrator::DevApplyResult, String> {
+    let repo_root = dev_repo_root().map_err(|e| e.to_string())?;
+    state
+        .dev_orchestrator
+        .apply_reviewed_diff(&task_id, &repo_root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_dev_task_snapshot(
     state: tauri::State<'_, Arc<AppState>>,
     task_id: String,
@@ -517,8 +531,13 @@ async fn list_dev_tasks(
 
 #[derive(Debug, serde::Deserialize)]
 struct DevCapabilityInput {
+    #[serde(alias = "allowExecute")]
+    allow_execute: Option<bool>,
+    #[serde(alias = "allowVerify")]
     allow_verify: bool,
+    #[serde(alias = "maxAutoIterations")]
     max_auto_iterations: Option<u32>,
+    #[serde(alias = "maxRuntimeMs")]
     max_runtime_ms: Option<u64>,
 }
 
@@ -530,6 +549,7 @@ async fn approve_dev_capability(
     state
         .dev_orchestrator
         .set_capability(mori_core::dev_orchestrator::DevCapability {
+            allow_execute: input.allow_execute.unwrap_or(false),
             allow_verify: input.allow_verify,
             max_auto_iterations: input.max_auto_iterations.unwrap_or(1),
             max_runtime_ms: input.max_runtime_ms.unwrap_or(120_000),
@@ -543,6 +563,21 @@ async fn get_dev_capability(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<mori_core::dev_orchestrator::DevCapability, String> {
     Ok(state.dev_orchestrator.get_capability().await)
+}
+
+fn dev_repo_root() -> anyhow::Result<std::path::PathBuf> {
+    let mut dir = std::env::current_dir()?;
+    loop {
+        if dir.join("package.json").is_file()
+            && dir.join("crates").join("mori-core").is_dir()
+            && dir.join("scripts").join("verify.sh").is_file()
+        {
+            return Ok(dir);
+        }
+        if !dir.pop() {
+            anyhow::bail!("could not locate mori-desktop repo root from current_dir");
+        }
+    }
 }
 
 const LINUX_BUILD_PACKAGES: &str = include_str!("../../../scripts/linux-build-packages.txt");
@@ -746,6 +781,12 @@ fn apply_floating_shape(app: AppHandle, shape: String, radius: u32) -> Result<()
 /// 用 data URL 而不是 Tauri asset protocol:asset protocol 需要 in tauri.conf.json
 /// security 開啟 + 設 scope。data URL 直接是字串,React → CSS variable → background-image
 /// 一條龍,不動 Tauri 設定。檔案 ~500KB,base64 ~700KB,記憶體 OK。
+fn floating_backplate_path(theme: &str) -> std::path::PathBuf {
+    crate::mori_dir()
+        .join("floating")
+        .join(format!("backplate-{theme}.png"))
+}
+
 #[tauri::command]
 fn read_floating_backplate(theme: String) -> Result<Option<String>, String> {
     use base64::Engine as _;
@@ -754,9 +795,7 @@ fn read_floating_backplate(theme: String) -> Result<Option<String>, String> {
             "invalid theme '{theme}', expected 'dark' or 'light'"
         ));
     }
-    let path = crate::mori_dir()
-        .join("floating")
-        .join(format!("backplate-{theme}.png"));
+    let path = floating_backplate_path(&theme);
     if !path.exists() {
         return Ok(None);
     }
@@ -780,8 +819,7 @@ fn read_character_backdrop(stem: String, theme: String) -> Result<Option<String>
             "invalid theme '{theme}', expected 'dark' or 'light'"
         ));
     }
-    let path = crate::character_pack::pack_dir(&stem)
-        .join(format!("backdrop-{theme}.png"));
+    let path = crate::character_pack::backdrop_path(&stem, &theme);
     if !path.exists() {
         return Ok(None);
     }
@@ -5992,6 +6030,7 @@ fn main() {
             get_dev_task,
             get_dev_task_snapshot,
             draft_dev_pr,
+            apply_reviewed_dev_diff,
             get_dev_task_stats,
             export_dev_tasks_dump,
             import_dev_tasks_dump,

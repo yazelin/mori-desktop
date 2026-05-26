@@ -53,15 +53,18 @@ No-Go：缺 `glib-2.0` 等基礎依賴仍未解。
 
 ## 6. Self-Dev UI 手動流程（必做）
 
+- enable Codex execution
 - start task
 - list tasks
 - open report
+- confirm executor command / Codex output
+- confirm changed files / Git diff
 - rerun
 - abort
 - delete
 
 Go：流程可完整走通。
-No-Go：任一 IPC 或按鈕不一致。
+No-Go：任一 IPC 或按鈕不一致，或 Codex 任務沒有產出可審核 diff。
 
 ## 7. Gate 一致性檢查（必做）
 
@@ -88,6 +91,7 @@ No-Go：任何關鍵輸出缺失或格式不可讀。
 
 ## 9. 安全邊界檢查（必做）
 
+- Codex 只能在隔離 workspace copy 內修改
 - 不自動 commit / push / merge
 - 失敗時停在 human review，狀態為 not-ready
 

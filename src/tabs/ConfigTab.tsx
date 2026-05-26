@@ -1214,6 +1214,7 @@ function ConfigTab({
     invoke<boolean>("is_x11_session").then(setIsX11).catch(() => {});
     invoke<string>("linux_session_type").then(setSessionType).catch(() => {});
   }, []);
+  const defaultBackplate = isX11 ? "logo" : "plain";
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
 
@@ -2009,6 +2010,30 @@ function ConfigTab({
                 }
               />
             </FormRow>
+            <FormRow
+              label="backplate"
+              hint={t("config_tab.rows.hint_backplate")}
+            >
+              <Select
+                value={
+                  (cfg.floating?.backplate as string | undefined) ??
+                  (cfg.floating?.x11_backplate as string | undefined) ??
+                  defaultBackplate
+                }
+                onChange={(v) =>
+                  applyPatch((c) => {
+                    const f = ensureSubObj(c, "floating");
+                    f.backplate = v;
+                    // 舊 key 仍可讀;一旦使用者存檔就收斂到跨平台 key。
+                    delete f.x11_backplate;
+                  })
+                }
+                options={[
+                  { value: "logo", label: "跟隨角色包背板" },
+                  { value: "plain", label: "不顯示背板" },
+                ]}
+              />
+            </FormRow>
             <CharacterPicker />
           </Section>
           </>}
@@ -2164,30 +2189,6 @@ function ConfigTab({
                   })
                 }
                 style={{ width: 70 }}
-              />
-            </FormRow>
-            <FormRow
-              label="backplate"
-              hint={t("config_tab.rows.hint_backplate")}
-            >
-              <Select
-                value={
-                  (cfg.floating?.backplate as string | undefined) ??
-                  (cfg.floating?.x11_backplate as string | undefined) ??
-                  "plain"
-                }
-                onChange={(v) =>
-                  applyPatch((c) => {
-                    const f = ensureSubObj(c, "floating");
-                    f.backplate = v;
-                    // 順便清掉舊 key,避免兩個並存造成困惑
-                    delete f.x11_backplate;
-                  })
-                }
-                options={[
-                  { value: "plain", label: "素色(跟著 theme 漸層)" },
-                  { value: "logo", label: "背板(角色 / 自訂 PNG)" },
-                ]}
               />
             </FormRow>
           </Section>

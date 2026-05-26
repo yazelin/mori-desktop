@@ -164,11 +164,19 @@ type CharacterManifest = {
 
 type BackplateMode = "plain" | "logo";
 
+async function defaultBackplateMode(): Promise<BackplateMode> {
+  try {
+    return (await invoke<boolean>("is_x11_session")) ? "logo" : "plain";
+  } catch {
+    return "plain";
+  }
+}
+
 /**
  * 解析 backdrop 圖片 chain(高優先到低):
  * 1. character pack 自己的 ~/.mori/characters/<stem>/backdrop-{theme}.png
  * 2. user 全域 ~/.mori/floating/backplate-{theme}.png
- * 3. shipped fallback(CSS var 預設 url(...))
+ * 3. shipped fallback(public/floating/backplate-x11-{theme}.png)
  *
  * 任一階成功就直接 return data URL,失敗(網路 invoke 例外 / 檔不存在)往下走。
  */
@@ -188,13 +196,13 @@ async function resolveBackdropUrl(
   } catch (e) {
     console.warn(`[FloatingMori] read_floating_backplate ${theme} failed`, e);
   }
-  return null;
+  return `/floating/backplate-x11-${theme}.png`;
 }
 
 /**
  * Backdrop 模式套用(跨平台):
  * - "plain" → 清空 CSS variables,.mori-backdrop 元素 background-image 變 none
- * - "logo"  → 跑 resolveBackdropUrl 拿 dark + light data URL,寫進 CSS variables
+ * - "logo"  → 跑 resolveBackdropUrl 拿 dark + light 圖片 URL,寫進 CSS variables
  *
  * X11 plain 模式的不透明 gradient body bg(body.x11-fallback)還是有效,
  * 那是另一套(防 WebKit half-alpha bug),不在這裡管。
@@ -287,9 +295,11 @@ function FloatingMori() {
           animated: parsed?.floating?.animated ?? true,
           wander: parsed?.floating?.wander ?? false,
         });
-        // 跨平台 backplate 模式(dual-read：新 key backplate 優先,fallback 舊 key x11_backplate)
+        // 跨平台 backplate 模式(dual-read：新 key backplate 優先,fallback 舊 key x11_backplate)。
+        // 缺設定時依目前 session 推導:X11 建議有背板,其他平台預設無背板。
+        const configuredBackplate = parsed?.floating?.backplate ?? parsed?.floating?.x11_backplate;
         const backplate: BackplateMode =
-          (parsed?.floating?.backplate ?? parsed?.floating?.x11_backplate ?? "plain") as BackplateMode;
+          (configuredBackplate ?? await defaultBackplateMode()) as BackplateMode;
         setBackplateMode(backplate);
         // X11 shape:CSS pseudo border-radius + OS-level XShape clip 都即時
         // 同步,改 config save 就生效不用重啟。

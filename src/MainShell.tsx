@@ -24,7 +24,6 @@ import LogsTab from "./tabs/LogsTab";
 import RecordingsTab from "./tabs/RecordingsTab";
 import TranscribeTab from "./tabs/TranscribeTab";
 import CorrectionsTab from "./tabs/CorrectionsTab";
-import SelfDevTab from "./tabs/SelfDevTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
   IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic, IconPencil,
@@ -33,9 +32,10 @@ import { toggleTheme, loadActiveTheme } from "./theme";
 import { setLocale, nextLocale } from "./i18n";
 import { Quickstart, shouldShowQuickstart } from "./Quickstart";
 
-type NavPayload = { tab: TabId; subTab?: string };
+type NavPayload = { tab: TabId | HiddenTabId; subTab?: string };
 
-type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs" | "transcribe" | "recordings" | "corrections" | "self_dev";
+type TabId = "chat" | "profiles" | "config" | "memory" | "annuli" | "skills" | "deps" | "logs" | "transcribe" | "recordings" | "corrections";
+type HiddenTabId = "self_dev";
 
 type TabDef = {
   id: TabId;
@@ -56,7 +56,6 @@ const TABS: TabDef[] = [
   { id: "corrections", Icon: IconPencil, key: "corrections" },
   { id: "deps",     Icon: IconDeps,     key: "deps" },
   { id: "logs",     Icon: IconHelp,     key: "logs" },
-  { id: "self_dev", Icon: IconPencil, key: "self_dev" },
 ];
 
 function MainShell() {
@@ -92,6 +91,9 @@ function MainShell() {
 
   useEffect(() => {
     const u = listen<NavPayload>("mori-nav", (e) => {
+      // Release build 先不把自我開發入口提供給一般使用者。
+      // SelfDevTab 與後端流程仍保留,之後恢復時再加回 sidebar route。
+      if (e.payload.tab === "self_dev") return;
       setTab(e.payload.tab);
       setPendingSubTab(e.payload.subTab ?? null);
     });
@@ -217,7 +219,6 @@ function MainShell() {
         {tab === "corrections" && <CorrectionsTab />}
         {tab === "deps" && <DepsTab />}
         {tab === "logs" && <LogsTab />}
-        {tab === "self_dev" && <SelfDevTab />}
       </main>
       {quickstartOpen && <Quickstart onDone={() => setQuickstartOpen(false)} />}
     </div>

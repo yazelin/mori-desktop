@@ -48,7 +48,11 @@ sprite generator app 能輸出**完全符合規格**的 `.moripack.zip`,user imp
 
 ### 顯示條件
 
-使用者 `~/.mori/config.json` 的 `floating.backplate` 必須是 `"logo"`。`"plain"` 模式下不論角色提不提供背板都不顯示。
+`floating.backplate` 缺欄位時由 runtime 依目前平台推導：
+X11 因透明 / 半透明支援較脆弱，預設 `"logo"`（顯示背板）；
+Wayland / Windows / macOS 預設 `"plain"`（不顯示背板）。
+使用者明確改成 `"logo"` 時會跟隨 active character pack 的背板；
+明確改成 `"plain"` 時，不論角色提不提供背板都不顯示。
 
 ### Fallback chain(高優先到低)
 

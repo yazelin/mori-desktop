@@ -5,9 +5,9 @@
 # 這種模糊指令。這份 profile 把你的口語意圖**重組成**含角色 / 任務 /
 # 限制 / 輸出格式的結構化 prompt,你貼進對應 chat app 就能直接用。
 #
-# 用 claude-bash:推理深度重要,結構化 prompt 寫得比 groq 細緻。想省 quota
+# 用 codex-bash:推理深度重要,結構化 prompt 寫得比 groq 細緻。想省 quota
 # 改 `provider: gemini` 也行,品質稍降但仍可用。
-provider: claude-bash
+provider: codex-bash
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false

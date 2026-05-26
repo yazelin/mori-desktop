@@ -6,9 +6,9 @@
 #   2. cp examples/scripts/mori-youtube-transcript.sh ~/bin/
 #      chmod +x ~/bin/mori-youtube-transcript.sh
 #
-# 用 claude-bash 是因為摘要任務 reasoning depth 重要 + tool calling 穩定,
+# 用 codex-bash 是因為摘要任務 reasoning depth 重要 + tool calling 穩定,
 # user 不介意走 user 自己 quota。想省 quota 改 provider: groq 也行。
-provider: claude-bash
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 shell_skills:

@@ -694,13 +694,13 @@ pub const DEFAULT_AGENT_MD: &str = r#"---
 # 不需要先裝 CLI。
 #
 # 進階 user 想用「外部 AI CLI 當 agent loop」(更強的 tool use):
-#   - 裝 Claude Code:`npm i -g @anthropic-ai/claude-code` → provider: claude-bash
-#   - 裝 Gemini CLI:`npm i -g @google/generative-ai-cli` → provider: gemini-bash
 #   - 裝 Codex CLI:`npm i -g @openai/codex` → provider: codex-bash
+#   - 裝 Gemini CLI:`npm i -g @google/generative-ai-cli` → provider: gemini-bash
+#   - 裝 Claude Code:`npm i -g @anthropic-ai/claude-code` → provider: claude-bash
 # Phase 3I 起 claude-bash / gemini-bash / codex-bash 都看得到 action_skill 跟
 # shell_skill(skill_server 已動態化)。
 
-# provider: claude-bash    # 進階:有裝 Claude Code 才打開
+# provider: codex-bash     # 進階:有裝 Codex CLI 才打開
 enable_file_include: true   # 啟用 #file: 預處理（讓 body 能引用 ~/.mori/corrections.md）
 # enable_read_skill: true  # 若要讓 LLM 動態呼叫 read_file_text skill，打開這行
 
@@ -740,9 +740,9 @@ mod tests {
 
     #[test]
     fn parse_with_provider_and_skills() {
-        let content = "---\nprovider: claude-bash\nenabled_skills: [translate, polish, open_url]\n---\nbody";
+        let content = "---\nprovider: codex-bash\nenabled_skills: [translate, polish, open_url]\n---\nbody";
         let p = parse_agent_profile("test", content);
-        assert_eq!(p.frontmatter.provider.as_deref(), Some("claude-bash"));
+        assert_eq!(p.frontmatter.provider.as_deref(), Some("codex-bash"));
         assert_eq!(p.frontmatter.enabled_skills, vec!["translate", "polish", "open_url"]);
         assert_eq!(p.body, "body");
     }

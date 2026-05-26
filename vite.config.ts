@@ -20,8 +20,15 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      // tell vite to ignore watching `crates/`
-      ignored: ["**/crates/**"],
+      // Keep Vite from watching Rust build output and local agent workspaces.
+      ignored: [
+        "**/crates/**",
+        "**/target/**",
+        "**/.worktrees/**",
+        "**/.mori-dev-workspaces/**",
+        "**/node_modules/**",
+        "**/dist/**",
+      ],
     },
   },
 });

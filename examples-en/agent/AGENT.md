@@ -1,9 +1,9 @@
 ---
 # Default Mori — Ctrl+Alt+0 to activate
 # Aligned with crates/mori-core/src/agent_profile.rs::DEFAULT_AGENT_MD.
-# Starting from 5I, claude-bash / gemini-bash / codex-bash all see action_skill
+# Starting from 5I, codex-bash / gemini-bash / claude-bash all see action_skill
 # and shell_skill too (skill_server is dynamic). Switch to any tool-calling provider.
-provider: claude-bash
+provider: codex-bash
 enable_file_include: true   # Enable #file: preprocessing (so body can reference ~/.mori/corrections.md)
 # enable_read_skill: true  # Uncomment to let LLM dynamically call read_file_text skill
 

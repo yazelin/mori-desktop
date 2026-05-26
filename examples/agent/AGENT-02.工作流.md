@@ -1,6 +1,6 @@
 ---
 # 展示自訂 shell_skills — 把 gh / docker / 任何 CLI 變 Mori 能力,不用改 Rust
-provider: claude-bash
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 shell_skills:
