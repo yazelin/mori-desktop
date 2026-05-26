@@ -12,6 +12,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (for manual reruns, e.g. v0.7.3)'
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
@@ -36,6 +41,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # ── Rust toolchain + cache ──────────────────────────────────────────
       - name: Install Rust stable
@@ -79,10 +86,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           # tagName 用 ${{ github.ref_name }} 拿到觸發的 tag(如 "v0.1.0")。
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Mori ${{ github.ref_name }}'
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: 'Mori ${{ inputs.tag || github.ref_name }}'
           releaseBody: |
-            ## Mori ${{ github.ref_name }}
+            ## Mori ${{ inputs.tag || github.ref_name }}
 
             Voice-driven desktop AI companion — see [README](https://github.com/yazelin/mori-desktop) for setup.
 
