@@ -12,6 +12,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (for manual reruns, e.g. v0.7.3)'
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
@@ -36,18 +41,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # ── Rust toolchain + cache ──────────────────────────────────────────
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          # release build 跟 check build 用不同 profile,cache key 分開
-          # 才不會互踩。
-          key: release
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       # ── Ubuntu 系統 deps(走 repo 自帶 script,同 check.yml) ────────────
       - name: Install Linux deps
@@ -65,35 +67,44 @@ jobs:
         run: npm ci
 
       # ── Tauri build + GitHub Release upload ─────────────────────────────
-      # `tauri-action` 自動跑:
-      #   1. `npm run build`(Vite 出 dist/)
-      #   2. `cargo build --release`(編 mori-tauri release binary)
-      #   3. `tauri build` bundle 出 .deb/.AppImage(Linux)或 .msi/.nsis(Win)
-      #   4. 建立 / 更新 GitHub Release,把 bundle 檔上傳成 release asset
-      #
-      # `releaseDraft: true` — 上傳完是 draft,你去 GitHub Releases 頁
-      # review 過再按 Publish。安全網,避免 CI 跑 fail 一半就公開的窘境。
-      - name: Build Tauri app + upload to Release
-        uses: tauri-apps/tauri-action@v0
+      # 手動跑 Tauri CLI,避免 release 卡在第三方 GitHub Action archive 下載。
+      # `releaseDraft: true` 的等效流程:
+      #   1. 確保 draft Release 存在
+      #   2. build bundle
+      #   3. 上傳 installers 到該 draft Release
+      - name: Ensure draft release exists
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # tagName 用 ${{ github.ref_name }} 拿到觸發的 tag(如 "v0.1.0")。
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Mori ${{ github.ref_name }}'
-          releaseBody: |
-            ## Mori ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" \
+            --draft \
+            --title "Mori $RELEASE_TAG" \
+            --notes "Voice-driven desktop AI companion — see README for setup."
 
-            Voice-driven desktop AI companion — see [README](https://github.com/yazelin/mori-desktop) for setup.
+      - name: Build Tauri app
+        working-directory: crates/mori-tauri
+        shell: bash
+        run: |
+          npm --prefix ../.. run build
+          npx --prefix ../.. tauri build --ci --config '{"build":{"beforeBuildCommand":""}}' ${{ matrix.args }}
 
-            ### Downloads
-            - **Windows**: `.exe`(NSIS installer,推薦)or `.msi`
-            - **Linux**: `.deb`(Ubuntu / Debian)or `.AppImage`(其他發行版)
-
-            完整 changelog 見 [CHANGELOG.md](https://github.com/yazelin/mori-desktop/blob/main/CHANGELOG.md)。
-          releaseDraft: true
-          prerelease: false
-          # mori-tauri Cargo.toml + tauri.conf.json 在 crates/mori-tauri/。
-          # tauri-action 預設找 repo 根目錄,要指這個路徑它才知道去哪 build。
-          projectPath: crates/mori-tauri
-          args: ${{ matrix.args }}
+      - name: Upload installers to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          mapfile -d '' assets < <(find target/release/bundle -type f \( \
+            -name '*.deb' -o \
+            -name '*.AppImage' -o \
+            -name '*.rpm' -o \
+            -name '*.msi' -o \
+            -name '*.exe' \
+          \) -print0)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets found under target/release/bundle" >&2
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber

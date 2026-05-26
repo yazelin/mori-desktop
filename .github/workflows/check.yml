@@ -33,14 +33,10 @@ jobs:
 
       # ── Rust toolchain ──────────────────────────────────────────────────
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      # 快取 target/ 跟 ~/.cargo/registry,後續 PR / push 走 incremental。
-      # key 自動含 OS + Cargo.lock hash,Linux 跟 Windows 各自獨立。
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       # ── Ubuntu 系統 deps(走 repo 自帶 script,單一可信來源) ───────────
       # `scripts/install-linux-deps.sh` 跟本機 dev / CI / docs 三邊同步,
