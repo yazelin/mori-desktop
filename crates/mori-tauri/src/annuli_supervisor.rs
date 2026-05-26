@@ -171,12 +171,11 @@ fn annuli_root_dir() -> PathBuf {
     if let Ok(p) = std::env::var("MORI_ANNULI_ROOT") {
         return PathBuf::from(p);
     }
-    let home_var = if cfg!(target_os = "windows") {
-        "USERPROFILE"
-    } else {
-        "HOME"
-    };
-    if let Ok(home) = std::env::var(home_var) {
+    if cfg!(target_os = "windows") {
+        if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+            return PathBuf::from(home).join(".mori").join("annuli");
+        }
+    } else if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home).join("mori-universe").join("annuli");
     }
     PathBuf::from("annuli")

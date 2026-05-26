@@ -2236,7 +2236,9 @@ async fn sync_supervisor_to_config(state: &AppState, cfg: &annuli_config::Annuli
     *state.annuli_supervisor.lock() = Some(sup);
 }
 
-/// 偵測 annuli runtime 在不在(`~/mori-universe/annuli/.venv/bin/python`)。
+/// 偵測 annuli runtime 在不在。
+/// - Windows install build:`%USERPROFILE%\.mori\annuli\.venv\Scripts\python.exe`
+/// - Linux/macOS dev layout:`~/mori-universe/annuli/.venv/bin/python`
 /// AnnuliTab 用這條決定要不要顯示「一鍵啟用」按鈕。Windows fallback `Scripts/python.exe`。
 #[tauri::command]
 fn annuli_runtime_installed() -> bool {
@@ -2254,6 +2256,12 @@ fn annuli_runtime_installed() -> bool {
 fn annuli_root_dir_for_user() -> Option<std::path::PathBuf> {
     if let Ok(p) = std::env::var("MORI_ANNULI_ROOT") {
         return Some(std::path::PathBuf::from(p));
+    }
+    if cfg!(target_os = "windows") {
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(std::path::PathBuf::from)?;
+        return Some(home.join(".mori").join("annuli"));
     }
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
