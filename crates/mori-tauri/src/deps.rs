@@ -981,7 +981,11 @@ pub fn registry() -> Vec<DepSpec> {
             check: CheckSpec::File {
                 path_template: "$HOME/mori-universe/annuli/.venv/bin/python",
             },
-            check_overrides: &[],
+            check_overrides: &[
+                ("windows", CheckSpec::File {
+                    path_template: "$USERPROFILE\\.mori\\annuli\\.venv\\Scripts\\python.exe",
+                }),
+            ],
             install: InstallSpec::Shell {
                 script: "set -e; \
                          ANNULI=\"$HOME/mori-universe/annuli\"; \
@@ -1021,13 +1025,14 @@ pub fn registry() -> Vec<DepSpec> {
                 ("windows", InstallSpec::Manual {
                     commands: &[
                         "# Windows PowerShell(需 git + Python 3.11 + uv):",
-                        "git clone https://github.com/yazelin/annuli %USERPROFILE%\\mori-universe\\annuli",
-                        "cd %USERPROFILE%\\mori-universe\\annuli",
+                        "mkdir $env:USERPROFILE\\.mori -Force",
+                        "git clone https://github.com/yazelin/annuli $env:USERPROFILE\\.mori\\annuli",
+                        "cd $env:USERPROFILE\\.mori\\annuli",
                         "uv venv .venv --python 3.11",
                         "uv pip install --python .venv\\Scripts\\python.exe -e .",
                         "$token = .\\.venv\\Scripts\\python.exe -c \"import secrets; print(secrets.token_hex(32))\"",
                         "if (!(Test-Path .env) -or !(Select-String -Path .env -Pattern '^ANNULI_SOUL_TOKEN=.' -Quiet)) { Add-Content .env \"ANNULI_SOUL_TOKEN=$token\" }",
-                        "# 回 Mori Desktop 的 Annuli tab 按「一鍵啟用」；它會把 annuli.soul_token 補進 %USERPROFILE%\\.mori\\config.json。",
+                        "# 回 Mori Desktop 的 Annuli tab 按「一鍵啟用」；它會把 annuli.soul_token 補進 $env:USERPROFILE\\.mori\\config.json。",
                     ],
                 }),
             ],
@@ -1330,5 +1335,7 @@ fn expand_home(p: &str) -> String {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| "~".into());
+    let userprofile = std::env::var("USERPROFILE").unwrap_or_else(|_| home.clone());
     p.replace("$HOME", &home)
+        .replace("$USERPROFILE", &userprofile)
 }
