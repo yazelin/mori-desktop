@@ -23,6 +23,7 @@ type DevTask = {
 };
 
 type DevCapability = {
+  allow_execute: boolean;
   allow_verify: boolean;
 };
 
@@ -30,6 +31,15 @@ type DevPrDraft = {
   task_id: string;
   title: string;
   body: string;
+};
+
+type DevApplyResult = {
+  task_id: string;
+  applied_files: string[];
+  deleted_files: string[];
+  command: string;
+  ok: boolean;
+  output: string;
 };
 
 type DevTaskStats = {
@@ -51,9 +61,14 @@ type DevReport = {
   task_id: string;
   summary: string;
   changed_files: string[];
+  error?: string | null;
   verify_command?: string | null;
   verify_ok?: boolean | null;
   verify_output?: string | null;
+  executor_command?: string | null;
+  executor_ok?: boolean | null;
+  executor_output?: string | null;
+  git_diff?: string | null;
   replay_log?: string[];
   quality_score?: number;
 };
@@ -68,7 +83,7 @@ export default function SelfDevTab() {
   const [verify, setVerify] = useState<VerifyProfile>("none");
   const [tasks, setTasks] = useState<DevTask[]>([]);
   const [report, setReport] = useState<DevReport | null>(null);
-  const [cap, setCap] = useState<DevCapability>({ allow_verify: false });
+  const [cap, setCap] = useState<DevCapability>({ allow_execute: false, allow_verify: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showVerifyOutput, setShowVerifyOutput] = useState(false);
@@ -78,6 +93,7 @@ export default function SelfDevTab() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [stats, setStats] = useState<DevTaskStats | null>(null);
   const [prDraft, setPrDraft] = useState<DevPrDraft | null>(null);
+  const [applyResult, setApplyResult] = useState<DevApplyResult | null>(null);
   const [deps, setDeps] = useState<DepInfo[]>([]);
   const [depsLoading, setDepsLoading] = useState(false);
 
@@ -144,7 +160,7 @@ export default function SelfDevTab() {
     setBusy(true);
     try {
       setError(null);
-      await invoke("start_dev_task", { input: { prompt, verifyProfile: verify } });
+      await invoke("start_dev_task", { input: { prompt, verify_profile: verify } });
       setPrompt("");
       await refresh();
     } catch (e) {
@@ -157,7 +173,17 @@ export default function SelfDevTab() {
   const setVerifyCapability = async (allow: boolean) => {
     try {
       setError(null);
-      await invoke("approve_dev_capability", { input: { allowVerify: allow } });
+      await invoke("approve_dev_capability", { input: { allow_execute: cap.allow_execute, allow_verify: allow } });
+      await refreshCap();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const setExecuteCapability = async (allow: boolean) => {
+    try {
+      setError(null);
+      await invoke("approve_dev_capability", { input: { allow_execute: allow, allow_verify: cap.allow_verify } });
       await refreshCap();
     } catch (e) {
       setError(String(e));
@@ -219,6 +245,20 @@ export default function SelfDevTab() {
     }
   };
 
+  const applyReviewedDiff = async (id: string) => {
+    const confirmed = window.confirm(t("self_dev_tab.apply_confirm"));
+    if (!confirmed) return;
+
+    try {
+      setError(null);
+      const result = await invoke<DevApplyResult>("apply_reviewed_dev_diff", { taskId: id });
+      setApplyResult(result);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const openReport = async (id: string) => {
     try {
       setError(null);
@@ -273,8 +313,14 @@ export default function SelfDevTab() {
   }, [missingDeps.length, report]);
 
   const releaseReady = useMemo(() => {
-    return gateSummary.deps !== "fail" && gateSummary.build === "pass" && gateSummary.core === "pass";
-  }, [gateSummary]);
+    return (
+      gateSummary.deps !== "fail" &&
+      gateSummary.build === "pass" &&
+      gateSummary.core === "pass" &&
+      !report?.error &&
+      report?.executor_ok !== false
+    );
+  }, [gateSummary, report?.error, report?.executor_ok]);
 
   const releaseStatus = releaseReady ? "ready" : "not-ready";
 
@@ -311,7 +357,8 @@ export default function SelfDevTab() {
   const copyPrReadySummary = async () => {
     const summary = report?.summary ?? "(no report)";
     const taskId = report?.task_id ?? "(no task)";
-    const text = `task=${taskId} | summary=${summary} | gate(deps=${gateSummary.deps}, build=${gateSummary.build}, core=${gateSummary.core})`;
+    const changed = report?.changed_files.length ?? 0;
+    const text = `task=${taskId} | summary=${summary} | changed=${changed} | gate(deps=${gateSummary.deps}, build=${gateSummary.build}, core=${gateSummary.core})`;
     await copySetupHint(text);
   };
 
@@ -452,7 +499,7 @@ export default function SelfDevTab() {
             { value: "full", label: t("self_dev_tab.verify_full") },
           ]}
         />
-        <button className="mori-btn" onClick={start} disabled={!prompt.trim()}>{busy ? t("self_dev_tab.busy") : t("self_dev_tab.start")}</button>
+        <button className="mori-btn" onClick={start} disabled={busy || !prompt.trim()}>{busy ? t("self_dev_tab.busy") : t("self_dev_tab.start")}</button>
         <button className="mori-btn" onClick={refresh}>{t("self_dev_tab.refresh")}</button>
         <button className="mori-btn" onClick={() => setAutoRefresh((v) => !v)}>
           {autoRefresh ? t("self_dev_tab.auto_refresh_off") : t("self_dev_tab.auto_refresh_on")}
@@ -467,6 +514,9 @@ export default function SelfDevTab() {
       )}
 
       <div className="mori-self-dev-actions mori-self-dev-capability">
+        <span>{t("self_dev_tab.execute_cap")}: <strong>{cap.allow_execute ? t("self_dev_tab.enabled") : t("self_dev_tab.disabled")}</strong></span>
+        <button className="mori-btn" onClick={() => setExecuteCapability(true)}>{t("self_dev_tab.enable_execute")}</button>
+        <button className="mori-btn" onClick={() => setExecuteCapability(false)}>{t("self_dev_tab.disable_execute")}</button>
         <span>{t("self_dev_tab.verify_cap")}: <strong>{cap.allow_verify ? t("self_dev_tab.enabled") : t("self_dev_tab.disabled")}</strong></span>
         <button className="mori-btn" onClick={() => setVerifyCapability(true)}>{t("self_dev_tab.enable_verify")}</button>
         <button className="mori-btn" onClick={() => setVerifyCapability(false)}>{t("self_dev_tab.disable_verify")}</button>
@@ -502,8 +552,9 @@ export default function SelfDevTab() {
                 {t("self_dev_tab.created_at")}: {fmtTime(task.created_at_ms)} · {t("self_dev_tab.finished_at")}: {fmtTime(task.finished_at_ms)}
               </div>
             </div>
-            <div className="mori-self-dev-actions">
+          <div className="mori-self-dev-actions">
               <button className="mori-btn" onClick={() => openReport(task.id)}>{t("self_dev_tab.report")}</button>
+              <button className="mori-btn" onClick={() => applyReviewedDiff(task.id)}>{t("self_dev_tab.apply_reviewed_diff")}</button>
               <button className="mori-btn" onClick={() => rerun(task.id)}>{t("self_dev_tab.rerun")}</button>
               <button className="mori-btn" onClick={() => abort(task.id)}>{t("self_dev_tab.abort")}</button>
               <button className="mori-btn" onClick={() => draftPr(task.id)}>{t("self_dev_tab.draft_pr")}</button>
@@ -521,10 +572,31 @@ export default function SelfDevTab() {
         </section>
       )}
 
+      {applyResult && (
+        <section className="mori-self-dev-output">
+          <h3 className="mori-self-dev-output-title">{t("self_dev_tab.apply_result")}</h3>
+          <div className="mori-self-dev-hint">{applyResult.output}</div>
+          <div className="mori-self-dev-hint">{t("self_dev_tab.apply_command")}: <code>{applyResult.command}</code></div>
+          <div className="mori-self-dev-hint">{t("self_dev_tab.applied_files")}: {applyResult.applied_files.length}</div>
+          <ul>
+            {applyResult.applied_files.map((f) => <li key={f}><code>{f}</code></li>)}
+          </ul>
+          {applyResult.deleted_files.length > 0 && (
+            <>
+              <div className="mori-self-dev-hint">{t("self_dev_tab.deleted_files")}: {applyResult.deleted_files.length}</div>
+              <ul>
+                {applyResult.deleted_files.map((f) => <li key={f}><code>{f}</code></li>)}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+
       {report && (
         <section className="mori-self-dev-output">
           <h3 className="mori-self-dev-output-title">{t("self_dev_tab.report")}</h3>
           <div className="mori-self-dev-hint">{report.summary}</div>
+          {report.error && <div className="mori-error" role="alert">{t("self_dev_tab.error_prefix")}{report.error}</div>}
           <div className="mori-self-dev-hint">{t("self_dev_tab.changed_files")}: {report.changed_files.length}</div>
           <ul>
             {report.changed_files.map((f) => <li key={f}><code>{f}</code></li>)}
@@ -533,6 +605,23 @@ export default function SelfDevTab() {
             <div className="mori-self-dev-hint">
               {t("self_dev_tab.verify_command")}: <code>{report.verify_command}</code> · {report.verify_ok ? t("self_dev_tab.verify_pass") : t("self_dev_tab.verify_fail")}
             </div>
+          )}
+          {report.executor_command && (
+            <div className="mori-self-dev-hint">
+              {t("self_dev_tab.executor_command")}: <code>{report.executor_command}</code> · {report.executor_ok ? t("self_dev_tab.executor_pass") : t("self_dev_tab.executor_fail")}
+            </div>
+          )}
+          {report.executor_output && (
+            <details>
+              <summary>{t("self_dev_tab.executor_output")}</summary>
+              <pre className="mori-code">{report.executor_output}</pre>
+            </details>
+          )}
+          {report.git_diff && (
+            <details>
+              <summary>{t("self_dev_tab.git_diff")}</summary>
+              <pre className="mori-code">{report.git_diff}</pre>
+            </details>
           )}
           <div className="mori-self-dev-hint">Quality score: {report.quality_score ?? "-"}</div>
           {report.replay_log && report.replay_log.length > 0 && (

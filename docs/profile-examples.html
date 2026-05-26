@@ -133,7 +133,7 @@ cp examples/voice_input/*.md ~/.mori/voice_input/</code></pre>
     <p>啟動時自動寫入的預設 — Mori 自由判斷該對話還是動手做事。已含 corrections.md 引用。</p>
 <pre>---
 # 預設 Mori — Ctrl+Alt+0 啟動
-provider: claude-bash
+provider: codex-bash
 enable_read: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)
 
 # enabled_skills 留空 = 全 built-in skill 都可用(包含 open_url / open_app
@@ -186,7 +186,7 @@ enabled_skills: [translate]
   <div class="example-body">
     <p>展示自訂 <code>shell_skills</code> — 把 <code>gh</code> / <code>docker</code> 任何 CLI 變 Mori 能力,不用改 Rust。</p>
 <pre>---
-provider: claude-bash
+provider: codex-bash
 enable_read: true
 shell_skills:
   - name: gh_pr_list
@@ -290,7 +290,7 @@ shell_skills:
       <a href="https://github.com/yazelin/mori-desktop/tree/main/examples/scripts"><code>examples/scripts/mori-youtube-transcript.sh</code></a>:
     </p>
 <pre>---
-provider: claude-bash
+provider: codex-bash
 enable_read: true
 shell_skills:
   - name: youtube_transcript

@@ -31,6 +31,7 @@ Thumbs.db
 
 # Mori runtime data
 .mori/
+.mori-dev-workspaces/
 
 # Claude Code 個人 session state(history / settings / cache 等不該進版本控制
 # 的 IDE-like artifact),預設整個 .claude/ 都不追。

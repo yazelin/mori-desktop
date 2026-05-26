@@ -414,14 +414,16 @@ impl GroqProvider {
                     "x11_shape": "circle",
                     "x11_shape_radius": 16,
                     // backplate:floating window 背板(跨平台)
-                    // - "plain" = CSS 漸層底,跟 theme 走(--c-page-bg 等)
-                    // - "logo"  = 背板 PNG,自動跟 theme 切 dark / light
+                    // - "logo"  = 跟隨 active character pack 的背板,
+                    //             自動跟 theme 切 dark / light
+                    // - "plain" = 不顯示背板,只保留透明/平台 fallback 底
+                    // - 缺欄位 = runtime 依 session 推導:
+                    //             X11 因透明支援較脆弱預設 logo;其他預設 plain
                     // logo 模式下優先讀 character pack 自帶的
                     //   ~/.mori/characters/<stem>/backdrop-{dark,light}.png
                     // 沒有就讀使用者全域
                     //   ~/.mori/floating/backplate-{dark,light}.png
                     // 都沒有就 fallback 到 shipped 預設。
-                    "backplate": "plain"
                 }
             });
             std::fs::write(&config, serde_json::to_string_pretty(&stub)?)?;

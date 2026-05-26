@@ -8,10 +8,10 @@
 #   2. In-app: Settings → General → Command line interface → Register CLI → enable
 #   3. Open new terminal, run `obsidian --version` to verify PATH
 #
-# Uses claude-bash because "find note → read → rewrite → write back" often needs
+# Uses codex-bash because "find note → read → rewrite → write back" often needs
 # 2-3 rounds of tool calling, and pure-API tool calling has slightly higher failure
-# rate. Switch to gemini-bash or leave provider blank if Claude Code isn't installed.
-provider: claude-bash
+# rate. Switch to gemini-bash / claude-bash or leave provider blank if Codex CLI isn't installed.
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 shell_skills:

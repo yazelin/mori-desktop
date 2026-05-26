@@ -6,10 +6,10 @@
 # spoken intent into a structured prompt with role / task / constraints /
 # output format — paste into the target chat app and use directly.
 #
-# Uses claude-bash because reasoning depth matters — structured prompts
+# Uses codex-bash because reasoning depth matters — structured prompts
 # write better than with groq. Switch to `provider: gemini` to save quota,
 # quality drops slightly but still usable.
-provider: claude-bash
+provider: codex-bash
 cleanup_level: smart
 paste_shortcut: ctrl_v
 enable_auto_enter: false

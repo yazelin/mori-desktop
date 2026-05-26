@@ -6,6 +6,40 @@
 
 ---
 
+## v0.7.2 — Release gate + 角色背板預設修正(2026-05-26)
+
+這版把自我開發維持在內部測試狀態,先不從正式版側欄暴露給一般使用者;同時把角色背板行為改回「跟著角色包」,並針對 X11 透明視窗支援較不穩的環境給安全預設。
+
+### Release gate
+
+- **自我開發入口暫時隱藏** — 主視窗側欄不再顯示自我開發分頁,`mori-nav` 事件也不會導到內部 tab;正式版 bundle 不再從 main shell 匯入 `SelfDevTab`。
+- **自我開發仍保留內部實作** — Codex 執行、隔離 `.mori-dev-workspaces/`、executor output、git diff capture、review/apply flow、release gate 報告仍留在程式碼中,後續可再開 gate。
+- **`.mori-dev-workspaces/` 加入 ignore** — 避免內部測試 workspace 與 release commit 混在一起。
+
+### 角色背板 / Floating Mori
+
+- **角色背板改跟隨角色包** — `read_character_backdrop` 會讀目前角色包自己的 `backplate-<theme>.png`;系統層背板則保留為使用者全域 fallback。
+- **X11 預設啟用背板,其他平台預設關閉** — 沒有明確設定 `floating.backplate` 時,執行期會偵測 X11 session: X11 預設 `logo`,Wayland / Windows / macOS 預設 `plain`。
+- **設定說明補上 X11 透明限制** — Config tab 的背板說明標明 X11 環境建議使用背板,因為透明支援度較脆弱;其他平台可維持無背板。
+- **內建背板 fallback** — 若角色包與使用者全域路徑都沒有背板檔,會使用 app 內建的 `floating/backplate-x11-<theme>.png`。
+
+### 角色包與 agent profile
+
+- **內建 Mori sprite sheet 維持真實動畫圖** — shipped `mori` 角色包的多狀態 sprite sheet 仍是 4x4 frame sheet,不是單張重複樣板。
+- **範例 agent profile 調整** — 進階 agent 文件與範例更明確推薦 `codex-bash` 作為優先 profile。
+
+### Verified
+
+- `bash scripts/verify.sh`
+- `npm run tauri build`
+- Linux bundle: `.deb` / `.rpm` / `.AppImage`
+
+### 升級
+
+無 breaking change。既有 `floating.backplate` 明確設定會保留;缺省值才改成依平台推導。
+
+---
+
 ## v0.7.1 — MSI 安裝體驗補強 + JSONL 觀測補完(2026-05-21)
 
 v0.7.0 release 後拿乾淨 Windows 機跑完整 MSI 安裝測,踩出一輪 release-only(dev 模式碰不到)的 bug,以及一輪「LLM 跑壞時看不到內部狀態」的盲點。本版集中補完。

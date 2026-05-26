@@ -7,10 +7,10 @@
 #   2. 在 app 內:Settings → General → Command line interface → Register CLI → 啟用
 #   3. 開新 terminal 跑 `obsidian --version` 確認 PATH 已加
 #
-# Provider 用 claude-bash 因為「找筆記 → 讀 → 改寫 → 寫回」常常要 2-3 round
-# tool calling,純 API tool calling 失敗率高一點。沒裝 Claude Code 改成
-# gemini-bash 或留空都行。
-provider: claude-bash
+# Provider 用 codex-bash 因為「找筆記 → 讀 → 改寫 → 寫回」常常要 2-3 round
+# tool calling,純 API tool calling 失敗率高一點。沒裝 Codex CLI 改成
+# gemini-bash / claude-bash 或留空都行。
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 shell_skills:

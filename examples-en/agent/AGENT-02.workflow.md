@@ -1,6 +1,6 @@
 ---
 # Demo of custom shell_skills — turn gh / docker / any CLI into a Mori capability without Rust changes
-provider: claude-bash
+provider: codex-bash
 enable_file_include: true
 enable_read_skill: true
 shell_skills:

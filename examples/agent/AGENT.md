@@ -4,10 +4,10 @@
 #
 # provider 留空 → 跟 config.json 的 `provider` 走(Quickstart 設的)。純 API
 # (gemini / groq / ollama)即可,不需先裝 CLI。進階要用外部 AI CLI 當 agent
-# loop 才打開 `provider: claude-bash` / `gemini-bash` / `codex-bash`(需各自裝
-# Claude Code / Gemini CLI / Codex CLI)。
+# loop 才打開 `provider: codex-bash` / `gemini-bash` / `claude-bash`(需各自裝
+# Codex CLI / Gemini CLI / Claude Code)。
 
-# provider: claude-bash   # 進階:有裝 Claude Code 才打開
+# provider: codex-bash    # 進階:有裝 Codex CLI 才打開
 enable_file_include: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)
 # enable_read_skill: true  # 若要讓 LLM 動態呼叫 read_file_text skill，打開這行
 
