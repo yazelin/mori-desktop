@@ -320,6 +320,41 @@ pub fn registry() -> Vec<DepSpec> {
             ],
         },
         DepSpec {
+            id: "ffmpeg",
+            name: "ffmpeg",
+            description: "音檔 / 影片格式抽取與轉碼工具。轉錄分頁用它把 mp3/mp4/m4a/flac/mov 等格式抽成 Whisper 需要的 16kHz mono WAV；Recordings 保存也用它轉成 lossless FLAC。",
+            unlocks: "Transcribe tab 單檔 / 批次轉錄；Recordings 自動 FLAC 壓縮",
+            size_hint: Some("~80-200MB"),
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: Some("安裝到 PATH 後請重啟 Mori，或在 Deps 頁按重新整理。"),
+            check: CheckSpec::Which { bin: "ffmpeg" },
+            check_overrides: &[],
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# Ubuntu / Debian:",
+                    "sudo apt install ffmpeg",
+                    "# Fedora / RHEL:",
+                    "# sudo dnf install ffmpeg-free",
+                    "# Arch / Manjaro:",
+                    "# sudo pacman -S ffmpeg",
+                    "# macOS(Homebrew):",
+                    "# brew install ffmpeg",
+                ],
+            },
+            install_overrides: &[
+                ("windows", InstallSpec::Manual {
+                    commands: &[
+                        "# PowerShell(winget):",
+                        "winget install --id Gyan.FFmpeg -e",
+                        "# 或 Chocolatey:",
+                        "# choco install ffmpeg",
+                        "# 安裝後重開 Mori，讓 PATH 生效。",
+                    ],
+                }),
+            ],
+        },
+        DepSpec {
             id: "whisper-server",
             name: "whisper-server (whisper.cpp 引擎)",
             description: "本機 STT 推理引擎 — whisper.cpp 官方 pre-built HTTP server。\

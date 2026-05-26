@@ -36,6 +36,8 @@ type CharacterEntry = {
   version: string;
 };
 
+const MORI_SPRITE_STUDIO_URL = "https://mori-sprite-studio.vercel.app/";
+
 type SaveStatus =
   | { kind: "idle" }
   | { kind: "saving" }
@@ -564,6 +566,12 @@ function CharacterPicker() {
     }
   };
 
+  const onOpenSpriteStudio = () => {
+    invoke("open_external_url", { url: MORI_SPRITE_STUDIO_URL }).catch((e) => {
+      setImportError(`開啟 Mori Sprite Studio 失敗:${String(e)}`);
+    });
+  };
+
   return (
     <>
       <FormRow
@@ -598,6 +606,9 @@ function CharacterPicker() {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="mori-btn" onClick={onImport} disabled={importing || busy}>
               {importing ? "匯入中…" : "匯入 .moripack.zip"}
+            </button>
+            <button className="mori-btn ghost" onClick={onOpenSpriteStudio}>
+              製作 moripack
             </button>
             {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
           </div>

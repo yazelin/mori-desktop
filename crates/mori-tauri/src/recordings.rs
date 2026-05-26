@@ -6,8 +6,8 @@
 //!
 //! ```text
 //! ~/.mori/recordings/2026-05-19T17-12-34/
-//! ├── audio-raw.wav         錄音原檔(silence-trim 前)
-//! ├── audio-trimmed.wav     送 STT 的版本(silence-trim 後)
+//! ├── audio-raw.flac        錄音原檔(silence-trim 前;lossless 壓縮)
+//! ├── audio-trimmed.flac    送 STT 的版本(silence-trim 後;lossless 壓縮)
 //! ├── transcript.txt        STT 出來的文字
 //! ├── response.txt          Mori final response
 //! └── meta.json             完整 metadata(provider / profile / score / 時間軸)
@@ -28,12 +28,15 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
 use crate::mori_dir;
+
+const AUDIO_COMPRESSION_CODEC: &str = "flac-lossless";
 
 /// 一次 pipeline run 的累積資料。`finalize()` 時一口氣寫進 session dir。
 ///
@@ -181,12 +184,25 @@ impl SessionRecord {
             return;
         }
 
-        // Audio
+        // Audio: write FLAC when ffmpeg is available. FLAC is lossless, so future
+        // voice-training datasets keep the original 16-bit PCM quality with much
+        // smaller disk usage than WAV. If encoding fails, keep a WAV fallback.
+        let mut audio_raw_file: Option<&'static str> = None;
+        let mut audio_trimmed_file: Option<&'static str> = None;
+        let mut audio_compression: Option<&'static str> = None;
         if let Some(bytes) = self.audio_raw_bytes {
-            write_file(&dir.join("audio-raw.wav"), &bytes, "audio-raw.wav");
+            let written = write_audio_variant(&dir, "audio-raw", &bytes);
+            if written.ends_with(".flac") {
+                audio_compression = Some(AUDIO_COMPRESSION_CODEC);
+            }
+            audio_raw_file = Some(written);
         }
         if let Some(bytes) = self.audio_trimmed_bytes {
-            write_file(&dir.join("audio-trimmed.wav"), &bytes, "audio-trimmed.wav");
+            let written = write_audio_variant(&dir, "audio-trimmed", &bytes);
+            if written.ends_with(".flac") {
+                audio_compression = Some(AUDIO_COMPRESSION_CODEC);
+            }
+            audio_trimmed_file = Some(written);
         }
         // Transcript & response
         if let Some(t) = self.transcript.as_deref() {
@@ -225,6 +241,11 @@ impl SessionRecord {
             "speaker_id": self.speaker_id,
             "evaluator": self.evaluator,
             "skill_calls": self.skill_calls,
+            "audio": {
+                "raw_file": audio_raw_file,
+                "trimmed_file": audio_trimmed_file,
+                "compression": audio_compression,
+            },
             "timings_ms": serde_json::json!({
                 "recording_ms": self.timings_ms.recording_ms,
                 "stt_ms": self.timings_ms.stt_ms,
@@ -243,6 +264,84 @@ impl SessionRecord {
             "recordings: session archived",
         );
     }
+}
+
+fn write_audio_variant(dir: &Path, stem: &'static str, wav_bytes: &[u8]) -> &'static str {
+    let flac_name = match stem {
+        "audio-raw" => "audio-raw.flac",
+        "audio-trimmed" => "audio-trimmed.flac",
+        _ => "audio.flac",
+    };
+    match encode_wav_to_flac(wav_bytes) {
+        Ok(flac) => {
+            write_file(&dir.join(flac_name), &flac, flac_name);
+            flac_name
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                file = stem,
+                "recordings: FLAC encode failed, keeping WAV fallback",
+            );
+            let wav_name = match stem {
+                "audio-raw" => "audio-raw.wav",
+                "audio-trimmed" => "audio-trimmed.wav",
+                _ => "audio.wav",
+            };
+            write_file(&dir.join(wav_name), wav_bytes, wav_name);
+            wav_name
+        }
+    }
+}
+
+fn encode_wav_to_flac(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let nonce = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let temp_dir = std::env::temp_dir();
+    let wav_path = temp_dir.join(format!("mori-recording-{pid}-{nonce}.wav"));
+    let flac_path = temp_dir.join(format!("mori-recording-{pid}-{nonce}.flac"));
+
+    fs::write(&wav_path, wav_bytes).map_err(|e| format!("write temp WAV: {e}"))?;
+    let output = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+        ])
+        .arg(&wav_path)
+        .args([
+            "-map",
+            "0:a:0",
+            "-sample_fmt",
+            "s16",
+            "-compression_level",
+            "8",
+        ])
+        .arg(&flac_path)
+        .output()
+        .map_err(|e| {
+            let _ = fs::remove_file(&wav_path);
+            let _ = fs::remove_file(&flac_path);
+            format!("spawn ffmpeg: {e}")
+        })?;
+    let _ = fs::remove_file(&wav_path);
+
+    if !output.status.success() {
+        let _ = fs::remove_file(&flac_path);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg exited {}: {}", output.status, stderr.trim()));
+    }
+    let flac = fs::read(&flac_path).map_err(|e| format!("read temp FLAC: {e}"))?;
+    let _ = fs::remove_file(&flac_path);
+    if flac.is_empty() {
+        return Err("ffmpeg produced empty FLAC".to_string());
+    }
+    Ok(flac)
 }
 
 fn write_file(path: &Path, bytes: &[u8], label: &str) {
@@ -450,6 +549,8 @@ pub struct SessionDetail {
     pub system_prompt: Option<String>,
     pub has_audio_raw: bool,
     pub has_audio_trimmed: bool,
+    pub audio_raw_format: Option<String>,
+    pub audio_trimmed_format: Option<String>,
 }
 
 #[tauri::command]
@@ -464,6 +565,8 @@ pub fn recordings_session_detail(timestamp: String) -> Result<SessionDetail, Str
             .and_then(|t| serde_json::from_str(&t).ok())
     };
     let read_text = |name: &str| -> Option<String> { fs::read_to_string(dir.join(name)).ok() };
+    let audio_raw = find_audio_file(&dir, "audio-raw");
+    let audio_trimmed = find_audio_file(&dir, "audio-trimmed");
     Ok(SessionDetail {
         timestamp,
         meta: read_json("meta.json"),
@@ -472,23 +575,65 @@ pub fn recordings_session_detail(timestamp: String) -> Result<SessionDetail, Str
         transcript: read_text("transcript.txt"),
         response: read_text("response.txt"),
         system_prompt: read_text("system-prompt.txt"),
-        has_audio_raw: dir.join("audio-raw.wav").exists(),
-        has_audio_trimmed: dir.join("audio-trimmed.wav").exists(),
+        has_audio_raw: audio_raw.is_some(),
+        has_audio_trimmed: audio_trimmed.is_some(),
+        audio_raw_format: audio_raw.map(|a| a.format.to_string()),
+        audio_trimmed_format: audio_trimmed.map(|a| a.format.to_string()),
     })
+}
+
+#[derive(Debug, Serialize)]
+pub struct AudioBytes {
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+    pub filename: String,
 }
 
 /// 回 audio bytes — UI 用 blob URL 播放。
 /// `which`: "raw" or "trimmed"
 #[tauri::command]
-pub fn recordings_audio_bytes(timestamp: String, which: String) -> Result<Vec<u8>, String> {
-    let file = match which.as_str() {
-        "raw" => "audio-raw.wav",
-        "trimmed" => "audio-trimmed.wav",
+pub fn recordings_audio_bytes(timestamp: String, which: String) -> Result<AudioBytes, String> {
+    let stem = match which.as_str() {
+        "raw" => "audio-raw",
+        "trimmed" => "audio-trimmed",
         _ => return Err(format!("unknown audio variant: {which}(只接 raw/trimmed)")),
     };
     let dir = recordings_root().join(sanitize_timestamp(&timestamp)?);
-    let path = dir.join(file);
-    fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))
+    let audio = find_audio_file(&dir, stem)
+        .ok_or_else(|| format!("audio file not found: {stem}.flac/.wav"))?;
+    let bytes = fs::read(&audio.path)
+        .map_err(|e| format!("read {}: {e}", audio.path.display()))?;
+    Ok(AudioBytes {
+        bytes,
+        mime_type: audio.mime_type.to_string(),
+        filename: audio.filename,
+    })
+}
+
+struct AudioFile {
+    path: PathBuf,
+    filename: String,
+    format: &'static str,
+    mime_type: &'static str,
+}
+
+fn find_audio_file(dir: &Path, stem: &str) -> Option<AudioFile> {
+    for (ext, format, mime_type) in [
+        ("flac", "flac", "audio/flac"),
+        ("wav", "wav", "audio/wav"),
+    ] {
+        let filename = format!("{stem}.{ext}");
+        let path = dir.join(&filename);
+        if path.exists() {
+            return Some(AudioFile {
+                path,
+                filename,
+                format,
+                mime_type,
+            });
+        }
+    }
+    None
 }
 
 #[tauri::command]
