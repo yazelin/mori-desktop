@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
+import { setLocale } from "../i18n";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
 import {
@@ -1957,7 +1958,7 @@ function ConfigTab({
                 onChange={(v) => {
                   applyPatch((c) => setStrOrUndef(c, "locale", v));
                   // 立即切 i18next(不用等 save 才看到)
-                  import("../i18n").then((m) => m.setLocale(v as "zh-TW" | "en")).catch(() => {});
+                  setLocale(v as "zh-TW" | "en").catch(() => {});
                 }}
                 options={[
                   { value: "zh-TW", label: "繁體中文 (zh-TW)" },
