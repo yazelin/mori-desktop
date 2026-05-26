@@ -6,6 +6,27 @@
 
 ---
 
+## v0.7.4 — Windows Annuli runtime path hotfix(2026-05-26)
+
+這版修掉 v0.7.3 發現的 Windows Annuli runtime 路徑錯置。Windows installer 版不該把 Annuli clone 到 `%USERPROFILE%\mori-universe\annuli`;它應該跟 Mori 其他 runtime 一樣放在 `%USERPROFILE%\.mori\annuli`。
+
+### Windows Annuli runtime
+
+- **runtime root 改回 `.mori`** — Windows 上 AnnuliTab 偵測、quick-enable、supervisor spawn 都改用 `%USERPROFILE%\.mori\annuli`。
+- **Deps 安裝指令補搬移** — 若 v0.7.3 已經把 Annuli 放在 `%USERPROFILE%\mori-universe\annuli`,新的 Windows PowerShell 指令會在 `.mori\annuli` 不存在時搬過去。
+- **Deps 檢測修正 `$USERPROFILE` 展開** — Windows override path 不再因只展開 `$HOME` 而偵測不到已安裝 runtime。
+- **Annuli 文件同步** — `docs/annuli.html` 的 Windows 安裝、token `.env`、手動啟動路徑全部改成 `.mori\annuli`。
+
+### Verified
+
+- `cargo check -p mori-tauri --all-targets`
+
+### 升級
+
+Windows 使用者若已經有 `%USERPROFILE%\mori-universe\annuli`,請搬到 `%USERPROFILE%\.mori\annuli`,或重新照 Deps / Annuli 文件的 PowerShell 指令安裝。Linux / macOS 的 `~/mori-universe/annuli` 開發機 layout 不變。
+
+---
+
 ## v0.7.3 — Annuli token setup + FLAC recordings 修補(2026-05-26)
 
 這版收斂 v0.7.2 之後的三個 release-ready fix:Annuli 一鍵啟用時把 soul token setup 做完整,錄音 cleanup / dependency UI 對齊 FLAC 實際需求,並補上 reminder cancel / snooze 的 stale callback race guard。
