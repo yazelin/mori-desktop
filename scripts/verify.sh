@@ -13,7 +13,11 @@ run() {
 }
 
 run npm run build
+run npm test
 run cargo test -p mori-core --lib
+run cargo test -p mori-time --lib
+run cargo test -p mori-file-loader --lib --tests
+run cargo test -p mori-tauri --bin mori-tauri
 run cargo check --workspace --all-targets
 
 if [ "${VERIFY_STRICT:-0}" = "1" ]; then

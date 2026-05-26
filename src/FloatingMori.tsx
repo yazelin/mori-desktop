@@ -62,7 +62,7 @@ const RIPPLE_LIFETIME_MS = 1200;
 // - 兩軸都 steps(4) jump-end,以 (0, 0) → (-400%, -400%) wrap 回 (0, 0) 完成 loop
 // - 這版簡化 不分 loop / one-shot,全 infinite(commit 4 toggle 時可改)
 // - grid "1x1" → 不跑 animation,純 static
-function spriteStyle(
+export function spriteStyle(
   visual: Visual,
   spriteUrl: string | undefined,
   manifest: CharacterManifest | null,
@@ -107,7 +107,7 @@ function spriteStyle(
   };
 }
 
-function visualFor(
+export function visualFor(
   mode: Mode,
   phase: Phase,
   transient: Visual | null,
