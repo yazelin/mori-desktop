@@ -55,16 +55,23 @@
 
 <p>
   Annuli 不是雲端服務。預設路徑在你的電腦:
-  <code>~/mori-universe/annuli</code> 與
-  <code>~/mori-universe/spirits/mori</code>。
+  Windows runtime 在 <code>%USERPROFILE%\.mori\annuli</code>;
+  Linux / macOS runtime 在 <code>~/mori-universe/annuli</code>。
+  vault 預設在 <code>~/mori-universe/spirits/mori</code>。
 </p>
 
 <h2>2. Windows 手動安裝 Annuli runtime</h2>
 
 <p>如果 Deps tab 還沒有自動安裝功能,在 PowerShell 執行:</p>
 
-<pre><code>git clone https://github.com/yazelin/annuli $env:USERPROFILE\mori-universe\annuli
-cd $env:USERPROFILE\mori-universe\annuli
+<pre><code>mkdir $env:USERPROFILE\.mori -Force
+if ((Test-Path $env:USERPROFILE\mori-universe\annuli) -and !(Test-Path $env:USERPROFILE\.mori\annuli)) {
+  Move-Item $env:USERPROFILE\mori-universe\annuli $env:USERPROFILE\.mori\annuli
+}
+if (!(Test-Path $env:USERPROFILE\.mori\annuli)) {
+  git clone https://github.com/yazelin/annuli $env:USERPROFILE\.mori\annuli
+}
+cd $env:USERPROFILE\.mori\annuli
 uv venv .venv --python 3.11
 uv pip install --python .venv\Scripts\python.exe -e .
 
@@ -112,7 +119,7 @@ fi</code></pre>
     <td><code>annuli.soul_token</code></td>
   </tr>
   <tr>
-    <td><code>~/mori-universe/annuli/.env</code> 或 <code>%USERPROFILE%\mori-universe\annuli\.env</code></td>
+    <td><code>~/mori-universe/annuli/.env</code> 或 <code>%USERPROFILE%\.mori\annuli\.env</code></td>
     <td><code>ANNULI_SOUL_TOKEN</code></td>
   </tr>
 </table>
@@ -136,7 +143,7 @@ fi</code></pre>
 </p>
 
 <pre><code># Windows PowerShell
-cd $env:USERPROFILE\mori-universe\annuli
+cd $env:USERPROFILE\.mori\annuli
 .\.venv\Scripts\python.exe main.py admin --port 5000
 
 # Linux / macOS

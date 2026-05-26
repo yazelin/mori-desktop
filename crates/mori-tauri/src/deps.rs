@@ -1026,7 +1026,8 @@ pub fn registry() -> Vec<DepSpec> {
                     commands: &[
                         "# Windows PowerShell(需 git + Python 3.11 + uv):",
                         "mkdir $env:USERPROFILE\\.mori -Force",
-                        "git clone https://github.com/yazelin/annuli $env:USERPROFILE\\.mori\\annuli",
+                        "if ((Test-Path $env:USERPROFILE\\mori-universe\\annuli) -and !(Test-Path $env:USERPROFILE\\.mori\\annuli)) { Move-Item $env:USERPROFILE\\mori-universe\\annuli $env:USERPROFILE\\.mori\\annuli }",
+                        "if (!(Test-Path $env:USERPROFILE\\.mori\\annuli)) { git clone https://github.com/yazelin/annuli $env:USERPROFILE\\.mori\\annuli }",
                         "cd $env:USERPROFILE\\.mori\\annuli",
                         "uv venv .venv --python 3.11",
                         "uv pip install --python .venv\\Scripts\\python.exe -e .",

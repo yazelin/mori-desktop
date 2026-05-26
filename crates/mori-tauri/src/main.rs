@@ -2357,8 +2357,8 @@ async fn annuli_quick_enable(
     // 1. 驗 runtime
     if !annuli_runtime_installed() {
         return Err(
-            "annuli runtime 沒裝 — 先到 DepsTab 裝「Annuli 反思服務 runtime」(等同 \
-             git clone ~/mori-universe/annuli + uv venv + pip install -e .)"
+            "annuli runtime 沒裝 — 先到 DepsTab 裝「Annuli 反思服務 runtime」(Windows: \
+             %USERPROFILE%\\.mori\\annuli; Linux/macOS: ~/mori-universe/annuli)"
                 .into(),
         );
     }
