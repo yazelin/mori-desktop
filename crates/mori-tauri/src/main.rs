@@ -2236,6 +2236,153 @@ async fn sync_supervisor_to_config(state: &AppState, cfg: &annuli_config::Annuli
     *state.annuli_supervisor.lock() = Some(sup);
 }
 
+fn annuli_supervisor_snapshot(state: &AppState) -> annuli_supervisor::SupervisorInfo {
+    state
+        .annuli_supervisor
+        .lock()
+        .as_ref()
+        .map(|s| s.info.clone())
+        .unwrap_or(annuli_supervisor::SupervisorInfo {
+            state: "none",
+            annuli_root: None,
+            python: None,
+            port: None,
+            reason: "supervisor has not settled yet".into(),
+        })
+}
+
+fn apply_annuli_config_to_state(
+    state: &AppState,
+    annuli_cfg: &annuli_config::AnnuliConfig,
+) -> Result<String, String> {
+    if annuli_cfg.is_ready() {
+        let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
+            .map_err(|e| format!("build annuli client: {e:#}"))?;
+        let client = Arc::new(client);
+        let store: Arc<dyn mori_core::memory::MemoryStore> = Arc::new(
+            mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()),
+        );
+        *state.memory.write() = store;
+        *state.annuli.write() = Some(client);
+        tracing::info!(
+            endpoint = %annuli_cfg.endpoint,
+            spirit = %annuli_cfg.spirit_name,
+            user_id = %annuli_cfg.user_id,
+            "annuli hot-reload -> AnnuliMemoryStore"
+        );
+        Ok(format!(
+            "reloaded: annuli enabled @ {} (spirit={}, user_id={})",
+            annuli_cfg.endpoint, annuli_cfg.spirit_name, annuli_cfg.user_id
+        ))
+    } else {
+        let memory_root = mori_core::memory::markdown::LocalMarkdownMemoryStore::default_root()
+            .map_err(|e| format!("locate ~/.mori/memory: {e:#}"))?;
+        let store = mori_core::memory::markdown::LocalMarkdownMemoryStore::new(memory_root.clone())
+            .map_err(|e| format!("init LocalMarkdown store: {e:#}"))?;
+        *state.memory.write() = Arc::new(store);
+        *state.annuli.write() = None;
+        tracing::info!(
+            path = %memory_root.display(),
+            "annuli hot-reload -> LocalMarkdownMemoryStore (annuli disabled)"
+        );
+        Ok(format!(
+            "reloaded: annuli disabled, fallback LocalMarkdown @ {}",
+            memory_root.display()
+        ))
+    }
+}
+
+#[tauri::command]
+fn annuli_supervisor_status(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> annuli_supervisor::SupervisorInfo {
+    annuli_supervisor_snapshot(&state)
+}
+
+#[tauri::command]
+fn annuli_supervisor_stop(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let cur_state = state
+        .annuli_supervisor
+        .lock()
+        .as_ref()
+        .map(|s| s.info.state);
+    match cur_state {
+        Some("spawned") | Some("spawned-not-ready") => {
+            *state.annuli_supervisor.lock() = None;
+            let _ = app.emit(
+                "annuli-supervisor-changed",
+                serde_json::json!({ "from": "supervisor_stop" }),
+            );
+            Ok("stopped Mori-managed Annuli process".into())
+        }
+        Some("already-running") => Err(
+            "Annuli is an external process on this port; Mori will not stop it. Stop that process manually, then restart from Mori."
+                .into(),
+        ),
+        Some(other) => Ok(format!("no Mori-managed Annuli process to stop (state={other})")),
+        None => Ok("no Annuli supervisor process is registered yet".into()),
+    }
+}
+
+#[tauri::command]
+async fn annuli_supervisor_resync_restart(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let config_path = mori_core::llm::groq::GroqProvider::bootstrap_mori_config()
+        .map_err(|e| format!("locate config.json: {e:#}"))?;
+    if ensure_annuli_config_soul_token(&config_path).is_some() {
+        tracing::info!(path = %config_path.display(), "annuli control: filled missing token");
+    }
+    let annuli_cfg = annuli_config::AnnuliConfig::load(&config_path);
+    if !annuli_cfg.is_ready() {
+        return Err(
+            "Annuli config is not ready; enable Annuli and set endpoint/spirit/user_id first"
+                .into(),
+        );
+    }
+    if !annuli_cfg.soul_token.trim().is_empty() {
+        sync_annuli_env_soul_token(&annuli_cfg.soul_token)?;
+    }
+
+    apply_annuli_config_to_state(&state, &annuli_cfg)?;
+
+    let cur_state = state
+        .annuli_supervisor
+        .lock()
+        .as_ref()
+        .map(|s| s.info.state);
+    if matches!(cur_state, Some("already-running")) {
+        let external_still_alive =
+            match mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config()) {
+                Ok(client) => client.health().await.map(|h| h.ok).unwrap_or(false),
+                Err(_) => false,
+            };
+        if external_still_alive {
+            return Err(
+                "Annuli is already running as an external process. Token was synced, but Mori cannot restart it; stop the external process first."
+                    .into(),
+            );
+        }
+    }
+
+    *state.annuli_supervisor.lock() = None;
+    let sup = annuli_supervisor::AnnuliSupervisor::maybe_spawn(&annuli_cfg).await;
+    let info = sup.info.clone();
+    *state.annuli_supervisor.lock() = Some(sup);
+    let _ = app.emit(
+        "annuli-supervisor-changed",
+        serde_json::json!({ "from": "supervisor_resync_restart" }),
+    );
+    Ok(format!(
+        "Annuli supervisor state={} ({})",
+        info.state, info.reason
+    ))
+}
+
 /// 偵測 annuli runtime 在不在。
 /// - Windows install build:`%USERPROFILE%\.mori\annuli\.venv\Scripts\python.exe`
 /// - Linux/macOS dev layout:`~/mori-universe/annuli/.venv/bin/python`
@@ -2340,6 +2487,47 @@ fn sync_annuli_env_soul_token(token: &str) -> Result<String, String> {
     Ok(format!("ANNULI_SOUL_TOKEN 已存在於 {}", env_path.display()))
 }
 
+fn ensure_annuli_config_soul_token(config_path: &std::path::Path) -> Option<String> {
+    let mut json: serde_json::Value = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())?;
+    let annuli = json.get_mut("annuli")?.as_object_mut()?;
+    if annuli
+        .get("soul_token")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let token = read_annuli_env_soul_token().unwrap_or_else(generate_soul_token);
+    annuli.insert("soul_token".to_string(), serde_json::json!(token.clone()));
+    if let Err(e) = sync_annuli_env_soul_token(&token) {
+        tracing::warn!(error = %e, "annuli token migration: sync .env failed");
+    }
+    match serde_json::to_string_pretty(&json)
+        .map_err(|e| e.to_string())
+        .and_then(|text| std::fs::write(config_path, text).map_err(|e| e.to_string()))
+    {
+        Ok(()) => {
+            tracing::info!(
+                path = %config_path.display(),
+                "annuli token migration: filled missing annuli.soul_token"
+            );
+            Some(token)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %config_path.display(),
+                "annuli token migration: write config failed"
+            );
+            None
+        }
+    }
+}
+
 /// 一鍵啟用 annuli(DepsTab 裝完後給 user 的「直接打開」入口)。流程:
 /// 1. 驗 runtime 已裝(否則早回 err)
 /// 2. 寫 `annuli.enabled = true` + sane defaults(endpoint / spirit_name / user_id /
@@ -2380,10 +2568,16 @@ async fn annuli_quick_enable(
         .ok_or_else(|| "config.json /annuli 不是 object".to_string())?;
     a.insert("enabled".to_string(), serde_json::json!(true));
     let str_empty = |a: &serde_json::Map<String, serde_json::Value>, k: &str| -> bool {
-        a.get(k).and_then(|v| v.as_str()).map(|s| s.is_empty()).unwrap_or(true)
+        a.get(k)
+            .and_then(|v| v.as_str())
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
     };
     if str_empty(a, "endpoint") {
-        a.insert("endpoint".to_string(), serde_json::json!("http://localhost:5000"));
+        a.insert(
+            "endpoint".to_string(),
+            serde_json::json!("http://localhost:5000"),
+        );
     }
     if str_empty(a, "spirit_name") {
         a.insert("spirit_name".to_string(), serde_json::json!("mori"));
@@ -2405,8 +2599,7 @@ async fn annuli_quick_enable(
             .to_string()
     };
     let env_sync_msg = sync_annuli_env_soul_token(&token)?;
-    std::fs::create_dir_all(mori_dir())
-        .map_err(|e| format!("mkdir ~/.mori: {e}"))?;
+    std::fs::create_dir_all(mori_dir()).map_err(|e| format!("mkdir ~/.mori: {e}"))?;
     std::fs::write(
         &config_path,
         serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?,
@@ -2416,13 +2609,16 @@ async fn annuli_quick_enable(
     // 3. Reload AnnuliClient / store(同 annuli_reload 的 if-ready 分支)
     let annuli_cfg = annuli_config::AnnuliConfig::load(&config_path);
     if !annuli_cfg.is_ready() {
-        return Err("config 寫好了但 is_ready=false — endpoint/spirit/user_id 還是空(不該發生)".into());
+        return Err(
+            "config 寫好了但 is_ready=false — endpoint/spirit/user_id 還是空(不該發生)".into(),
+        );
     }
     let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
         .map_err(|e| format!("build annuli client: {e:#}"))?;
     let client = Arc::new(client);
-    let store: Arc<dyn mori_core::memory::MemoryStore> =
-        Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
+    let store: Arc<dyn mori_core::memory::MemoryStore> = Arc::new(
+        mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()),
+    );
     *state.memory.write() = store;
     *state.annuli.write() = Some(client.clone());
 
@@ -2444,7 +2640,9 @@ async fn annuli_quick_enable(
         "annuli-supervisor-changed",
         serde_json::json!({ "from": "quick_enable" }),
     );
-    Ok(format!("✓ Annuli 已啟用。{info_msg}。{env_sync_msg}。{token_health_msg}"))
+    Ok(format!(
+        "✓ Annuli 已啟用。{info_msg}。{env_sync_msg}。{token_health_msg}"
+    ))
 }
 
 /// C — annuli 熱重載 command。
@@ -2463,42 +2661,7 @@ async fn annuli_reload(state: tauri::State<'_, Arc<AppState>>) -> Result<String,
     let config_path = mori_core::llm::groq::GroqProvider::bootstrap_mori_config()
         .map_err(|e| format!("locate config.json: {e:#}"))?;
     let annuli_cfg = annuli_config::AnnuliConfig::load(&config_path);
-
-    let result_msg = if annuli_cfg.is_ready() {
-        let client = mori_core::annuli::AnnuliClient::new(annuli_cfg.to_client_config())
-            .map_err(|e| format!("build annuli client: {e:#}"))?;
-        let client = Arc::new(client);
-        let store: Arc<dyn mori_core::memory::MemoryStore> = Arc::new(
-            mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()),
-        );
-        *state.memory.write() = store;
-        *state.annuli.write() = Some(client);
-        tracing::info!(
-            endpoint = %annuli_cfg.endpoint,
-            spirit = %annuli_cfg.spirit_name,
-            user_id = %annuli_cfg.user_id,
-            "annuli hot-reload → AnnuliMemoryStore"
-        );
-        format!(
-            "reloaded: annuli enabled @ {} (spirit={}, user_id={})",
-            annuli_cfg.endpoint, annuli_cfg.spirit_name, annuli_cfg.user_id
-        )
-    } else {
-        let memory_root = mori_core::memory::markdown::LocalMarkdownMemoryStore::default_root()
-            .map_err(|e| format!("locate ~/.mori/memory: {e:#}"))?;
-        let store = mori_core::memory::markdown::LocalMarkdownMemoryStore::new(memory_root.clone())
-            .map_err(|e| format!("init LocalMarkdown store: {e:#}"))?;
-        *state.memory.write() = Arc::new(store);
-        *state.annuli.write() = None;
-        tracing::info!(
-            path = %memory_root.display(),
-            "annuli hot-reload → LocalMarkdownMemoryStore (annuli disabled)"
-        );
-        format!(
-            "reloaded: annuli disabled, fallback LocalMarkdown @ {}",
-            memory_root.display()
-        )
-    };
+    let result_msg = apply_annuli_config_to_state(&state, &annuli_cfg)?;
 
     // 把 supervisor 對齊 config(enable→啟動 / disable→殺我們 spawn 的 child)
     sync_supervisor_to_config(&state, &annuli_cfg).await;
@@ -5779,6 +5942,10 @@ fn main() {
     if !annuli_section_present && annuli_runtime_installed() {
         if let Some(cfg_path) = &config_path {
             let default_uid = pick_annuli_user_id_default(cfg_path);
+            let token = read_annuli_env_soul_token().unwrap_or_else(generate_soul_token);
+            if let Err(e) = sync_annuli_env_soul_token(&token) {
+                tracing::warn!(error = %e, "annuli auto-detect: sync .env token failed");
+            }
             let mut json: serde_json::Value = std::fs::read_to_string(cfg_path)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
@@ -5791,6 +5958,7 @@ fn main() {
                         "endpoint": "http://localhost:5000",
                         "spirit_name": "mori",
                         "user_id": default_uid,
+                        "soul_token": token,
                     }),
                 );
                 if let Ok(text) = serde_json::to_string_pretty(&json) {
@@ -5809,6 +5977,13 @@ fn main() {
                 }
             }
             annuli_cfg = annuli_config::AnnuliConfig::load(cfg_path);
+        }
+    }
+    if annuli_cfg.enabled && annuli_cfg.soul_token.trim().is_empty() && annuli_runtime_installed() {
+        if let Some(cfg_path) = &config_path {
+            if ensure_annuli_config_soul_token(cfg_path).is_some() {
+                annuli_cfg = annuli_config::AnnuliConfig::load(cfg_path);
+            }
         }
     }
     let annuli_cfg = annuli_cfg; // 從這之後 immutable
@@ -6117,6 +6292,9 @@ fn main() {
             wake_word_restart_listener,
             annuli_runtime_installed,
             annuli_quick_enable,
+            annuli_supervisor_status,
+            annuli_supervisor_stop,
+            annuli_supervisor_resync_restart,
             notification_config::get_notification_config,
             notification_config::set_notification_config,
             correction_audit_config::get_correction_audit_config,

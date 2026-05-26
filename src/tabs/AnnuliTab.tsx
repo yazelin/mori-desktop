@@ -35,6 +35,14 @@ type AnnuliStatus = {
   error: string | null;
 };
 
+type SupervisorInfo = {
+  state: string;
+  annuli_root: string | null;
+  python: string | null;
+  port: number | null;
+  reason: string;
+};
+
 type MemorySection = {
   header: string;
   index: number;
@@ -70,10 +78,13 @@ function previewData(json: string, max = 80): string {
 export default function AnnuliTab() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<AnnuliStatus | null>(null);
+  const [supervisor, setSupervisor] = useState<SupervisorInfo | null>(null);
   const [soul, setSoul] = useState<string | null>(null);
   const [sections, setSections] = useState<MemorySection[]>([]);
   const [events, setEvents] = useState<AnnuliEvent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [controlBusy, setControlBusy] = useState<"stop" | "restart" | null>(null);
+  const [controlMsg, setControlMsg] = useState<string | null>(null);
   const [sleepBusy, setSleepBusy] = useState(false);
   const [sleepResult, setSleepResult] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -88,6 +99,7 @@ export default function AnnuliTab() {
     try {
       const st = await invoke<AnnuliStatus>("annuli_status");
       setStatus(st);
+      invoke<SupervisorInfo>("annuli_supervisor_status").then(setSupervisor).catch(() => {});
       if (!st.configured || !st.reachable) {
         setSoul(null);
         setSections([]);
@@ -126,6 +138,7 @@ export default function AnnuliTab() {
     const id = setInterval(() => {
       // 只 refresh status / events,不重 fetch SOUL / sections(那兩個基本不變)
       invoke<AnnuliStatus>("annuli_status").then(setStatus).catch(() => {});
+      invoke<SupervisorInfo>("annuli_supervisor_status").then(setSupervisor).catch(() => {});
       invoke<AnnuliEvent[]>("annuli_list_events_today").then(setEvents).catch(() => {});
     }, 30_000);
     return () => clearInterval(id);
@@ -140,12 +153,32 @@ export default function AnnuliTab() {
       // 等 supervisor 跑(spawn + health-check 最多 15s),再 refresh
       setTimeout(() => {
         refresh();
+        invoke<SupervisorInfo>("annuli_supervisor_status").then(setSupervisor).catch(() => {});
         invoke<boolean>("annuli_runtime_installed").then(setRuntimeInstalled).catch(() => {});
       }, 2000);
     } catch (e) {
       setEnableMsg(`❌ ${String(e)}`);
     } finally {
       setEnableBusy(false);
+    }
+  };
+
+  const runControl = async (kind: "stop" | "restart") => {
+    setControlBusy(kind);
+    setControlMsg(null);
+    try {
+      const command = kind === "stop" ? "annuli_supervisor_stop" : "annuli_supervisor_resync_restart";
+      const out = await invoke<string>(command);
+      setControlMsg(out);
+      setTimeout(() => {
+        refresh();
+        invoke<SupervisorInfo>("annuli_supervisor_status").then(setSupervisor).catch(() => {});
+      }, kind === "restart" ? 2000 : 300);
+    } catch (e) {
+      setControlMsg(`Error: ${String(e)}`);
+      invoke<SupervisorInfo>("annuli_supervisor_status").then(setSupervisor).catch(() => {});
+    } finally {
+      setControlBusy(null);
     }
   };
 
@@ -260,6 +293,52 @@ export default function AnnuliTab() {
           </div>
         )}
       </div>
+
+      <section className="mori-annuli-section">
+        <h2 className="mori-annuli-section-title">Annuli process</h2>
+        <div className="mori-annuli-status">
+          <div className="mori-annuli-status-main">
+            supervisor: <code>{supervisor?.state ?? "loading"}</code>
+            {supervisor?.port ? <> · port: <code>{supervisor.port}</code></> : null}
+          </div>
+          <div className="mori-annuli-status-sub">
+            {supervisor?.reason ?? "checking supervisor state"}
+          </div>
+          {supervisor?.annuli_root && (
+            <div className="mori-annuli-status-sub">
+              root: <code>{supervisor.annuli_root}</code>
+            </div>
+          )}
+          {supervisor?.state === "already-running" && (
+            <div className="mori-annuli-status-err">
+              This Annuli process was not started by Mori. Stop the external process first if you want Mori to restart it with the synced token.
+            </div>
+          )}
+          <div className="mori-annuli-sleep-row">
+            <button
+              className="mori-btn"
+              onClick={() => runControl("restart")}
+              disabled={controlBusy !== null || !status.configured}
+              title="Sync config/.env token, then restart Mori-managed Annuli"
+            >
+              {controlBusy === "restart" ? "Restarting..." : "Sync token & restart"}
+            </button>
+            <button
+              className="mori-btn"
+              onClick={() => runControl("stop")}
+              disabled={controlBusy !== null}
+              title="Stop only the Annuli process spawned by Mori"
+            >
+              {controlBusy === "stop" ? "Stopping..." : "Stop Mori-managed Annuli"}
+            </button>
+            {controlMsg && (
+              <div className={`mori-annuli-sleep-result ${controlMsg.startsWith("Error:") ? "bad" : ""}`}>
+                {controlMsg}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* Sleep button */}
       <div className="mori-annuli-sleep-row">
