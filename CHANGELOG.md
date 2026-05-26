@@ -6,6 +6,37 @@
 
 ---
 
+## v0.7.5 — Annuli process controls + release toolchain cleanup(2026-05-27)
+
+這版補上 Mori Desktop 內建的 Annuli process 控制面板，收斂 v0.7.3/v0.7.4 後使用者最容易卡住的狀態:localhost 上已經有舊 Annuli process 在跑，但 Mori 不能接管、也沒有 UI 能清楚告訴你下一步。
+
+### Annuli process controls
+
+- **Annuli tab 新增 process 區塊** — 顯示 supervisor state、runtime root、port、reason，讓 `spawned` / `already-running` / `failed` 這類狀態不用再猜。
+- **同步 token 並重啟** — `Sync token & restart` 會補齊 `annuli.soul_token`、同步 Annuli `.env`，再重啟 Mori 自己管理的 Annuli process。
+- **停止 Mori-managed Annuli** — `Stop Mori-managed Annuli` 只會停止 Mori spawn 的 child process，不會誤殺外部手動啟動的 Annuli。
+- **外部 process 保護** — 若 port 上是 external `already-running` Annuli，Mori 會明確提示先手動停止；等外部 process 停掉後，可再由 Mori 接管啟動。
+- **startup token migration 補強** — runtime 已安裝但 config 缺 token 時，啟動流程會自動補 `annuli.soul_token` 並同步 `.env`。
+
+### Build / CI cleanup
+
+- **Windows hidden process imports 清理** — 移除兩個已不需要的 local `CommandExt` import。
+- **frontend import cleanup** — `MainShell` / `ConfigTab` 改用 top-level import，減少不必要 dynamic import。
+- **Vite chunk warning threshold** — 調整 build warning limit，避免目前 bundle size 在正常範圍內產生 noise。
+- **CI Node 22** — GitHub check / release workflows 升到 Node 22。
+
+### Verified
+
+- `npm run build`
+- `cargo test -p mori-core --lib`
+- `cargo check --workspace --all-targets`
+
+### 遷移
+
+無 breaking change。若本機已經有舊路徑或手動啟動的 Annuli 佔住 `localhost:5000`，新版 Annuli tab 會顯示 `already-running`；請先停止該外部 process，再按 `Sync token & restart` 讓 Mori 用 `.mori\annuli` runtime 與同步後的 token 接管。
+
+---
+
 ## v0.7.4 — Windows Annuli runtime path hotfix(2026-05-26)
 
 這版修掉 v0.7.3 發現的 Windows Annuli runtime 路徑錯置。Windows installer 版不該把 Annuli clone 到 `%USERPROFILE%\mori-universe\annuli`;它應該跟 Mori 其他 runtime 一樣放在 `%USERPROFILE%\.mori\annuli`。

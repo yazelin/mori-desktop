@@ -92,7 +92,6 @@ pub async fn run_python_script(
     // 是 mori-core 自身一部分,直接 inline OS-conditional 比較乾淨。
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }

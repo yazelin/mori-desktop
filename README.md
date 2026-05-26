@@ -9,7 +9,7 @@ Tauri 2 + Rust + React,Whisper 是耳朵,LLM 是腦袋,你是同伴。
 
 📖 **完整介紹 + 互動 demo**:[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-🌲 **Latest** — [**v0.7.4**](https://github.com/yazelin/mori-desktop/releases/tag/v0.7.4):**Windows Annuli runtime path hotfix**(Annuli runtime 改回 `%USERPROFILE%\.mori\annuli`,Deps 指令可搬移 v0.7.3 錯放的 `%USERPROFILE%\mori-universe\annuli`,文件同步)· v0.7.3 → Annuli token setup + FLAC recordings 修補 · v0.7.2 → Release gate + 角色背板預設修正 · v0.7.0 → Windows port 全面修補 + verifier-trained wake-word · v0.6.6 → Annuli transparent setup + 召喚師身分 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+🌲 **Latest** — [**v0.7.5**](https://github.com/yazelin/mori-desktop/releases/tag/v0.7.5):**Annuli process controls + release toolchain cleanup**(Annuli tab 可查看 supervisor state、同步 token 並重啟 Mori-managed Annuli、保護 external process 不被誤殺)· v0.7.4 → Windows Annuli runtime path hotfix · v0.7.3 → Annuli token setup + FLAC recordings 修補 · v0.7.2 → Release gate + 角色背板預設修正 · v0.7.0 → Windows port 全面修補 + verifier-trained wake-word · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 

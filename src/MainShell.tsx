@@ -11,6 +11,7 @@
 // - 每個 tab 一個 React component;只 mount 當前選中的 tab,避免重複 IPC
 
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import ChatPanel from "./ChatPanel";
@@ -74,19 +75,17 @@ function MainShell() {
   // 空 → 不顯示(老 user 沒過 Quickstart 也不會看到亂跳)。
   const [userName, setUserName] = useState<string>("");
   useEffect(() => {
-    import("@tauri-apps/api/core").then(({ invoke }) =>
-      invoke<string>("config_read")
-        .then((text) => {
-          try {
-            const cfg = JSON.parse(text);
-            const n = (cfg?.user?.name ?? "") as string;
-            if (typeof n === "string") setUserName(n.trim());
-          } catch {
-            // 不擋
-          }
-        })
-        .catch(() => {}),
-    );
+    invoke<string>("config_read")
+      .then((text) => {
+        try {
+          const cfg = JSON.parse(text);
+          const n = (cfg?.user?.name ?? "") as string;
+          if (typeof n === "string") setUserName(n.trim());
+        } catch {
+          // 不擋
+        }
+      })
+      .catch(() => {});
   }, [quickstartOpen]); // Quickstart 關閉後重抓(user 改名後即時反映)
 
   useEffect(() => {
