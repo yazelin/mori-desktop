@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Mori — Annuli 記憶與年輪</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="sprites/logo.png">
+<link rel="stylesheet" href="_book.css">
+</head>
+<body>
+
+<header class="book-header">
+  <img class="book-logo" src="sprites/logo.png" alt="Mori logo">
+  <div>
+    <h1>Mori</h1>
+    <div class="book-title-sub">DOCS</div>
+  </div>
+  <nav class="book-nav">
+    <a href="index.html">Home</a>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="dwelling-rite.html">宿靈儀式</a>
+    <a href="hotkeys.html">Hotkeys</a>
+    <a href="providers.html">Providers</a>
+    <a href="mori-home.html">~/.mori/</a>
+    <a href="memory.html">Memory</a>
+    <a href="annuli.html" class="current">Annuli</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+    <a href="https://github.com/yazelin/mori-desktop">GitHub</a>
+  </nav>
+</header>
+
+<h1 class="page-title">Annuli 記憶與年輪</h1>
+<div class="page-subtitle">VAULT · MEMORY · SOUL TOKEN</div>
+
+<p class="lead">
+  Annuli 是 Mori 的可選反思服務。沒裝 Annuli 時,Mori 仍會使用本機
+  <code>~/.mori/memory/</code> fallback；接上 Annuli 後,長期記憶、對話事件、
+  SOUL 與年輪會改走 <code>~/mori-universe/spirits/&lt;name&gt;/</code> vault。
+</p>
+
+<div class="note">
+  <strong>一般使用者建議先用 Mori 內建的一鍵流程。</strong>
+  到 <strong>Deps</strong> 安裝「Annuli 反思服務 runtime」,再到
+  <strong>Annuli</strong> tab 按「一鍵啟用」。新版 Mori 會自動產生並同步
+  <code>soul_token</code>;不需要去網站申請 token。
+</div>
+
+<h2>1. Annuli 解鎖什麼</h2>
+<ul>
+  <li><strong>SOUL.md</strong>:角色核心身分,由 vault 保存。</li>
+  <li><strong>MEMORY.md</strong>:使用者明確要求 Mori 記住的長期記憶。</li>
+  <li><strong>events</strong>:每天的 user / assistant 對話事件。</li>
+  <li><strong>rings</strong>:按下 sleep 後產生的反思年輪。</li>
+</ul>
+
+<p>
+  Annuli 不是雲端服務。預設路徑在你的電腦:
+  <code>~/mori-universe/annuli</code> 與
+  <code>~/mori-universe/spirits/mori</code>。
+</p>
+
+<h2>2. Windows 手動安裝 Annuli runtime</h2>
+
+<p>如果 Deps tab 還沒有自動安裝功能,在 PowerShell 執行:</p>
+
+<pre><code>git clone https://github.com/yazelin/annuli $env:USERPROFILE\mori-universe\annuli
+cd $env:USERPROFILE\mori-universe\annuli
+uv venv .venv --python 3.11
+uv pip install --python .venv\Scripts\python.exe -e .
+
+$token = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
+if (!(Test-Path .env) -or !(Select-String -Path .env -Pattern '^ANNULI_SOUL_TOKEN=.' -Quiet)) {
+  Add-Content .env "ANNULI_SOUL_TOKEN=$token"
+}</code></pre>
+
+<p>
+  接著回 Mori Desktop:打開 <strong>Annuli</strong> tab,按「一鍵啟用」。新版 Mori
+  會讀取 <code>annuli\.env</code> 裡的 <code>ANNULI_SOUL_TOKEN</code>,並寫進
+  <code>%USERPROFILE%\.mori\config.json</code> 的 <code>annuli.soul_token</code>。
+</p>
+
+<h2>3. Linux / macOS 安裝 Annuli runtime</h2>
+
+<p>建議直接用 Mori 的 <strong>Deps</strong> tab 安裝。手動等價指令:</p>
+
+<pre><code>ANNULI="$HOME/mori-universe/annuli"
+mkdir -p "$HOME/mori-universe"
+git clone https://github.com/yazelin/annuli "$ANNULI"
+cd "$ANNULI"
+uv venv "$ANNULI/.venv" --python 3.11
+uv pip install --python "$ANNULI/.venv/bin/python" -e "$ANNULI"
+
+touch "$ANNULI/.env"
+if ! grep -q '^ANNULI_SOUL_TOKEN=.' "$ANNULI/.env"; then
+  TOKEN="$("$ANNULI/.venv/bin/python" -c 'import secrets; print(secrets.token_hex(32))')"
+  printf '\nANNULI_SOUL_TOKEN=%s\n' "$TOKEN" >> "$ANNULI/.env"
+fi</code></pre>
+
+<h2>4. SOUL token 是什麼</h2>
+
+<p>
+  <code>soul_token</code> 是本機隨機 secret,不是平台帳號 token,也不是 API key。
+  它的目的只有一個:防止 LLM 或未授權 caller 直接寫入 SOUL / MEMORY。
+</p>
+
+<p>兩邊必須完全一致:</p>
+
+<table>
+  <tr><th>位置</th><th>欄位</th></tr>
+  <tr>
+    <td><code>~/.mori/config.json</code> 或 <code>%USERPROFILE%\.mori\config.json</code></td>
+    <td><code>annuli.soul_token</code></td>
+  </tr>
+  <tr>
+    <td><code>~/mori-universe/annuli/.env</code> 或 <code>%USERPROFILE%\mori-universe\annuli\.env</code></td>
+    <td><code>ANNULI_SOUL_TOKEN</code></td>
+  </tr>
+</table>
+
+<pre><code>{
+  "annuli": {
+    "enabled": true,
+    "endpoint": "http://localhost:5000",
+    "spirit_name": "mori",
+    "user_id": "yazelin",
+    "soul_token": "同 ANNULI_SOUL_TOKEN 的值",
+    "timeout_secs": 10
+  }
+}</code></pre>
+
+<h2>5. 啟動與驗證</h2>
+
+<p>
+  若 Mori 是從 Annuli tab 一鍵啟用,它會自行嘗試啟動 localhost Annuli server。
+  若要手動啟動:
+</p>
+
+<pre><code># Windows PowerShell
+cd $env:USERPROFILE\mori-universe\annuli
+.\.venv\Scripts\python.exe main.py admin --port 5000
+
+# Linux / macOS
+cd ~/mori-universe/annuli
+.venv/bin/python main.py admin --port 5000</code></pre>
+
+<p>驗證 server 是否活著:</p>
+
+<pre><code>curl http://localhost:5000/health</code></pre>
+
+<p>
+  回應裡 <code>soul_token_configured</code> 應該是 <code>true</code>。如果是
+  <code>false</code>,代表 Annuli server 啟動時沒有讀到
+  <code>ANNULI_SOUL_TOKEN</code>;重啟 Annuli 或重啟 Mori。
+</p>
+
+<h2>6. 常見錯誤</h2>
+
+<h3><code>soul_token config.json 沒設</code></h3>
+<p>
+  這是 Mori Desktop 端還沒送 request 前就擋下來。修法:到 Config tab 的 Annuli
+  subtab 填 <code>soul_token</code>,或回 Annuli tab 按新版「一鍵啟用」讓 Mori 自動補。
+</p>
+
+<h3><code>ANNULI_SOUL_TOKEN 未設</code> 或 <code>X-Soul-Token 不符</code></h3>
+<p>
+  這是 Annuli server 端拒絕。修法:確認 <code>.env</code> 與
+  <code>config.json</code> 的 token 完全一致,然後重啟 Annuli server。
+</p>
+
+<h3>Annuli tab 顯示 unreachable</h3>
+<ul>
+  <li>確認 <code>endpoint</code> 是 <code>http://localhost:5000</code>,沒有尾端 slash。</li>
+  <li>確認 <code>curl http://localhost:5000/health</code> 有回應。</li>
+  <li>若 500 error,看 Annuli process terminal 的 traceback。</li>
+</ul>
+
+<h2>7. 文件狀態</h2>
+
+<p>
+  舊的 <code>docs/design/annuli-wave3-integration.md</code> 是工程 checklist,
+  不是一般使用者手冊,部分敘述也已落後於目前實作。安裝與故障排除以本頁為準。
+</p>
+
+</body>
+</html>

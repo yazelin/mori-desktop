@@ -77,6 +77,7 @@ use mori_core::skill::{
 use mori_time::{Notifier, ReminderService};
 use mori_core::{PHASE, VERSION};
 use parking_lot::Mutex;
+use rand::RngCore;
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
@@ -2239,11 +2240,9 @@ async fn sync_supervisor_to_config(state: &AppState, cfg: &annuli_config::Annuli
 /// AnnuliTab 用這條決定要不要顯示「一鍵啟用」按鈕。Windows fallback `Scripts/python.exe`。
 #[tauri::command]
 fn annuli_runtime_installed() -> bool {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let root = home.join("mori-universe").join("annuli");
+    let Some(root) = annuli_root_dir_for_user() else {
+        return false;
+    };
     let py = if cfg!(target_os = "windows") {
         root.join(".venv").join("Scripts").join("python.exe")
     } else {
@@ -2252,9 +2251,91 @@ fn annuli_runtime_installed() -> bool {
     py.exists() && root.join("main.py").exists()
 }
 
+fn annuli_root_dir_for_user() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("MORI_ANNULI_ROOT") {
+        return Some(std::path::PathBuf::from(p));
+    }
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)?;
+    Some(home.join("mori-universe").join("annuli"))
+}
+
+fn generate_soul_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn read_annuli_env_soul_token() -> Option<String> {
+    let root = annuli_root_dir_for_user()?;
+    let text = std::fs::read_to_string(root.join(".env")).ok()?;
+    text.lines()
+        .find_map(|line| line.strip_prefix("ANNULI_SOUL_TOKEN="))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn sync_annuli_env_soul_token(token: &str) -> Result<String, String> {
+    let Some(root) = annuli_root_dir_for_user() else {
+        return Ok("ANNULI_SOUL_TOKEN 未同步到 annuli .env(HOME/USERPROFILE 未設)".into());
+    };
+    if !root.exists() {
+        return Ok(format!(
+            "ANNULI_SOUL_TOKEN 未同步到 annuli .env({} 不存在)",
+            root.display()
+        ));
+    }
+
+    let env_path = root.join(".env");
+    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
+    let mut lines = Vec::new();
+    let mut found = false;
+    let mut changed = false;
+    let mut mismatch = false;
+
+    for line in existing.lines() {
+        if let Some(value) = line.strip_prefix("ANNULI_SOUL_TOKEN=") {
+            found = true;
+            if value.trim().is_empty() {
+                lines.push(format!("ANNULI_SOUL_TOKEN={token}"));
+                changed = true;
+            } else {
+                mismatch = value.trim() != token;
+                lines.push(line.to_string());
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !found {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(format!("ANNULI_SOUL_TOKEN={token}"));
+        changed = true;
+    }
+
+    if changed {
+        std::fs::write(&env_path, format!("{}\n", lines.join("\n")))
+            .map_err(|e| format!("write {}: {e}", env_path.display()))?;
+        return Ok(format!("ANNULI_SOUL_TOKEN 已寫入 {}", env_path.display()));
+    }
+    if mismatch {
+        return Ok(format!(
+            "{} 已有不同 ANNULI_SOUL_TOKEN；保留既有值。若 Annuli 是手動啟動，請讓 .env 與 ~/.mori/config.json 的 annuli.soul_token 一致。",
+            env_path.display()
+        ));
+    }
+    Ok(format!("ANNULI_SOUL_TOKEN 已存在於 {}", env_path.display()))
+}
+
 /// 一鍵啟用 annuli(DepsTab 裝完後給 user 的「直接打開」入口)。流程:
 /// 1. 驗 runtime 已裝(否則早回 err)
-/// 2. 寫 `annuli.enabled = true` + sane defaults(endpoint / spirit_name / user_id 空才填)
+/// 2. 寫 `annuli.enabled = true` + sane defaults(endpoint / spirit_name / user_id /
+///    soul_token 空才填),並同步 token 到 annuli `.env`
 /// 3. Reload AnnuliClient + AnnuliMemoryStore swap 進 state
 /// 4. 若 supervisor 不是 healthy → drop 舊 + maybe_spawn 新(該 fn 內部自己 health-check
 ///    +「已 reachable 就 not-spawn」邏輯,跑兩次安全)
@@ -2305,6 +2386,17 @@ async fn annuli_quick_enable(
             serde_json::json!(pick_annuli_user_id_default(&config_path)),
         );
     }
+    let token = if str_empty(a, "soul_token") {
+        let token = read_annuli_env_soul_token().unwrap_or_else(generate_soul_token);
+        a.insert("soul_token".to_string(), serde_json::json!(token.clone()));
+        token
+    } else {
+        a.get("soul_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let env_sync_msg = sync_annuli_env_soul_token(&token)?;
     std::fs::create_dir_all(mori_dir())
         .map_err(|e| format!("mkdir ~/.mori: {e}"))?;
     std::fs::write(
@@ -2324,7 +2416,7 @@ async fn annuli_quick_enable(
     let store: Arc<dyn mori_core::memory::MemoryStore> =
         Arc::new(mori_core::memory::annuli::AnnuliMemoryStore::new(client.clone()));
     *state.memory.write() = store;
-    *state.annuli.write() = Some(client);
+    *state.annuli.write() = Some(client.clone());
 
     // 4. supervisor 對齊 config(共用 helper,enable→啟動 / disable→殺 child)
     sync_supervisor_to_config(&state, &annuli_cfg).await;
@@ -2334,12 +2426,17 @@ async fn annuli_quick_enable(
         .as_ref()
         .map(|s| format!("supervisor: {} ({})", s.info.state, s.info.reason))
         .unwrap_or_else(|| "supervisor: none".into());
+    let token_health_msg = match client.health().await {
+        Ok(h) if h.soul_token_configured => "server token: configured".to_string(),
+        Ok(_) => "server token: not configured yet。若已有 Annuli process 在跑，請重啟 Annuli / Mori 讓 ANNULI_SOUL_TOKEN 生效。".to_string(),
+        Err(e) => format!("server token: health check failed({e})"),
+    };
     tracing::info!(info = %info_msg, "annuli quick-enable done");
     let _ = app.emit(
         "annuli-supervisor-changed",
         serde_json::json!({ "from": "quick_enable" }),
     );
-    Ok(format!("✓ Annuli 已啟用。{info_msg}"))
+    Ok(format!("✓ Annuli 已啟用。{info_msg}。{env_sync_msg}。{token_health_msg}"))
 }
 
 /// C — annuli 熱重載 command。

@@ -219,6 +219,7 @@ Linux user 在 Mori UI 的「Deps」頁可以**一鍵下載 + 安裝**這兩塊(
 | [Hotkeys](https://yazelin.github.io/mori-desktop/hotkeys.html) | 完整熱鍵清單 + 自訂 |
 | [Providers](https://yazelin.github.io/mori-desktop/providers.html) | Groq / Gemini / Ollama / Claude / Gemini / Codex bash+cli / OpenAI-compat 端點 |
 | [~/.mori/](https://yazelin.github.io/mori-desktop/mori-home.html) | config / profile / memory / theme / logs / corrections 全套結構 |
+| [Annuli](https://yazelin.github.io/mori-desktop/annuli.html) | Annuli runtime / SOUL token / Windows 手動安裝 / 記憶寫入故障排除 |
 | [Troubleshooting](https://yazelin.github.io/mori-desktop/troubleshooting.html) | LogsTab 除錯 / Windows bash CLI / 全域熱鍵 / Whisper deps |
 | [Tokenizer 對比](docs/tokenizer-comparison.md) | 中英 starter 在不同 LLM 的 token 數差異 + 取捨 |
 

@@ -969,11 +969,13 @@ pub fn registry() -> Vec<DepSpec> {
                       vault(SOUL.md + MEMORY.md + events + rings)",
             size_hint: Some("~200MB(annuli code + venv + deps)"),
             needs_sudo: false,
-            platforms: &["linux", "macos"],
+            platforms: &["linux", "macos", "windows"],
             install_caveat: Some(
                 "Annuli Wave 4 仍在進行中。基本對接(SOUL / MEMORY / events / rings / sleep)\
-                 都接好可用,Wave 4 新 endpoints(memory section)還在收尾。裝完到 Config tab \
-                 開 annuli.enabled + 填 endpoint http://localhost:5000 即可連線。\
+                 都接好可用。安裝 / 一鍵啟用會自動產生本機 SOUL token；若手動啟動 \
+                 annuli,請確認 annuli .env 的 ANNULI_SOUL_TOKEN 與 ~/.mori/config.json \
+                 的 annuli.soul_token 一致。裝完到 Config tab 開 annuli.enabled + 填 \
+                 endpoint http://localhost:5000 即可連線。\
                  整合 checklist 見 docs/design/annuli-wave3-integration.md。",
             ),
             check: CheckSpec::File {
@@ -1007,17 +1009,25 @@ pub fn registry() -> Vec<DepSpec> {
                             \"$ANNULI/.venv/bin/python\" -m ensurepip --upgrade; \
                             \"$ANNULI/.venv/bin/python\" -m pip install -e \"$ANNULI\"; \
                          fi; \
-                         echo '✓ annuli runtime 裝好了。記得到 Config tab 開 annuli.enabled + 填 endpoint http://localhost:5000。'",
+                         touch \"$ANNULI/.env\"; \
+                         if ! grep -q '^ANNULI_SOUL_TOKEN=.' \"$ANNULI/.env\"; then \
+                            TOKEN=\"$($ANNULI/.venv/bin/python -c 'import secrets; print(secrets.token_hex(32))')\"; \
+                            printf '\\nANNULI_SOUL_TOKEN=%s\\n' \"$TOKEN\" >> \"$ANNULI/.env\"; \
+                            echo '已在 annuli .env 產生 ANNULI_SOUL_TOKEN。'; \
+                         fi; \
+                         echo '✓ annuli runtime 裝好了。到 Annuli tab 按「一鍵啟用」會同步 ~/.mori/config.json 的 annuli.soul_token。'",
             },
             install_overrides: &[
                 ("windows", InstallSpec::Manual {
                     commands: &[
-                        "# Windows 一鍵安裝尚未實作 — annuli wave 2 ship 後再補。",
-                        "# 暫時手動跑(需 git + Python 3.11):",
+                        "# Windows PowerShell(需 git + Python 3.11 + uv):",
                         "git clone https://github.com/yazelin/annuli %USERPROFILE%\\mori-universe\\annuli",
                         "cd %USERPROFILE%\\mori-universe\\annuli",
                         "uv venv .venv --python 3.11",
                         "uv pip install --python .venv\\Scripts\\python.exe -e .",
+                        "$token = .\\.venv\\Scripts\\python.exe -c \"import secrets; print(secrets.token_hex(32))\"",
+                        "if (!(Test-Path .env) -or !(Select-String -Path .env -Pattern '^ANNULI_SOUL_TOKEN=.' -Quiet)) { Add-Content .env \"ANNULI_SOUL_TOKEN=$token\" }",
+                        "# 回 Mori Desktop 的 Annuli tab 按「一鍵啟用」；它會把 annuli.soul_token 補進 %USERPROFILE%\\.mori\\config.json。",
                     ],
                 }),
             ],
