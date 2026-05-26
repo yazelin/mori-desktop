@@ -6,7 +6,7 @@
 //   - history.json(對話 history 摘要)
 //   - transcript.txt + response.txt
 //   - system-prompt.txt(完整 prompt LLM 看的)
-//   - audio-raw.wav / audio-trimmed.wav(可播放)
+//   - audio-raw.flac / audio-trimmed.flac(新 session,lossless 壓縮) 或舊版 .wav(可播放)
 //
 // 設計:
 //   - 列表 mount 載 summary(輕量,不含 audio bytes)
@@ -41,6 +41,14 @@ type SessionDetail = {
   system_prompt: string | null;
   has_audio_raw: boolean;
   has_audio_trimmed: boolean;
+  audio_raw_format: string | null;
+  audio_trimmed_format: string | null;
+};
+
+type AudioBytes = {
+  bytes: number[];
+  mime_type: string;
+  filename: string;
 };
 
 type RecordingsStats = {
@@ -183,8 +191,8 @@ function RecordingsTab() {
   const loadAudio = async (timestamp: string, which: "raw" | "trimmed") => {
     if (audioUrls[which]) return; // 已 load
     try {
-      const bytes = await invoke<number[]>("recordings_audio_bytes", { timestamp, which });
-      const blob = new Blob([new Uint8Array(bytes)], { type: "audio/wav" });
+      const audio = await invoke<AudioBytes>("recordings_audio_bytes", { timestamp, which });
+      const blob = new Blob([new Uint8Array(audio.bytes)], { type: audio.mime_type });
       const url = URL.createObjectURL(blob);
       setAudioUrls((prev) => ({ ...prev, [which]: url }));
     } catch (e) {
@@ -434,14 +442,14 @@ function RecordingsTab() {
                           </div>
                           {detail.has_audio_raw && (
                             <AudioRow
-                              label="raw(silence-trim 前)"
+                              label={`raw(silence-trim 前)${detail.audio_raw_format ? ` · ${detail.audio_raw_format}` : ""}`}
                               url={audioUrls.raw}
                               onLoad={() => loadAudio(s.timestamp, "raw")}
                             />
                           )}
                           {detail.has_audio_trimmed && (
                             <AudioRow
-                              label="trimmed(STT 用)"
+                              label={`trimmed(STT 用)${detail.audio_trimmed_format ? ` · ${detail.audio_trimmed_format}` : ""}`}
                               url={audioUrls.trimmed}
                               onLoad={() => loadAudio(s.timestamp, "trimmed")}
                             />

@@ -6,6 +6,36 @@
 
 ---
 
+## v0.7.3 — Annuli token setup + FLAC recordings 修補(2026-05-26)
+
+這版收斂 v0.7.2 之後的三個 release-ready fix:Annuli 一鍵啟用時把 soul token setup 做完整,錄音 cleanup / dependency UI 對齊 FLAC 實際需求,並補上 reminder cancel / snooze 的 stale callback race guard。
+
+### Annuli token setup
+
+- **一鍵啟用自動補 soul token** — `annuli_quick_enable` 會在 `annuli.soul_token` 空白時產生 token,寫回 `~/.mori/config.json`,並同步到 `~/mori-universe/annuli/.env`。
+- **server token health check** — quick-enable 後會 probe Annuli server token 狀態,提示是否需要重啟 Annuli / Mori 才能讓 `ANNULI_SOUL_TOKEN` 生效。
+- **Annuli docs 補齊** — 新增 `docs/annuli.html`,Getting Started 連到 Annuli 專頁,README 文件索引補上 troubleshooting 入口。
+
+### Recordings / FLAC
+
+- **錄音 cleanup 對齊 FLAC** — recordings cleanup 會處理 FLAC 輸出與相關 metadata,避免只覆蓋舊 WAV 路徑。
+- **Deps tab 補 FLAC 依賴說明** — dependency/status copy 更新,讓使用者知道錄音與轉檔需要的 runtime 狀態。
+
+### Reminders
+
+- **取消 / 稍後提醒不再觸發過期 callback** — `tokio-cron-scheduler` callback fire 前會重新讀 DB,若 reminder 狀態、`due_at` 或 cron 已變更就跳過,避免 cancel / snooze race 後仍跳通知。
+
+### Verified
+
+- `bash scripts/verify.sh`
+- `cargo test -p mori-time`
+
+### 升級
+
+無 breaking change。若已經有 Annuli process 在跑,quick-enable 同步 token 後可能需要重啟 Annuli / Mori,讓 server 端讀到新的 `ANNULI_SOUL_TOKEN`。
+
+---
+
 ## v0.7.2 — Release gate + 角色背板預設修正(2026-05-26)
 
 這版把自我開發維持在內部測試狀態,先不從正式版側欄暴露給一般使用者;同時把角色背板行為改回「跟著角色包」,並針對 X11 透明視窗支援較不穩的環境給安全預設。

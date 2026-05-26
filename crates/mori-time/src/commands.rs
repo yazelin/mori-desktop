@@ -34,7 +34,7 @@ use tokio::sync::Mutex;
 use crate::notifier::Notifier;
 use crate::parser;
 use crate::scheduler::{OnFireCallback, ReminderScheduler, SchedulerError};
-use crate::schema::{Reminder, ReminderError, ReminderStore};
+use crate::schema::{Reminder, ReminderError, ReminderStatus, ReminderStore};
 
 /// 2026-05-22:on_fire 觸發時對外 emit 通知事件。設計成 trait 是為了讓 mori-time
 /// 不直接依賴 tauri(會循環依賴)— `mori-tauri` 那邊用 Tauri AppHandle 實作這個 trait,
@@ -125,6 +125,40 @@ impl ReminderService {
             // 仰賴 tokio task 隔離:spawned task 內 panic 只殺那條 task,不傳染
             // scheduler。詳見模組 doc。
             tokio::spawn(async move {
+                // Race guard:tokio-cron-scheduler 可能已經把 callback 排進 task,
+                // 使用者才按 cancel / snooze。這時 scheduler.cancel() 已無法阻止
+                // 這個已排隊 callback,所以 fire 前重新讀 DB;若狀態或 due_at 已變,
+                // 代表這是過期 callback,不應再通知。
+                {
+                    let store = store_inner.lock().await;
+                    match store.get(reminder.id) {
+                        Ok(current) => {
+                            let still_active =
+                                matches!(current.status, ReminderStatus::Pending | ReminderStatus::Snoozed)
+                                && current.due_at == reminder.due_at
+                                && current.cron_expr == reminder.cron_expr;
+                            if !still_active {
+                                tracing::info!(
+                                    reminder_id = reminder.id,
+                                    current_status = ?current.status,
+                                    current_due_at = %current.due_at,
+                                    scheduled_due_at = %reminder.due_at,
+                                    "skipping stale reminder callback after cancel/snooze",
+                                );
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                reminder_id = reminder.id,
+                                error = %e,
+                                "skipping reminder callback because reminder cannot be reloaded",
+                            );
+                            return;
+                        }
+                    }
+                }
+
                 // K3:發桌面通知。失敗 log warn,不 throw。
                 //
                 // **必須走 spawn_blocking**:`notify_rust::Notification::show()` 在 Linux
