@@ -20,6 +20,7 @@ mod gmail_cmd;
 mod hotkey_config;
 mod mcp_cmd;
 mod notification_config;
+mod permission_broker;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
