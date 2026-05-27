@@ -237,8 +237,8 @@ input 格式跟 voice transcript 對接。
 
 - **媒體下載** — 「下載這個影片」呼叫 yt-dlp(shell_skill 包)
 - **ExecCommand 白名單** — 「跑那個指令」要先有白名單 + 二次確認機制
-- **Mori Instance Direction** — Mori Desktop 是 shell,不是 Mori 本身;Mori Instance
-  可運行在桌面、服務型機器人、AGV 車、站點端點或 server,body parts 組成身體,
+- **Mori Instance Direction** — Mori Desktop 是 shell/UI,不是 Mori 本身;Mori Instance
+  可運行在桌面、Android phone、服務型機器人、AGV 車、站點端點或 server,body parts 組成身體,
   Mori Hub 協調多個 Mori,World Tree 保留共享規格與 lore。詳見
   [Mori Instance Direction 決議](mori-instance-direction.md)。
 - **Mori Body Interface** — standalone-first body parts 架構:manifest / local API /

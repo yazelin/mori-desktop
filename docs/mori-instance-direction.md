@@ -26,16 +26,25 @@ Mori Instance
   transport bindings
 ```
 
-Mori Desktop 是 Mori Instance 的一種 shell,不是 Mori 本身。
+Mori Desktop 是 Mori Instance 的一種 shell / UI / 互動方式,不是 Mori 本身。它專門
+在 Ubuntu Desktop、Windows Desktop 這類桌面作業系統上執行,提供聊天 UI、設定 UI、
+body registry UI、cue center UI 與 permission broker UI。
 
 ```text
 Mori Desktop
   = desktop shell
+  = chat UI / interaction UI
   = settings console
   = body registry UI
   = cue center UI
   = local permission broker UI
 ```
+
+如果同一個 Mori Instance 跑在 AGV 車或服務型機器人的內嵌電腦上,它可能完全不需要
+Mori Desktop;或即使有 desktop shell,主要用途也可能只是設定與檢查相連的 body
+parts,而不是提供該設備的主要語音服務。未來若 Mori Instance 跑在 Android 手機上,
+可能會有另一種 shell,例如 Mori Mobile / Mori Phone。名稱未定,但概念上它和 Mori
+Desktop 同屬 shell。
 
 未來的 Mori 可以有身體:
 
@@ -116,6 +125,7 @@ Body Parts
 
 Shells
   Mori Desktop
+  Mori Mobile / Mori Phone
   robot screen
   mobile companion
   web console
@@ -343,8 +353,8 @@ DDS/ROS2 and Zenoh are future/current specialized bindings, not core assumptions
 Mori Hub / Center
   ├─ mori.station.a.service-01
   ├─ mori.station.b.service-01
-  ├─ mori.vehicle.hgp-001
-  ├─ mori.vehicle.hgp-002
+  ├─ mori.vehicle.agv-001
+  ├─ mori.vehicle.agv-002
   └─ mori.desktop.yazelin-main
 ```
 
@@ -476,8 +486,34 @@ Mori native agent remains the identity/core path.
 
 ```text
 Existence metadata may be visible.
-Content handoff must be explicit.
-Internal/private data never auto-ingests.
+Content handoff defaults to explicit.
+Ingestion can be enabled by user policy.
+Internal/private data never auto-ingests unless a user-created policy explicitly allows it.
+```
+
+Memory / Annuli ingestion should be treated like observability policy, closer to log levels than
+hardcoded behavior. A body part may emit events and artifacts, but whether those enter short-term
+memory, long-term memory, Annuli events, or Annuli reflection should be configurable per body part,
+per artifact class, and per visibility level.
+
+Example policy levels:
+
+| Level | Meaning |
+|---|---|
+| `off` | Do not record beyond local body part state |
+| `metadata` | Record existence, timestamps, status, no content |
+| `events` | Record structured events and cues |
+| `summary` | Record user-approved summaries only |
+| `full_public` | Record public artifacts/content |
+| `full_internal` | Record internal content; requires explicit user opt-in |
+| `reflection` | Allow Annuli to use the material for reflection/digests |
+
+Default:
+
+```text
+public artifact  -> metadata/events, user may opt into summary/full_public
+internal artifact -> metadata only, user may explicitly opt into summary/full_internal
+raw private data -> off unless body-specific policy says otherwise
 ```
 
 ### 7. World Tree 是中心嗎?
@@ -512,6 +548,8 @@ Local Mori remains sovereign and offline-capable.
 - 建立 transport binding abstraction。
 - 加入 Connector Introspection,讓 CLI help / OpenAPI / skill doc 生成 connector
   schema。
+- 建立 memory / Annuli ingestion policy,讓使用者像設定 log level 一樣決定哪些
+  body part 的哪些資料可被記憶或反思。
 
 ### Long-term
 
