@@ -6,6 +6,7 @@ pub mod artifact;
 pub mod manifest;
 pub mod registry;
 pub mod permission;
+pub mod permission_audit;
 
 pub use artifact::{
     classify_artifact, MoriArtifact, SuggestedAction, Visibility, KIND_CHARACTER_PACK,
@@ -18,4 +19,7 @@ pub use registry::{scan_body_parts, DiscoveredBodyPart};
 pub use permission::{
     default_policy, evaluate, BrokerResponse, Decision, Lease, PermissionRequest, PolicyRule,
     PolicyTable, RiskClass, SUPPORTED_PERMISSION_SCHEMA,
+};
+pub use permission_audit::{
+    append_audit, broker_decide, read_audit_tail, PermissionAuditEntry,
 };
