@@ -100,7 +100,7 @@
 
 ### 各 stage 的「完成判準」(避免 scope 漂)
 
-- **BI-0 done** = 能從 Appearance 開 Studio → 匯入 zip → 驗證(zip-slip / manifest / required sprites)→ 套用 → floating sprite reload;且匯入流程內部走的是**正式 artifact envelope**(不是隨手寫的 import 函式),這樣才真的驗到契約。
+- **BI-0 done** ✅(2026-05-27,branch `feat/bi-0-artifact-handoff`,待 Task 4 手測 + merge)= 能從 Appearance 開 Studio → 匯入 zip → 驗證(zip-slip / manifest / required sprites)→ 套用 → floating sprite reload;且匯入前走正式 `mori_core::body::MoriArtifact` envelope(`inspect_artifact`),handoff 可見可取消。
 - **BI-1 done** = Desktop 掃到 ≥1 個 manifest(含 BI-0 的 MoriPack)並顯示 install/health,**完全不能**觸發任何 write/exec。
 - **BI-2 done** = 有一條 fake 高風險請求被 broker 攔下並寫 audit log;allow/deny/ask 三路徑都有 test。
 - **BI-3 done** = 跑一個 Codex session,Desktop 能收到 waiting_input / done cue(不重複)。
