@@ -194,6 +194,16 @@ Body Interface 的核心是 semantic contract,不是某一種 transport。外部
 這件事必須從 manifest v1 就考慮,否則未來要接 robot / AGV / ROS2 / Zenoh body
 parts 時會被 HTTP-only schema 卡住。
 
+但 transport-agnostic 不代表 Mori 要取代 ROS2/DDS。若一個 Mori body 本來就在
+ROS2 robot graph 中,它應保留 ROS2 native topics / services / actions。Mori
+manifest 只描述這些 ROS interface 在 Mori 世界裡的 body ownership、capability、
+permission、safety、memory/Annuli policy。也就是:
+
+```text
+ROS2/DDS defines robot communication.
+Mori Body Interface defines semantic integration and governance.
+```
+
 ### Semantic schema
 
 這些資料結構不應綁定單一 transport:
@@ -243,8 +253,10 @@ Manifest should allow multiple interfaces:
     {
       "name": "pose",
       "transport": "ros2",
-      "topic": "/mori/localization/pose",
-      "message_type": "mori_msgs/msg/MoriPose"
+      "topic": "/localization/pose",
+      "message_type": "geometry_msgs/msg/PoseStamped",
+      "capability": "location.pose.read",
+      "ingestion": "metadata"
     }
   ]
 }

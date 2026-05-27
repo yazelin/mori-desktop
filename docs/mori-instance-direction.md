@@ -277,10 +277,30 @@ Robot controller / navigation stack
 Actuator
 ```
 
-## Transport 決議
+## Transport 與 ROS2/DDS 決議
 
 我們不把 Mori 綁死在 HTTP、DDS、Zenoh 任一種 transport。Mori 的核心是 semantic
 contract,transport 只是 binding。
+
+如果 Mori 生長在 ROS2 robot / AGV 系統裡,ROS2/DDS 應該是身體神經系統,不是 Mori
+要取代的東西。雷達、定位、camera、nav stack、控制器若已經用 ROS2 topics /
+services / actions 溝通,就應保留 ROS2 原生 interface。Mori 不重新發明一套 parallel
+robot bus。
+
+Mori 需要定義的是上層語意與治理:
+
+- 這個 ROS node / topic / action 屬於哪個 Mori Instance / body part。
+- 它代表什麼 capability。
+- Mori agent 能否讀取、提議、執行。
+- 是否需要 permission / safety gate。
+- 事件能否進 memory / Annuli reflection。
+- 是否要變成 cue、artifact、session state 或 hub message。
+
+```text
+ROS2/DDS = robot body nervous system
+Mori Body Interface = semantic / policy / governance layer
+Mori Runtime = brain / coordination layer
+```
 
 ### Transport 分層
 
@@ -304,14 +324,55 @@ DDS/ROS2 適合 robot / vehicle 內部的即時感測與控制:
 /cmd_vel
 ```
 
-Mori 不直接把 DDS topic 當 agent context。應透過 adapter:
+Mori 不直接把 DDS topic 當 agent context,也不定義新的 transport 取代 ROS2。
+應透過 adapter 把 ROS2 原生 interface 映射成 Mori semantic state / event /
+capability / policy:
 
 ```text
-DDS/ROS2 topic
+ROS2/DDS topic / service / action
   ↓
 Mori ROS2/DDS Adapter
   ↓
-Mori semantic event/state
+Mori semantic event/state/capability
+```
+
+範例:ROS2 原生定位 topic 不需要被 Mori 重做。
+
+```json
+{
+  "body_id": "mori.vehicle.agv-001.localization",
+  "parent_mori": "mori.vehicle.agv-001",
+  "interfaces": [
+    {
+      "transport": "ros2",
+      "topic": "/localization/pose",
+      "message_type": "geometry_msgs/msg/PoseStamped"
+    }
+  ],
+  "capabilities": ["location.pose.read"],
+  "data_policy": {
+    "default_ingestion": "metadata"
+  }
+}
+```
+
+範例:ROS2 navigation action 也保留原生 action,但 Mori 宣告它的 capability 與
+safety policy。
+
+```json
+{
+  "capability": "navigation.goal.propose",
+  "risk": "physical.motion",
+  "execution": {
+    "transport": "ros2",
+    "action": "/navigate_to_pose",
+    "action_type": "nav2_msgs/action/NavigateToPose"
+  },
+  "policy": {
+    "llm_direct_execute": false,
+    "requires_safety_gate": true
+  }
+}
 ```
 
 ### Zenoh 的位置
