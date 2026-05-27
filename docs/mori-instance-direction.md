@@ -598,6 +598,9 @@ Local Mori remains sovereign and offline-capable.
 
 - 完成 [Mori Body Interface 決議](mori-body-interface.md) 的 manifest / event /
   permission / artifact handoff schema。
+- 定義 compile-time core / bundled sidecars / install-time body packs / runtime
+  discovery 四層 provisioning,讓 Mori Desktop 可一鍵安裝官方部件,也能動態接入
+  第三方部件。
 - 將 Mori Meeting Recorder 作為 standalone-first body part 實作。
 - 將 Agent Plus 作為 cue/session observer body part 實作。
 - Mori Desktop 先成為 body registry + cue center 的 shell。

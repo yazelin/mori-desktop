@@ -185,6 +185,141 @@ Mori body part 可以有多種 runtime 形態,不強迫全部 Tauri tab 化。
 3. 短任務與自動化:CLI。
 4. Mori Desktop 內建必要能力:crate。
 
+## Packaging / Provisioning Layers
+
+Body parts 不只是在 runtime 動態掃描。Mori 應支援四層 provisioning,讓第一方功能可
+一鍵安裝,第三方功能也可獨立接入。
+
+```text
+1. Compile-time core
+   Mori Desktop shell、body registry、permission broker、基本 settings UI。
+
+2. Build-time bundled sidecars
+   隨 Mori Desktop installer 一起打包的官方 body part binary / CLI / service。
+
+3. Install-time body packs
+   安裝時依 bundle manifest 一次安裝 body parts 與 dependencies。
+
+4. Runtime discovery
+   啟動後掃描 ~/.mori/body-parts 或使用者手動加入的外部 body part。
+```
+
+這四層可以同時存在。Bundled 不代表 tightly coupled;即使隨 installer 打包,body part
+仍應透過 Body Interface 和 Mori Instance 溝通。
+
+### Compile-time core
+
+只放 Mori shell 必備能力:
+
+- Body registry reader。
+- Settings shell。
+- Cue center shell。
+- Permission broker shell。
+- Manifest / schema validator。
+- Local launcher / health checker。
+
+這一層不應包含所有功能 runtime。Mori Desktop 會逐步從「功能全塞進 app」收斂成
+「Mori Instance 的 desktop shell」。
+
+### Build-time bundled sidecars
+
+適合第一方、常用、穩定的 body parts:
+
+- Mori Ear basic runtime。
+- Agent Plus basic observer。
+- Mori Meeting Recorder launcher。
+- TTS / wake-word helper。
+- 官方 connector launcher。
+
+打包形態偏好 binary / CLI / sidecar service,而不是 Rust dynamic library plugin。
+跨平台 Rust/Tauri 動態 plugin ABI、簽章、更新、安全邊界都比較複雜;sidecar 仍可
+獨立更新與獨立 crash。
+
+### Install-time body packs
+
+Body pack 是一組預先定義好的 body parts 與 dependencies。它讓使用者安裝時一次完成
+所需組件,不用進 Desktop tab 後逐項裝 dependency。
+
+```json
+{
+  "bundle_id": "mori.body-pack.meeting",
+  "name": "Mori Meeting Pack",
+  "includes": [
+    "mori.meeting-recorder",
+    "mori.whisper-local",
+    "mori.ffmpeg"
+  ],
+  "dependencies": [
+    {
+      "id": "ffmpeg",
+      "install": "system_or_managed"
+    },
+    {
+      "id": "whisper-server",
+      "install": "managed",
+      "platform": ["windows", "linux"]
+    }
+  ],
+  "register_manifests": true,
+  "post_install_health_check": true
+}
+```
+
+可能的 packs:
+
+- `mori.body-pack.minimal`
+- `mori.body-pack.personal`
+- `mori.body-pack.meeting`
+- `mori.body-pack.agent-ops`
+- `mori.body-pack.streaming`
+- `mori.body-pack.robot-ros2`
+
+### Runtime discovery
+
+外部開發者最主要靠這一層接入:
+
+```text
+~/.mori/body-parts/*/manifest.json
+~/.mori/body-parts/*.json
+<repo>/.mori-body/manifest.json
+manual local API endpoint
+```
+
+第三方 body part 只要提供 manifest、settings schema、health、interfaces、
+permissions、data policy,就能被 Mori Desktop 發現與接入。
+
+## Extraction Strategy
+
+目前 mori-desktop 已經包含許多功能。遷移策略不是一次拆光,而是先建立中間介面,再
+逐步抽出。
+
+```text
+Current mori-desktop
+  many built-in features
+        ↓
+Define Body Interface / provisioning / permission / ingestion policy
+        ↓
+Wrap existing built-in feature behind internal manifest
+        ↓
+Move implementation to sidecar / standalone repo when stable
+        ↓
+Mori Desktop keeps shell + registry + settings + cue center
+```
+
+判斷某功能是否應移出:
+
+| Signal | Action |
+|---|---|
+| 平台依賴重 | standalone / sidecar |
+| 需要獨立測試 | standalone |
+| 有敏感資料邊界 | standalone-first |
+| 可能給第三方使用 | body part |
+| 只是一小段 UI glue | 留在 Desktop |
+| 跟 Mori identity/runtime 高耦合 | 留在 core,但仍暴露 schema |
+
+這表示現在的 Mori Desktop 是未來 Mori Desktop shell 的起點。它不是錯誤方向,只是需要
+逐步把高耦合功能搬到 body parts。
+
 ## Transport-Agnostic Interface
 
 Body Interface 的核心是 semantic contract,不是某一種 transport。外部 body part
