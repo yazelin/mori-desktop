@@ -237,8 +237,9 @@ input 格式跟 voice transcript 對接。
 
 - **媒體下載** — 「下載這個影片」呼叫 yt-dlp(shell_skill 包)
 - **ExecCommand 白名單** — 「跑那個指令」要先有白名單 + 二次確認機制
-- **會議逐字稿** — 連續錄音存檔 → Whisper streaming → LLM 整理會議記錄 +
-  action items,結果丟 Annuli 的 `knowledge/` 永久保存
+- **Meeting Recorder** — Observer Mode 多來源多音軌錄音:system 軌作客戶版會議紀錄,
+  mic 軌作內部備忘,即時字幕分流;詳見 [Meeting Recorder 決議](meeting-recorder.md)。
+  後續再接 LLM 整理 action items 與 Annuli `knowledge/` 保存。
 
 ---
 

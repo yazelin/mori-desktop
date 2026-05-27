@@ -228,6 +228,10 @@ LLM 通訊抽象。一份 agent 程式碼能打 Groq、Ollama、OpenAI、Anthrop
 
 ## 錄音流程(目前實作)
 
+會議錄音的下一階段設計已獨立成 [Meeting Recorder 決議](meeting-recorder.md):
+採 Observer Mode,多來源多音軌,system 軌作客戶版來源,mic 軌作內部備忘來源,
+並保留即時字幕與未來 Presenter Mode 的資料模型。
+
 ```
 使用者按 Ctrl+Alt+Space(toggle 模式 = 一按切換、hold 模式 = 按住開錄)
    ↓
