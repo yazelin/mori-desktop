@@ -46,6 +46,10 @@ Mori universe 採用 **standalone-first, integration-second** 架構。
 
 這不是「把所有東西外包出去」。這是把 Mori 拆成多個低耦合、可獨立進化的身體部位。
 
+本文件描述 body part 接入方式。更高層的 Mori Instance / Mori Hub / World Tree
+關係,以及 Mori 從桌面軟體走向具身代理人的方向,見
+[Mori Instance Direction 決議](mori-instance-direction.md)。
+
 ## 名詞
 
 | 名詞 | 定義 |
