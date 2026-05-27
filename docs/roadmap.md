@@ -253,6 +253,11 @@ input 格式跟 voice transcript 對接。
   [Meeting Recorder 決議](meeting-recorder.md)。mori-desktop 後續只做低耦合整合,
   再接 LLM 整理 action items 與 Annuli `knowledge/` 保存。
 
+> 📋 以上 Body Interface 系列(Instance Direction / Body Interface / MoriPack /
+> Meeting Recorder)的**實作順序、依賴鏈與進度**收斂在
+> [Body Interface 實作 Backlog](body-interface-backlog.md)(`BI-0…BI-6` + 北極星)。
+> 本段是願景描述;要動工看那份 backlog。
+
 ---
 
 ## 更遠
