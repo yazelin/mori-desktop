@@ -6,6 +6,7 @@ export const SHELL_TAB_IDS = [
   "annuli",
   "skills",
   "body",
+  "permissions",
   "transcribe",
   "recordings",
   "corrections",
