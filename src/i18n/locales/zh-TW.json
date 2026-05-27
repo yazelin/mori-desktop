@@ -542,6 +542,18 @@
     "batch_save_all_button": "全部存 .transcript.txt"
   }
 
+  ,"body_tab": {
+    "title": "身體部件",
+    "refresh": "重新整理",
+    "hint": "掃描本機 body part manifest(唯讀;不會啟動或執行任何部件)",
+    "empty": "還沒有任何 body part。",
+    "capabilities": "能力",
+    "interfaces": "介面",
+    "status_valid": "✓ 正常",
+    "status_unsupported": "⚠ 版本不支援",
+    "status_parse_error": "✗ 解析失敗",
+    "parse_error_name": "(無法解析)"
+  }
   ,"self_dev_tab": {
     "title": "自我開發（Phase B + D Gate）",
     "hint": "在人工授權下用 Codex 執行自我開發任務，產出 diff 後交給 release gate 審核。",

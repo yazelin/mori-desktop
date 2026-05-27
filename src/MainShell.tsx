@@ -20,7 +20,7 @@ import ConfigTab from "./tabs/ConfigTab";
 import MemoryTab from "./tabs/MemoryTab";
 import AnnuliTab from "./tabs/AnnuliTab";
 import SkillsTab from "./tabs/SkillsTab";
-import { BodyTab } from "./tabs/BodyTab";
+import BodyTab from "./tabs/BodyTab";
 import DepsTab from "./tabs/DepsTab";
 import LogsTab from "./tabs/LogsTab";
 import RecordingsTab from "./tabs/RecordingsTab";
