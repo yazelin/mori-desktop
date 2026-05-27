@@ -5,6 +5,7 @@
 pub mod artifact;
 pub mod manifest;
 pub mod registry;
+pub mod permission;
 
 pub use artifact::{
     classify_artifact, MoriArtifact, SuggestedAction, Visibility, KIND_CHARACTER_PACK,
@@ -14,3 +15,7 @@ pub use manifest::{
     ManifestStatus, Transport, SUPPORTED_MANIFEST_SCHEMA,
 };
 pub use registry::{scan_body_parts, DiscoveredBodyPart};
+pub use permission::{
+    default_policy, evaluate, BrokerResponse, Decision, Lease, PermissionRequest, PolicyRule,
+    PolicyTable, RiskClass, SUPPORTED_PERMISSION_SCHEMA,
+};
