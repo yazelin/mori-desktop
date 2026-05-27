@@ -73,6 +73,16 @@ fn cli_command(binary: &str) -> Command {
             // 都沒找到 — fallthrough 讓 Rust 自己回 "program not found" error
         }
     }
+    #[cfg(not(windows))]
+    {
+        let has_separator = binary.contains('/');
+        let has_ext = std::path::Path::new(binary).extension().is_some();
+        if !has_separator && !has_ext {
+            if let Some(full) = find_on_unix_user_path(binary) {
+                return Command::new(full);
+            }
+        }
+    }
     Command::new(binary)
 }
 
@@ -87,6 +97,44 @@ fn find_on_windows_path(filename: &str) -> Option<std::path::PathBuf> {
             return Some(candidate);
         }
     }
+    None
+}
+
+/// Desktop launches often do not inherit shell init from NVM/Volta, while a
+/// terminal does. Scan common user-level CLI install dirs before giving up.
+#[cfg(not(windows))]
+fn find_on_unix_user_path(filename: &str) -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(filename);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+    for dir in [
+        home.join(".local").join("bin"),
+        home.join(".cargo").join("bin"),
+        home.join(".volta").join("bin"),
+    ] {
+        let candidate = dir.join(filename);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    let nvm_versions = home.join(".nvm").join("versions").join("node");
+    if let Ok(entries) = std::fs::read_dir(nvm_versions) {
+        for entry in entries.flatten() {
+            let candidate = entry.path().join("bin").join(filename);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
     None
 }
 

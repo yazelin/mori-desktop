@@ -47,6 +47,7 @@ libasound2-dev
 ffmpeg
 pkg-config
 build-essential
+cmake
 curl
 wget
 file

@@ -234,6 +234,15 @@ impl WhisperServer {
             "--language",
             lang,
         ]);
+        if let Some(bin_dir) = self.binary.parent().filter(|p| !p.as_os_str().is_empty()) {
+            let cur = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+            let next = if cur.is_empty() {
+                bin_dir.to_string_lossy().into_owned()
+            } else {
+                format!("{}:{cur}", bin_dir.display())
+            };
+            cmd.env("LD_LIBRARY_PATH", next);
+        }
         cmd.stdout(Stdio::null()).stderr(Stdio::null());
         crate::suppress_console_on_windows!(cmd);
 

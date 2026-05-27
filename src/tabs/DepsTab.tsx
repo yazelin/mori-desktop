@@ -9,7 +9,8 @@ import { IconRefresh, IconClipboard } from "../icons";
 
 type CheckSpec =
   | { kind: "Which"; bin: string }
-  | { kind: "File"; path_template: string };
+  | { kind: "File"; path_template: string }
+  | { kind: "WhisperServer"; path_template: string };
 type InstallSpec =
   | { kind: "Shell"; script: string }
   | { kind: "Manual"; commands: string[] }
@@ -81,7 +82,7 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
   // 顯示條件 `(showCommand || manual)` 讓 Manual block 永遠 visible,「收起」
   // 按鈕變裝飾。改成 Manual 預設 true + 顯示條件單看 showCommand,「收起」
   // 真的能收起。
-  const [showCommand, setShowCommand] = useState(manual);
+  const [showCommand, setShowCommand] = useState(manual && !dep.status.installed);
 
   const install = async () => {
     if (manual) return; // UI 不會 disable,但 click 也不送
@@ -125,7 +126,22 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
         </div>
         <div className="mori-dep-actions">
           {dep.status.installed ? (
-            <span className="mori-dep-status-detail">{dep.status.detail}</span>
+            <>
+              <span className="mori-dep-status-detail">{dep.status.detail}</span>
+              {manual ? (
+                <button className="mori-btn" onClick={() => setShowCommand(!showCommand)}>
+                  {showCommand ? t("deps_tab.hide_command") : t("deps_tab.show_command")}
+                </button>
+              ) : (
+                <button
+                  className="mori-btn"
+                  onClick={install}
+                  disabled={installing}
+                >
+                  {installing ? t("deps_tab.reinstalling_button") : t("deps_tab.reinstall_button")}
+                </button>
+              )}
+            </>
           ) : manual ? (
             <button className="mori-btn" onClick={() => setShowCommand(!showCommand)}>
               {showCommand ? t("deps_tab.hide_command") : t("deps_tab.show_command")}
@@ -150,10 +166,12 @@ function DepCard({ dep, onRefresh }: { dep: DepInfo; onRefresh: () => void }) {
           ⚠️ <span className="label">{t("deps_tab.platform_note_label")}</span> {dep.install_caveat}
         </div>
       )}
-      {!dep.status.installed && showCommand && (
+      {showCommand && (
         <div className="mori-dep-cmd">
           <div className="mori-dep-cmd-head">
-            <span className="label">{manual ? t("deps_tab.manual_label") : t("deps_tab.auto_label")}</span>
+            <span className="label">
+              {manual ? t("deps_tab.manual_label") : t("deps_tab.auto_label")}
+            </span>
             <button className="mori-btn small ghost" onClick={copyCmd}><IconClipboard width={12} height={12} /> {t("deps_tab.copy_button")}</button>
           </div>
           <pre>{cmdPreview}</pre>
