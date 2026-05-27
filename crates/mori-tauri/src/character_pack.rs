@@ -83,6 +83,15 @@ pub struct CharacterEntry {
 const DEFAULT_PACKAGE_NAME: &str = "mori";
 const REQUIRED_STATES: &[&str] = &["idle", "sleeping", "recording", "thinking", "done", "error"];
 
+/// stem 是否是安全的角色包資料夾名(不會逃出 characters_dir、不是隱藏/特殊名如 `.`/`..`)。
+fn stem_is_safe(stem: &str) -> bool {
+    !stem.is_empty()
+        && !stem.starts_with('.')
+        && !stem.contains('/')
+        && !stem.contains('\\')
+        && !stem.contains("..")
+}
+
 pub fn characters_dir() -> PathBuf {
     crate::mori_dir().join("characters")
 }
@@ -340,7 +349,7 @@ pub fn zip_has_character_manifest(path: &std::path::Path) -> bool {
 /// 判斷一個角色包能不能刪。純函式,不碰 filesystem。
 /// 擋:空字串、內建 default(`mori`)、路徑分隔符 / `..`、以及「目前 active」的那個。
 pub fn ensure_deletable(stem: &str, active: &str) -> Result<()> {
-    if stem.is_empty() || stem.contains('/') || stem.contains('\\') || stem.contains("..") {
+    if !stem_is_safe(stem) {
         anyhow::bail!("不合法的角色包名稱:{stem}");
     }
     if stem == DEFAULT_PACKAGE_NAME {
@@ -366,6 +375,9 @@ pub fn delete(stem: &str) -> Result<()> {
 /// 把一個資料夾遞迴打包成 zip 寫到 dest。zip 內路徑相對 src、用 forward slash,
 /// 因此產物結構同 import 期待(manifest.json + sprites/ + backdrops),可被 import_zip 再匯入。
 pub fn export_dir(src: &Path, dest: &Path) -> Result<()> {
+    if dest.starts_with(src) {
+        anyhow::bail!("匯出位置不能在角色包資料夾內:{dest:?}");
+    }
     let file = std::fs::File::create(dest).with_context(|| format!("create {dest:?}"))?;
     let mut zip = zip::ZipWriter::new(file);
     let opts: zip::write::SimpleFileOptions = Default::default();
@@ -401,6 +413,9 @@ pub fn export_dir(src: &Path, dest: &Path) -> Result<()> {
 
 /// 把已安裝的角色包重新打包成 `.moripack.zip` 寫到 dest(dest 由呼叫端 save dialog 決定)。
 pub fn export(stem: &str, dest: &Path) -> Result<()> {
+    if !stem_is_safe(stem) {
+        anyhow::bail!("不合法的角色包名稱:{stem}");
+    }
     if !manifest_path(stem).exists() {
         anyhow::bail!("角色包不存在或缺 manifest:{stem}");
     }
@@ -706,5 +721,23 @@ mod tests {
         for name in &names {
             assert!(!name.contains('\\'), "path contains backslash: {name}");
         }
+    }
+
+    #[test]
+    fn ensure_deletable_refuses_dot_names() {
+        assert!(ensure_deletable(".", "mori").is_err());
+        assert!(ensure_deletable("..", "mori").is_err());
+        assert!(ensure_deletable(".hidden", "mori").is_err());
+        // 正常 stem 仍然 Ok
+        assert!(ensure_deletable("myfox", "mori").is_ok());
+    }
+
+    #[test]
+    fn export_dir_refuses_dest_inside_src() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let src = tmp.path();
+        let dest = src.join("out.zip");
+        let err = export_dir(src, &dest).unwrap_err().to_string();
+        assert!(err.contains("匯出位置不能在角色包資料夾內"), "unexpected error: {err}");
     }
 }
