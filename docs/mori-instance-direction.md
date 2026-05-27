@@ -11,7 +11,7 @@ Mori 不是 Mori Desktop。
 
 Mori 是一個可運行在某個載體上的智慧代理人,具備 identity、runtime、body
 registry、permission broker、session state、memory handoff policy。這個載體現在
-可以是一台 Ubuntu / Windows 電腦;未來也可以是一台服務型機器人、一台 HGP 車、一個
+可以是一台 Ubuntu / Windows 電腦;未來也可以是一台服務型機器人、一台 AGV 車、一個
 捷運站服務處端點,或一組由 hub 管理的機器。
 
 ```text
@@ -51,7 +51,7 @@ Mori Body
   hands      = manipulator / service actuator
 ```
 
-如果 Mori 運行在一台 HGP 車或服務型機器人上,可以理解為:
+如果 Mori 運行在一台 AGV 車或服務型機器人上,可以理解為:
 
 ```text
 一台車 / 一台機器人 = 一個 Mori Instance
@@ -68,7 +68,7 @@ Mori runtime = 這個身體的大腦 / 協調層
 - Mori Meeting Recorder 獨立開發與測試。
 - Agent Plus 觀察多個 CLI / coding agent session。
 - LINE / Telegram / Discord / YouTube / OBS connectors 以自己的 runtime 運行。
-- 未來服務機器人或 HGP 車把 radar、定位、camera、speaker 接成 body parts。
+- 未來服務機器人或 AGV 車把 radar、定位、camera、speaker 接成 body parts。
 - 多個 Mori 之間透過 hub / center 協調。
 
 因此 Mori 的長期方向是:
@@ -149,7 +149,7 @@ Mori Instance 是具體的一個 Mori。它可以是:
 
 - 目前的個人桌面 Mori。
 - 一台服務機器人 Mori。
-- 一台 HGP 車 Mori。
+- 一台 AGV 車 Mori。
 - 一個捷運站服務處 Mori。
 - 一個 headless server Mori。
 
@@ -187,7 +187,7 @@ Body part 可以透過 CLI / HTTP / SSE / WebSocket / Zenoh / DDS / ROS2 接入,
 
 ## 具身 Mori 的資料流
 
-服務型機器人或 HGP 車上的 Mori:
+服務型機器人或 AGV 車上的 Mori:
 
 ```text
 Sensors
@@ -523,6 +523,6 @@ Local Mori remains sovereign and offline-capable.
 ## 一句話總結
 
 Mori 是一個能運行在不同載體上的智慧代理人。Mori Desktop 只是它現在的桌面外殼。
-未來 Mori 可以是一台服務機器人或 HGP 車的大腦;感測器與執行器透過嚴謹的 body
+未來 Mori 可以是一台服務機器人或 AGV 車的大腦;感測器與執行器透過嚴謹的 body
 interface 接入;多個 Mori 透過 hub / world-tree 協調;所有 transport 都只是語意
 介面的 binding,而不是 Mori 的本體。

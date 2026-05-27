@@ -124,7 +124,7 @@ Mori Desktop 轉成 body registry、設定中心、cue center、permission broke
 
 ### Mori Instance Direction
 
-Mori Desktop 不是 Mori 的全部。Mori 是一個可運行在桌面電腦、服務型機器人、HGP
+Mori Desktop 不是 Mori 的全部。Mori 是一個可運行在桌面電腦、服務型機器人、AGV
 車、站點端點或 server 上的 Mori Instance;Mori Desktop 只是其中一種 shell。
 未來具身 Mori 的感測器 / 執行器透過 body parts 接入,多個 Mori 透過 hub / center
 協調,World Tree 保留為共享規格、lore、registry 與治理層。
