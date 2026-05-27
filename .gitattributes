@@ -1,0 +1,29 @@
+# 二進位資產:永遠不做 EOL(換行)轉換。
+#
+# 為什麼需要:git 的「binary 自動偵測」靠檔案裡有沒有 NUL byte。像
+# `crates/mori-file-loader/tests/fixtures/sample.pdf` 這種小 PDF 整檔沒 NUL,
+# 會被誤判成文字檔;在 Windows runner(git core.autocrlf=true)checkout 時
+# LF→CRLF 轉換會插入 CR,搞壞 PDF 的 byte offset(startxref / trailer),
+# 導致 pdf-extract 報 "invalid file trailer"。標成 binary 即可根治。
+#
+# 不加 `* text=auto`,避免對既有檔做 repo-wide renormalize。
+
+*.pdf      binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.zip      binary
+*.moripack binary
+*.onnx     binary
+*.wav      binary
+*.mp3      binary
+*.flac     binary
+*.docx     binary
+*.xlsx     binary
+*.pptx     binary
+*.epub     binary
+*.ttf      binary
+*.woff     binary
+*.woff2    binary
