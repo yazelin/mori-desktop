@@ -12,6 +12,7 @@
 pub mod agent;
 pub mod agent_profile;
 pub mod annuli;
+pub mod body;
 pub mod context;
 pub mod correction_audit;
 pub mod correction_inbox;

@@ -2184,6 +2184,34 @@ fn character_dir() -> String {
         .to_string()
 }
 
+#[tauri::command]
+fn character_delete(app: tauri::AppHandle, stem: String) -> Result<(), String> {
+    crate::character_pack::delete(&stem).map_err(|e| e.to_string())?;
+    let _ = app.emit("character-pack-deleted", &stem);
+    Ok(())
+}
+
+#[tauri::command]
+fn character_export(stem: String, dest: String) -> Result<(), String> {
+    crate::character_pack::export(&stem, std::path::Path::new(&dest)).map_err(|e| e.to_string())
+}
+
+/// BI-0:看一個本機檔案,回傳 Mori 認得的 artifact envelope(目前只有 character
+/// pack)。認不得回 Err,讓 UI 顯示「Mori 不認得這個檔案」並讓使用者取消。
+/// 這是 Body Interface「handoff 要可見、可取消」原則的入口。
+#[tauri::command]
+fn inspect_artifact(path: String) -> Result<mori_core::body::MoriArtifact, String> {
+    let p = std::path::Path::new(&path);
+    let artifact = mori_core::body::classify_artifact(p)
+        .ok_or_else(|| format!("Mori 不認得這個檔案:{path}"))?;
+    if artifact.kind == mori_core::body::KIND_CHARACTER_PACK
+        && !crate::character_pack::zip_has_character_manifest(p)
+    {
+        return Err(format!("這個檔案不是角色包(zip 裡找不到 manifest.json):{path}"));
+    }
+    Ok(artifact)
+}
+
 /// C — annuli 熱重載 command。
 ///
 /// 流程:
@@ -6278,6 +6306,9 @@ fn main() {
             character_pack_import_zip,
             character_sprite_data_url,
             character_dir,
+            character_delete,
+            character_export,
+            inspect_artifact,
             file_loader_cmd::read_file_text_cmd,
             reminders_cmd::remind_me_cmd,
             reminders_cmd::list_reminders_cmd,

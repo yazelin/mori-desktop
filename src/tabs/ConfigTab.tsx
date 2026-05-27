@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { setLocale } from "../i18n";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
@@ -38,6 +38,15 @@ type CharacterEntry = {
 };
 
 const MORI_SPRITE_STUDIO_URL = "https://mori-sprite-studio.vercel.app/";
+
+interface MoriArtifact {
+  artifact_id: string;
+  kind: string;
+  path: string;
+  visibility: string;
+  mime: string;
+  suggested_actions: string[];
+}
 
 type SaveStatus =
   | { kind: "idle" }
@@ -511,6 +520,7 @@ function CharacterPicker() {
   const [msg, setMsg] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [pending, setPending] = useState<MoriArtifact | null>(null);
 
   const refresh = async () => {
     try {
@@ -544,22 +554,34 @@ function CharacterPicker() {
     }
   };
 
-  const onImport = async () => {
+  const onPickFile = async () => {
     const selected = await openDialog({
       multiple: false,
       filters: [{ name: "Mori character pack", extensions: ["zip", "moripack"] }],
     });
     if (!selected || typeof selected !== "string") return;
+    setImportError(null);
+    try {
+      const artifact = await invoke<MoriArtifact>("inspect_artifact", { path: selected });
+      setPending(artifact); // 顯示可見、可取消的 handoff 確認，先不動 vault/角色
+    } catch (e: any) {
+      setImportError(String(e));
+    }
+  };
+
+  const onConfirmImport = async () => {
+    if (!pending) return;
     setImporting(true);
     setImportError(null);
     try {
       const entry = await invoke<CharacterEntry>("character_pack_import_zip", {
-        zipPath: selected,
+        zipPath: pending.path,
       });
       await refresh();
       setActive(entry.stem);
       setMsg(`✅ 已匯入:${entry.display_name} by ${entry.author}`);
       setTimeout(() => setMsg(null), 4000);
+      setPending(null);
     } catch (e: any) {
       setImportError(String(e));
     } finally {
@@ -567,10 +589,42 @@ function CharacterPicker() {
     }
   };
 
+  const onCancelImport = () => {
+    setPending(null);
+    setImportError(null);
+  };
+
   const onOpenSpriteStudio = () => {
     invoke("open_external_url", { url: MORI_SPRITE_STUDIO_URL }).catch((e) => {
       setImportError(`開啟 Mori Sprite Studio 失敗:${String(e)}`);
     });
+  };
+
+  const onExport = async (stem: string, displayName: string) => {
+    const dest = await saveDialog({
+      defaultPath: `${stem}.moripack.zip`,
+      filters: [{ name: "Mori character pack", extensions: ["zip", "moripack"] }],
+    });
+    if (!dest || typeof dest !== "string") return;
+    try {
+      await invoke("character_export", { stem, dest });
+      setMsg(`✅ 已匯出 ${displayName}`);
+      setTimeout(() => setMsg(null), 4000);
+    } catch (e: any) {
+      setImportError(`匯出失敗:${String(e)}`);
+    }
+  };
+
+  const onDeletePack = async (stem: string, displayName: string) => {
+    if (!confirm(`刪除角色包「${displayName}」?會移除整個資料夾,無法復原。`)) return;
+    try {
+      await invoke("character_delete", { stem });
+      await refresh();
+      setMsg(`🗑 已刪除 ${displayName}`);
+      setTimeout(() => setMsg(null), 3000);
+    } catch (e: any) {
+      setImportError(`刪除失敗:${String(e)}`);
+    }
   };
 
   return (
@@ -605,7 +659,7 @@ function CharacterPicker() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="mori-btn" onClick={onImport} disabled={importing || busy}>
+            <button className="mori-btn" onClick={onPickFile} disabled={importing || busy}>
               {importing ? "匯入中…" : "匯入 .moripack.zip"}
             </button>
             <button className="mori-btn ghost" onClick={onOpenSpriteStudio}>
@@ -613,11 +667,71 @@ function CharacterPicker() {
             </button>
             {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
           </div>
+          {pending && (
+            <div
+              style={{
+                border: "1px solid var(--c-border)",
+                borderRadius: 8,
+                padding: 10,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                fontSize: 12,
+              }}
+            >
+              <div>
+                Mori 認得這個檔案:<strong>角色包</strong>(<code>{pending.kind}</code>)
+              </div>
+              <div style={{ opacity: 0.8 }}>
+                可見度:{pending.visibility} · 可做:{pending.suggested_actions.join(" → ")}
+              </div>
+              <div style={{ opacity: 0.6, wordBreak: "break-all" }}>{pending.path}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="mori-btn" onClick={onConfirmImport} disabled={importing}>
+                  {importing ? "匯入中…" : "確認匯入並套用"}
+                </button>
+                <button className="mori-btn ghost" onClick={onCancelImport} disabled={importing}>
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
           {importError && (
             <div style={{ color: "rgba(255, 160, 160, 0.95)", fontSize: 12 }}>
               ❌ 匯入失敗:{importError}
             </div>
           )}
+        </div>
+      </FormRow>
+      <FormRow
+        label="管理"
+        hint="匯出成 .moripack.zip 可備份/分享;刪除會移除整包(使用中與內建 mori 不能刪)。"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {chars.map((c) => {
+            const isActive = c.stem === active;
+            const isDefault = c.stem === "mori";
+            return (
+              <div key={c.stem} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <span style={{ flex: 1 }}>
+                  {c.display_name}
+                  {c.author ? <span style={{ opacity: 0.6 }}> · by {c.author}</span> : null}
+                  {isActive ? <span style={{ opacity: 0.6 }}> · 使用中</span> : null}
+                </span>
+                <button className="mori-btn small ghost" onClick={() => onExport(c.stem, c.display_name)}>
+                  匯出
+                </button>
+                <button
+                  className="mori-btn small ghost"
+                  onClick={() => onDeletePack(c.stem, c.display_name)}
+                  disabled={isActive || isDefault}
+                  title={isActive ? "使用中,先切換再刪" : isDefault ? "內建角色不能刪" : "刪除"}
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
         </div>
       </FormRow>
     </>

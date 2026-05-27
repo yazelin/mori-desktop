@@ -322,6 +322,12 @@ Body Interface、permission、audio policy 成熟後再移出。
 - 是否要支援 signed official packs?
 - 是否要讓 World Tree / public gallery 成為 character pack catalog?
 
+## 實作進度(BI-0)
+
+- ✅ Phase 1 manual artifact handoff(Open Studio / Import / Validate / Activate / reload)— #107 已落地。
+- ✅ Artifact envelope 正式化:`mori_core::body::MoriArtifact` + `classify_artifact` + `inspect_artifact` command;匯入前顯示可見、可取消的 handoff(BI-0,branch `feat/bi-0-artifact-handoff`)。
+- ⏳ Phase 2 custom URL(`mori://character-pack/import`)、Phase 3 local API — 未做(YAGNI,等需求)。
+
 ## 下一步
 
 1. 保留 [Character Pack 規範](character-pack.md) 作為 zip / manifest source of truth。
