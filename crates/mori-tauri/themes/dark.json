@@ -6,6 +6,7 @@
     "page-bg": "#1f3329",
     "sidebar-bg": "#172620",
     "surface-bg": "#243a31",
+    "bg": "#243a31",
     "input-bg": "rgba(0, 0, 0, 0.30)",
     "input-focus-bg": "rgba(0, 0, 0, 0.42)",
     "divider": "rgba(230, 222, 202, 0.08)",
@@ -19,6 +20,7 @@
     "sidebar-text": "rgba(243, 240, 230, 0.65)",
     "sidebar-text-active": "rgba(243, 240, 230, 0.98)",
     "sidebar-hover-bg": "rgba(230, 222, 202, 0.05)",
+    "sidebar-active-bg": "rgba(106, 143, 114, 0.22)",
     "active-bg": "rgba(106, 143, 114, 0.22)",
     "active-border": "rgba(168, 197, 162, 0.45)",
     "primary-bg": "rgba(106, 143, 114, 0.28)",
@@ -35,7 +37,10 @@
     "warning-border": "rgba(255, 200, 100, 0.25)",
     "warning-text": "rgba(255, 220, 170, 0.95)",
     "success-bg": "rgba(170, 230, 185, 0.10)",
+    "success-border": "rgba(170, 230, 185, 0.30)",
     "success-text": "rgba(190, 240, 200, 0.95)",
+    "mono-bg": "rgba(168, 197, 162, 0.10)",
+    "mono-border": "rgba(168, 197, 162, 0.25)",
     "mono-color": "rgba(168, 197, 162, 0.92)",
     "kbd-bg": "rgba(230, 222, 202, 0.08)",
     "kbd-border": "rgba(230, 222, 202, 0.18)",
@@ -50,6 +55,8 @@
     "recording-progress-bg": "rgba(106, 143, 114, 0.14)",
     "recording-progress-border": "rgba(168, 197, 162, 0.35)",
     "meter-from": "rgba(106, 143, 114, 0.80)",
-    "meter-to": "rgba(168, 197, 162, 0.90)"
+    "meter-to": "rgba(168, 197, 162, 0.90)",
+    "forest": "#6a8c5a",
+    "forest-light": "#8db077"
   }
 }
