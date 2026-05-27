@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { setLocale } from "../i18n";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
@@ -600,6 +600,33 @@ function CharacterPicker() {
     });
   };
 
+  const onExport = async (stem: string, displayName: string) => {
+    const dest = await saveDialog({
+      defaultPath: `${stem}.moripack.zip`,
+      filters: [{ name: "Mori character pack", extensions: ["zip", "moripack"] }],
+    });
+    if (!dest || typeof dest !== "string") return;
+    try {
+      await invoke("character_export", { stem, dest });
+      setMsg(`✅ 已匯出 ${displayName}`);
+      setTimeout(() => setMsg(null), 4000);
+    } catch (e: any) {
+      setImportError(`匯出失敗:${String(e)}`);
+    }
+  };
+
+  const onDeletePack = async (stem: string, displayName: string) => {
+    if (!confirm(`刪除角色包「${displayName}」?會移除整個資料夾,無法復原。`)) return;
+    try {
+      await invoke("character_delete", { stem });
+      await refresh();
+      setMsg(`🗑 已刪除 ${displayName}`);
+      setTimeout(() => setMsg(null), 3000);
+    } catch (e: any) {
+      setImportError(`刪除失敗:${String(e)}`);
+    }
+  };
+
   return (
     <>
       <FormRow
@@ -674,6 +701,37 @@ function CharacterPicker() {
               ❌ 匯入失敗:{importError}
             </div>
           )}
+        </div>
+      </FormRow>
+      <FormRow
+        label="管理"
+        hint="匯出成 .moripack.zip 可備份/分享;刪除會移除整包(使用中與內建 mori 不能刪)。"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {chars.map((c) => {
+            const isActive = c.stem === active;
+            const isDefault = c.stem === "mori";
+            return (
+              <div key={c.stem} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <span style={{ flex: 1 }}>
+                  {c.display_name}
+                  {c.author ? <span style={{ opacity: 0.6 }}> · by {c.author}</span> : null}
+                  {isActive ? <span style={{ opacity: 0.6 }}> · 使用中</span> : null}
+                </span>
+                <button className="mori-btn small ghost" onClick={() => onExport(c.stem, c.display_name)}>
+                  匯出
+                </button>
+                <button
+                  className="mori-btn small ghost"
+                  onClick={() => onDeletePack(c.stem, c.display_name)}
+                  disabled={isActive || isDefault}
+                  title={isActive ? "使用中,先切換再刪" : isDefault ? "內建角色不能刪" : "刪除"}
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
         </div>
       </FormRow>
     </>
