@@ -1007,6 +1007,7 @@ Agent Plus specific tests:
 - 建立本文件。
 - 為 Mori Meeting Recorder 保留 standalone-first 決議。
 - 為 Agent Plus 寫 integration spec。
+- 為 MoriPack / Character Pack Studio 建立 artifact-first integration sample。
 - 決定 manifest / event / permission schema 初版。
 
 ### Phase 1: Body Registry skeleton

@@ -245,6 +245,9 @@ input 格式跟 voice transcript 對接。
   event stream / artifact handoff / permission broker,讓 Mori Ear、Mori Meeting
   Recorder、Agent Plus 等部件能獨立執行又低耦合接回 Mori Desktop。詳見
   [Mori Body Interface 決議](mori-body-interface.md)。
+- **MoriPack Integration** — 以 Character Pack / Mori Sprite Animation Pack 作為第一個
+  artifact-first integration 樣板:外部 Studio 獨立編輯,匯出 `.moripack.zip`,
+  Mori Desktop 負責匯入、驗證、套用。詳見 [MoriPack Integration 決議](moripack-integration.md)。
 - **Mori Meeting Recorder** — standalone-first 獨立專案:Observer Mode 多來源多音軌錄音,
   system 軌作客戶版會議紀錄,mic 軌作內部備忘,即時字幕分流;詳見
   [Meeting Recorder 決議](meeting-recorder.md)。mori-desktop 後續只做低耦合整合,
