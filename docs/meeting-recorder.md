@@ -1,7 +1,8 @@
 # Meeting Recorder 決議
 
 > 狀態:design decision,尚未實作。
-> 目的:定義未來會議錄音 / 即時字幕 / 客戶版與內部版紀錄的資料邊界。
+> 目的:定義未來 Mori Meeting Recorder 的專案邊界、會議錄音 / 即時字幕 /
+> 客戶版與內部版紀錄的資料邊界。
 
 ## 背景
 
@@ -14,6 +15,42 @@
 - 未來需要錄音中即時字幕,而不是只在停止後轉整段音檔。
 
 ## 核心決議
+
+Meeting Recorder 應採用 **standalone-first** 設計,未來專案名稱暫定
+**Mori Meeting Recorder**。
+
+這不是 Mori Desktop chat / Transcribe tab 的附屬功能,而是 Mori universe 內一個可獨立運行的會議記錄工具。Mori Desktop 未來可以整合它,但不應擁有它的 raw audio、internal transcript、session lifecycle。
+
+第一版實作應優先建立獨立 repo,而不是直接塞進 mori-desktop:
+
+```text
+mori-meeting-recorder/
+  owns:
+    audio capture
+    system loopback
+    mic capture
+    realtime captions
+    public/internal export
+    session storage
+
+mori-desktop/
+  may later:
+    open Mori Meeting Recorder
+    import/export meeting.public.md
+    ask Mori to summarize selected outputs
+    share provider/model settings
+```
+
+Mori Desktop 和 Mori Meeting Recorder 的連接面應保持低耦合,大致只包含:
+
+- STT provider / API key / model path 等使用者設定。
+- 匯出檔案或 session metadata 的 handoff。
+- 未來可選的 CLI / local HTTP API。
+- 使用者明確要求時,才把指定 public/internal 產物交給 Mori 整理。
+
+Mori Desktop / Annuli / Mori agent 不得自動讀取 `mic_internal` raw audio 或 internal transcript,也不得把內部私聊自動寫入 memory / knowledge。
+
+## MVP 錄音模式
 
 第一版 Meeting Recorder 採用 **Observer Mode / 旁聽錄音模式**:
 
@@ -150,30 +187,46 @@ Presenter Mode 需要:
 
 第一版不做:
 
+- 直接在 mori-desktop 內完成完整 Meeting Recorder MVP。
 - 指定單一 Google Meet 視窗或分頁音訊。
 - 自動偵測 Google Meet 麥克風是否解除靜音。
 - 把 mic 軌自動混進客戶版會議紀錄。
 - 雲端 relay、central OAuth hub、第三方資料中介。
 
-## 實作提示
+## Standalone 實作提示
 
-未來實作時可新增一個獨立 `MeetingRecorder`,不要把現有短錄音 `Recorder` 直接擴成所有用途:
+新 repo 應先專注建立可測試的 audio / caption core,不要依賴 Mori Desktop 的狀態機或 UI:
 
-- `Recorder`:保留給 VoiceInput / Agent 短錄音。
 - `MeetingRecorder`:管理多來源、多音軌、session manifest、即時字幕事件。
+- `AudioCapture`:平台音訊 capture 抽象,分別實作 Windows WASAPI loopback、macOS ScreenCaptureKit、Linux PipeWire。
+- `SessionStore`:保存 raw audio、segments、timeline、exports。
+- `Exporter`:只根據 `visibility` 產生 public/internal 文件。
 
-Rust/Tauri command 可朝這個形狀演進:
+可先做 standalone app,再補 CLI / local HTTP API。API 可朝這個形狀演進:
 
 ```text
 meeting_recorder_start(config)
 meeting_recorder_stop(session_id)
 meeting_recorder_status(session_id)
 meeting_recorder_list_sources()
+meeting_recorder_export(session_id, visibility)
 ```
 
-前端 Transcribe tab 的 Meeting mode 應顯示至少兩個來源狀態:
+UI 應顯示至少兩個來源狀態:
 
 - 會議音訊:系統輸出,客戶版來源。
 - 內部麥克風:本機收音,內部來源。
 
 UI 文案要明確:「客戶版只使用會議音訊;內部麥克風不會預設匯出給客戶。」
+
+## Mori Desktop 整合留白
+
+等 Mori Meeting Recorder standalone MVP 穩定後,mori-desktop 可以用低耦合方式整合:
+
+- 開啟或啟動 Mori Meeting Recorder。
+- 顯示最近 session 列表。
+- 匯入 `meeting.public.md` 作為可整理的會議素材。
+- 在使用者明確選取後,把 `meeting.internal.md` 交給 Mori 產生內部摘要。
+- 共用 provider/model 設定,但不共用 raw internal data。
+
+這個整合不是第一版 blocker。第一版成功標準是 Mori Meeting Recorder 自己能獨立完成雙軌錄音、即時字幕分流、public/internal export。
