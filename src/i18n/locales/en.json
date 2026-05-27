@@ -39,6 +39,8 @@
     "recordings_sub": "Voice session replay",
     "corrections": "Corrections",
     "corrections_sub": "STT inbox / dictionary",
+    "body": "Body",
+    "body_sub": "body parts registry",
     "self_dev": "Self Dev",
     "self_dev_sub": "Bootstrap tasks"
   },

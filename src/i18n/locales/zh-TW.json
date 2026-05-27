@@ -39,6 +39,8 @@
     "recordings_sub": "語音 session 回顧",
     "corrections": "Corrections",
     "corrections_sub": "STT 校正盒 / 字典",
+    "body": "身體",
+    "body_sub": "body part 清單",
     "self_dev": "自我開發",
     "self_dev_sub": "自舉任務"
   },

@@ -372,6 +372,19 @@ export function IconEyeOff(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 🤖 Body — 插座 + 身體部件(body parts registry)
+// 簡化人形輪廓 + 右下角小插座符號(表示可連接的硬體/外部工具)。
+export function IconBody(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="6" r="2.5" />
+      <path d="M8 10 h8 l1 6 H7 z" />
+      <path d="M9 16 v5 M15 16 v5" />
+      <path d="M16 19 h3 v-2 h-3" />
+    </svg>
+  );
+}
+
 // 🎙 Voice profile mic w/ stand — 跟 IconMic 區分
 export function IconVoiceMic(props: SVGProps<SVGSVGElement>) {
   return (
