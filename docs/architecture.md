@@ -113,6 +113,25 @@ Annuli **不是儲存**,Annuli **是服務**:
 
 詳細設計見 [`docs/design/annuli-memory.md`](design/annuli-memory.md)。
 
+### Mori Body Interface
+
+大型能力不再預設塞進 mori-desktop tab。Mori universe 採
+standalone-first, integration-second:每個能力可以是可獨立執行的 body part,
+透過 manifest / local API / event stream / artifact handoff 接回 Mori Desktop。
+Mori Desktop 轉成 body registry、設定中心、cue center、permission broker。
+
+詳細規格見 [Mori Body Interface 決議](mori-body-interface.md)。
+
+### Mori Instance Direction
+
+Mori Desktop 不是 Mori 的全部。Mori 是一個可運行在桌面電腦、服務型機器人、AGV
+車、站點端點、Android phone 或 server 上的 Mori Instance;Mori Desktop 只是其中
+一種 desktop shell / UI / 互動方式。
+未來具身 Mori 的感測器 / 執行器透過 body parts 接入,多個 Mori 透過 hub / center
+協調,World Tree 保留為共享規格、lore、registry 與治理層。
+
+詳細方向見 [Mori Instance Direction 決議](mori-instance-direction.md)。
+
 ---
 
 ## Core Principle
@@ -227,6 +246,11 @@ LLM 通訊抽象。一份 agent 程式碼能打 Groq、Ollama、OpenAI、Anthrop
 - Privacy-first 旗標(`Privacy::LocalOnly` 強制不離本機)
 
 ## 錄音流程(目前實作)
+
+會議錄音的下一階段設計已獨立成 [Meeting Recorder 決議](meeting-recorder.md):
+採 standalone-first 的 Mori Meeting Recorder 專案方向,Observer Mode 多來源多音軌,
+system 軌作客戶版來源,mic 軌作內部備忘來源,並保留即時字幕與未來 Presenter
+Mode 的資料模型。
 
 ```
 使用者按 Ctrl+Alt+Space(toggle 模式 = 一按切換、hold 模式 = 按住開錄)
