@@ -1720,6 +1720,7 @@
 }
 .mori-pill-badge.tone-success {
   background: var(--c-success-bg);
+  /* palette 沒有 --c-success-border token(warning/danger 才有);dark 用字面值,light 在下方覆寫 */
   border-color: rgba(170, 230, 185, 0.30);
   color: var(--c-success-text);
 }
