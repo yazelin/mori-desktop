@@ -6,6 +6,39 @@
 
 ---
 
+## v0.7.6 — Deps 修復 + CLI 偵測補強(2026-05-27)
+
+這版修掉 Linux 本機 Whisper 與 Bash CLI provider 在桌面 app 環境下的兩個實際踩坑:whisper.cpp 官方 release 目前沒有 Linux `whisper-server` 預編譯 binary,以及 GUI app 啟動時不一定吃得到 shell / nvm / wrapper 裡的 CLI 路徑。
+
+### 本機 Whisper / Deps
+
+- **Linux whisper-server 改成自行建置** — Deps 頁不再假設 `whisper-bin-x64.zip` 是 Linux binary;Linux 會從 whisper.cpp `v1.8.4` source 用 CMake 建 CPU 版 `whisper-server`,並把相依 `.so` 放進 `~/.mori/bin/`。
+- **實際執行檢測** — whisper-server 的 Deps check 從「檔案存在」升級成跑 `--help`;缺 `.so`、binary 壞掉、架構不合都會直接顯示錯誤。
+- **同目錄 shared library 可載入** — Mori 啟動 whisper-server 時會把 `~/.mori/bin` 加進 `LD_LIBRARY_PATH`,避免 Linux 上 `libwhisper.so.*` / `libggml*.so.*` 找不到。
+- **Deps 頁補重新安裝 / 修復** — 已安裝但想覆蓋修復的 Shell dep 會顯示「重新安裝 / 修復」;Manual dep 已安裝時仍可展開安裝指令。
+- **Linux build packages 加 `cmake`** — Mori app 本身仍不把 whisper.cpp 編進 binary;只有使用 Deps 安裝 Linux CPU whisper-server 時需要 CMake。
+
+### Codex / Gemini / Claude CLI
+
+- **CLI 偵測補掃使用者層級路徑** — Deps check 與 Bash CLI provider 現在除了 process PATH,也會掃 `~/.local/bin`、`~/.cargo/bin`、Volta、nvm 的 `versions/node/*/bin` 等常見 CLI 安裝位置。
+- **Gemini / Codex / Claude GUI PATH 問題降低** — 從 terminal 可跑、但 Mori GUI 內找不到 `gemini` / `codex` / `claude` 的情況會少很多。
+- **codex-auth-switcher 說明補齊** — switcher 若只提供 shell function,GUI / Rust subprocess 看不到;需要 Mori 走 switcher profile 時,使用可執行 wrapper 並把 provider binary 指向 wrapper。沒裝 switcher 的使用者不需要 wrapper。
+
+### Verified
+
+- `cargo check -p mori-core --lib`
+- `cargo check -p mori-tauri --all-targets`
+- `npm run build`
+- `bash scripts/verify.sh`
+- Linux 實機:whisper.cpp `v1.8.4` CPU server 啟動 ready,同一支 `.m4a` 成功轉錄
+- Linux 實機:乾淨 GUI-like PATH 下 `gemini --version` / `codex --version` 透過 wrapper 可執行
+
+### 升級
+
+無 breaking change。更新到 v0.7.6 後,若 Linux 上既有 `~/.mori/bin/whisper-server` 是壞的或缺 `.so`,到 Deps 頁按「重新安裝 / 修復」。Codex/Gemini/Claude 一般 npm / nvm 安裝可維持短名 `gemini` / `codex` / `claude`;只有需要經過 `codex-auth-switcher` 的使用者才需要 wrapper。
+
+---
+
 ## v0.7.5 — Annuli process controls + release toolchain cleanup(2026-05-27)
 
 這版補上 Mori Desktop 內建的 Annuli process 控制面板，收斂 v0.7.3/v0.7.4 後使用者最容易卡住的狀態:localhost 上已經有舊 Annuli process 在跑，但 Mori 不能接管、也沒有 UI 能清楚告訴你下一步。

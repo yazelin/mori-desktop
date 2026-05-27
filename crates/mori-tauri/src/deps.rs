@@ -90,10 +90,14 @@ impl DepSpec {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind")]
 pub enum CheckSpec {
-    /// `which <bin>` 找 binary
+    /// 找 binary。先用目前 process PATH,再掃常見 user-level CLI 安裝路徑
+    /// (例如 NVM 的 `~/.nvm/versions/node/*/bin`)。
     Which { bin: &'static str },
     /// 檔案存在
     File { path_template: &'static str },
+    /// whisper-server 存在且能啟動。Linux release binary 可能缺同目錄
+    /// shared libraries,只看檔案存在會誤判。
+    WhisperServer { path_template: &'static str },
     /// 跑指令 + 看 stdout 含某字串(例:`ollama list` 看有沒 `qwen3:8b`)
     CommandStdoutContains {
         cmd: &'static str,
@@ -359,13 +363,13 @@ pub fn registry() -> Vec<DepSpec> {
             name: "whisper-server (whisper.cpp 引擎)",
             description: "本機 STT 推理引擎 — whisper.cpp 官方 pre-built HTTP server。\
                           Mori 啟動時 lazy spawn,送 WAV 到 localhost。\
-                          Linux 自動下載 + 解壓 + 放到 ~/.mori/bin/;Windows 給手動步驟。",
+                          Linux 自動 build CPU 版到 ~/.mori/bin/;Windows 給手動步驟。",
             unlocks: "stt_provider=whisper-local 能真的 spawn 起來跑(沒這個就只有 .bin 沒人讀)",
             size_hint: Some("~5-10MB(僅 CPU 版,GPU 版可手動換)"),
             needs_sudo: false,
             platforms: &["linux", "macos", "windows"],
             install_caveat: None,
-            check: CheckSpec::File {
+            check: CheckSpec::WhisperServer {
                 path_template: "$HOME/.mori/bin/whisper-server",
             },
             check_overrides: &[
@@ -374,19 +378,41 @@ pub fn registry() -> Vec<DepSpec> {
                 }),
             ],
             install: InstallSpec::Shell {
-                // 從 whisper.cpp GitHub release 抓 Linux x86_64 build,解壓出
-                // whisper-server。版本固定 pin 一個近期 stable;升級換 tag 即可。
-                // whisper.cpp 官方在 release 提供 ubuntu-22-x64.zip / ubuntu-22-x64.tar.xz,
-                // 內含 whisper-server + 共享 lib。
-                script: "mkdir -p \"$HOME/.mori/bin\" && \
-                         cd /tmp && \
-                         curl -L -o whisper-cpp-bin.zip \
-                           https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip && \
-                         (unzip -o whisper-cpp-bin.zip -d whisper-cpp-bin || tar -xJf whisper-cpp-bin.zip -C whisper-cpp-bin) && \
-                         find whisper-cpp-bin -name 'whisper-server' -type f -executable -exec cp {} \"$HOME/.mori/bin/whisper-server\" \\; && \
-                         chmod +x \"$HOME/.mori/bin/whisper-server\" && \
-                         rm -rf /tmp/whisper-cpp-bin /tmp/whisper-cpp-bin.zip && \
-                         echo \"whisper-server installed to $HOME/.mori/bin/whisper-server\"",
+                // Linux 官方 release 目前沒有穩定的 linux-x64 binary asset;
+                // `whisper-bin-x64.zip` 是 Windows build。Linux 改從固定 tag
+                // build CPU 版 server,再把 shared libraries 一起放進 ~/.mori/bin。
+                script: "set -eu && \
+                         version=v1.8.4 && \
+                         work=\"/tmp/mori-whisper-cpp-$version\" && \
+                         rm -rf \"$work\" && \
+                         mkdir -p \"$work\" \"$HOME/.mori/bin\" && \
+                         cd \"$work\" && \
+                         curl -L -o whisper.cpp.tar.gz \
+                           \"https://github.com/ggml-org/whisper.cpp/archive/refs/tags/$version.tar.gz\" && \
+                         tar -xzf whisper.cpp.tar.gz && \
+                         cmake -S \"whisper.cpp-${version#v}\" -B build \
+                           -DCMAKE_BUILD_TYPE=Release \
+                           -DWHISPER_BUILD_TESTS=OFF \
+                           -DWHISPER_BUILD_EXAMPLES=ON \
+                           -DWHISPER_BUILD_SERVER=ON \
+                           -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+                           -DCMAKE_INSTALL_RPATH='$ORIGIN' && \
+                         cmake --build build --target whisper-server -j\"$(nproc)\" && \
+                         cp -f build/bin/whisper-server \"$HOME/.mori/bin/whisper-server\" && \
+                         cp -f build/src/libwhisper.so.* \"$HOME/.mori/bin/\" && \
+                         cp -f build/ggml/src/libggml*.so.* \"$HOME/.mori/bin/\" && \
+                         cd \"$HOME/.mori/bin\" && \
+                         ln -sf \"$(ls libwhisper.so.*.*.* | sort -V | tail -1)\" libwhisper.so.1 && \
+                         ln -sf libwhisper.so.1 libwhisper.so && \
+                         ln -sf \"$(ls libggml.so.*.*.* | sort -V | tail -1)\" libggml.so.0 && \
+                         ln -sf libggml.so.0 libggml.so && \
+                         ln -sf \"$(ls libggml-base.so.*.*.* | sort -V | tail -1)\" libggml-base.so.0 && \
+                         ln -sf libggml-base.so.0 libggml-base.so && \
+                         ln -sf \"$(ls libggml-cpu.so.*.*.* | sort -V | tail -1)\" libggml-cpu.so.0 && \
+                         ln -sf libggml-cpu.so.0 libggml-cpu.so && \
+                         chmod +x whisper-server libwhisper.so.* libggml*.so.* && \
+                         rm -rf \"$work\" && \
+                         echo \"whisper-server + shared libraries installed to $HOME/.mori/bin\"",
             },
             install_overrides: &[
                 ("windows", InstallSpec::Download {
@@ -1105,35 +1131,161 @@ fn run_check_cmd(cmd: &str, args: &[&str]) -> std::io::Result<std::process::Outp
     c.output()
 }
 
+fn run_whisper_server_probe(path: &std::path::Path) -> std::io::Result<std::process::Output> {
+    let mut c = Command::new(path);
+    c.arg("--help");
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let cur = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        let next = if cur.is_empty() {
+            parent.to_string_lossy().into_owned()
+        } else {
+            format!("{}:{cur}", parent.display())
+        };
+        c.env("LD_LIBRARY_PATH", next);
+    }
+    mori_core::suppress_console_on_windows!(c);
+    c.output()
+}
+
+fn find_executable_detail(bin: &str) -> Option<String> {
+    // Windows 沒 `which`,用 `where.exe`。Linux/macOS 用 `which`。
+    let cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    if let Ok(out) = run_check_cmd(cmd, &[bin]) {
+        if out.status.success() {
+            let detail = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !detail.is_empty() {
+                return Some(detail);
+            }
+        }
+    }
+
+    for candidate in common_user_bin_candidates(bin) {
+        if candidate.is_file() {
+            return Some(candidate.display().to_string());
+        }
+    }
+    None
+}
+
+fn common_user_bin_candidates(bin: &str) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) else {
+        return out;
+    };
+    let home = std::path::PathBuf::from(home);
+
+    let names: Vec<String> = if cfg!(target_os = "windows") {
+        vec![
+            format!("{bin}.exe"),
+            format!("{bin}.cmd"),
+            format!("{bin}.bat"),
+        ]
+    } else {
+        vec![bin.to_string()]
+    };
+
+    for dir in [
+        home.join(".local").join("bin"),
+        home.join(".cargo").join("bin"),
+        home.join(".volta").join("bin"),
+        home.join("AppData").join("Roaming").join("npm"),
+    ] {
+        for name in &names {
+            out.push(dir.join(name));
+        }
+    }
+
+    let nvm_versions = home.join(".nvm").join("versions").join("node");
+    if let Ok(entries) = std::fs::read_dir(nvm_versions) {
+        for entry in entries.flatten() {
+            let dir = entry.path().join("bin");
+            for name in &names {
+                out.push(dir.join(name));
+            }
+        }
+    }
+
+    out
+}
+
 pub fn check_dep(spec: &DepSpec) -> DepStatus {
     // 走 effective_check — 平台特定 override 優先(像 Windows 的 uv 用 .exe 副檔名),
     // 沒有再 fallback 預設(Linux 慣例 path)。
     match spec.effective_check() {
-        CheckSpec::Which { bin } => {
-            // Windows 沒 `which`,用內建的 `where.exe`(Cmd built-in,但 where.exe 是
-            // 真檔案在 System32)。Linux/macOS 用 `which`。
-            let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-            match run_check_cmd(cmd, &[bin]) {
-                Ok(out) if out.status.success() => DepStatus {
-                    id: spec.id,
-                    installed: true,
-                    detail: Some(String::from_utf8_lossy(&out.stdout).trim().to_string()),
-                },
-                _ => DepStatus { id: spec.id, installed: false, detail: None },
-            }
-        }
+        CheckSpec::Which { bin } => match find_executable_detail(bin) {
+            Some(detail) => DepStatus {
+                id: spec.id,
+                installed: true,
+                detail: Some(detail),
+            },
+            None => DepStatus {
+                id: spec.id,
+                installed: false,
+                detail: None,
+            },
+        },
         CheckSpec::File { path_template } => {
             let path = expand_home(path_template);
             match std::fs::metadata(&path) {
                 Ok(meta) => DepStatus {
                     id: spec.id,
                     installed: true,
-                    detail: Some(format!("{path} ({:.1} MB)", meta.len() as f64 / 1024.0 / 1024.0)),
+                    detail: Some(format!(
+                        "{path} ({:.1} MB)",
+                        meta.len() as f64 / 1024.0 / 1024.0
+                    )),
                 },
                 Err(_) => DepStatus {
                     id: spec.id,
                     installed: false,
                     detail: Some(format!("not at {path}")),
+                },
+            }
+        }
+        CheckSpec::WhisperServer { path_template } => {
+            let path = expand_home(path_template);
+            let path_buf = std::path::PathBuf::from(&path);
+            let meta = match std::fs::metadata(&path_buf) {
+                Ok(meta) => meta,
+                Err(_) => {
+                    return DepStatus {
+                        id: spec.id,
+                        installed: false,
+                        detail: Some(format!("not at {path}")),
+                    };
+                }
+            };
+            match run_whisper_server_probe(&path_buf) {
+                Ok(out) if out.status.success() => DepStatus {
+                    id: spec.id,
+                    installed: true,
+                    detail: Some(format!(
+                        "{path} ({:.1} MB)",
+                        meta.len() as f64 / 1024.0 / 1024.0
+                    )),
+                },
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    let msg = if stderr.is_empty() { stdout } else { stderr };
+                    DepStatus {
+                        id: spec.id,
+                        installed: false,
+                        detail: Some(if msg.is_empty() {
+                            format!("{path} exists but failed to run")
+                        } else {
+                            msg
+                        }),
+                    }
+                }
+                Err(e) => DepStatus {
+                    id: spec.id,
+                    installed: false,
+                    detail: Some(format!("{path} exists but probe failed: {e}")),
                 },
             }
         }
@@ -1143,7 +1295,10 @@ pub fn check_dep(spec: &DepSpec) -> DepStatus {
                     let stdout = String::from_utf8_lossy(&out.stdout);
                     if stdout.contains(needle) {
                         // 取含 needle 的那一行當 detail(像 `ollama list` 顯示 size)
-                        let line = stdout.lines().find(|l| l.contains(needle)).unwrap_or(needle);
+                        let line = stdout
+                            .lines()
+                            .find(|l| l.contains(needle))
+                            .unwrap_or(needle);
                         DepStatus {
                             id: spec.id,
                             installed: true,
@@ -1264,8 +1419,8 @@ fn run_download(
 
     // 2. 解壓(目前只支援 .zip)
     let cursor = std::io::Cursor::new(bytes.as_ref());
-    let mut archive = zip::ZipArchive::new(cursor)
-        .map_err(|e| anyhow::anyhow!("open zip archive: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| anyhow::anyhow!("open zip archive: {e}"))?;
 
     let mut extracted = 0usize;
     let want_all = extract_members.is_empty();
@@ -1317,7 +1472,9 @@ fn run_download(
         });
     }
 
-    log.push_str(&format!("==> done, {extracted} file(s) extracted to {dest}\n"));
+    log.push_str(&format!(
+        "==> done, {extracted} file(s) extracted to {dest}\n"
+    ));
     Ok(InstallResult {
         success: true,
         exit_code: None,

@@ -101,21 +101,21 @@
 <p>需要先:</p>
 <ul>
   <li><code>ollama serve</code> + <code>ollama pull qwen3:8b</code>(本機 LLM,<strong>支援 tool calling</strong>)</li>
-  <li><strong>下載 whisper 模型 + 引擎</strong>(Linux 從 Deps tab 一鍵下載;Windows 暫時手動):
+  <li><strong>安裝 whisper 模型 + 引擎</strong>(推薦走 Deps tab;Linux 會建置 CPU 版 server,Windows 會使用官方 release zip 或顯示手動指令):
     <pre><code># 模型(.bin)
 mkdir -p ~/.mori/models
 wget -O ~/.mori/models/ggml-small.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 
-# 引擎(whisper-server[.exe])— 從 whisper.cpp 官方 release 抓
-# https://github.com/ggml-org/whisper.cpp/releases/latest
-# 解壓後把 whisper-server[.exe] 放到 ~/.mori/bin/</code></pre>
+# 引擎(whisper-server[.exe])
+# Linux:v0.7.6+ Deps tab 從 whisper.cpp source 建 CPU 版到 ~/.mori/bin/
+# Windows:Deps tab 下載 whisper.cpp release zip,或手動解壓到 %USERPROFILE%\.mori\bin\</code></pre>
   </li>
 </ul>
 
 <p><strong>中文模型大小取捨</strong>(Intel CPU 實測):base 142MB(快但常分不清同音字)/ small 466MB(夠用)/ medium 1.5GB(更準但慢)。</p>
 
-<h3>架構:Mori 不編 whisper.cpp,改 shell-out 子程序</h3>
+<h3>架構:Mori 不把 whisper.cpp 編進 app binary,改 shell-out 子程序</h3>
 
 <p>v0.2 之後,Mori 不再 in-process 編 whisper.cpp C++ source 進 binary,改成
 <strong>spawn 官方 <code>whisper-server</code> 子程序,HTTP POST WAV 給它</strong>。
@@ -125,7 +125,7 @@ SIGKILL 收尾。</p>
 <p>好處:</p>
 <ul>
   <li><strong>引擎跟模型都可自選 + 隨時換</strong>(下一節)</li>
-  <li><strong>不需要 cmake / libclang</strong> 才能 build Mori — Linux contributor setup 從 5 min 變 1 min</li>
+  <li><strong>Mori app build 不需要 libclang 或把 whisper.cpp 編進去</strong> — Linux Deps 安裝 CPU 引擎時才需要 <code>cmake</code></li>
   <li><strong>跨平台統一</strong> — Windows / Linux / macOS 用同一條 path</li>
   <li><strong>引擎 crash 不會帶死 Mori</strong> — Mori 抓 exit code 報錯,下次自動重啟 server</li>
 </ul>
@@ -133,21 +133,23 @@ SIGKILL 收尾。</p>
 <h3>替換引擎(GPU 加速 / 自編變體)</h3>
 
 <p>whisper.cpp <a href="https://github.com/ggml-org/whisper.cpp/releases">releases</a>
-提供多種預編 binary:</p>
+提供多種預編 binary,但不是每個版本都有 Linux 預編譯檔。v0.7.6 起 Mori 的 Linux Deps
+流程改成從 source 建 CPU 版;Windows / GPU 變體仍可使用 release zip 或自編版本替換。</p>
 
 <table>
   <tr><th>變體</th><th>適合誰</th><th>速度提升</th></tr>
-  <tr><td><code>whisper-bin-x64.zip</code></td><td>所有人預設(純 CPU)</td><td>基準</td></tr>
-  <tr><td><code>whisper-blas-bin-x64.zip</code></td><td>多核心 CPU 想榨更多</td><td>~30%</td></tr>
-  <tr><td><code>whisper-cublas-cuda12-bin-x64.zip</code></td><td>NVIDIA RTX / Tesla</td><td>3-5x</td></tr>
-  <tr><td><code>whisper-clblast-bin-x64.zip</code></td><td>AMD / Intel GPU(OpenCL)</td><td>2-3x</td></tr>
-  <tr><td>macOS binary</td><td>Apple Silicon</td><td>自帶 Metal,2-4x</td></tr>
+  <tr><td>Linux Deps CPU build</td><td>Linux 預設</td><td>基準</td></tr>
+  <tr><td><code>whisper-bin-x64.zip</code></td><td>Windows 預設(純 CPU)</td><td>基準</td></tr>
+  <tr><td><code>whisper-blas-bin-x64.zip</code></td><td>Windows 多核心 CPU 想榨更多</td><td>~30%</td></tr>
+  <tr><td><code>whisper-cublas-*-bin-x64.zip</code></td><td>Windows NVIDIA RTX / Tesla</td><td>3-5x</td></tr>
+  <tr><td>自編 Linux GPU / BLAS 版</td><td>Linux 進階使用者</td><td>依硬體</td></tr>
+  <tr><td>macOS xcframework / 自編 server</td><td>Apple Silicon</td><td>依 backend</td></tr>
 </table>
 
 <p><strong>替換流程</strong>:</p>
 <ol>
-  <li>從 whisper.cpp release 頁下載你要的變體 zip</li>
-  <li>解壓後找出 <code>whisper-server</code>(Linux)或 <code>whisper-server.exe</code>(Win)</li>
+  <li>從 whisper.cpp release 頁下載你要的變體 zip,或在 Linux 自行編出目標變體</li>
+  <li>解壓或建置後找出 <code>whisper-server</code>(Linux)或 <code>whisper-server.exe</code>(Win)</li>
   <li>整套(binary + 相依 <code>.dll</code> / <code>.so</code>)複製到 <code>~/.mori/bin/</code>(Win 是 <code>%USERPROFILE%\.mori\bin\</code>)</li>
   <li>(Unix)<code>chmod +x whisper-server</code></li>
   <li>重啟 Mori — 下次 <code>Ctrl+Alt+Space</code> 起來的就是 GPU 版,<strong>Mori 程式碼一行都不用改</strong></li>
@@ -214,6 +216,18 @@ claude 看 system prompt 知道有 mori CLI → 透過 Bash tool 跑 <code>mori 
 mori CLI HTTP 到主程式 dispatch skill → 結果回 claude → claude 給最終回應。</p>
 
 <p>類似的還有 <code>gemini-bash</code> / <code>codex-bash</code>,把 <code>"binary"</code> 換成 <code>"gemini"</code> / <code>"codex"</code> 即可。</p>
+
+<div class="note">
+  <strong>Linux GUI PATH / nvm / switcher 注意(v0.7.6+)</strong>:
+  Mori 會先用 process PATH 找短名 binary,再補掃 <code>~/.local/bin</code>,
+  <code>~/.cargo/bin</code>,Volta,以及 <code>~/.nvm/versions/node/*/bin</code>。
+  這會涵蓋多數 <code>npm i -g @google/gemini-cli</code> /
+  <code>npm i -g @openai/codex</code> / Claude CLI 安裝情境。
+  但 shell function / alias 不是 executable,GUI app 看不到。若使用
+  <code>codex-auth-switcher</code> 這類切帳工具,請建立實體 wrapper,例如
+  <code>~/.local/bin/codex</code>,再把 <code>providers.codex-bash.binary</code>
+  指到該 wrapper。沒使用 switcher 的話不需要這層 wrapper。
+</div>
 
 <div class="note">
   <strong>Windows 短名 binary 自動探 <code>.cmd</code> shim(v0.4.0+)</strong>:

@@ -922,9 +922,9 @@ fn chat_provider_info(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
 /// 純 API provider(`gemini` / `groq` / `ollama` / 自訂 OpenAI-compat)沒 binary
 /// 需求,return `requires_binary: false`。
 ///
-/// **跨平台:用 `which::which()`(純 Rust)而非 spawn `which` / `where` subprocess**
-/// — Windows 沒 `which` binary(系統用 `where`)。`which::which()` 自己掃 PATH,
-/// 結果一致。
+/// **跨平台:先用 `which::which()` 掃 process PATH,再補掃常見 user-level CLI
+/// 安裝路徑**。桌面 app 常常沒有載入 `.bashrc` / NVM PATH,但使用者其實已經
+/// `npm install -g @openai/codex`。
 fn check_provider_binary(provider_name: &str) -> serde_json::Value {
     let Some(bin) = provider_binary_for(provider_name) else {
         // 純 API provider,不需 binary
@@ -932,7 +932,7 @@ fn check_provider_binary(provider_name: &str) -> serde_json::Value {
             "requires_binary": false,
         });
     };
-    let available = which::which(bin).is_ok();
+    let available = provider_binary_available(bin);
     serde_json::json!({
         "requires_binary": true,
         "binary": bin,
@@ -940,6 +940,46 @@ fn check_provider_binary(provider_name: &str) -> serde_json::Value {
         "suggested_api": suggested_api_fallback(bin),
         "install_hint": install_hint_for(bin),
     })
+}
+
+fn provider_binary_available(bin: &str) -> bool {
+    which::which(bin).is_ok() || common_user_binary_candidates(bin).into_iter().any(|p| p.is_file())
+}
+
+fn common_user_binary_candidates(bin: &str) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) else {
+        return out;
+    };
+    let home = std::path::PathBuf::from(home);
+    let names: Vec<String> = if cfg!(target_os = "windows") {
+        vec![format!("{bin}.exe"), format!("{bin}.cmd"), format!("{bin}.bat")]
+    } else {
+        vec![bin.to_string()]
+    };
+
+    for dir in [
+        home.join(".local").join("bin"),
+        home.join(".cargo").join("bin"),
+        home.join(".volta").join("bin"),
+        home.join("AppData").join("Roaming").join("npm"),
+    ] {
+        for name in &names {
+            out.push(dir.join(name));
+        }
+    }
+
+    let nvm_versions = home.join(".nvm").join("versions").join("node");
+    if let Ok(entries) = std::fs::read_dir(nvm_versions) {
+        for entry in entries.flatten() {
+            let dir = entry.path().join("bin");
+            for name in &names {
+                out.push(dir.join(name));
+            }
+        }
+    }
+
+    out
 }
 
 /// Provider name → 對應 CLI binary。Pure API provider 回 None。
