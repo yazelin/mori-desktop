@@ -5,6 +5,7 @@ mod action_skills;
 mod annuli_commands;
 mod annuli_config;
 mod annuli_supervisor;
+mod body_registry;
 mod character_pack;
 mod context_provider;
 mod correction_audit_config;
@@ -2210,6 +2211,14 @@ fn inspect_artifact(path: String) -> Result<mori_core::body::MoriArtifact, Strin
         return Err(format!("這個檔案不是角色包(zip 裡找不到 manifest.json):{path}"));
     }
     Ok(artifact)
+}
+
+/// BI-1:唯讀掃描 ~/.mori/body-parts/ 回傳 body part 清單。不啟動/不執行任何東西。
+#[tauri::command]
+fn body_registry_list() -> Result<Vec<mori_core::body::DiscoveredBodyPart>, String> {
+    Ok(mori_core::body::scan_body_parts(
+        &crate::body_registry::body_parts_dir(),
+    ))
 }
 
 /// C — annuli 熱重載 command。
@@ -6309,6 +6318,7 @@ fn main() {
             character_delete,
             character_export,
             inspect_artifact,
+            body_registry_list,
             file_loader_cmd::read_file_text_cmd,
             reminders_cmd::remind_me_cmd,
             reminders_cmd::list_reminders_cmd,
@@ -6476,6 +6486,12 @@ fn main() {
             // manifest.json + 6 張 sprite PNG 從 binary 內嵌寫入,已存在不覆蓋。
             if let Err(e) = crate::character_pack::ensure_default() {
                 tracing::warn!(error = %e, "character_pack::ensure_default failed");
+            }
+
+            // BI-1:ensure ~/.mori/body-parts/mori.moripack-studio/manifest.json。
+            // bundled MoriPack Studio manifest 寫入,已存在不覆蓋(user 可能改過)。
+            if let Err(e) = crate::body_registry::ensure_bundled_body_parts() {
+                tracing::warn!(error = %e, "ensure_bundled_body_parts failed (non-fatal)");
             }
 
             // Phase 3A.1.2:ensure ~/.mori/wakeword/sounds/(wake-ack 預設檔 + 5 個備選)。

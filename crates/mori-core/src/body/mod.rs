@@ -3,7 +3,14 @@
 //! manifest / event / permission / cue 等型別。
 
 pub mod artifact;
+pub mod manifest;
+pub mod registry;
 
 pub use artifact::{
     classify_artifact, MoriArtifact, SuggestedAction, Visibility, KIND_CHARACTER_PACK,
 };
+pub use manifest::{
+    manifest_status, parse_manifest, BodyKind, BodyManifest, DataPolicy, Entrypoints, Interface,
+    ManifestStatus, Transport, SUPPORTED_MANIFEST_SCHEMA,
+};
+pub use registry::{scan_body_parts, DiscoveredBodyPart};

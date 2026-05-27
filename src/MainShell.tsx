@@ -20,6 +20,7 @@ import ConfigTab from "./tabs/ConfigTab";
 import MemoryTab from "./tabs/MemoryTab";
 import AnnuliTab from "./tabs/AnnuliTab";
 import SkillsTab from "./tabs/SkillsTab";
+import BodyTab from "./tabs/BodyTab";
 import DepsTab from "./tabs/DepsTab";
 import LogsTab from "./tabs/LogsTab";
 import RecordingsTab from "./tabs/RecordingsTab";
@@ -27,7 +28,7 @@ import TranscribeTab from "./tabs/TranscribeTab";
 import CorrectionsTab from "./tabs/CorrectionsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
-  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic, IconPencil,
+  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic, IconPencil, IconBody,
 } from "./icons";
 import { toggleTheme, loadActiveTheme } from "./theme";
 import { setLocale, nextLocale } from "./i18n";
@@ -48,6 +49,7 @@ const TABS: TabDef[] = [
   { id: "memory",   Icon: IconMemory,   key: "memory" },
   { id: "annuli",   Icon: IconAnnuli,   key: "annuli" },
   { id: "skills",   Icon: IconSkills,   key: "skills" },
+  { id: "body",     Icon: IconBody,     key: "body" },
   { id: "transcribe", Icon: IconTranscribe, key: "transcribe" },
   { id: "recordings", Icon: IconMic,    key: "recordings" },
   { id: "corrections", Icon: IconPencil, key: "corrections" },
@@ -208,6 +210,7 @@ function MainShell() {
         {tab === "memory" && <MemoryTab />}
         {tab === "annuli" && <AnnuliTab />}
         {tab === "skills" && <SkillsTab />}
+        {tab === "body" && <BodyTab />}
         {tab === "transcribe" && <TranscribeTab />}
         {tab === "recordings" && <RecordingsTab />}
         {tab === "corrections" && <CorrectionsTab />}

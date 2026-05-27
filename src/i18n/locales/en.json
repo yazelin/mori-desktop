@@ -39,6 +39,8 @@
     "recordings_sub": "Voice session replay",
     "corrections": "Corrections",
     "corrections_sub": "STT inbox / dictionary",
+    "body": "Body",
+    "body_sub": "body parts registry",
     "self_dev": "Self Dev",
     "self_dev_sub": "Bootstrap tasks"
   },
@@ -540,6 +542,18 @@
     "batch_save_all_button": "Save all .transcript.txt"
   }
 
+  ,"body_tab": {
+    "title": "Body Parts",
+    "refresh": "Refresh",
+    "hint": "Scans local body part manifests (read-only; never launches or runs anything)",
+    "empty": "No body parts yet.",
+    "capabilities": "Capabilities",
+    "interfaces": "Interfaces",
+    "status_valid": "✓ OK",
+    "status_unsupported": "⚠ Unsupported version",
+    "status_parse_error": "✗ Parse failed",
+    "parse_error_name": "(unparseable)"
+  }
   ,"self_dev_tab": {
     "title": "Self Dev (Phase B + D Gate)",
     "hint": "Run Codex-powered self-development tasks under explicit human controls, then review the diff through the release gate.",

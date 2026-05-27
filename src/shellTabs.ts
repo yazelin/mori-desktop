@@ -5,11 +5,12 @@ export const SHELL_TAB_IDS = [
   "memory",
   "annuli",
   "skills",
-  "deps",
-  "logs",
+  "body",
   "transcribe",
   "recordings",
   "corrections",
+  "deps",
+  "logs",
 ] as const;
 
 export type TabId = (typeof SHELL_TAB_IDS)[number];
