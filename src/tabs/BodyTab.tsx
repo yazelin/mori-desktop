@@ -43,7 +43,7 @@ export default function BodyTab() {
       <p style={{ opacity: 0.7, fontSize: 12 }}>
         {t("body_tab.hint")} (<code>~/.mori/body-parts/</code>)
       </p>
-      {err && <div style={{ color: "rgba(255,160,160,.95)", fontSize: 12 }}>❌ {err}</div>}
+      {err && <div className="mori-tab-error" style={{ fontSize: 12 }}>❌ {err}</div>}
       {parts.length === 0 && !err && <div style={{ opacity: 0.6 }}>{t("body_tab.empty")}</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {parts.map((p) => (
@@ -60,7 +60,7 @@ export default function BodyTab() {
             {p.manifest?.interfaces?.length ? (
               <div style={{ fontSize: 12 }}>{t("body_tab.interfaces")}: {p.manifest.interfaces.map((i) => `${i.name}(${i.transport})`).join(", ")}</div>
             ) : null}
-            {p.detail && <div style={{ fontSize: 12, color: "rgba(255,160,160,.95)" }}>{p.detail}</div>}
+            {p.detail && <div className="mori-tab-error" style={{ fontSize: 12 }}>{p.detail}</div>}
             <div style={{ fontSize: 10, opacity: 0.4, wordBreak: "break-all", marginTop: 4 }}>{p.source}</div>
           </div>
         ))}
@@ -71,11 +71,11 @@ export default function BodyTab() {
 
 function StatusBadge({ status }: { status: string }) {
   const { t } = useTranslation();
-  const map: Record<string, { label: string; c: string }> = {
-    valid: { label: t("body_tab.status_valid"), c: "rgba(140,220,160,.9)" },
-    unsupported_schema: { label: t("body_tab.status_unsupported"), c: "rgba(230,200,120,.9)" },
-    parse_error: { label: t("body_tab.status_parse_error"), c: "rgba(255,160,160,.95)" },
+  const map: Record<string, { label: string; tone: string }> = {
+    valid: { label: t("body_tab.status_valid"), tone: "tone-success" },
+    unsupported_schema: { label: t("body_tab.status_unsupported"), tone: "tone-warning" },
+    parse_error: { label: t("body_tab.status_parse_error"), tone: "tone-danger" },
   };
-  const s = map[status] ?? { label: status, c: "var(--c-text-muted)" };
-  return <span style={{ fontSize: 11, color: s.c }}>{s.label}</span>;
+  const s = map[status] ?? { label: status, tone: "tone-neutral" };
+  return <span className={`mori-pill-badge ${s.tone}`}>{s.label}</span>;
 }

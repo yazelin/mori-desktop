@@ -77,7 +77,7 @@ export default function PermissionsTab() {
       <p style={{ opacity: 0.7, fontSize: 12 }}>
         {t("permissions_tab.hint")} (<code>~/.mori/permission-audit.jsonl</code>)
       </p>
-      {err && <div style={{ color: "rgba(255,160,160,.95)", fontSize: 12 }}>❌ {err}</div>}
+      {err && <div className="mori-tab-error" style={{ fontSize: 12 }}>❌ {err}</div>}
 
       <h3 style={{ marginBottom: 6 }}>{t("permissions_tab.policy_title")}</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 16 }}>
@@ -121,11 +121,11 @@ export default function PermissionsTab() {
 
 function DecisionBadge({ decision }: { decision: string }) {
   const { t } = useTranslation();
-  const map: Record<string, { label: string; c: string }> = {
-    allow: { label: t("permissions_tab.decision_allow"), c: "rgba(140,220,160,.9)" },
-    ask: { label: t("permissions_tab.decision_ask"), c: "rgba(230,200,120,.9)" },
-    deny: { label: t("permissions_tab.decision_deny"), c: "rgba(255,160,160,.95)" },
+  const map: Record<string, { label: string; tone: string }> = {
+    allow: { label: t("permissions_tab.decision_allow"), tone: "tone-success" },
+    ask: { label: t("permissions_tab.decision_ask"), tone: "tone-warning" },
+    deny: { label: t("permissions_tab.decision_deny"), tone: "tone-danger" },
   };
-  const s = map[decision] ?? { label: decision, c: "var(--c-text-muted)" };
-  return <span style={{ fontSize: 11, color: s.c, fontWeight: 600 }}>{s.label}</span>;
+  const s = map[decision] ?? { label: decision, tone: "tone-neutral" };
+  return <span className={`mori-pill-badge ${s.tone}`}>{s.label}</span>;
 }
