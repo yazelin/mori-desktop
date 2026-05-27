@@ -9,6 +9,7 @@
   --c-page-bg:             #1f3329;
   --c-sidebar-bg:          #172620;
   --c-surface-bg:          #243a31;
+  --c-bg:                  #243a31;
   --c-input-bg:            rgba(0, 0, 0, 0.30);
   --c-input-focus-bg:      rgba(0, 0, 0, 0.42);
   --c-divider:             rgba(230, 222, 202, 0.08);
@@ -22,6 +23,7 @@
   --c-sidebar-text:        rgba(243, 240, 230, 0.65);
   --c-sidebar-text-active: rgba(243, 240, 230, 0.98);
   --c-sidebar-hover-bg:    rgba(230, 222, 202, 0.05);
+  --c-sidebar-active-bg:   rgba(106, 143, 114, 0.22);
   --c-active-bg:           rgba(106, 143, 114, 0.22);
   --c-active-border:       rgba(168, 197, 162, 0.45);
   --c-primary-bg:          rgba(106, 143, 114, 0.28);
@@ -38,7 +40,10 @@
   --c-warning-border:      rgba(255, 200, 100, 0.25);
   --c-warning-text:        rgba(255, 220, 170, 0.95);
   --c-success-bg:          rgba(170, 230, 185, 0.10);
+  --c-success-border:      rgba(170, 230, 185, 0.30);
   --c-success-text:        rgba(190, 240, 200, 0.95);
+  --c-mono-bg:             rgba(168, 197, 162, 0.10);
+  --c-mono-border:         rgba(168, 197, 162, 0.25);
   --c-mono-color:          rgba(168, 197, 162, 0.92);
   --c-kbd-bg:              rgba(230, 222, 202, 0.08);
   --c-kbd-border:          rgba(230, 222, 202, 0.18);
@@ -57,6 +62,9 @@
   /* level meter gradient */
   --c-meter-from:            rgba(106, 143, 114, 0.80);
   --c-meter-to:              rgba(168, 197, 162, 0.90);
+  /* brand greens — 之前散在 .tsx 用 hex fallback(#6a8c5a / #8db077),提成 token */
+  --c-forest:                #6a8c5a;
+  --c-forest-light:          #8db077;
 }
 
 .mori-shell {
@@ -1720,8 +1728,7 @@
 }
 .mori-pill-badge.tone-success {
   background: var(--c-success-bg);
-  /* palette 沒有 --c-success-border token(warning/danger 才有);dark 用字面值,light 在下方覆寫 */
-  border-color: rgba(170, 230, 185, 0.30);
+  border-color: var(--c-success-border);
   color: var(--c-success-text);
 }
 .mori-pill-badge.tone-warning {
