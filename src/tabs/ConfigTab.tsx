@@ -39,6 +39,15 @@ type CharacterEntry = {
 
 const MORI_SPRITE_STUDIO_URL = "https://mori-sprite-studio.vercel.app/";
 
+interface MoriArtifact {
+  artifact_id: string;
+  kind: string;
+  path: string;
+  visibility: string;
+  mime: string;
+  suggested_actions: string[];
+}
+
 type SaveStatus =
   | { kind: "idle" }
   | { kind: "saving" }
@@ -511,6 +520,7 @@ function CharacterPicker() {
   const [msg, setMsg] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [pending, setPending] = useState<MoriArtifact | null>(null);
 
   const refresh = async () => {
     try {
@@ -544,27 +554,44 @@ function CharacterPicker() {
     }
   };
 
-  const onImport = async () => {
+  const onPickFile = async () => {
     const selected = await openDialog({
       multiple: false,
       filters: [{ name: "Mori character pack", extensions: ["zip", "moripack"] }],
     });
     if (!selected || typeof selected !== "string") return;
+    setImportError(null);
+    try {
+      const artifact = await invoke<MoriArtifact>("inspect_artifact", { path: selected });
+      setPending(artifact); // 顯示可見、可取消的 handoff 確認，先不動 vault/角色
+    } catch (e: any) {
+      setImportError(String(e));
+    }
+  };
+
+  const onConfirmImport = async () => {
+    if (!pending) return;
     setImporting(true);
     setImportError(null);
     try {
       const entry = await invoke<CharacterEntry>("character_pack_import_zip", {
-        zipPath: selected,
+        zipPath: pending.path,
       });
       await refresh();
       setActive(entry.stem);
       setMsg(`✅ 已匯入:${entry.display_name} by ${entry.author}`);
       setTimeout(() => setMsg(null), 4000);
+      setPending(null);
     } catch (e: any) {
       setImportError(String(e));
     } finally {
       setImporting(false);
     }
+  };
+
+  const onCancelImport = () => {
+    setPending(null);
+    setImportError(null);
   };
 
   const onOpenSpriteStudio = () => {
@@ -605,7 +632,7 @@ function CharacterPicker() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="mori-btn" onClick={onImport} disabled={importing || busy}>
+            <button className="mori-btn" onClick={onPickFile} disabled={importing || busy}>
               {importing ? "匯入中…" : "匯入 .moripack.zip"}
             </button>
             <button className="mori-btn ghost" onClick={onOpenSpriteStudio}>
@@ -613,6 +640,35 @@ function CharacterPicker() {
             </button>
             {msg && <span style={{ fontSize: 12, opacity: 0.8 }}>{msg}</span>}
           </div>
+          {pending && (
+            <div
+              style={{
+                border: "1px solid var(--c-border)",
+                borderRadius: 8,
+                padding: 10,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                fontSize: 12,
+              }}
+            >
+              <div>
+                Mori 認得這個檔案:<strong>角色包</strong>(<code>{pending.kind}</code>)
+              </div>
+              <div style={{ opacity: 0.8 }}>
+                可見度:{pending.visibility} · 可做:{pending.suggested_actions.join(" → ")}
+              </div>
+              <div style={{ opacity: 0.6, wordBreak: "break-all" }}>{pending.path}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="mori-btn" onClick={onConfirmImport} disabled={importing}>
+                  {importing ? "匯入中…" : "確認匯入並套用"}
+                </button>
+                <button className="mori-btn ghost" onClick={onCancelImport} disabled={importing}>
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
           {importError && (
             <div style={{ color: "rgba(255, 160, 160, 0.95)", fontSize: 12 }}>
               ❌ 匯入失敗:{importError}
