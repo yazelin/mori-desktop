@@ -2189,8 +2189,15 @@ fn character_dir() -> String {
 /// 這是 Body Interface「handoff 要可見、可取消」原則的入口。
 #[tauri::command]
 fn inspect_artifact(path: String) -> Result<mori_core::body::MoriArtifact, String> {
-    mori_core::body::classify_artifact(std::path::Path::new(&path))
-        .ok_or_else(|| format!("Mori 不認得這個檔案:{path}"))
+    let p = std::path::Path::new(&path);
+    let artifact = mori_core::body::classify_artifact(p)
+        .ok_or_else(|| format!("Mori 不認得這個檔案:{path}"))?;
+    if artifact.kind == mori_core::body::KIND_CHARACTER_PACK
+        && !crate::character_pack::zip_has_character_manifest(p)
+    {
+        return Err(format!("這個檔案不是角色包(zip 裡找不到 manifest.json):{path}"));
+    }
+    Ok(artifact)
 }
 
 /// C — annuli 熱重載 command。

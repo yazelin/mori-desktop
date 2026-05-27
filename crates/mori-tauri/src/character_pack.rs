@@ -324,6 +324,19 @@ pub fn import_zip(zip_bytes: &[u8]) -> Result<CharacterEntry> {
     })
 }
 
+/// 輕量確認一個檔案是不是角色包候選:能當 zip 打開且裡面有 `manifest.json`。
+/// 不做完整 schema / sprite 驗證(那是 import_zip 的事),只回答「值不值得當角色包對待」。
+pub fn zip_has_character_manifest(path: &std::path::Path) -> bool {
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return false;
+    };
+    let has_manifest = archive.by_name("manifest.json").is_ok();
+    has_manifest
+}
+
 fn validate_manifest(m: &CharacterManifest) -> Result<()> {
     if !m.schema_version.starts_with("1.") {
         anyhow::bail!(
@@ -512,5 +525,41 @@ mod tests {
         // 但 backup 階段已執行(若 ~/.mori/characters/test-pack/ 存在會 rename)— 在 CI / test env 通常不存在,OK。
         let res = import_zip(&zip_bytes);
         assert!(res.is_err(), "should reject path traversal");
+    }
+
+    // ── zip_has_character_manifest tests ────────────────────────────────────
+
+    #[test]
+    fn zip_has_character_manifest_returns_true_when_manifest_present() {
+        let m = make_valid_manifest();
+        let zip_bytes = build_zip_with(&m, &[], &[]);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let zip_path = tmp.path().join("pack.zip");
+        std::fs::write(&zip_path, &zip_bytes).unwrap();
+        assert!(super::zip_has_character_manifest(&zip_path));
+    }
+
+    #[test]
+    fn zip_has_character_manifest_returns_false_when_manifest_absent() {
+        let mut buf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts: zip::write::SimpleFileOptions = Default::default();
+            w.start_file("some_other_file.txt", opts).unwrap();
+            w.write_all(b"no manifest here").unwrap();
+            w.finish().unwrap();
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let zip_path = tmp.path().join("no_manifest.zip");
+        std::fs::write(&zip_path, &buf).unwrap();
+        assert!(!super::zip_has_character_manifest(&zip_path));
+    }
+
+    #[test]
+    fn zip_has_character_manifest_returns_false_for_non_zip_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let fake_path = tmp.path().join("not_a_zip.zip");
+        std::fs::write(&fake_path, b"not a zip").unwrap();
+        assert!(!super::zip_has_character_manifest(&fake_path));
     }
 }

@@ -66,10 +66,13 @@ impl MoriArtifact {
 /// 看一個本機檔案路徑,判斷 Mori 認不認得它、能對它做什麼。
 /// 認得 → artifact envelope;不認得 → `None`。
 ///
+/// **Extension-based candidate detection only** — 只看副檔名,不讀檔案內容。
 /// BI-0 只認 character pack(`.moripack.zip` / `.moripack` / `.zip`)。
-/// 真正的內容驗證仍在 import 時做(manifest / required sprites / zip-slip)。
-/// `.zip` 是 speculative 接受(任何 zip 都可能是角色包);真正的內容驗證
-/// (manifest / required sprites / zip-slip)在 import 時做,會濾掉誤判。
+///
+/// 真正的內容驗證分兩層:
+/// - inspect 層(`inspect_artifact` Tauri command):peek zip 確認 `manifest.json` 存在,
+///   拒絕無 manifest 的一般 zip,確保 UI 呈現真實。
+/// - import 層(`import_zip`):完整 manifest schema + 6 required sprites + zip-slip 防護。
 pub fn classify_artifact(path: &Path) -> Option<MoriArtifact> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     if name.ends_with(".moripack.zip") || name.ends_with(".moripack") || name.ends_with(".zip") {
