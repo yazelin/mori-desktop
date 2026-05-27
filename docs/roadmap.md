@@ -237,6 +237,10 @@ input 格式跟 voice transcript 對接。
 
 - **媒體下載** — 「下載這個影片」呼叫 yt-dlp(shell_skill 包)
 - **ExecCommand 白名單** — 「跑那個指令」要先有白名單 + 二次確認機制
+- **Mori Body Interface** — standalone-first body parts 架構:manifest / local API /
+  event stream / artifact handoff / permission broker,讓 Mori Ear、Mori Meeting
+  Recorder、Agent Plus 等部件能獨立執行又低耦合接回 Mori Desktop。詳見
+  [Mori Body Interface 決議](mori-body-interface.md)。
 - **Mori Meeting Recorder** — standalone-first 獨立專案:Observer Mode 多來源多音軌錄音,
   system 軌作客戶版會議紀錄,mic 軌作內部備忘,即時字幕分流;詳見
   [Meeting Recorder 決議](meeting-recorder.md)。mori-desktop 後續只做低耦合整合,

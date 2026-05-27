@@ -113,6 +113,15 @@ Annuli **不是儲存**,Annuli **是服務**:
 
 詳細設計見 [`docs/design/annuli-memory.md`](design/annuli-memory.md)。
 
+### Mori Body Interface
+
+大型能力不再預設塞進 mori-desktop tab。Mori universe 採
+standalone-first, integration-second:每個能力可以是可獨立執行的 body part,
+透過 manifest / local API / event stream / artifact handoff 接回 Mori Desktop。
+Mori Desktop 轉成 body registry、設定中心、cue center、permission broker。
+
+詳細規格見 [Mori Body Interface 決議](mori-body-interface.md)。
+
 ---
 
 ## Core Principle
