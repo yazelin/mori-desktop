@@ -337,6 +337,76 @@ pub fn zip_has_character_manifest(path: &std::path::Path) -> bool {
     has_manifest
 }
 
+/// 判斷一個角色包能不能刪。純函式,不碰 filesystem。
+/// 擋:空字串、內建 default(`mori`)、路徑分隔符 / `..`、以及「目前 active」的那個。
+pub fn ensure_deletable(stem: &str, active: &str) -> Result<()> {
+    if stem.is_empty() || stem.contains('/') || stem.contains('\\') || stem.contains("..") {
+        anyhow::bail!("不合法的角色包名稱:{stem}");
+    }
+    if stem == DEFAULT_PACKAGE_NAME {
+        anyhow::bail!("內建角色「{stem}」不能刪除。");
+    }
+    if stem == active {
+        anyhow::bail!("「{stem}」是目前使用中的角色,請先切換到別的角色再刪。");
+    }
+    Ok(())
+}
+
+/// 刪除一個已安裝的角色包(整個資料夾)。低風險:角色包只是本機視覺素材,不碰 memory/Annuli。
+pub fn delete(stem: &str) -> Result<()> {
+    ensure_deletable(stem, &get_active())?;
+    let dir = pack_dir(stem);
+    if !dir.exists() {
+        anyhow::bail!("角色包不存在:{stem}");
+    }
+    std::fs::remove_dir_all(&dir).with_context(|| format!("remove pack dir {dir:?}"))?;
+    Ok(())
+}
+
+/// 把一個資料夾遞迴打包成 zip 寫到 dest。zip 內路徑相對 src、用 forward slash,
+/// 因此產物結構同 import 期待(manifest.json + sprites/ + backdrops),可被 import_zip 再匯入。
+pub fn export_dir(src: &Path, dest: &Path) -> Result<()> {
+    let file = std::fs::File::create(dest).with_context(|| format!("create {dest:?}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts: zip::write::SimpleFileOptions = Default::default();
+    fn add(
+        zip: &mut zip::ZipWriter<std::fs::File>,
+        root: &Path,
+        cur: &Path,
+        opts: &zip::write::SimpleFileOptions,
+    ) -> Result<()> {
+        use std::io::Write;
+        let mut entries: Vec<_> = std::fs::read_dir(cur)?.collect::<std::result::Result<_, _>>()?;
+        entries.sort_by_key(|e| e.path()); // 穩定順序
+        for entry in entries {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                zip.add_directory(format!("{rel}/"), *opts)?;
+                add(zip, root, &path, opts)?;
+            } else {
+                zip.start_file(rel, *opts)?;
+                zip.write_all(&std::fs::read(&path)?)?;
+            }
+        }
+        Ok(())
+    }
+    add(&mut zip, src, src, &opts)?;
+    zip.finish()?;
+    Ok(())
+}
+
+/// 把已安裝的角色包重新打包成 `.moripack.zip` 寫到 dest(dest 由呼叫端 save dialog 決定)。
+pub fn export(stem: &str, dest: &Path) -> Result<()> {
+    if !manifest_path(stem).exists() {
+        anyhow::bail!("角色包不存在或缺 manifest:{stem}");
+    }
+    export_dir(&pack_dir(stem), dest)
+}
+
 fn validate_manifest(m: &CharacterManifest) -> Result<()> {
     if !m.schema_version.starts_with("1.") {
         anyhow::bail!(
@@ -561,5 +631,80 @@ mod tests {
         let fake_path = tmp.path().join("not_a_zip.zip");
         std::fs::write(&fake_path, b"not a zip").unwrap();
         assert!(!super::zip_has_character_manifest(&fake_path));
+    }
+
+    // ── ensure_deletable tests ───────────────────────────────────────────────
+
+    #[test]
+    fn ensure_deletable_refuses_empty() {
+        assert!(ensure_deletable("", "mori").is_err());
+    }
+
+    #[test]
+    fn ensure_deletable_refuses_builtin_mori() {
+        let err = ensure_deletable("mori", "other").unwrap_err().to_string();
+        assert!(err.contains("內建角色"));
+    }
+
+    #[test]
+    fn ensure_deletable_refuses_slash() {
+        assert!(ensure_deletable("a/b", "mori").is_err());
+    }
+
+    #[test]
+    fn ensure_deletable_refuses_backslash() {
+        assert!(ensure_deletable("a\\b", "mori").is_err());
+    }
+
+    #[test]
+    fn ensure_deletable_refuses_dotdot() {
+        assert!(ensure_deletable("..", "mori").is_err());
+    }
+
+    #[test]
+    fn ensure_deletable_refuses_active_pack() {
+        let err = ensure_deletable("foo", "foo").unwrap_err().to_string();
+        assert!(err.contains("使用中"));
+    }
+
+    #[test]
+    fn ensure_deletable_allows_normal_non_active() {
+        assert!(ensure_deletable("foo", "mori").is_ok());
+    }
+
+    // ── export_dir tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn export_dir_creates_importable_zip_structure() {
+        let src_tmp = tempfile::TempDir::new().unwrap();
+        let src = src_tmp.path();
+
+        // manifest.json at root
+        let manifest = make_valid_manifest();
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        std::fs::write(src.join("manifest.json"), manifest_json.as_bytes()).unwrap();
+
+        // sprites/idle.png
+        std::fs::create_dir_all(src.join("sprites")).unwrap();
+        std::fs::write(src.join("sprites").join("idle.png"), b"fake png bytes").unwrap();
+
+        // output zip
+        let dest_tmp = tempfile::TempDir::new().unwrap();
+        let dest = dest_tmp.path().join("pack.moripack.zip");
+
+        export_dir(src, &dest).expect("export_dir ok");
+
+        // verify zip contents
+        let file = std::fs::File::open(&dest).unwrap();
+        let mut archive = zip::ZipArchive::new(file).expect("valid zip");
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.contains(&"manifest.json".to_string()), "missing manifest.json; got {names:?}");
+        assert!(names.contains(&"sprites/idle.png".to_string()), "missing sprites/idle.png; got {names:?}");
+        // no backslashes in any path
+        for name in &names {
+            assert!(!name.contains('\\'), "path contains backslash: {name}");
+        }
     }
 }
