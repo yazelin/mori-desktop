@@ -68,6 +68,8 @@ impl MoriArtifact {
 ///
 /// BI-0 只認 character pack(`.moripack.zip` / `.moripack` / `.zip`)。
 /// 真正的內容驗證仍在 import 時做(manifest / required sprites / zip-slip)。
+/// `.zip` 是 speculative 接受(任何 zip 都可能是角色包);真正的內容驗證
+/// (manifest / required sprites / zip-slip)在 import 時做,會濾掉誤判。
 pub fn classify_artifact(path: &Path) -> Option<MoriArtifact> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     if name.ends_with(".moripack.zip") || name.ends_with(".moripack") || name.ends_with(".zip") {
@@ -155,5 +157,11 @@ mod tests {
     fn classify_rejects_unknown_extension() {
         assert!(classify_artifact(Path::new("/x/notes.txt")).is_none());
         assert!(classify_artifact(Path::new("/x/no-extension")).is_none());
+    }
+
+    #[test]
+    fn classify_is_case_insensitive() {
+        assert!(classify_artifact(Path::new("/x/PACK.ZIP")).is_some());
+        assert!(classify_artifact(Path::new("/x/Mori.MoriPack.Zip")).is_some());
     }
 }
