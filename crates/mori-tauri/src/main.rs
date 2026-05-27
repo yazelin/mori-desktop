@@ -20,6 +20,7 @@ mod gmail_cmd;
 mod hotkey_config;
 mod mcp_cmd;
 mod notification_config;
+mod permission_broker;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
@@ -2219,6 +2220,28 @@ fn body_registry_list() -> Result<Vec<mori_core::body::DiscoveredBodyPart>, Stri
     Ok(mori_core::body::scan_body_parts(
         &crate::body_registry::body_parts_dir(),
     ))
+}
+
+/// BI-2:評估一筆 permission request → allow/deny/ask,並寫 audit log。
+/// audit 寫不下去 → Err(fail-safe:記不下來的授權不算數,呼叫端應視同 deny)。
+#[tauri::command]
+fn permission_decide(
+    request: mori_core::body::PermissionRequest,
+) -> Result<mori_core::body::BrokerResponse, String> {
+    crate::permission_broker::decide(&request)
+}
+
+/// BI-2:讀 audit log 最後 `limit` 筆(新到舊),唯讀。
+/// 回傳型別刻意是 `Vec`(非 `Result`):`read_audit_tail` 無法失敗,缺檔 / 壞行都降級成空。
+#[tauri::command]
+fn permission_audit_list(limit: usize) -> Vec<mori_core::body::PermissionAuditEntry> {
+    mori_core::body::read_audit_tail(&crate::permission_broker::audit_path(), limit)
+}
+
+/// BI-2:回傳目前的預設政策表(risk class → 預設決策),供 UI 顯示。唯讀。
+#[tauri::command]
+fn permission_policy_list() -> Vec<mori_core::body::PolicyRule> {
+    mori_core::body::default_policy().rules
 }
 
 /// C — annuli 熱重載 command。
@@ -6319,6 +6342,9 @@ fn main() {
             character_export,
             inspect_artifact,
             body_registry_list,
+            permission_decide,
+            permission_audit_list,
+            permission_policy_list,
             file_loader_cmd::read_file_text_cmd,
             reminders_cmd::remind_me_cmd,
             reminders_cmd::list_reminders_cmd,

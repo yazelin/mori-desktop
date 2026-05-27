@@ -41,6 +41,8 @@
     "corrections_sub": "STT 校正盒 / 字典",
     "body": "身體",
     "body_sub": "body part 清單",
+    "permissions": "權限",
+    "permissions_sub": "Permission broker / audit",
     "self_dev": "自我開發",
     "self_dev_sub": "自舉任務"
   },
@@ -553,6 +555,19 @@
     "status_unsupported": "⚠ 版本不支援",
     "status_parse_error": "✗ 解析失敗",
     "parse_error_name": "(無法解析)"
+  }
+  ,"permissions_tab": {
+    "title": "權限 broker",
+    "refresh": "重新整理",
+    "hint": "body part / agent 的工具請求經 broker 依風險分級裁決,每筆寫進 audit log(唯讀)",
+    "policy_title": "預設政策",
+    "demo_title": "示範 / 測試",
+    "demo_hint": "送一條假請求穿過 broker(示範 allow / ask / deny 三路徑;會寫進下方 audit log)。",
+    "audit_title": "稽核紀錄(audit log)",
+    "audit_empty": "還沒有任何裁決紀錄。",
+    "decision_allow": "✓ 允許",
+    "decision_ask": "？ 詢問",
+    "decision_deny": "✗ 拒絕"
   }
   ,"self_dev_tab": {
     "title": "自我開發（Phase B + D Gate）",

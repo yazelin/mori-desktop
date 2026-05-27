@@ -1705,6 +1705,64 @@
   color: #4A2D78;
 }
 
+/* BI-1/BI-2 — body registry status + permission decision badges。
+   Pill 樣式,雙 theme:dark 走 --c-*-text token;light 用 forest-deep 暗字拉對比
+   (同 .mori-skill-kind / .mori-memory-type 的作法)。新 UI 一律用這組,別寫死 rgba。 */
+.mori-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.mori-pill-badge.tone-success {
+  background: var(--c-success-bg);
+  /* palette 沒有 --c-success-border token(warning/danger 才有);dark 用字面值,light 在下方覆寫 */
+  border-color: rgba(170, 230, 185, 0.30);
+  color: var(--c-success-text);
+}
+.mori-pill-badge.tone-warning {
+  background: var(--c-warning-bg);
+  border-color: var(--c-warning-border);
+  color: var(--c-warning-text);
+}
+.mori-pill-badge.tone-danger {
+  background: var(--c-danger-bg);
+  border-color: var(--c-danger-border);
+  color: var(--c-danger-text);
+}
+.mori-pill-badge.tone-neutral {
+  background: var(--c-kbd-bg);
+  border-color: var(--c-border-strong);
+  color: var(--c-text-muted);
+}
+[data-theme-base="light"] .mori-pill-badge.tone-success {
+  background: rgba(106, 143, 114, 0.20);
+  border-color: rgba(106, 143, 114, 0.55);
+  color: #2C4A3D;
+}
+[data-theme-base="light"] .mori-pill-badge.tone-warning {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #945A0A;
+}
+[data-theme-base="light"] .mori-pill-badge.tone-danger {
+  background: rgba(214, 84, 84, 0.16);
+  border-color: rgba(214, 84, 84, 0.50);
+  color: #8A2D2D;
+}
+
+/* tab 內錯誤字:dark 用 danger token,light 換深紅拉對比 */
+.mori-tab-error {
+  color: var(--c-danger-text);
+}
+[data-theme-base="light"] .mori-tab-error {
+  color: #8A2D2D;
+}
+
 /* light theme:把所有「淺綠 text on 淺底」的位置都改成 forest-deep 暗字,
    保持綠色語意但拉高對比 */
 [data-theme-base="light"] .mori-tab-placeholder code,

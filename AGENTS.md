@@ -23,6 +23,7 @@ The repository is part of the Mori universe. Preserve the existing poetic Tradit
 - Do not write to `mori-journal` identity or memory files if that private repo is present. Only write under `projects/` after explicit authorization.
 - Keep setup dependencies in this repo. Use `scripts/install-linux-deps.sh`; do not fetch setup logic from another repository.
 - annuli integration should go over HTTP, not direct Python imports.
+- UI colors must use the theme tokens, never hardcoded values. The app has dual themes (dark/light/custom); `theme.ts::applyTheme()` rewrites the `--c-*` variables on `:root` at startup, so any color in a `.tsx`/CSS must be `var(--c-...)` (full list at the top of `src/shell.css`). Hardcoded inline `rgba(...)`/hex will not follow theme switches and won't match the palette. For status/severity badges use the `.mori-pill-badge tone-{success,warning,danger,neutral}` classes and `.mori-tab-error` for error text (defined in `shell.css` with `[data-theme-base="light"]` overrides); add new badge colors in `shell.css` following the `.mori-skill-kind` / `.mori-memory-type` pattern, not inline in components.
 - Keep changes narrow. Do not reformat unrelated files or rewrite large surfaces unless the task explicitly requires it.
 
 ## Setup

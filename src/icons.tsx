@@ -385,6 +385,16 @@ export function IconBody(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 🛡 Permissions — 盾牌(權限 broker / audit)。
+export function IconPermissions(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3 l7 3 v5 c0 4.5 -3 7.5 -7 9 c-4 -1.5 -7 -4.5 -7 -9 V6 z" />
+      <path d="M9 12 l2 2 l4 -4" />
+    </svg>
+  );
+}
+
 // 🎙 Voice profile mic w/ stand — 跟 IconMic 區分
 export function IconVoiceMic(props: SVGProps<SVGSVGElement>) {
   return (

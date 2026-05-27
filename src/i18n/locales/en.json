@@ -41,6 +41,8 @@
     "corrections_sub": "STT inbox / dictionary",
     "body": "Body",
     "body_sub": "body parts registry",
+    "permissions": "Permissions",
+    "permissions_sub": "Permission broker / audit",
     "self_dev": "Self Dev",
     "self_dev_sub": "Bootstrap tasks"
   },
@@ -553,6 +555,19 @@
     "status_unsupported": "⚠ Unsupported version",
     "status_parse_error": "✗ Parse failed",
     "parse_error_name": "(unparseable)"
+  }
+  ,"permissions_tab": {
+    "title": "Permission Broker",
+    "refresh": "Refresh",
+    "hint": "Tool requests from body parts / agents are brokered by risk class; every decision is written to an audit log (read-only)",
+    "policy_title": "Default policy",
+    "demo_title": "Demo / test",
+    "demo_hint": "Send a fake request through the broker (demonstrates allow / ask / deny; it is written to the audit log below).",
+    "audit_title": "Audit log",
+    "audit_empty": "No decisions yet.",
+    "decision_allow": "✓ allow",
+    "decision_ask": "？ ask",
+    "decision_deny": "✗ deny"
   }
   ,"self_dev_tab": {
     "title": "Self Dev (Phase B + D Gate)",
