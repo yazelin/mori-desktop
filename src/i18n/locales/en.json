@@ -43,6 +43,8 @@
     "body_sub": "body parts registry",
     "permissions": "Permissions",
     "permissions_sub": "Permission broker / audit",
+    "pulse": "Pulse",
+    "pulse_sub": "AI session monitor (AgentPulse)",
     "self_dev": "Self Dev",
     "self_dev_sub": "Bootstrap tasks"
   },
@@ -644,5 +646,17 @@
     "copy_recovery_checklist": "Copy recovery checklist",
     "release_gate_status": "Release gate: {{status}}",
     "copy_release_gate": "Copy release gate status"
+  }
+  ,"pulse_tab": {
+    "title": "Pulse",
+    "refresh": "Refresh",
+    "hint": "Subscribes to AgentPulse: which AI coding session is running / waiting for you / done (read-only; notifications come from the AgentPulse capsule).",
+    "not_running": "AgentPulse not found (not running, or not registered yet). Start AgentPulse and refresh.",
+    "sessions_title": "Active sessions",
+    "sessions_empty": "No sessions right now.",
+    "cues_title": "Cues",
+    "cues_empty": "No cues yet.",
+    "cue_waiting": "？ waiting",
+    "cue_done": "✓ done"
   }
 }

@@ -395,6 +395,15 @@ export function IconPermissions(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// 💓 Pulse — 心跳波形(agent session 脈搏)。
+export function IconPulse(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 12 h4 l2 -6 l3 12 l2 -6 h5" />
+    </svg>
+  );
+}
+
 // 🎙 Voice profile mic w/ stand — 跟 IconMic 區分
 export function IconVoiceMic(props: SVGProps<SVGSVGElement>) {
   return (

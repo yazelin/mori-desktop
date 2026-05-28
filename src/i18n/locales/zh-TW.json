@@ -43,6 +43,8 @@
     "body_sub": "body part 清單",
     "permissions": "權限",
     "permissions_sub": "Permission broker / audit",
+    "pulse": "脈搏",
+    "pulse_sub": "AI session 監控(AgentPulse)",
     "self_dev": "自我開發",
     "self_dev_sub": "自舉任務"
   },
@@ -644,5 +646,17 @@
     "copy_recovery_checklist": "複製失敗回復清單",
     "release_gate_status": "發版門檻狀態：{{status}}",
     "copy_release_gate": "複製發版門檻狀態"
+  }
+  ,"pulse_tab": {
+    "title": "脈搏",
+    "refresh": "重新整理",
+    "hint": "訂閱 AgentPulse:看哪個 AI coding session 在跑 / 等你輸入 / 跑完了(唯讀;通知由 AgentPulse 膠囊發)。",
+    "not_running": "找不到 AgentPulse(沒啟動,或還沒註冊)。開著 AgentPulse 再重新整理。",
+    "sessions_title": "進行中的 session",
+    "sessions_empty": "目前沒有 session。",
+    "cues_title": "提示(cue)",
+    "cues_empty": "還沒有 cue。",
+    "cue_waiting": "？ 等輸入",
+    "cue_done": "✓ 跑完"
   }
 }
