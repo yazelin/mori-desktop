@@ -146,9 +146,12 @@ target/
 dist/
 node_modules/
 src-tauri/target/
+src-tauri/gen/
 .DS_Store
 *.swp
 ```
+
+> `src-tauri/gen/`:Tauri 2 的 `generate_context!` macro 編譯時 auto-generate `schemas/` 到這(會弄髒 working tree)。對齊 mori-desktop 慣例。
 
 - [ ] **Step 3: package.json**
 
@@ -168,7 +171,6 @@ src-tauri/target/
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-single-instance": "^2.0.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-i18next": "^14.0.0",
@@ -458,15 +460,18 @@ npm run tauri dev
 MIT
 ```
 
-- [ ] **Step 8: npm install + 第一次 cargo check**
+- [ ] **Step 8: npm install + 第一次 frontend build + cargo check**
 
 ```bash
 cd ~/mori-universe/mori-meeting-recorder
 npm install 2>&1 | tail -3
+npm run build 2>&1 | tail -3       # 先 build frontend 出 dist/(Tauri generate_context! 需要)
 (cd src-tauri && cargo check 2>&1 | tail -3)
 ```
 
-Expected: 兩條都跑完無 error。Tauri 第一次 build 會慢(~5-10 min download + compile deps),這只是 `check`,應該 ~30-60s。
+Expected: 三條都跑完無 error。Tauri 第一次 cargo check 會慢(~5-15 min download + compile Tauri 2 + libpulse-binding 等 ~300 crates),最後綠燈。
+
+> 注意:**`npm run build` 必須在 cargo check 之前跑一次**(產生 `dist/`),否則 `generate_context!` macro 找不到 `frontendDist` panic。後續 `scripts/verify.sh`(Task 12)會把這個 order 寫進去。
 
 - [ ] **Step 9: 第一個 commit + push**
 
