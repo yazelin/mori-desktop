@@ -50,8 +50,8 @@
 | 1 | MVP 範圍 | Option A 最小可行 | 先把 standalone 雙軌 + 停止後轉錄收斂成可 ship 的東西,live captions / handoff 等迭代 |
 | 2 | Repo 名 / 可見性 / license | `mori-meeting-recorder`,public,MIT | 對齊 AgentPulse |
 | 3 | GUI stack | Tauri 2 + React | family 一致(mori-desktop / AgentPulse 同套);frontend 與 audio runtime 同 binary |
-| 4 | Platform scope | Linux + Windows MVP | cpal 一個 lib 兩平台都 cover loopback;macOS 等 core 穩定再補 |
-| 5 | Audio lib | cpal 0.15 + hound 3.5(對齊 mori-desktop)+ 平台 glue 找 loopback device | 跟 mori-desktop 同 stack,Linux 走 `.monitor` device,Windows 走 WASAPI loopback flag |
+| 4 | Platform scope | Linux + Windows MVP | 平台 native lib(各家最自然);macOS 等 core 穩定再補(屆時加 CoreAudio impl) |
+| 5 | Audio lib | **Linux: `libpulse-binding`(PA client API,PipeWire 完全相容)+ hound**;**Windows: `cpal` 0.15 WASAPI loopback + hound**(對齊 mori-desktop) | **Spike(2026-05-28)發現 cpal 0.15 Linux 只走 ALSA host,看不到 PipeWire `.monitor` source**(monitor 是 pulse 抽象層,ALSA 不認識)。OBS 也是平台 native 路線(`linux-pulseaudio` + `linux-pipewire` + `win-wasapi` 各一個 plugin),不走 gstreamer — 零外部 system deps、低延遲、error 可控、長期 backend 切換容易。本 repo 同模式:`audio/{linux,windows}.rs` 分檔(原本就分),只是 Linux impl 用 libpulse 取代 cpal,上層 `audio::open_capture(SourceKind, PathBuf) → CaptureHandle` interface 不變 |
 | 6 | STT 整合 | shell-out `whisper.cpp` CLI,各自 bundle install script | standalone-first(model 在 user filesystem `~/.mori/models/`,兩 repo 共享 via convention 不 via IPC);parallel via `tokio::join!` |
 | 7 | BI-1 wiring | self-register `~/.mori/body-parts/mori.meeting-recorder/manifest.json`,kind=StandaloneApp,interfaces=[] | 跟 AgentPulse 同模式但沒 HTTP/SSE(MVP 沒對外 endpoint) |
 | 8 | GUI 主視覺 | Floating capsule(AgentPulse 風)+ 雙擊展開,**單視窗切 size** | yazelin 想要快速操作 + 收音狀態一目了然;避開「主視窗 vs 膠囊 sync」雙視窗問題 |
@@ -82,7 +82,7 @@ mori-meeting-recorder/               (新 public repo,MIT)
 │       ├── recorder.rs              (session lifecycle: start/stop/status)
 │       ├── audio/
 │       │   ├── mod.rs               (AudioCapture trait)
-│       │   ├── linux.rs             (cpal + find .monitor input device)
+│       │   ├── linux.rs             (libpulse-binding — list pulse sources, record monitor by name)
 │       │   ├── windows.rs           (cpal + WASAPI loopback config)
 │       │   └── writer.rs            (hound WavWriter,per-track,16kHz mono 16-bit)
 │       ├── session_store.rs         (~/.mori/meetings/<id>/ 目錄佈局 + path getter)
@@ -406,7 +406,7 @@ Write-Host "✓ ready: $bin\whisper-cli.exe + $models\ggml-small.bin"
 
 ### Manual e2e(實機跑一次)
 
-**Linux 先全跑一次,Windows 在 cpal loopback glue 寫完後同樣流程跑一次**(用一台 Windows 機,或 VM 加音訊 passthrough)。
+**Linux 先全跑一次,Windows 在 cpal WASAPI loopback glue 寫完後同樣流程跑一次**(用一台 Windows 機,或 VM 加音訊 passthrough)。
 
 1. 開 mori-meeting-recorder
 2. 確認膠囊預設 collapsed,雙擊展開
@@ -438,7 +438,8 @@ for d in host.input_devices()? {
 
 | 風險 | 緩解 |
 |---|---|
-| cpal Linux PipeWire `.monitor` device 不一致 | 先 spike;失敗則 fallback gstreamer-rs(後備方案,不在 MVP 主路徑) |
+| libpulse Linux:PipeWire monitor source 命名 / 可見性可能因 distro / 配置不一致 | Spike 已驗證 yazelin 機器有 6 個 monitor source(HDMI / 內建喇叭 / USB mic);若 user 機器沒,UI 提示「跑 `pactl load-module module-loopback`」(後續 follow-up:DepsTab 加自動偵測) |
+| Windows cpal WASAPI loopback 在 cpal 0.15 行為未實機驗證 | Task 8 完成後在 Windows 機 e2e;若 cpal `default_output_device + build_input_stream` 不走 loopback,fallback 直接調 `windows` crate WASAPI(spec 視為 follow-up,不擋 MVP Linux ship) |
 | Tauri 2 transparent + alwaysOnTop on Wayland 行為 | mori-desktop 有經驗(`feedback_no_force_gdk_x11`);走 Wayland native,X11 fallback |
 | whisper.cpp release binary 名稱在不同版本可能不同(`whisper-cli` vs `main`) | install script pin `WHISPER_VERSION`;DepsTab 也 detect 兩個檔名 |
 | Windows WASAPI loopback 需要 device 是「正在輸出」才能拿到 samples | doc UI 明示;靜音 / 沒輸出時 SYS pill 顯示灰(不是錯誤) |
