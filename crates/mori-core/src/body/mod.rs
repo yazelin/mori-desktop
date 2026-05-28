@@ -7,6 +7,7 @@ pub mod manifest;
 pub mod registry;
 pub mod permission;
 pub mod permission_audit;
+pub mod cue_state;
 
 pub use artifact::{
     classify_artifact, MoriArtifact, SuggestedAction, Visibility, KIND_CHARACTER_PACK,
@@ -22,4 +23,7 @@ pub use permission::{
 };
 pub use permission_audit::{
     append_audit, broker_decide, read_audit_tail, PermissionAuditEntry,
+};
+pub use cue_state::{
+    append_state, is_snooze_active, read_state_map, CueAction, CueStateEntry,
 };
