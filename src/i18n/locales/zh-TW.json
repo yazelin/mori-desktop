@@ -657,6 +657,15 @@
     "cues_title": "提示(cue)",
     "cues_empty": "還沒有 cue。",
     "cue_waiting": "？ 等輸入",
-    "cue_done": "✓ 跑完"
+    "cue_done": "✓ 跑完",
+    "cue_ack": "已看",
+    "cue_snooze": "稍後",
+    "cue_snooze_5m": "5 分後",
+    "cue_snooze_15m": "15 分後",
+    "cue_snooze_1h": "1 小時後",
+    "cue_jump": "開資料夾",
+    "cue_dismiss": "移除",
+    "cue_acked": "(已看)",
+    "cue_no_cwd": "找不到資料夾"
   }
 }

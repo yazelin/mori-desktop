@@ -657,6 +657,15 @@
     "cues_title": "Cues",
     "cues_empty": "No cues yet.",
     "cue_waiting": "？ waiting",
-    "cue_done": "✓ done"
+    "cue_done": "✓ done",
+    "cue_ack": "Ack",
+    "cue_snooze": "Snooze",
+    "cue_snooze_5m": "5 min",
+    "cue_snooze_15m": "15 min",
+    "cue_snooze_1h": "1 hour",
+    "cue_jump": "Open folder",
+    "cue_dismiss": "Dismiss",
+    "cue_acked": "(acked)",
+    "cue_no_cwd": "No cwd"
   }
 }

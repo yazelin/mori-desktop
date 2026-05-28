@@ -181,16 +181,113 @@ function CueBadge({ type }: { type: string }) {
   return <span className="mori-pill-badge tone-neutral">{type}</span>;
 }
 
-// 真正的 action row 在 Task 4 寫。Task 3 先放 placeholder 讓 build 過。
 function CueRow(
-  { cue, effective }:
+  { cue, effective, session, onChanged }:
     { cue: Cue; effective: Effective; session: SessionInfo | null; onChanged: () => void }
 ) {
+  const { t } = useTranslation();
+  const cwd = session?.cwd ?? null;
+  const acked = effective === "acked";
+
+  const set = async (action: "ack" | "dismiss" | "snooze", snooze_until?: string) => {
+    try {
+      await invoke("cue_state_set", {
+        eventId: cue.event_id,
+        action,
+        snoozeUntil: snooze_until ?? null,
+      });
+      onChanged();
+    } catch { /* 寫失敗忽略,UI 不卡 */ }
+  };
+  const snooze = (mins: number) =>
+    set("snooze", new Date(Date.now() + mins * 60_000).toISOString());
+
+  const jump = async () => {
+    if (!cwd) return;
+    try { await invoke("cue_open_path", { path: cwd }); } catch { /* 開不到不擾 */ }
+  };
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, opacity: effective === "acked" ? 0.55 : 1 }}>
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+        opacity: acked ? 0.55 : 1,
+        border: "1px solid var(--c-border)", borderRadius: 6, padding: "6px 8px",
+      }}
+    >
       <CueBadge type={cue.type} />
       <span>{cue.summary}</span>
+      {acked && (
+        <span className="mori-pill-badge tone-neutral" style={{ fontSize: 10 }}>
+          {t("pulse_tab.cue_acked")}
+        </span>
+      )}
       <span style={{ fontSize: 10, opacity: 0.4, marginLeft: "auto" }}>{cue.time}</span>
+
+      <div style={{ display: "flex", gap: 4 }}>
+        {!acked && (
+          <button className="mori-btn small ghost" onClick={() => set("ack")}>
+            {t("pulse_tab.cue_ack")}
+          </button>
+        )}
+        {!acked && (
+          <SnoozeMenu
+            label={t("pulse_tab.cue_snooze")}
+            options={[
+              { mins: 5, label: t("pulse_tab.cue_snooze_5m") },
+              { mins: 15, label: t("pulse_tab.cue_snooze_15m") },
+              { mins: 60, label: t("pulse_tab.cue_snooze_1h") },
+            ]}
+            onPick={snooze}
+          />
+        )}
+        <button
+          className="mori-btn small ghost"
+          disabled={!cwd}
+          title={cwd ?? t("pulse_tab.cue_no_cwd")}
+          onClick={jump}
+        >
+          {t("pulse_tab.cue_jump")}
+        </button>
+        <button className="mori-btn small ghost" onClick={() => set("dismiss")}>
+          {t("pulse_tab.cue_dismiss")}
+        </button>
+      </div>
     </div>
+  );
+}
+
+function SnoozeMenu(
+  { label, options, onPick }:
+    { label: string; options: { mins: number; label: string }[]; onPick: (mins: number) => void }
+) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative" }}>
+      <button className="mori-btn small ghost" onClick={() => setOpen((v) => !v)}>
+        {label}
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute", right: 0, top: "100%", marginTop: 4,
+            background: "var(--c-surface-bg)", border: "1px solid var(--c-border)",
+            borderRadius: 6, padding: 4, zIndex: 10,
+            display: "flex", flexDirection: "column", gap: 2, minWidth: 96,
+          }}
+        >
+          {options.map((o) => (
+            <button
+              key={o.mins}
+              className="mori-btn small ghost"
+              style={{ justifyContent: "flex-start" }}
+              onClick={() => { onPick(o.mins); setOpen(false); }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
