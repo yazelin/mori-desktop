@@ -74,16 +74,16 @@ export default function PulseTab() {
   const notRunning = base === null;
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>{t("pulse_tab.title")}</h2>
+    <div className="mori-tab">
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <h2 className="mori-tab-title" style={{ marginBottom: 0 }}>{t("pulse_tab.title")}</h2>
         <button className="mori-btn small ghost" onClick={() => { discover(); refreshSessions(); }}>
           {t("pulse_tab.refresh")}
         </button>
       </div>
-      <p style={{ opacity: 0.7, fontSize: 12 }}>{t("pulse_tab.hint")}</p>
-      {err && <div className="mori-tab-error" style={{ fontSize: 12 }}>❌ {err}</div>}
-      {notRunning && <div style={{ opacity: 0.6 }}>{t("pulse_tab.not_running")}</div>}
+      <p className="mori-tab-hint">{t("pulse_tab.hint")}</p>
+      {err && <div className="mori-tab-error" style={{ fontSize: 12, marginBottom: 12 }}>❌ {err}</div>}
+      {notRunning && <div className="mori-tab-placeholder">{t("pulse_tab.not_running")}</div>}
 
       {!notRunning && (
         <>

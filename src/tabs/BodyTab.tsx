@@ -35,16 +35,16 @@ export default function BodyTab() {
   useEffect(() => { refresh(); }, []);
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>{t("body_tab.title")}</h2>
+    <div className="mori-tab">
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <h2 className="mori-tab-title" style={{ marginBottom: 0 }}>{t("body_tab.title")}</h2>
         <button className="mori-btn small ghost" onClick={refresh}>{t("body_tab.refresh")}</button>
       </div>
-      <p style={{ opacity: 0.7, fontSize: 12 }}>
+      <p className="mori-tab-hint">
         {t("body_tab.hint")} (<code>~/.mori/body-parts/</code>)
       </p>
-      {err && <div className="mori-tab-error" style={{ fontSize: 12 }}>❌ {err}</div>}
-      {parts.length === 0 && !err && <div style={{ opacity: 0.6 }}>{t("body_tab.empty")}</div>}
+      {err && <div className="mori-tab-error" style={{ fontSize: 12, marginBottom: 12 }}>❌ {err}</div>}
+      {parts.length === 0 && !err && <div className="mori-tab-placeholder">{t("body_tab.empty")}</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {parts.map((p) => (
           <div key={p.source} style={{ border: "1px solid var(--c-border)", borderRadius: 8, padding: 10 }}>
