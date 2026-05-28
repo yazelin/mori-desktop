@@ -19,6 +19,7 @@ mod file_loader_cmd;
 mod gmail_cmd;
 mod hotkey_config;
 mod mcp_cmd;
+mod cue_state;
 mod notification_config;
 mod permission_broker;
 #[cfg(target_os = "linux")]
@@ -2242,6 +2243,44 @@ fn permission_audit_list(limit: usize) -> Vec<mori_core::body::PermissionAuditEn
 #[tauri::command]
 fn permission_policy_list() -> Vec<mori_core::body::PolicyRule> {
     mori_core::body::default_policy().rules
+}
+
+/// BI-4:列出 cue 狀態 map(event_id → 最後 action)。唯讀。
+#[tauri::command]
+fn cue_state_list() -> std::collections::HashMap<String, mori_core::body::CueAction> {
+    crate::cue_state::list()
+}
+
+/// BI-4:寫一筆 cue action。`snooze_until` 只在 action="snooze" 時讀。
+#[tauri::command]
+fn cue_state_set(
+    event_id: String,
+    action: String,
+    snooze_until: Option<String>,
+) -> Result<(), String> {
+    let act = match action.as_str() {
+        "ack" => mori_core::body::CueAction::Ack,
+        "dismiss" => mori_core::body::CueAction::Dismiss,
+        "snooze" => {
+            let until = snooze_until.ok_or_else(|| "snooze requires snooze_until".to_string())?;
+            mori_core::body::CueAction::Snooze { until }
+        }
+        other => return Err(format!("unknown action: {other}")),
+    };
+    crate::cue_state::append_now(&event_id, act)
+}
+
+/// BI-4:把 session cwd 丟給系統開檔器(jump action)。
+/// 走 action_skills::platform::open_url(同一份 xdg-open / ShellExecuteExW 實作),
+/// 跟既有 `open_profile_dir` 一樣 — 對目錄就會開 file manager。
+#[tauri::command]
+fn cue_open_path(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("empty path".to_string());
+    }
+    crate::action_skills::open_url_for_quickstart(trimmed)
+        .map_err(|e| format!("open {trimmed}: {e}"))
 }
 
 /// C — annuli 熱重載 command。
@@ -6345,6 +6384,9 @@ fn main() {
             permission_decide,
             permission_audit_list,
             permission_policy_list,
+            cue_state_list,
+            cue_state_set,
+            cue_open_path,
             file_loader_cmd::read_file_text_cmd,
             reminders_cmd::remind_me_cmd,
             reminders_cmd::list_reminders_cmd,
