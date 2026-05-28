@@ -105,6 +105,7 @@
 - **BI-2 done** ✅(2026-05-28,branch `feat/bi-2-permission-broker`)= permission envelope(`PermissionRequest`/`BrokerResponse`)+ 10-class 預設政策 + 純函式 `evaluate`(未知 risk → deny)+ append-only audit log(`~/.mori/permission-audit.jsonl`)+ 唯讀 Permissions tab(政策表 / audit / demo 三路徑)。一條 fake `exec.destructive` 被 broker 攔下並寫 audit;allow/deny/ask 三路徑都有 test。**未做**(刻意):互動式 ask 解析 UI、user-editable policy、lease(等真實 requester BI-3/BI-5)。
 - **BI-3 done** ✅(2026-05-28)= AgentPulse(`yazelin/AgentPulse`,現居 `~/mori-universe/AgentPulse`)加 body-interface 對外口 —— `mori_bridge` + hook_server GET `/health`·`/manifest`·`/sessions`·`/events`(SSE)+ CORS,啟動寫 `~/.mori/body-parts/mori.agent-pulse/manifest.json`(PR `yazelin/AgentPulse#1`,偵測核心沿用既有 hooks 不動)。mori-desktop 唯讀「脈搏」tab 用 BI-1 registry 發現它、webview 直接 `fetch /sessions` + `EventSource /events`(CSP=null,localhost 直連;CORS `*`),顯示 session 清單 + cue(event_id dedup 不重複)。通知仍由 AgentPulse 膠囊發(§766 不重複)。**待手測 e2e**:跑一個 Codex session → tab 收到 waiting_input / done cue。
   > 註:「Agent Plus」是早期 doc 的 typo,正名 **AgentPulse**(Agent / session **pulse**)。
+- **BI-4 done** ✅(2026-05-28,branch `feat/bi-4-cue-center`)= PulseTab 每筆 cue 升級成可操作 —— ack / snooze(5m/15m/1h)/ jump / dismiss。狀態 append 到 `~/.mori/cue-state.jsonl`(`mori_core::body::cue_state`,replay last-action-wins per event_id;corrupt-line 跳過、缺檔降級空 map),3 個 Tauri command:`cue_state_list` / `cue_state_set` / `cue_open_path`。ack 淡顯仍在 log(只剩 dismiss 可按)、snooze 過期自動復活(前端 30 秒 tick re-render)、jump 走 `action_skills::platform::open_url`(xdg-open / ShellExecuteExW)直接打開 session cwd(cwd 缺則 disable 並 tooltip 提示)、dismiss 永久從畫面消失。配色全走 `var(--c-*)` token,按鈕用 `.mori-btn small ghost`。**未做**(刻意):cross-cue bulk ops、cue 歷史頁(留給有需要再做)、lease(broker P8 同樣 defer)。
 - **BI-5 done** = 依 meeting-recorder.md 的 e2e,public/internal 軌分流 + handoff 不自動讀 private raw audio。
 
 ---
@@ -143,6 +144,6 @@
 
 ---
 
-**Last updated**: 2026-05-27
+**Last updated**: 2026-05-28
 **Owner**: yazelin
-**Next action**: 寫 BI-0(MoriPack)per-slice implementation plan → TDD → code
+**Next action**: 寫 BI-5(Meeting Recorder standalone)per-slice implementation plan → TDD → code
