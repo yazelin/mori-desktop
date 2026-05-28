@@ -8,6 +8,7 @@ interface DiscoveredBodyPart { source: string; status: string; manifest: BodyMan
 
 interface SessionInfo {
   id: string; provider: string; state: string; project_name: string;
+  cwd?: string | null;
   is_active: boolean; formatted_time: string;
 }
 interface SessionsSnapshot { sessions: SessionInfo[]; active_count: number; }
@@ -16,12 +17,36 @@ interface Cue {
   summary: string; time: string;
 }
 
+// last-action-wins 的本地 state map(由 cue_state_list 回填,SSE 不帶這個)。
+// serde tag = "kind" + snake_case rename。
+type CueAction =
+  | { kind: "ack" }
+  | { kind: "snooze"; until: string }
+  | { kind: "dismiss" };
+type CueStateMap = Record<string, CueAction>;
+
+type Effective = "unread" | "acked" | "snoozed" | "dismissed";
+
+function effectiveState(cueId: string, state: CueStateMap, nowIso: string): Effective {
+  const a = state[cueId];
+  if (!a) return "unread";
+  if (a.kind === "ack") return "acked";
+  if (a.kind === "dismiss") return "dismissed";
+  if (a.kind === "snooze") {
+    // 字串字典序對 RFC3339 偏移混雜不安全,走 timestamp 比。
+    return new Date(a.until).getTime() > new Date(nowIso).getTime() ? "snoozed" : "unread";
+  }
+  return "unread";
+}
+
 export default function PulseTab() {
   const { t } = useTranslation();
   const [base, setBase] = useState<string | null>(null);
   const [sseUrl, setSseUrl] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [cues, setCues] = useState<Cue[]>([]);
+  const [cueState, setCueState] = useState<CueStateMap>({});
+  const [now, setNow] = useState<string>(() => new Date().toISOString());
   const [err, setErr] = useState<string | null>(null);
   const seen = useRef<Set<string>>(new Set());
 
@@ -71,13 +96,28 @@ export default function PulseTab() {
     return () => es.close();
   }, [sseUrl]);
 
+  // 4) BI-4:載 cue state map(ack / snooze / dismiss 持久化在 ~/.mori/cue-state.jsonl)。
+  const reloadCueState = async () => {
+    try {
+      const m = await invoke<CueStateMap>("cue_state_list");
+      setCueState(m ?? {});
+    } catch { /* 缺檔 → 空 map */ }
+  };
+  useEffect(() => { reloadCueState(); }, []);
+
+  // 5) 30 秒 tick 推 `now`,讓過期 snooze 自動復活。
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date().toISOString()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const notRunning = base === null;
 
   return (
     <div className="mori-tab">
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
         <h2 className="mori-tab-title" style={{ marginBottom: 0 }}>{t("pulse_tab.title")}</h2>
-        <button className="mori-btn small ghost" onClick={() => { discover(); refreshSessions(); }}>
+        <button className="mori-btn small ghost" onClick={() => { discover(); refreshSessions(); reloadCueState(); }}>
           {t("pulse_tab.refresh")}
         </button>
       </div>
@@ -105,13 +145,18 @@ export default function PulseTab() {
           <h3 style={{ marginBottom: 6 }}>{t("pulse_tab.cues_title")}</h3>
           {cues.length === 0 && <div style={{ opacity: 0.6 }}>{t("pulse_tab.cues_empty")}</div>}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {cues.map((c) => (
-              <div key={c.event_id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <CueBadge type={c.type} />
-                <span>{c.summary}</span>
-                <span style={{ fontSize: 10, opacity: 0.4, marginLeft: "auto" }}>{c.time}</span>
-              </div>
-            ))}
+            {cues
+              .map((c) => ({ c, eff: effectiveState(c.event_id, cueState, now) }))
+              .filter(({ eff }) => eff !== "dismissed" && eff !== "snoozed")
+              .map(({ c, eff }) => (
+                <CueRow
+                  key={c.event_id}
+                  cue={c}
+                  effective={eff}
+                  session={sessions.find((s) => s.id === c.session_id) ?? null}
+                  onChanged={reloadCueState}
+                />
+              ))}
           </div>
         </>
       )}
@@ -134,4 +179,18 @@ function CueBadge({ type }: { type: string }) {
   if (type === "cue.done")
     return <span className="mori-pill-badge tone-success">{t("pulse_tab.cue_done")}</span>;
   return <span className="mori-pill-badge tone-neutral">{type}</span>;
+}
+
+// 真正的 action row 在 Task 4 寫。Task 3 先放 placeholder 讓 build 過。
+function CueRow(
+  { cue, effective }:
+    { cue: Cue; effective: Effective; session: SessionInfo | null; onChanged: () => void }
+) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, opacity: effective === "acked" ? 0.55 : 1 }}>
+      <CueBadge type={cue.type} />
+      <span>{cue.summary}</span>
+      <span style={{ fontSize: 10, opacity: 0.4, marginLeft: "auto" }}>{cue.time}</span>
+    </div>
+  );
 }
