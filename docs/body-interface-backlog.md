@@ -103,7 +103,8 @@
 - **BI-0 done** ✅(2026-05-27,branch `feat/bi-0-artifact-handoff`,待 Task 4 手測 + merge)= 能從 Appearance 開 Studio → 匯入 zip → 驗證(zip-slip / manifest / required sprites)→ 套用 → floating sprite reload;且匯入前走正式 `mori_core::body::MoriArtifact` envelope(`inspect_artifact`),handoff 可見可取消。
 - **BI-1 done** ✅(2026-05-28,branch `feat/bi-1-body-registry`)= Desktop 掃 `~/.mori/body-parts/` 顯示 ≥1 個 manifest(MoriPack Studio,啟動自動寫入)+ 唯讀 BodyTab 顯示 name/kind/能力/狀態(valid/unsupported_schema/parse_error);**完全沒有** write/exec/啟停按鈕。health=靜態有效性(live 探測留 BI-3)。
 - **BI-2 done** ✅(2026-05-28,branch `feat/bi-2-permission-broker`)= permission envelope(`PermissionRequest`/`BrokerResponse`)+ 10-class 預設政策 + 純函式 `evaluate`(未知 risk → deny)+ append-only audit log(`~/.mori/permission-audit.jsonl`)+ 唯讀 Permissions tab(政策表 / audit / demo 三路徑)。一條 fake `exec.destructive` 被 broker 攔下並寫 audit;allow/deny/ask 三路徑都有 test。**未做**(刻意):互動式 ask 解析 UI、user-editable policy、lease(等真實 requester BI-3/BI-5)。
-- **BI-3 done** = 跑一個 Codex session,Desktop 能收到 waiting_input / done cue(不重複)。
+- **BI-3 done** ✅(2026-05-28)= AgentPulse(`yazelin/AgentPulse`,現居 `~/mori-universe/AgentPulse`)加 body-interface 對外口 —— `mori_bridge` + hook_server GET `/health`·`/manifest`·`/sessions`·`/events`(SSE)+ CORS,啟動寫 `~/.mori/body-parts/mori.agent-pulse/manifest.json`(PR `yazelin/AgentPulse#1`,偵測核心沿用既有 hooks 不動)。mori-desktop 唯讀「脈搏」tab 用 BI-1 registry 發現它、webview 直接 `fetch /sessions` + `EventSource /events`(CSP=null,localhost 直連;CORS `*`),顯示 session 清單 + cue(event_id dedup 不重複)。通知仍由 AgentPulse 膠囊發(§766 不重複)。**待手測 e2e**:跑一個 Codex session → tab 收到 waiting_input / done cue。
+  > 註:「Agent Plus」是早期 doc 的 typo,正名 **AgentPulse**(Agent / session **pulse**)。
 - **BI-5 done** = 依 meeting-recorder.md 的 e2e,public/internal 軌分流 + handoff 不自動讀 private raw audio。
 
 ---
