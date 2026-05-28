@@ -37,9 +37,15 @@
 
 ---
 
-### Task 1: Spike — cpal loopback discovery on Linux
+### Task 1: Spike — cpal loopback discovery on Linux ✅ DONE(2026-05-28)
 
-**Goal:** 在 yazelin 機器 confirm cpal `.monitor` device 拿得到。失敗就改路線(gstreamer-rs),所以**第一刀**。
+> **Spike result**:cpal 0.15 Linux 走 `Host: Alsa`,**沒有 `.monitor` device**(monitor 是 pulse 抽象層,ALSA 不認識)。`pactl list short sources` 同時看到 6 個 PipeWire monitor source(HDMI / 內建喇叭 / Fifine USB mic)。
+>
+> **Decision**:Linux 改走 `libpulse-binding` + `libpulse-simple-binding`(對齊 OBS 的 `linux-pulseaudio` plugin 路線)。Windows 仍走 cpal WASAPI loopback。Spec §2 #5 已更新 2026-05-28。Task 8 Linux impl 改寫(libpulse-simple sync API + pactl 列 source)。Task 2 Cargo.toml deps 改成 platform-gated。
+>
+> `/tmp/cpal-loopback-spike/` 已丟。
+
+**Goal**(已達成):驗證 cpal Linux 路徑是否能拿到 system loopback。結論:**不行**,需平台特定 lib。
 
 **Files:**
 - Create(臨時): `/tmp/cpal-loopback-spike/Cargo.toml` + `src/main.rs`
@@ -271,13 +277,21 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
-cpal = "0.15"
 hound = "3.5"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+
+# Linux:libpulse client API(PipeWire 完全相容,看得到 .monitor source)
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = "2"
+libpulse-simple-binding = "2"
+
+# Windows:cpal WASAPI loopback(對齊 mori-desktop)
+[target.'cfg(target_os = "windows")'.dependencies]
+cpal = "0.15"
 
 [dev-dependencies]
 tempfile = "3"
@@ -462,7 +476,8 @@ git commit -m "$(cat <<'EOF'
 feat: initial Tauri 2 scaffold
 
 Single-window AlwaysOnTop transparent capsule (360x60 collapsed).
-Frontend stub. cpal + hound + tokio + serde deps locked in.
+Frontend stub. hound + tokio + serde + chrono + dirs in main deps;
+libpulse-binding/simple-binding under cfg(linux),cpal under cfg(windows).
 Single-instance plugin wired.
 
 BI-5 plan: mori-desktop/docs/superpowers/plans/2026-05-28-bi-5-meeting-recorder.md
@@ -1435,14 +1450,188 @@ pub fn open_capture(_source: SourceKind, _out_path: std::path::PathBuf) -> Resul
 }
 ```
 
-- [ ] **Step 2: 寫 Linux impl**
+- [ ] **Step 2: 寫 Linux impl(libpulse-binding + pactl 找 monitor source)**
+
+> Task 1 spike 發現 cpal Linux 看不到 PipeWire monitor source(monitor 是 pulse 抽象,ALSA 不認識)。OBS 同樣選平台 native(`linux-pulseaudio` plugin),我們對齊。libpulse-simple 走 blocking sync API 在 dedicated thread,server 端會把 source 原 format 降到我們要求的 16kHz mono i16 — 不用 client-side resample。
 
 `src-tauri/src/audio/linux.rs`:
 
 ```rust
-//! Linux:cpal default host(ALSA / PulseAudio / PipeWire)。
+//! Linux:libpulse client API(對齊 OBS linux-pulseaudio plugin)。
+//! - MicInternal:default input source(`None` source name)
+//! - MeetingSystem:第一個 `.monitor` source(透過 `pactl list short sources` 列出)
+//!
+//! 走 libpulse-simple sync API,blocking read 在 dedicated thread。
+//! server 端做 resample / format conversion → 我們收到的就是 16kHz mono i16。
+
+use super::{writer::TrackWriter, CaptureHandle, SignalMeter, SourceKind};
+use libpulse_binding::sample::{Format, Spec};
+use libpulse_binding::stream::Direction;
+use libpulse_simple_binding::Simple;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+const TARGET_RATE: u32 = 16_000;
+const CHUNK_MS: u64 = 50; // 50ms blocking read,讓 stop_flag check 不會卡太久
+const CHUNK_SAMPLES: usize = (TARGET_RATE as u64 * CHUNK_MS / 1000) as usize; // 800 @16kHz
+const CHUNK_BYTES: usize = CHUNK_SAMPLES * 2; // i16 = 2 bytes
+
+/// 挑出符合 source 的 PulseAudio source name。
+/// MicInternal → `None`(讓 pulse 用 default input)。
+/// MeetingSystem → 第一個 `.monitor` 結尾 source(走 pactl 列)。
+pub fn pick_source(source: SourceKind) -> Result<Option<String>, String> {
+    match source {
+        SourceKind::MicInternal => Ok(None),
+        SourceKind::MeetingSystem => {
+            let out = Command::new("pactl")
+                .args(["list", "short", "sources"])
+                .output()
+                .map_err(|e| format!("spawn pactl: {e}(install pulseaudio-utils?)"))?;
+            if !out.status.success() {
+                return Err(format!("pactl exited {}", out.status));
+            }
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for line in stdout.lines() {
+                // 格式:ID NAME MODULE FORMAT CHANNELS STATE
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                if cols.len() >= 2 && cols[1].ends_with(".monitor") {
+                    return Ok(Some(cols[1].to_string()));
+                }
+            }
+            Err("no .monitor source — run `pactl load-module module-loopback` or check PipeWire config".into())
+        }
+    }
+}
+
+pub fn open_capture(source: SourceKind, out_path: PathBuf) -> Result<CaptureHandle, String> {
+    let source_name = pick_source(source)?;
+    let spec = Spec {
+        format: Format::S16le,
+        channels: 1,
+        rate: TARGET_RATE,
+    };
+    if !spec.is_valid() {
+        return Err("invalid pulse spec".into());
+    }
+
+    // libpulse 會 server-side 把 source 的 native format 降到我們要求的 16kHz mono i16 — 不用 resample
+    let simple = Simple::new(
+        None,                                // 預設 PA server(PipeWire 完全相容)
+        "mori-meeting-recorder",             // app name
+        Direction::Record,
+        source_name.as_deref(),              // None = default input;Some("xxx.monitor") = system loopback
+        match source {
+            SourceKind::MicInternal => "mic-internal",
+            SourceKind::MeetingSystem => "system-loopback",
+        },
+        &spec,
+        None, // 預設 channel map
+        None, // 預設 buffer attrs
+    )
+    .map_err(|e| format!("pulse Simple::new: {e}"))?;
+
+    let writer = Arc::new(Mutex::new(Some(TrackWriter::create(&out_path)?)));
+    let signal = Arc::new(Mutex::new(SignalMeter::default()));
+    let stop_flag = Arc::new(AtomicBool::new(false));
+
+    // capture loop 在 dedicated thread(simple.read 是 blocking,thread 拿 simple ownership)
+    let writer_for_thread = writer.clone();
+    let signal_for_thread = signal.clone();
+    let stop_for_thread = stop_flag.clone();
+    let writer_handle = std::thread::spawn(move || -> Result<u64, String> {
+        let mut buf = vec![0u8; CHUNK_BYTES];
+        while !stop_for_thread.load(Ordering::Relaxed) {
+            match simple.read(&mut buf) {
+                Ok(()) => {
+                    let samples: Vec<i16> = buf
+                        .chunks_exact(2)
+                        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                        .collect();
+                    // RMS → SignalMeter
+                    let sumsq: f64 = samples.iter().map(|&x| (x as f64).powi(2)).sum();
+                    let rms = (sumsq / samples.len() as f64).sqrt();
+                    let rms_norm = rms / 32_768.0;
+                    let db = if rms_norm > 0.0 { 20.0 * rms_norm.log10() } else { -120.0 };
+                    let now = chrono::Utc::now().timestamp_millis() as u64;
+                    if let Ok(mut s) = signal_for_thread.lock() {
+                        s.peak_rms_db = db as f32;
+                        s.last_sample_at_unix_ms = now;
+                    }
+                    // 寫 WAV
+                    if let Ok(mut guard) = writer_for_thread.lock() {
+                        if let Some(w) = guard.as_mut() {
+                            let _ = w.push_samples(&samples);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("pulse read err: {e}");
+                    break;
+                }
+            }
+        }
+        // stop_flag set → drop simple → finalize WAV
+        drop(simple);
+        let mut guard = writer_for_thread.lock().unwrap();
+        if let Some(w) = guard.take() {
+            let n = w.samples_written();
+            w.finalize().map_err(|e| format!("finalize: {e}"))?;
+            Ok(n)
+        } else {
+            Err("writer already finalized".into())
+        }
+    });
+
+    Ok(CaptureHandle {
+        source,
+        writer_handle,
+        signal,
+        stop_flag,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_source_mic_internal_returns_none() {
+        // MicInternal 不打 pactl,直接 Ok(None)
+        assert_eq!(pick_source(SourceKind::MicInternal).unwrap(), None);
+    }
+
+    // MeetingSystem 的 pick_source 需要 pactl 在 PATH + PipeWire/PulseAudio 跑著。
+    // CI 無此環境 → #[ignore]。yazelin 機器跑這個 should return Ok(Some("alsa_output.xxx.monitor"))。
+    #[test]
+    #[ignore]
+    fn pick_source_meeting_system_returns_some_monitor() {
+        let result = pick_source(SourceKind::MeetingSystem);
+        match result {
+            Ok(Some(name)) => assert!(name.ends_with(".monitor"), "got: {name}"),
+            Ok(None) => panic!("expected Some(.monitor name), got None"),
+            Err(e) => panic!("pick failed: {e}"),
+        }
+    }
+}
+```
+
+- [ ] **Step 3: 寫 Windows impl(cpal WASAPI loopback)**
+
+> Windows 仍走 cpal — mori-desktop 同 stack。cpal 0.15 WASAPI host 對 `default_output_device + build_input_stream` 會自動走 loopback。
+
+`src-tauri/src/audio/windows.rs`:
+
+```rust
+//! Windows:cpal WASAPI host。
 //! - MicInternal:default input device
-//! - MeetingSystem:找名字含 "monitor"(case-insensitive)的 input device
+//! - MeetingSystem:WASAPI loopback(用 default_output_device 開 input stream,cpal 內部處理 loopback flag)
+//!
+//! handle_chunk_f32 / resample 邏輯這邊自己一份(Linux 走 libpulse 不需要 client-side resample,
+//! 兩邊不共用)。
+
+#![cfg(target_os = "windows")]
 
 use super::{writer::TrackWriter, CaptureHandle, SignalMeter, SourceKind};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -1453,33 +1642,28 @@ use std::sync::{Arc, Mutex};
 
 const TARGET_RATE: u32 = 16_000;
 
-/// 從 cpal device 列表挑出符合 source 的 device。
 pub fn pick_device(source: SourceKind) -> Result<Device, String> {
     let host = cpal::default_host();
     match source {
         SourceKind::MicInternal => host
             .default_input_device()
             .ok_or_else(|| "no default input device".into()),
-        SourceKind::MeetingSystem => {
-            // 找 `.monitor` 後綴(PipeWire / PulseAudio 的 loopback source)
-            let inputs = host.input_devices().map_err(|e| format!("input_devices: {e}"))?;
-            for d in inputs {
-                let name = d.name().unwrap_or_default();
-                if name.to_lowercase().contains("monitor") {
-                    return Ok(d);
-                }
-            }
-            Err("no loopback (.monitor) device found — try `pactl load-module module-loopback`".into())
-        }
+        SourceKind::MeetingSystem => host
+            .default_output_device()
+            .ok_or_else(|| "no default output device for loopback".into()),
     }
 }
 
-/// 開 cpal stream → 寫 WAV(downsample 到 16kHz mono i16 in callback)。回 handle。
 pub fn open_capture(source: SourceKind, out_path: PathBuf) -> Result<CaptureHandle, String> {
     let device = pick_device(source)?;
-    let default_config = device
-        .default_input_config()
-        .map_err(|e| format!("default_input_config: {e}"))?;
+    let default_config = match source {
+        SourceKind::MicInternal => device
+            .default_input_config()
+            .map_err(|e| format!("default_input_config: {e}"))?,
+        SourceKind::MeetingSystem => device
+            .default_output_config()
+            .map_err(|e| format!("default_output_config (loopback): {e}"))?,
+    };
     let in_rate = default_config.sample_rate().0;
     let in_channels = default_config.channels();
     let sample_format = default_config.sample_format();
@@ -1494,34 +1678,29 @@ pub fn open_capture(source: SourceKind, out_path: PathBuf) -> Result<CaptureHand
     let signal = Arc::new(Mutex::new(SignalMeter::default()));
     let stop_flag = Arc::new(AtomicBool::new(false));
 
-    let writer_for_thread = writer.clone();
-    let signal_for_cb = signal.clone();
-
     let resample_ratio = in_rate as f64 / TARGET_RATE as f64;
-
     let err_fn = |e| eprintln!("audio stream error: {e}");
 
+    let writer_cb = writer.clone();
+    let signal_cb = signal.clone();
+
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            let signal_cb = signal_for_cb.clone();
-            let writer_cb = writer_for_thread.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    handle_chunk_f32(data, in_channels, resample_ratio, &writer_cb, &signal_cb);
-                },
-                err_fn,
-                None,
-            )
-        }
+        SampleFormat::F32 => device.build_input_stream(
+            &config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                handle_chunk_f32(data, in_channels, resample_ratio, &writer_cb, &signal_cb);
+            },
+            err_fn,
+            None,
+        ),
         SampleFormat::I16 => {
-            let signal_cb = signal_for_cb.clone();
-            let writer_cb = writer_for_thread.clone();
+            let writer_cb_i = writer_cb.clone();
+            let signal_cb_i = signal_cb.clone();
             device.build_input_stream(
                 &config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     let f: Vec<f32> = data.iter().map(|&x| x as f32 / 32_768.0).collect();
-                    handle_chunk_f32(&f, in_channels, resample_ratio, &writer_cb, &signal_cb);
+                    handle_chunk_f32(&f, in_channels, resample_ratio, &writer_cb_i, &signal_cb_i);
                 },
                 err_fn,
                 None,
@@ -1533,11 +1712,9 @@ pub fn open_capture(source: SourceKind, out_path: PathBuf) -> Result<CaptureHand
 
     stream.play().map_err(|e| format!("stream.play: {e}"))?;
 
-    // capture stream 必須 live 在 thread 內,直到 stop_flag 被 set 才 drop。
     let stop_for_thread = stop_flag.clone();
     let writer_for_finalize = writer.clone();
     let writer_thread = std::thread::spawn(move || {
-        // 留住 stream object;stop_flag set → drop stream → cpal callback 停
         while !stop_for_thread.load(Ordering::Relaxed) {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
@@ -1577,7 +1754,7 @@ fn handle_chunk_f32(
             .collect()
     };
 
-    // crude resample by index pick(MVP — 不過 whisper 對 16kHz mono 要求高,後面用 rubato 升級)
+    // crude resample by index pick(MVP — 後續用 rubato 升級)
     let mut out_i16: Vec<i16> = Vec::with_capacity((mono.len() as f64 / resample_ratio) as usize + 1);
     let mut idx = 0.0_f64;
     while (idx as usize) < mono.len() {
@@ -1586,7 +1763,6 @@ fn handle_chunk_f32(
         idx += resample_ratio;
     }
 
-    // RMS + 寫 WAV
     if !out_i16.is_empty() {
         let sumsq: f64 = out_i16.iter().map(|&x| (x as f64).powi(2)).sum();
         let rms = (sumsq / out_i16.len() as f64).sqrt();
@@ -1605,169 +1781,43 @@ fn handle_chunk_f32(
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // 跨平台只測 pick_device 在 error path 的行為(實機才有 monitor device)。
-    // 這個 test 只在 CI 無 mic / no monitor 時跑,主要驗證 error message 對。
-    #[test]
-    #[ignore] // 實機跑,CI 不跑
-    fn pick_device_mic_internal_returns_default() {
-        let _ = pick_device(SourceKind::MicInternal);
-    }
-}
 ```
 
-- [ ] **Step 3: 寫 Windows impl(類似但 device pick 換)**
+> ⚠ Windows loopback 在 cpal 0.15 行為**未實機 spike** — `default_output_device + default_output_config + build_input_stream` 在 WASAPI host **應該**自動走 loopback,實機跑 Task 12 e2e 才會驗證。失敗 fallback 是直接調 `windows` crate WASAPI(超出 MVP,follow-up)。
 
-`src-tauri/src/audio/windows.rs`:
-
-```rust
-//! Windows:cpal WASAPI host。
-//! - MicInternal:default input device
-//! - MeetingSystem:WASAPI loopback — host.output_devices() 第一個(default playback device 的 loopback)
-
-#![cfg(target_os = "windows")]
-
-use super::{writer::TrackWriter, CaptureHandle, SignalMeter, SourceKind};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, SampleRate, StreamConfig};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-
-const TARGET_RATE: u32 = 16_000;
-
-pub fn pick_device(source: SourceKind) -> Result<Device, String> {
-    let host = cpal::default_host();
-    match source {
-        SourceKind::MicInternal => host
-            .default_input_device()
-            .ok_or_else(|| "no default input device".into()),
-        SourceKind::MeetingSystem => {
-            // cpal 0.15 WASAPI:output device 的 loopback 用 default_output + as_input
-            // 但 cpal API 沒直接給 loopback flag — 用 host.output_devices() + WASAPI 特性
-            // 簡化:default_output_device.supported_input_configs() 用 loopback
-            host.default_output_device()
-                .ok_or_else(|| "no default output device for loopback".into())
-        }
-    }
-}
-
-pub fn open_capture(source: SourceKind, out_path: PathBuf) -> Result<CaptureHandle, String> {
-    let device = pick_device(source)?;
-    // Windows loopback 用 default_output_config() 的 format 開 input stream
-    let default_config = match source {
-        SourceKind::MicInternal => device
-            .default_input_config()
-            .map_err(|e| format!("default_input_config: {e}"))?,
-        SourceKind::MeetingSystem => device
-            .default_output_config()
-            .map_err(|e| format!("default_output_config (loopback): {e}"))?,
-    };
-    let in_rate = default_config.sample_rate().0;
-    let in_channels = default_config.channels();
-    let sample_format = default_config.sample_format();
-
-    let config = StreamConfig {
-        channels: in_channels,
-        sample_rate: SampleRate(in_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    let writer = Arc::new(Mutex::new(Some(TrackWriter::create(&out_path)?)));
-    let signal = Arc::new(Mutex::new(SignalMeter::default()));
-    let stop_flag = Arc::new(AtomicBool::new(false));
-
-    let resample_ratio = in_rate as f64 / TARGET_RATE as f64;
-    let err_fn = |e| eprintln!("audio stream error: {e}");
-
-    // 用同樣的 handle_chunk_f32 — 從 linux.rs 抽出共用 module 比較好,但 MVP 重複一份
-    let writer_cb = writer.clone();
-    let signal_cb = signal.clone();
-
-    let stream = match sample_format {
-        SampleFormat::F32 => device.build_input_stream(
-            &config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                super::linux::handle_chunk_f32_pub(data, in_channels, resample_ratio, &writer_cb, &signal_cb);
-            },
-            err_fn,
-            None,
-        ),
-        SampleFormat::I16 => {
-            let writer_cb_i = writer_cb.clone();
-            let signal_cb_i = signal_cb.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let f: Vec<f32> = data.iter().map(|&x| x as f32 / 32_768.0).collect();
-                    super::linux::handle_chunk_f32_pub(&f, in_channels, resample_ratio, &writer_cb_i, &signal_cb_i);
-                },
-                err_fn,
-                None,
-            )
-        }
-        other => return Err(format!("unsupported sample format: {other:?}")),
-    }
-    .map_err(|e| format!("build_input_stream: {e}"))?;
-
-    stream.play().map_err(|e| format!("stream.play: {e}"))?;
-
-    let stop_for_thread = stop_flag.clone();
-    let writer_for_finalize = writer.clone();
-    let writer_thread = std::thread::spawn(move || {
-        while !stop_for_thread.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        drop(stream);
-        let mut guard = writer_for_finalize.lock().unwrap();
-        if let Some(w) = guard.take() {
-            let n = w.samples_written();
-            w.finalize().map_err(|e| format!("finalize: {e}"))?;
-            Ok(n)
-        } else {
-            Err("writer already finalized".into())
-        }
-    });
-
-    Ok(CaptureHandle {
-        source,
-        writer_handle: writer_thread,
-        signal,
-        stop_flag,
-    })
-}
-```
-
-> ⚠ Windows loopback 在 cpal 0.15 上目前的 status:**`default_output_device` + `default_output_config` + `build_input_stream` 在 WASAPI host 自動會走 loopback 模式**(cpal 內部處理)。如果這條路 build 不出 stream,fallback 是用 `windows` crate 直接調 WASAPI(超出 MVP 範圍 — 留 follow-up task)。
-
-- [ ] **Step 4: linux.rs 把 handle_chunk_f32 暴露 pub(crate) 給 windows.rs 用**
-
-修改 `src-tauri/src/audio/linux.rs` `handle_chunk_f32` 簽名:
-
-```rust
-pub(crate) fn handle_chunk_f32_pub(
-    samples: &[f32],
-    in_channels: u16,
-    resample_ratio: f64,
-    writer: &Arc<Mutex<Option<TrackWriter>>>,
-    signal: &Arc<Mutex<SignalMeter>>,
-) {
-    handle_chunk_f32(samples, in_channels, resample_ratio, writer, signal);
-}
-```
-
-- [ ] **Step 5: cargo check 兩平台**
+- [ ] **Step 4: cargo check Linux**
 
 ```bash
 cd ~/mori-universe/mori-meeting-recorder/src-tauri
 cargo check 2>&1 | tail -5
 ```
 
-Expected: Linux 跑 → mod windows 不會編(cfg target_os),所以只檢 mod linux。無 error。
+Expected: Linux 跑 → 只編 `mod audio::linux`(`audio::windows` 被 `#[cfg(target_os = "windows")]` 排除),libpulse-binding + libpulse-simple-binding 都 link 過。**首次 build 需要 system libpulse**(`apt install libpulse-dev` 或 PipeWire pulse compat lib,大部分 Ubuntu/Fedora 桌面預裝)。
+
+如果 `cargo check` 噴 `pkg-config could not find libpulse`,跑:
+
+```bash
+sudo apt install libpulse-dev pulseaudio-utils
+```
+
+(`pulseaudio-utils` 提供 `pactl`,runtime 也要)。
+
+- [ ] **Step 5: 跑 Linux pick_source 測試(non-ignored)**
+
+```bash
+cd ~/mori-universe/mori-meeting-recorder/src-tauri
+cargo test audio::linux::tests::pick_source_mic_internal_returns_none 2>&1 | tail -5
+```
+
+Expected: `1 passed`。
+
+實機可選跑:
+
+```bash
+cargo test audio::linux::tests::pick_source_meeting_system_returns_some_monitor -- --ignored 2>&1 | tail -5
+```
+
+Expected: pass(yazelin 機器 spike 已證實有 monitor source)。
 
 - [ ] **Step 6: Commit**
 
@@ -1775,16 +1825,21 @@ Expected: Linux 跑 → mod windows 不會編(cfg target_os),所以只檢 mod li
 cd ~/mori-universe/mori-meeting-recorder
 git add src-tauri/src/audio
 git commit -m "$(cat <<'EOF'
-feat(audio): AudioCapture for Linux (PipeWire .monitor) + Windows (WASAPI loopback)
+feat(audio): AudioCapture — Linux libpulse + Windows cpal WASAPI loopback
 
-Linux: cpal default_host, pick_device looks for `.monitor`-named
-input device for MeetingSystem; default_input_device for MicInternal.
-Windows: WASAPI host, default_output_device + default_output_config
-yields loopback stream automatically via cpal.
+Linux: libpulse-simple-binding (matching OBS linux-pulseaudio plugin
+choice). pick_source uses `pactl list short sources` to find the
+first .monitor source for MeetingSystem; MicInternal → default input.
+Server-side resample to 16kHz mono i16, dedicated thread blocking
+read 50ms chunks, stop_flag interrupts gracefully.
 
-Both paths: crude resample to 16kHz mono i16 in callback, peak RMS
-tracked in SignalMeter for capsule pill colors. Writer thread holds
-stream alive until stop_flag.
+Windows: cpal WASAPI host (matching mori-desktop). default_output_
+device + build_input_stream gives loopback. Client-side resample +
+mono mix in callback.
+
+Rationale: Task 1 spike found cpal 0.15 Linux = ALSA-only, can't see
+PipeWire monitor abstraction. OBS uses same per-platform native
+approach. interfaces unchanged at the audio::open_capture layer.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -3264,13 +3319,14 @@ gh pr merge --auto --squash
 - §6 BI-1 manifest ✓(Task 7 + Task 10 startup hook)
 - §7 Deps bundle ✓(Task 12)
 - §8 測試策略 ✓(每個 task 都有 TDD + Task 12 manual e2e)
-- §11 風險 — cpal Linux loopback ✓(Task 1 spike)
+- §11 風險 — cpal Linux loopback ✓(Task 1 spike → confirm cpal 不可行 → 改 libpulse,spec 已更新)
 - §13 mori-desktop 整合 — clarify ✓(完全不改 mori-desktop;Task 12 backlog doc only)
 
 **Placeholder scan:**
 - 沒有 TBD / TODO
 - 每 step 都有 code 或 command 或明確 expected output
 - 一處 Windows WASAPI loopback 的 cpal 0.15 行為註記(可能要 fallback到 `windows` crate),plan 標 follow-up 不是 placeholder
+- Linux libpulse 路徑 spike 已實機驗證(Task 1 done),Windows cpal loopback **未** spike(留 Task 12 e2e 驗)
 
 **Type consistency:**
 - `SourceKind` enum(`MeetingSystem` / `MicInternal`)— Task 3 定義,Task 4-9 都用同一份
