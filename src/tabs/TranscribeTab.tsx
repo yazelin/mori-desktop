@@ -1,19 +1,18 @@
-// 轉錄 tab — 本機 whisper.cpp 把音檔 / 影片 / 會議錄音轉成逐字稿。
+// 轉錄 tab — 本機 whisper.cpp 把音檔 / 影片轉成逐字稿。
 //
-// 三個模式(top tab 切換):
+// 兩個模式(top tab 切換):
 // 1. **單檔** — picker / drag-drop 一個 file → ffmpeg 抽音軌 → whisper → transcript
 // 2. **批次** — picker 一個資料夾 → scan supported exts → 逐個轉 → 旁邊存 .txt
-// 3. **會議** — 開麥克風長錄音 → 停止後自動轉錄
 //
 // 全部走本機 whisper-local provider(不送 Groq 雲端),user 已透過 Quickstart
 // / Deps tab / 手動 setup whisper-server + model。Dep 檢查紅標時直接擋轉錄按鈕。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
-import { IconRefresh, IconClipboard, IconCheck, IconWarning, IconMic, IconStop } from "../icons";
+import { IconRefresh, IconClipboard, IconCheck, IconWarning } from "../icons";
 import { Select } from "../Select";
 
 // ─── shared types ───────────────────────────────────────────────────────
@@ -41,7 +40,7 @@ type BatchEntry = TranscribeOutput & {
 
 type FolderScanEntry = { path: string; name: string; size_bytes: number };
 
-type Mode = "file" | "batch" | "meeting";
+type Mode = "file" | "batch";
 
 type Language = "auto" | "zh" | "en" | "ja";
 
@@ -78,7 +77,7 @@ export default function TranscribeTab() {
       <DepsPanel deps={deps} onRefresh={refreshDeps} refreshing={depsRefreshing} />
 
       <div className="mori-transcribe-mode-bar">
-        {(["file", "batch", "meeting"] as const).map((m) => (
+        {(["file", "batch"] as const).map((m) => (
           <button
             key={m}
             className={`mori-btn small ${mode === m ? "primary" : ""}`}
@@ -111,7 +110,6 @@ export default function TranscribeTab() {
 
       {mode === "file" && <FileMode language={language} disabled={!depsOk} />}
       {mode === "batch" && <BatchMode language={language} disabled={!depsOk} />}
-      {mode === "meeting" && <MeetingMode language={language} disabled={!depsOk} />}
     </div>
   );
 }
@@ -533,165 +531,3 @@ function BatchMode({ language, disabled }: { language: Language; disabled: boole
   );
 }
 
-// ─── Mode C: meeting recording ──────────────────────────────────────────
-
-function MeetingMode({ language, disabled }: { language: Language; disabled: boolean }) {
-  const { t } = useTranslation();
-  const [recording, setRecording] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const tickRef = useRef<number | null>(null);
-
-  // 轉錄 lifecycle:idle → recording → transcribing → done
-  const [phase, setPhase] = useState<"idle" | "recording" | "transcribing" | "done">("idle");
-  const [pendingWav, setPendingWav] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    sourcePath: string;
-    text: string;
-    duration: number;
-    chunks: number;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [chunkProgress, setChunkProgress] = useState<{ chunk: number; total: number } | null>(
-    null,
-  );
-
-  // recording duration tick
-  useEffect(() => {
-    if (recording) {
-      tickRef.current = window.setInterval(() => setDuration((d) => d + 1), 1000);
-    } else if (tickRef.current) {
-      clearInterval(tickRef.current);
-      tickRef.current = null;
-    }
-    return () => {
-      if (tickRef.current) clearInterval(tickRef.current);
-    };
-  }, [recording]);
-
-  // listen for the chunk progress + transcribed events
-  useEffect(() => {
-    const unlisteners: UnlistenFn[] = [];
-    listen<{ chunk: number; total: number; path: string }>("transcribe-chunk-progress", (e) => {
-      if (pendingWav && e.payload.path === pendingWav) {
-        setChunkProgress({ chunk: e.payload.chunk, total: e.payload.total });
-      }
-    })
-      .then((u) => unlisteners.push(u))
-      .catch(() => {});
-    listen<{
-      wav_path: string;
-      text: string;
-      duration_secs: number;
-      chunks: number;
-      error: string | null;
-    }>("meeting-transcribed", (e) => {
-      if (pendingWav && e.payload.wav_path === pendingWav) {
-        setChunkProgress(null);
-        if (e.payload.error) {
-          setError(e.payload.error);
-          setPhase("idle");
-        } else {
-          setResult({
-            sourcePath: e.payload.wav_path,
-            text: e.payload.text,
-            duration: e.payload.duration_secs,
-            chunks: e.payload.chunks,
-          });
-          setPhase("done");
-        }
-      }
-    })
-      .then((u) => unlisteners.push(u))
-      .catch(() => {});
-    return () => unlisteners.forEach((u) => u());
-  }, [pendingWav]);
-
-  const start = async () => {
-    setError(null);
-    setResult(null);
-    setDuration(0);
-    try {
-      await invoke("meeting_recording_start");
-      setRecording(true);
-      setPhase("recording");
-    } catch (e: any) {
-      setError(String(e));
-    }
-  };
-
-  const stop = async () => {
-    try {
-      const ack = await invoke<{ wav_path: string; duration_secs: number }>(
-        "meeting_recording_stop",
-        { language: language === "auto" ? null : language },
-      );
-      setRecording(false);
-      setPendingWav(ack.wav_path);
-      setPhase("transcribing");
-    } catch (e: any) {
-      setError(String(e));
-      setRecording(false);
-      setPhase("idle");
-    }
-  };
-
-  const fmtDuration = (s: number) =>
-    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-
-  return (
-    <section className="mori-transcribe-mode-section">
-      <p className="mori-transcribe-meeting-hint">{t("transcribe_tab.meeting_hint")}</p>
-      <p className="mori-transcribe-meeting-warn">
-        <IconWarning width={12} height={12} /> {t("transcribe_tab.meeting_warning_systemaudio")}
-      </p>
-
-      <div className="mori-transcribe-meeting-controls">
-        {phase === "idle" && (
-          <button className="mori-btn primary" onClick={start} disabled={disabled}>
-            <IconMic width={14} height={14} /> {t("transcribe_tab.meeting_record_button")}
-          </button>
-        )}
-        {phase === "recording" && (
-          <>
-            <span className="mori-transcribe-meeting-state recording">
-              {t("transcribe_tab.meeting_recording_state", { duration: fmtDuration(duration) })}
-            </span>
-            <button className="mori-btn" onClick={stop}>
-              <IconStop width={14} height={14} /> {t("transcribe_tab.meeting_record_stop_button")}
-            </button>
-          </>
-        )}
-        {phase === "transcribing" && pendingWav && (
-          <span className="mori-transcribe-meeting-state transcribing">
-            {t("transcribe_tab.meeting_transcribing_state", { path: pendingWav })}
-            {chunkProgress && (
-              <> · {t("transcribe_tab.progress_chunk", chunkProgress)}</>
-            )}
-          </span>
-        )}
-        {phase === "done" && result && (
-          <span className="mori-transcribe-meeting-state done">
-            {t("transcribe_tab.meeting_done_state", {
-              duration: result.duration.toFixed(1) + "s",
-              chunks: result.chunks,
-            })}
-          </span>
-        )}
-      </div>
-
-      {error && (
-        <div className="mori-transcribe-error">
-          {t("transcribe_tab.error_transcribe", { e: error })}
-        </div>
-      )}
-      {result && (
-        <ResultBlock
-          sourcePath={result.sourcePath}
-          text={result.text}
-          duration={result.duration}
-          chunks={result.chunks}
-        />
-      )}
-    </section>
-  );
-}

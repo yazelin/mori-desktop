@@ -3,48 +3,23 @@
 //! Surface:
 //! - `transcribe_file(path)` — 單檔轉錄(音檔/影片皆可,ffmpeg 抽音軌)
 //! - `transcribe_paths(paths)` — 批次,逐個跑;個別失敗不擋整批
-//! - `meeting_recording_start()` / `meeting_recording_stop()` — 長錄音 +
-//!   結束時自動轉錄。錄音狀態存 [`AppState::meeting_recorder`]。
 //! - `transcribe_check_deps()` — UI 入口檢查 ffmpeg + whisper-server + model
 //!   是否齊備,給 UI 顯示「該裝什麼」hint。
 //!
 //! 進度事件透過 `tauri::Emitter` 推給前端:
 //! - `transcribe-file-progress` — 批次過程,payload `{ index, total, path, status }`
 //! - `transcribe-chunk-progress` — 單檔長檔分塊,payload `{ chunk, total, path }`
-//! - `meeting-duration` — 錄音中每秒 tick 一次,payload `{ secs }`
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 use mori_core::transcribe_media::{
     check_ffmpeg, has_supported_extension, transcribe_media_file, transcribe_paths, TranscribeOpts,
     TranscribeResult,
 };
-
-use crate::recording::{RecordedAudio, Recorder};
-use crate::AppState;
-
-// ─── State shape ────────────────────────────────────────────────────────
-
-/// AppState 上多掛一個 meeting recorder slot。跟 `recorder`(voice-input 短錄)
-/// 分開,避免兩種使用情境互踩 — 你錄會議的時候按熱鍵語音輸入不會把會議中斷。
-pub struct MeetingState {
-    pub recorder: Mutex<Option<Recorder>>,
-    pub started_at: Mutex<Option<std::time::Instant>>,
-}
-
-impl Default for MeetingState {
-    fn default() -> Self {
-        Self {
-            recorder: Mutex::new(None),
-            started_at: Mutex::new(None),
-        }
-    }
-}
 
 // ─── helpers ────────────────────────────────────────────────────────────
 
@@ -314,164 +289,3 @@ pub fn transcribe_save_alongside(source_path: String, text: String) -> Result<St
     Ok(out.display().to_string())
 }
 
-// ─── Meeting recording ──────────────────────────────────────────────────
-
-#[derive(Serialize, Debug)]
-pub struct MeetingStatus {
-    pub recording: bool,
-    pub duration_secs: u64,
-}
-
-#[tauri::command]
-pub fn meeting_recording_status(state: State<'_, Arc<AppState>>) -> MeetingStatus {
-    let active = state.meeting.recorder.lock().is_some();
-    let secs = state
-        .meeting
-        .started_at
-        .lock()
-        .map(|t| t.elapsed().as_secs())
-        .unwrap_or(0);
-    MeetingStatus {
-        recording: active,
-        duration_secs: secs,
-    }
-}
-
-#[tauri::command]
-pub fn meeting_recording_start(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    let mut slot = state.meeting.recorder.lock();
-    if slot.is_some() {
-        return Err("meeting recorder already running".into());
-    }
-    let rec = Recorder::start().map_err(|e| format!("start meeting recorder: {e:#}"))?;
-    *slot = Some(rec);
-    *state.meeting.started_at.lock() = Some(std::time::Instant::now());
-    tracing::info!("meeting recording started");
-    Ok(())
-}
-
-/// 停止錄音 → 立刻 spawn task 把 WAV 寫到 temp + 轉錄,結束發 `meeting-transcribed`
-/// 事件帶結果。同步回傳「dump 出來的 WAV 路徑 + 預期會在 X 秒後完成」讓 UI
-/// 立刻把錄音 UI 切回去 + 顯示「轉錄中」狀態。
-#[derive(Serialize, Debug)]
-pub struct MeetingStopAck {
-    pub wav_path: String,
-    pub duration_secs: f32,
-}
-
-#[derive(Serialize, Clone)]
-struct MeetingTranscribedPayload {
-    wav_path: String,
-    text: String,
-    duration_secs: f32,
-    chunks: u32,
-    error: Option<String>,
-}
-
-#[tauri::command]
-pub async fn meeting_recording_stop(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    language: Option<String>,
-) -> Result<MeetingStopAck, String> {
-    // 1. 取出 recorder,讓 mutex 立刻釋放
-    let rec_opt = state.meeting.recorder.lock().take();
-    let started_at = state.meeting.started_at.lock().take();
-    let rec = rec_opt.ok_or_else(|| "no active meeting recording".to_string())?;
-    let audio: RecordedAudio = rec.stop().map_err(|e| format!("stop recorder: {e:#}"))?;
-    let duration_secs = audio.duration_secs();
-    let elapsed = started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-    tracing::info!(
-        duration_secs,
-        wall_secs = elapsed,
-        samples = audio.samples.len(),
-        "meeting stopped, encoding WAV"
-    );
-
-    // 2. 編碼成 WAV,寫到 ~/.mori/meetings/YYYYMMDD-HHMMSS.wav
-    let wav_bytes = audio
-        .to_wav_bytes()
-        .map_err(|e| format!("encode WAV: {e:#}"))?;
-    let dir = mori_home_dir().join("meetings");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-    let wav_path = dir.join(format!("meeting-{stamp}.wav"));
-    std::fs::write(&wav_path, &wav_bytes)
-        .map_err(|e| format!("write WAV {}: {e}", wav_path.display()))?;
-    tracing::info!(path = %wav_path.display(), bytes = wav_bytes.len(), "meeting WAV saved");
-
-    // 3. 同步回 ack(UI 立刻可切換顯示)
-    let ack = MeetingStopAck {
-        wav_path: wav_path.display().to_string(),
-        duration_secs,
-    };
-
-    // 4. 背景 task 跑轉錄;完成發事件
-    let app_for_task = app.clone();
-    let wav_for_task = wav_path.clone();
-    tauri::async_runtime::spawn(async move {
-        let provider = match get_local_provider(language.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = app_for_task.emit(
-                    "meeting-transcribed",
-                    MeetingTranscribedPayload {
-                        wav_path: wav_for_task.display().to_string(),
-                        text: String::new(),
-                        duration_secs,
-                        chunks: 0,
-                        error: Some(e),
-                    },
-                );
-                return;
-            }
-        };
-        let app_for_chunk = app_for_task.clone();
-        let wav_for_chunk = wav_for_task.clone();
-        let progress = Arc::new(move |chunk: u32, total: u32, _p: &std::path::Path| {
-            let _ = app_for_chunk.emit(
-                "transcribe-chunk-progress",
-                ChunkProgressPayload {
-                    chunk,
-                    total,
-                    path: wav_for_chunk.display().to_string(),
-                },
-            );
-        }) as mori_core::transcribe_media::ProgressFn;
-
-        let opts = TranscribeOpts {
-            language: None,
-            chunk_seconds: None,
-        };
-
-        let payload =
-            match transcribe_media_file(&wav_for_task, provider, opts, Some(progress)).await {
-                Ok(r) => MeetingTranscribedPayload {
-                    wav_path: wav_for_task.display().to_string(),
-                    text: r.text,
-                    duration_secs: r.duration_secs.max(duration_secs),
-                    chunks: r.chunks,
-                    error: None,
-                },
-                Err(e) => MeetingTranscribedPayload {
-                    wav_path: wav_for_task.display().to_string(),
-                    text: String::new(),
-                    duration_secs,
-                    chunks: 0,
-                    error: Some(format!("{e:#}")),
-                },
-            };
-        let _ = app_for_task.emit("meeting-transcribed", payload);
-    });
-
-    Ok(ack)
-}
-
-// 借用 main.rs 的 mori dir helper;不直接 import 避免循環。複製簡單版。
-fn mori_home_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    home.join(".mori")
-}
