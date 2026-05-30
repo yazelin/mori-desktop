@@ -29,17 +29,14 @@ use mori_core::transcribe_media::{
 fn get_local_provider(
     language: Option<String>,
 ) -> Result<Arc<dyn mori_core::llm::transcribe::TranscriptionProvider>, String> {
-    let p =
-        mori_core::llm::whisper_local::LocalWhisperProvider::from_config_with_language_override(
-            language,
-        )
+    // 轉檔頁 = 強制本機、永不上雲:走 mori-ear 的 backend=local。ear 沒在線會自動
+    // lazy-spawn `mori-ear --serve`(耳朵器官,比 desktop 長壽)。
+    let p = mori_core::llm::ear_transcribe::EarTranscriptionProvider::force_local(language)
         .map_err(|e| {
             format!(
-                "whisper-local 未配置好:{e}\n\n\
-             先確認:\n\
-             1. ~/.mori/bin/whisper-server 存在(從 whisper.cpp release 解壓)\n\
-             2. ~/.mori/models/ggml-small.bin 存在(從 HuggingFace 抓)\n\
-             或在 Config tab 把 providers.whisper-local 路徑寫成你放的位置。"
+                "mori-ear STT 初始化失敗:{e}\n\n\
+                 轉檔走本機 mori-ear(耳朵器官);沒在線會自動拉起 `mori-ear --serve`。\n\
+                 確認 mori-ear 已安裝(`cargo install --path .` 放進 ~/.cargo/bin,或丟 ~/.mori/bin)。"
             )
         })?;
     Ok(Arc::new(p))
@@ -63,16 +60,17 @@ pub async fn transcribe_check_deps() -> TranscribeDepStatus {
         Ok(v) => (true, Some(v)),
         Err(_) => (false, None),
     };
-    let cfg = mori_core::llm::whisper_local::LocalWhisperProvider::resolved_config();
+    // STT 委派給 mori-ear:dep-check 改回報「mori-ear 是否可用」(binary 找得到或服務已在線)。
+    // 欄位名沿用 whisper_* 不動,避免動到前端 TranscribeTab.tsx —— 那邊的 copy 跟
+    // shed-meeting-mode 有碰撞,等它 merge 後再一起改字。model 由 mori-ear 自管,desktop 不檢查。
+    let (ear_ok, ear_path) = mori_core::llm::ear_transcribe::ear_availability();
     TranscribeDepStatus {
         ffmpeg_ok,
         ffmpeg_version,
-        whisper_binary_ok: mori_core::llm::whisper_local::server_binary_available(
-            &cfg.server_binary,
-        ),
-        whisper_binary_path: cfg.server_binary.display().to_string(),
-        whisper_model_ok: cfg.model_path.exists(),
-        whisper_model_path: cfg.model_path.display().to_string(),
+        whisper_binary_ok: ear_ok,
+        whisper_binary_path: ear_path,
+        whisper_model_ok: ear_ok,
+        whisper_model_path: "(由 mori-ear 管理)".to_string(),
     }
 }
 

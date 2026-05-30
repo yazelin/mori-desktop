@@ -23,9 +23,10 @@ pub mod groq;
 pub mod ollama;
 pub(crate) mod openai_compat;
 pub mod transcribe;
-// v2:從 in-process FFI 改成 shell-out 到 whisper.cpp `whisper-server` HTTP
-// 子程序,跨平台統一架構。詳見 whisper_local.rs doc。
-pub mod whisper_local;
+// desktop 端 STT 委派給 mori-ear(耳朵器官)。舊的 whisper_local(desktop 自起私有
+// whisper-server + 管模型檔)已移除 —— STT 統一由 mori-ear 提供(POST /inference),
+// 沒在線就 lazy-spawn `mori-ear --serve`。詳見 ear_transcribe.rs doc。
+pub mod ear_transcribe;
 
 // ─── Provider factory ───────────────────────────────────────────────
 //
