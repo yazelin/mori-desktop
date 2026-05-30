@@ -50,12 +50,13 @@ pub fn build_transcription_provider(
 
     match default.as_str() {
         "whisper-local" => {
-            let p = super::whisper_local::LocalWhisperProvider::from_config()?;
+            let p = super::ear_transcribe::EarTranscriptionProvider::from_config()?;
             tracing::info!(
                 provider = "whisper-local",
-                model_path = %p.model_path().display(),
+                via = "mori-ear",
+                backend = "auto",
                 language = ?p.language(),
-                "transcription provider selected",
+                "transcription provider selected (delegated to mori-ear)",
             );
             Ok(Arc::new(p))
         }
@@ -109,11 +110,11 @@ pub fn build_named_transcription_provider(
 ) -> Result<Arc<dyn TranscriptionProvider>> {
     match name {
         "whisper-local" => {
-            let p = super::whisper_local::LocalWhisperProvider::from_config()?;
+            let p = super::ear_transcribe::EarTranscriptionProvider::from_config()?;
             tracing::info!(
                 provider = "whisper-local",
-                model_path = %p.model_path().display(),
-                "transcription provider selected (profile override)",
+                via = "mori-ear",
+                "transcription provider selected (profile override, delegated to mori-ear)",
             );
             Ok(Arc::new(p))
         }
@@ -207,10 +208,8 @@ fn mori_config_path() -> Option<std::path::PathBuf> {
         .map(|h| std::path::PathBuf::from(h).join(".mori").join("config.json"))
 }
 
-/// Snapshot UI 顯示用 default model path。v2 之後 whisper_local 模組跨平台,
-/// 直接拿它的 default 即可。
+/// Snapshot UI 顯示用。whisper-local 現在委派給 mori-ear,沒有單一 model 檔路徑可顯示
+/// (ear 內部自選 backend / 模型),回一個說明字串。
 fn default_whisper_model_path_display() -> String {
-    super::whisper_local::default_model_path()
-        .display()
-        .to_string()
+    "mori-ear (lazy-spawn --serve, POST /inference)".to_string()
 }

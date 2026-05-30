@@ -433,18 +433,26 @@ impl GroqProvider {
     }
 }
 
-/// 給 config stub 的 whisper-local 預設值 helpers。v2 之後 whisper_local
-/// 模組跨平台,直接複用它的 default 函式。
+/// 給 config stub 的 whisper-local 預設值 helpers。STT 已委派給 mori-ear,這些值只用來
+/// 鋪 config.json 樣板(ear 內部仍可能用本機 whisper-server),inline 預設即可。
 fn default_whisper_model_path_config_string() -> String {
-    super::whisper_local::default_model_path()
-        .to_string_lossy()
-        .into_owned()
+    home_dir()
+        .map(|h| {
+            h.join(".mori")
+                .join("models")
+                .join("ggml-small.bin")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_else(|| "~/.mori/models/ggml-small.bin".to_string())
 }
 
 fn default_whisper_server_binary_config_string() -> String {
-    super::whisper_local::default_server_binary()
-        .to_string_lossy()
-        .into_owned()
+    if cfg!(windows) {
+        "whisper-server.exe".to_string()
+    } else {
+        "whisper-server".to_string()
+    }
 }
 
 fn home_dir() -> Option<std::path::PathBuf> {
