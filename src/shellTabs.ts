@@ -8,7 +8,6 @@ export const SHELL_TAB_IDS = [
   "body",
   "permissions",
   "pulse",
-  "transcribe",
   "recordings",
   "corrections",
   "deps",

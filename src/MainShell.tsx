@@ -26,11 +26,10 @@ import PulseTab from "./tabs/PulseTab";
 import DepsTab from "./tabs/DepsTab";
 import LogsTab from "./tabs/LogsTab";
 import RecordingsTab from "./tabs/RecordingsTab";
-import TranscribeTab from "./tabs/TranscribeTab";
 import CorrectionsTab from "./tabs/CorrectionsTab";
 import {
   IconChat, IconProfiles, IconConfig, IconMemory, IconAnnuli, IconSkills, IconDeps,
-  IconSun, IconMoon, IconGlobe, IconHelp, IconTranscribe, IconMic, IconPencil, IconBody,
+  IconSun, IconMoon, IconGlobe, IconHelp, IconMic, IconPencil, IconBody,
   IconPermissions,
   IconPulse,
 } from "./icons";
@@ -56,7 +55,6 @@ const TABS: TabDef[] = [
   { id: "body",     Icon: IconBody,     key: "body" },
   { id: "permissions", Icon: IconPermissions, key: "permissions" },
   { id: "pulse", Icon: IconPulse, key: "pulse" },
-  { id: "transcribe", Icon: IconTranscribe, key: "transcribe" },
   { id: "recordings", Icon: IconMic,    key: "recordings" },
   { id: "corrections", Icon: IconPencil, key: "corrections" },
   { id: "deps",     Icon: IconDeps,     key: "deps" },
@@ -219,7 +217,6 @@ function MainShell() {
         {tab === "body" && <BodyTab />}
         {tab === "permissions" && <PermissionsTab />}
         {tab === "pulse" && <PulseTab />}
-        {tab === "transcribe" && <TranscribeTab />}
         {tab === "recordings" && <RecordingsTab />}
         {tab === "corrections" && <CorrectionsTab />}
         {tab === "deps" && <DepsTab />}
