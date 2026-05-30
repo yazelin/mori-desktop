@@ -123,9 +123,6 @@ const MAX_HISTORY_PAIRS: usize = 10;
 pub struct AppState {
     pub phase: Mutex<Phase>,
     pub recorder: Mutex<Option<Recorder>>,
-    /// 轉錄頁的會議錄音(長錄音 + 結束自動轉錄)。跟 `recorder`(短錄/voice-input)
-    /// 分開,兩種互不踩。
-    pub meeting: crate::transcribe_cmds::MeetingState,
     /// 透過 GroqProvider::discover_api_key() 在啟動時嘗試取得;
     /// 若無,transcribe 階段會回 Error。
     pub groq_api_key: Mutex<Option<String>>,
@@ -5527,9 +5524,8 @@ fn chinese_weekday(en: &str) -> &'static str {
 
 /// 預設 vault 根目錄:`$HOME/mori-universe/spirits`(Windows fallback 走 `USERPROFILE`)。
 ///
-/// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` / `transcribe_cmds::mori_home_dir()`
-/// 同一條 fallback 邏輯 — 沒 `HOME` 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md
-/// 工程注意第一點)。
+/// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` 同一條 fallback 邏輯 — 沒 `HOME`
+/// 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md 工程注意第一點)。
 pub(crate) fn default_vault_root() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -6205,7 +6201,6 @@ fn main() {
     let state = Arc::new(AppState {
         phase: Mutex::new(Phase::default()),
         recorder: Mutex::new(None),
-        meeting: crate::transcribe_cmds::MeetingState::default(),
         groq_api_key: Mutex::new(None),
         memory: parking_lot::RwLock::new(memory),
         annuli: parking_lot::RwLock::new(annuli_client),
@@ -6414,9 +6409,6 @@ fn main() {
             transcribe_cmds::transcribe_paths_cmd,
             transcribe_cmds::transcribe_scan_folder,
             transcribe_cmds::transcribe_save_alongside,
-            transcribe_cmds::meeting_recording_start,
-            transcribe_cmds::meeting_recording_stop,
-            transcribe_cmds::meeting_recording_status,
             wake_sound::wake_ack_status,
             wake_sound::wake_ack_set_active,
             wake_sound::wake_ack_set_enabled,
