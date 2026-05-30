@@ -32,7 +32,6 @@ pub mod redact;
 pub mod runtime;
 pub mod skill;
 pub mod tokenize;
-pub mod transcribe_media;
 pub mod url_detect;
 pub mod voice_cleanup;
 pub mod voice_feedback;

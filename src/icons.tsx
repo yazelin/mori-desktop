@@ -339,17 +339,6 @@ export function IconTree(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// 📝 Transcribe — 音波 + 文字行,對應「逐字稿」概念
-export function IconTranscribe(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...base} {...props}>
-      <path d="M3 10 v4 M6 8 v8 M9 11 v2 M12 7 v10 M15 9 v6" />
-      <path d="M3 19 h10" />
-      <path d="M18 6 l4 0 M18 11 h4 M18 16 h4" />
-    </svg>
-  );
-}
-
 // 👁 Eye — 顯示密碼/key
 export function IconEye(props: SVGProps<SVGSVGElement>) {
   return (

@@ -47,7 +47,6 @@ mod recordings;
 mod soul_distribution;
 mod speaker_id;
 mod theme;
-mod transcribe_cmds;
 mod tts;
 mod wake_sound;
 mod wake_word;
@@ -6404,11 +6403,6 @@ fn main() {
             // DepsTab 內的 `anthropic-skills` entry)— 兩條路徑 install 結果一致。
             skill_install_cmd::install_anthropic_skills_cmd,
             skill_install_cmd::anthropic_skills_status_cmd,
-            transcribe_cmds::transcribe_check_deps,
-            transcribe_cmds::transcribe_file_cmd,
-            transcribe_cmds::transcribe_paths_cmd,
-            transcribe_cmds::transcribe_scan_folder,
-            transcribe_cmds::transcribe_save_alongside,
             wake_sound::wake_ack_status,
             wake_sound::wake_ack_set_active,
             wake_sound::wake_ack_set_enabled,
