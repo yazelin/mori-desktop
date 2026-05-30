@@ -5524,9 +5524,8 @@ fn chinese_weekday(en: &str) -> &'static str {
 
 /// 預設 vault 根目錄:`$HOME/mori-universe/spirits`(Windows fallback 走 `USERPROFILE`)。
 ///
-/// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` / `transcribe_cmds::mori_home_dir()`
-/// 同一條 fallback 邏輯 — 沒 `HOME` 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md
-/// 工程注意第一點)。
+/// 跟 `crates/mori-core/src/llm/groq.rs::home_dir()` 同一條 fallback 邏輯 — 沒 `HOME`
+/// 時讀 `USERPROFILE`(Windows quirk,見 CLAUDE.md 工程注意第一點)。
 pub(crate) fn default_vault_root() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
