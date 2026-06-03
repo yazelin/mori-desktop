@@ -1,7 +1,7 @@
 {
   "name": "mori-desktop",
   "private": true,
-  "version": "0.7.6",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "predev": "cargo build -p mori-cli && node scripts/stage-mori-cli-for-bundle.mjs debug",

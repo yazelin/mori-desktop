@@ -6,6 +6,25 @@
 
 ---
 
+## v0.8.0 — 身體介面(Body Interface)+ STT 委派給 mori-ear(2026-06-04)
+
+把「身體部件」架構(Body Interface, BI-0~5)落地,並把轉錄 / 會議錄音拆給專責 organ,mori-desktop 自身瘦身。
+
+### 新功能
+- **BI-0 MoriArtifact** — 語意化 artifact 信封;角色包(character pack)可視 / 可取消交付 + 管理 UI(匯出 / 刪除)。
+- **BI-1 Body Registry** — 唯讀 Body 分頁,掃描並顯示已註冊的身體部件(BodyManifest)。
+- **BI-2 Permission Broker** — 唯讀 Permissions 分頁(policy + audit);risk policy 評估 + 稽核紀錄。
+- **BI-3 Pulse 分頁** — 接 AgentPulse `/sessions` + `/events` SSE,監看 AI session 活動。
+- **BI-4 Cue Center** — 可操作的 cue surface。
+- **BI-5 Meeting Recorder MVP(Observer Mode)** — 設計落地;實際會議錄音改由獨立的 mori-meeting-recorder 負責。
+
+### 變更
+- **STT 委派給 mori-ear** — 不再自行 spawn `whisper_local`;轉錄統一交給 mori-ear。
+- **移除內建 Transcribe 分頁**(檔案 / 批次轉錄)+ 移出會議錄音模式 → recorder 成唯一轉錄入口,mori-desktop 淨刪約 400 行。
+- **UI** — 補齊缺的 `--c-*` color token;Body / Permissions / Pulse 分頁對齊 `.mori-tab` 版面。
+
+無 breaking change(設定 / vault 格式不變)。
+
 ## v0.7.6 — Deps 修復 + CLI 偵測補強(2026-05-27)
 
 這版修掉 Linux 本機 Whisper 與 Bash CLI provider 在桌面 app 環境下的兩個實際踩坑:whisper.cpp 官方 release 目前沒有 Linux `whisper-server` 預編譯 binary,以及 GUI app 啟動時不一定吃得到 shell / nvm / wrapper 裡的 CLI 路徑。
