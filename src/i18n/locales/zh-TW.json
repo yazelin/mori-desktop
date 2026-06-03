@@ -498,7 +498,8 @@
     "status_valid": "✓ 正常",
     "status_unsupported": "⚠ 版本不支援",
     "status_parse_error": "✗ 解析失敗",
-    "parse_error_name": "(無法解析)"
+    "parse_error_name": "(無法解析)",
+    "launch_button": "啟動"
   }
   ,"permissions_tab": {
     "title": "權限 broker",

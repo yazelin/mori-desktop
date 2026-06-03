@@ -11,6 +11,7 @@ interface BodyManifest {
   capabilities?: string[];
   interfaces?: { name: string; transport: string }[];
   permissions?: string[];
+  entrypoints?: { app?: string; cli?: string; web?: string; local_api?: string };
 }
 interface DiscoveredBodyPart {
   source: string;
@@ -60,6 +61,15 @@ export default function BodyTab() {
             {p.manifest?.interfaces?.length ? (
               <div style={{ fontSize: 12 }}>{t("body_tab.interfaces")}: {p.manifest.interfaces.map((i) => `${i.name}(${i.transport})`).join(", ")}</div>
             ) : null}
+            {p.manifest?.entrypoints?.app && (
+              <button
+                className="mori-btn small"
+                style={{ marginTop: 6 }}
+                onClick={() => invoke("launch_recorder_cmd", { appPath: p.manifest?.entrypoints?.app }).catch((e) => setErr(String(e)))}
+              >
+                {t("body_tab.launch_button")}
+              </button>
+            )}
             {p.detail && <div className="mori-tab-error" style={{ fontSize: 12 }}>{p.detail}</div>}
             <div style={{ fontSize: 10, opacity: 0.4, wordBreak: "break-all", marginTop: 4 }}>{p.source}</div>
           </div>
