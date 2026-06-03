@@ -6,6 +6,22 @@
 
 ---
 
+## v0.8.1 — Recorder ↔ Desktop 雙向偵測 + tray 整合(2026-06-04)
+
+把 BI-5 當初延後的「desktop 端」補上:桌面與 mori-meeting-recorder 互相偵測對方在不在,在場時各自調整 UI(雙向偵測 + 自適應 UI)。
+
+### 新功能
+- **tray「會議錄音」入口** — 偵測到 recorder 安裝(其 body-part manifest 有 `entrypoints.app`)就在 tray 顯示,點了 spawn recorder(帶 `--no-tray`);沒裝不顯示。
+- **Body 分頁啟動鈕** — 對有 app entrypoint 的身體部件顯示「啟動」鈕(`launch_recorder_cmd`)。
+- **hub presence marker** — 啟動寫 `~/.mori/body-parts/mori.desktop/manifest.json`(合法 BodyManifest + `pid`/`started_at`),結束移除;讓其他部件偵測 hub 是否「正在執行」。
+
+### 變更
+- 跨平台 spawn recorder 帶 `--no-tray`;Windows 用 `CREATE_NO_WINDOW` 防 console 一閃;tray「會議錄音」點擊時即時重查路徑。
+
+無 breaking change。完整雙向 tray 行為需搭配 **mori-meeting-recorder v0.1.3**(recorder 端:偵測到 desktop 在跑就收起自己 tray、展開膠囊)。plan 見 `docs/superpowers/plans/2026-06-04-bi-5-recorder-tray-launch.md`。
+
+---
+
 ## v0.8.0 — 身體介面(Body Interface)+ STT 委派給 mori-ear(2026-06-04)
 
 把「身體部件」架構(Body Interface, BI-0~5)落地,並把轉錄 / 會議錄音拆給專責 organ,mori-desktop 自身瘦身。
