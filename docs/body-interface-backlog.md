@@ -144,6 +144,6 @@
 
 ---
 
-**Last updated**: 2026-05-28
+**Last updated**: 2026-06-04
 **Owner**: yazelin
-**Next action**: BI-6 Multi-session / Schedule(視需要);或先 follow-up BI-5 phase 2(live captions / mori-desktop RecorderTab)
+**Next action**: BI-6 Multi-session / Schedule(視需要)。BI-5 follow-up「Recorder ↔ Desktop 雙向偵測 + tray 整合」**已實作**(desktop tray / Body 分頁出「會議錄音」啟動入口 + 寫 hub presence marker;recorder 偵測 desktop 在跑就藏自己 tray、展開膠囊;plan 見 `superpowers/plans/2026-06-04-bi-5-recorder-tray-launch.md`)。仍待:live captions、mori-desktop RecorderTab(sessions / handoff)。

@@ -498,7 +498,8 @@
     "status_valid": "✓ OK",
     "status_unsupported": "⚠ Unsupported version",
     "status_parse_error": "✗ Parse failed",
-    "parse_error_name": "(unparseable)"
+    "parse_error_name": "(unparseable)",
+    "launch_button": "Launch"
   }
   ,"permissions_tab": {
     "title": "Permission Broker",
