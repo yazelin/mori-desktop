@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "mori-cli"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "mori-core"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3035,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "mori-file-loader"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "calamine",
  "chrono",
@@ -3048,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "mori-gmail"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "mori-mcp"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "rmcp",
  "serde",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "mori-tauri"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "mori-time"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "chrono-english",
