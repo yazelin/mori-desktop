@@ -2219,66 +2219,9 @@ fn body_registry_list() -> Result<Vec<mori_core::body::DiscoveredBodyPart>, Stri
     ))
 }
 
-// ── BI-5 follow-up:Recorder ↔ Desktop 雙向偵測 + tray 整合 ──────────────
-// desktop(hub)啟動寫 presence marker、結束移除;recorder 偵測它在不在跑來決定要不要長
-// 自己的 tray。desktop 這邊偵測 recorder 是否安裝 → tray / Body 分頁出「會議錄音」啟動入口。
-// 偵測一律走 ~/.mori 檔案 marker,不開 IPC;任一邊單獨存在時行為不變(standalone-first)。
-
-/// hub presence marker 路徑。同時是合法 BodyManifest(desktop 自己 Body 分頁會列它)
-/// + 額外 pid/started_at 供其他部件偵測。
-fn desktop_marker_path() -> std::path::PathBuf {
-    mori_dir()
-        .join("body-parts")
-        .join("mori.desktop")
-        .join("manifest.json")
-}
-
-/// 純函式:產生 hub presence marker 的 JSON 字串。抽出來好測(見 tests)。
-/// 合法 v1 BodyManifest(BodyKind 無 hub 變體 → 用 standalone_app)+ 額外 pid/started_at。
-/// BodyManifest 無 deny_unknown_fields,額外欄位被忽略;recorder 只讀 pid。
-/// 不放 entrypoints.app → Body 分頁不會給 hub 自己一顆「啟動」鈕。
-fn desktop_marker_json(pid: u32, started_at: u64) -> String {
-    let marker = serde_json::json!({
-        "schema_version": 1,
-        "id": "mori.desktop",
-        "name": "Mori Desktop",
-        "kind": "standalone_app",
-        "description": "Mori 桌面本體(hub)—— 身體部件中樞。此檔同時是 presence marker(pid 供偵測 hub 是否在執行)。",
-        "interfaces": [],
-        "capabilities": [],
-        "permissions": [],
-        "data_policy": { "owns_raw_data": false, "default_ingestion": "off" },
-        "pid": pid,
-        "started_at": started_at
-    });
-    serde_json::to_string_pretty(&marker).unwrap_or_else(|_| "{}".to_string())
-}
-
-/// 啟動時寫 presence marker(pid 供 recorder 偵測 hub「正在執行」)。失敗只 warn 不致命。
-fn write_desktop_presence_marker() {
-    let path = desktop_marker_path();
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(path = %parent.display(), error = %e, "create mori.desktop marker dir failed");
-            return;
-        }
-    }
-    let pid = std::process::id();
-    let started_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    if let Err(e) = std::fs::write(&path, desktop_marker_json(pid, started_at)) {
-        tracing::warn!(path = %path.display(), error = %e, "write mori.desktop marker failed");
-    } else {
-        tracing::info!(pid, "mori.desktop presence marker written");
-    }
-}
-
-/// app 結束時移除 marker,讓之後 standalone 啟動的 recorder 不誤判 desktop 還在跑。
-fn remove_desktop_presence_marker() {
-    let _ = std::fs::remove_file(desktop_marker_path());
-}
+// ── BI-5 follow-up:Desktop 偵測 recorder 是否安裝 → tray / Body 分頁出「會議錄音」啟動入口 ──
+// 走 ~/.mori 的 body-part manifest;recorder 沒裝就不顯示(自適應)。recorder v0.1.4 起是普通 app、
+// 沒有自己的 tray,所以 desktop 不再需要寫「hub 在執行」的 marker 給它偵測(該 marker 已移除)。
 
 /// 找已安裝的 mori-meeting-recorder 可執行檔(它 body-part manifest 的 entrypoints.app)。
 /// 沒裝 / 沒 app entrypoint → None。tray 與 Body 分頁據此決定要不要顯示「會議錄音」入口。
@@ -7471,41 +7414,15 @@ fn main() {
 
             tracing::info!("hotkey path ready (toggle + cancel + picker + Alt+0~9 + Ctrl+Alt+0~9) + tray icon");
 
-            // BI-5 follow-up:寫 hub presence marker(pid),讓其他身體部件偵測 desktop「正在執行」。
-            write_desktop_presence_marker();
-
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while running tauri application")
-        .run(|_app, event| {
-            // BI-5 follow-up:app 真正結束時移除 hub presence marker,
-            // 讓之後 standalone 啟動的 recorder 不誤判 desktop 還在跑。
-            if let tauri::RunEvent::Exit = event {
-                remove_desktop_presence_marker();
-            }
-        });
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn desktop_marker_json_is_valid_body_manifest() {
-        let json = desktop_marker_json(4321, 1000);
-        // 必須能被 mori-core 當合法 v1 BodyManifest 解析(否則 desktop 自己 Body 分頁會 parse_error)。
-        let m = mori_core::body::parse_manifest(&json).expect("hub marker must parse as BodyManifest");
-        assert_eq!(m.id, "mori.desktop");
-        assert_eq!(m.kind, mori_core::body::BodyKind::StandaloneApp);
-        assert_eq!(
-            mori_core::body::manifest_status(&m),
-            mori_core::body::ManifestStatus::Valid
-        );
-        // pid 必須是 recorder 端(desktop_presence)讀得到的數字欄位。
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["pid"].as_u64(), Some(4321));
-    }
 
     // ─── Phase 6 polish A: check_provider_binary ─────────────────────
     // 驗 provider name → binary mapping + 各 helper return 結構。
