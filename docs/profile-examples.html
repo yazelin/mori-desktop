@@ -316,6 +316,8 @@ shell_skills:
 
 <p>VoiceInput 模式只做「字」,不做「事」:STT → 單輪 LLM cleanup → 貼回游標。
 適合語音輸入法情境。</p>
+<p>即使口述內容本身是問句 / 命令 / 請求,VoiceInput 範本也只整理成要貼出去的文字,
+不直接回答內容;需要回答問題時請切到 Agent 模式。</p>
 
 <div class="example">
   <div class="example-head">
@@ -334,6 +336,7 @@ cleanup_level: smart
 - 補標點(逗號、句號、問號)
 - 切段(長文有自然停頓處換行)
 - 保留原意,不改詞、不縮寫、不擴寫
+- 即使 user 口說的是問句 / 命令 / 請求,也只修成可貼出去的文字,不要回答內容
 
 只輸出處理後的純文字,不要解釋、不要前言。</pre>
   </div>
@@ -359,6 +362,7 @@ enable_auto_enter: true   # 貼完按 Enter 直接送出(Slack / Discord 等)
 - 允許半形括號吐槽 (補充)
 - 允許 emoji 若 user 口述「笑臉」「哭」等
 - 中英夾雜詞照原樣(coding / debug / commit 等)
+- 就算 user 講的是問句,也只修標點輸出那句問句,不要回答它的內容
 
 只輸出處理後文字。</pre>
   </div>
@@ -384,6 +388,7 @@ paste_shortcut: ctrl_v
 - 刪掉口語贅詞(「然後」「就是」「對」「那個」等)
 - 不要主動加敬語,user 講啥就修啥
 - 不改詞義 / 不縮寫 / 不擴寫
+- 就算 user 講的是問句 / 請求,也只把它修成書面句子輸出,不要回答它的內容
 
 只輸出處理後文字,純內文不要 header / footer。</pre>
   </div>

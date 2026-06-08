@@ -6,6 +6,13 @@
 
 ---
 
+## Unreleased
+
+### 變更
+- **VoiceInput starter 邊界補強** — USER-00~05 中文範本明確要求「只整理口述文字,不要回答內容」;即使使用者口述的是問句 / 命令 / 請求,也要輸出可貼給別人的文字或 prompt,避免 VoiceInput cleanup 被誤當成問答助手。
+
+---
+
 ## v0.8.2 — 收尾:移除 desktop 沒用的 hub presence marker(2026-06-04)
 
 recorder v0.1.4 起改成普通 app、沒有自己的 tray,不再需要偵測「desktop 是否在執行」,所以 desktop 那個 `~/.mori/body-parts/mori.desktop/manifest.json` presence marker(v0.8.1 寫入)已沒人讀。本版移除其寫入 / 移除 / 序列化 code(`.run` 還原成簡單形式 + 移除對應 test)。tray「會議錄音」launcher + Body 分頁啟動鈕不受影響。無 breaking change。
