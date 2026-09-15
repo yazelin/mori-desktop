@@ -19,7 +19,8 @@
 //! - 送 paste 鍵:
 //!   - **X11 session**(`XDG_SESSION_TYPE=x11`)→ `xdotool key ctrl+v`
 //!     不需 daemon / 不需 group 權限,直接走 X server。
-//!   - **Wayland session** → `ydotool key 29:1 47:1 47:0 29:0`
+//!   - **Wayland session** → `ydotool key ctrl+v`(0.1.x)或
+//!     `ydotool key 29:1 47:1 47:0 29:0`(1.x)
 //!     需要 `ydotoold` daemon + user 在 `input` group。
 //!
 //! ## Setup
@@ -201,27 +202,59 @@ fn run_xdotool_paste(use_shift_v: bool) -> Result<()> {
     Ok(())
 }
 
-/// Wayland:`ydotool key 29:1 47:1 47:0 29:0`(Linux keycode 序列)。
+/// Wayland:依 ydotool 版本送名稱或 Linux keycode 序列。
 /// Linux keycodes:29=Ctrl, 42=Shift, 47=V。
 /// 需 ydotoold daemon + user 在 input group。
 fn run_ydotool_paste(use_shift_v: bool) -> Result<()> {
-    let keys: &[&str] = if use_shift_v {
-        &["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
-    } else {
-        &["29:1", "47:1", "47:0", "29:0"]
-    };
-    let mut cmd = Command::new("ydotool");
-    cmd.arg("key");
-    for k in keys {
-        cmd.arg(k);
-    }
-    let status = cmd
+    let keys = ydotool_paste_args(use_shift_v, ydotool_wants_named_keys());
+    let status = Command::new("ydotool")
+        .arg("key")
+        .args(keys)
         .status()
-        .context("spawn ydotool — is ydotoold daemon running + user in input group?")?;
+        .context("spawn ydotool — is ydotoold running + user in input group?")?;
     if !status.success() {
         anyhow::bail!("ydotool exited {status}");
     }
     Ok(())
+}
+
+/// 0.1.x(Ubuntu 24.04)吃 `ctrl+v`;1.x 吃 `<keycode>:<state>`。
+/// 餵錯時 0.1.x 仍 exit 0,但會打出 `2442` 之類的垃圾字元,所以不能靠
+/// exit status 判斷。`key --help` 裡的這句是兩代之間穩定的區別。
+fn ydotool_help_uses_named_keys(help: &str) -> bool {
+    help.contains("separated by plus")
+}
+
+fn ydotool_wants_named_keys() -> bool {
+    static NAMED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NAMED.get_or_init(|| {
+        Command::new("ydotool")
+            .args(["key", "--help"])
+            .output()
+            .map(|output| {
+                let help = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+                ydotool_help_uses_named_keys(&help)
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn ydotool_paste_args(use_shift_v: bool, named_keys: bool) -> Vec<&'static str> {
+    if named_keys {
+        if use_shift_v {
+            vec!["ctrl+shift+v"]
+        } else {
+            vec!["ctrl+v"]
+        }
+    } else if use_shift_v {
+        vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
+    } else {
+        vec!["29:1", "47:1", "47:0", "29:0"]
+    }
 }
 
 #[async_trait]
@@ -238,13 +271,49 @@ pub type PlatformPasteController = LinuxPasteController;
 /// auto-enter:ydotool keycode 28 (KEY_ENTER) press+release。
 /// 失敗只 warn 不 bail — 失敗 user 自己按 Enter 即可。
 pub fn send_enter() {
-    let result = Command::new("ydotool")
-        .args(["key", "28:1", "28:0"])
-        .status();
+    let keys: &[&str] = if ydotool_wants_named_keys() {
+        &["enter"]
+    } else {
+        &["28:1", "28:0"]
+    };
+    let result = Command::new("ydotool").arg("key").args(keys).status();
     match result {
         Ok(s) if s.success() => tracing::debug!("auto-enter sent via ydotool"),
         Ok(s) => tracing::warn!(status = ?s, "ydotool auto-enter exited non-zero"),
         Err(e) => tracing::warn!(?e, "ydotool auto-enter spawn failed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_ydotool_0_1_named_key_help() {
+        assert!(ydotool_help_uses_named_keys(
+            "Each key sequence can be modifiers and keys, separated by plus (+)",
+        ));
+        assert!(!ydotool_help_uses_named_keys(
+            "Usage: ydotool key [--key-delay] <keycode:state>...",
+        ));
+    }
+
+    #[test]
+    fn builds_named_paste_args_for_ydotool_0_1() {
+        assert_eq!(ydotool_paste_args(false, true), vec!["ctrl+v"]);
+        assert_eq!(ydotool_paste_args(true, true), vec!["ctrl+shift+v"]);
+    }
+
+    #[test]
+    fn builds_keycode_paste_args_for_ydotool_1() {
+        assert_eq!(
+            ydotool_paste_args(false, false),
+            vec!["29:1", "47:1", "47:0", "29:0"],
+        );
+        assert_eq!(
+            ydotool_paste_args(true, false),
+            vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"],
+        );
     }
 }
 

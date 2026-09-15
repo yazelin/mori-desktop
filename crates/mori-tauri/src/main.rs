@@ -118,6 +118,7 @@ impl Default for Phase {
 
 /// 對話歷史最多保留幾「對」(user + assistant 各算一則,所以實際 message 數是 2x)。
 const MAX_HISTORY_PAIRS: usize = 10;
+const SINGLE_INSTANCE_TOGGLE_EVENT: &str = "single-instance-hotkey-toggle";
 
 pub struct AppState {
     pub phase: Mutex<Phase>,
@@ -6315,7 +6316,14 @@ fn main() {
     tauri::Builder::default()
         // 5J-followup: 防止 mori-tauri orphan + 新實例並存的搶 tray / hotkey 戰。
         // 第二個 instance 啟動時觸發此 callback:把焦點還給第一個然後自殺。
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == "--toggle-recording") {
+                tracing::info!("single-instance hotkey fallback triggered");
+                if let Err(e) = app.emit(SINGLE_INSTANCE_TOGGLE_EVENT, ()) {
+                    tracing::warn!(?e, "failed to emit single-instance hotkey event");
+                }
+                return;
+            }
             tracing::warn!("another mori-tauri instance tried to start — focusing existing");
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.show();
@@ -7152,6 +7160,26 @@ fn main() {
                 "hotkey toggle/hold listeners armed (mode={:?})",
                 *state_for_setup.toggle_mode.lock(),
             );
+
+            // Ubuntu 24.04 的 portal 沒有 GlobalShortcuts。GNOME 自訂快捷鍵
+            // 會啟動 `mori-tauri --toggle-recording`:若 Mori 已在跑,上面的
+            // single-instance callback 送這個事件;若這是第一個 instance,
+            // 則在 listener 全掛好後自行送一次。這條 fallback 永遠是 toggle
+            // 語意,不受 portal 的 hold/release 模式影響。
+            let handle_single_instance = app.handle().clone();
+            let state_single_instance = state_for_setup.clone();
+            app.listen(SINGLE_INSTANCE_TOGGLE_EVENT, move |_event| {
+                handle_hotkey_toggle(
+                    handle_single_instance.clone(),
+                    state_single_instance.clone(),
+                );
+            });
+            if std::env::args().any(|arg| arg == "--toggle-recording") {
+                tracing::info!("first-instance hotkey fallback triggered");
+                if let Err(e) = app.emit(SINGLE_INSTANCE_TOGGLE_EVENT, ()) {
+                    tracing::warn!(?e, "failed to emit first-instance hotkey event");
+                }
+            }
 
             // Phase 3A: wake-word 觸發 → 跟主熱鍵 Hold-press 等效(start_recording)。
             // Phase 3B 起改用 VAD silence-stop:即時 poll Recorder.level,user 講完
