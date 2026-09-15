@@ -7,11 +7,12 @@
 //!   2. 沒在線 → **lazy-spawn `mori-ear --serve`**(像舊版 lazy-spawn whisper-server),
 //!      poll descriptor ready(≤12s)後再用。spawn 出來的 ear 是 detached、**不** kill-on-drop
 //!      —— 耳朵要比 desktop 長壽(desktop rebuild / 關掉,耳朵還在聽 + 還能轉錄)。
-//!   3. `POST /inference`(multipart `file` + `language` + `backend`)→ 回 `{"text"}`。
+//!   3. `POST /inference`(multipart `file` + `language` + optional `backend`,固定
+//!      `cleanup=false`)→ 回原始辨識文字 `{"text"}`。文字整理只由 desktop 做一次。
 //!
-//! backend(per-request 傳給 ear,對應 ear 的 `auto`/`local`):
-//!   - `auto`(hotkey 語音路徑,[`EarTranscriptionProvider::from_config`]):交給 ear 決定 ——
-//!     本機 whisper-server 優先、不可用才 Groq。「just works」。
+//! backend(per-request 傳給 ear):
+//!   - 未指定(hotkey 語音路徑,[`EarTranscriptionProvider::from_config`]):使用 ear.json
+//!     當下的 `auto`/`local`/`groq`，讓 mori-ear 模式 UI 能即時控制 Desktop。
 //!   - `local`(轉檔 UI,[`EarTranscriptionProvider::force_local`]):強制本機、永不上雲
 //!     (守住「拿已有音檔產逐字稿」頁的隱私承諾)。
 //!
@@ -36,8 +37,8 @@ const READY_TIMEOUT_SECS: u64 = 12;
 const INFERENCE_TIMEOUT_SECS: u64 = 120;
 
 pub struct EarTranscriptionProvider {
-    /// `"auto"` | `"local"` —— per-request 傳給 ear。
-    backend: String,
+    /// `None` = 使用 ear 目前模式；`Some("local")` = 轉檔頁強制本機。
+    backend: Option<String>,
     language: Option<String>,
     http: reqwest::Client,
     /// 序列化 lazy-spawn,避免並發多個 transcribe 同時 spawn 出多個 `mori-ear --serve`。
@@ -49,7 +50,7 @@ impl EarTranscriptionProvider {
     /// profile frontmatter / config.json 全部沿用,使用者無感切換到 mori-ear。
     pub const NAME: &'static str = "whisper-local";
 
-    pub fn new(backend: &str, language: Option<String>) -> Result<Self> {
+    pub fn new(backend: Option<&str>, language: Option<String>) -> Result<Self> {
         let http = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -57,23 +58,23 @@ impl EarTranscriptionProvider {
             .build()
             .context("build reqwest client for mori-ear")?;
         Ok(Self {
-            backend: backend.to_string(),
+            backend: backend.map(str::to_owned),
             language,
             http,
             spawn_lock: Mutex::new(()),
         })
     }
 
-    /// hotkey 語音路徑:`backend=auto`(ear 決定 local-first / Groq fallback)。
+    /// hotkey 語音路徑不指定 backend，使用 ear.json 當下模式。
     /// language 讀 `~/.mori/config.json` `providers.whisper-local.language`。
     pub fn from_config() -> Result<Self> {
-        Self::new("auto", config_language())
+        Self::new(None, config_language())
     }
 
     /// 轉檔 UI:`backend=local`(強制本機、永不上雲)。language 優先用呼叫端覆寫,
     /// 沒給就讀 config。
     pub fn force_local(language: Option<String>) -> Result<Self> {
-        Self::new("local", language.or_else(config_language))
+        Self::new(Some("local"), language.or_else(config_language))
     }
 
     pub fn language(&self) -> Option<&str> {
@@ -95,9 +96,14 @@ impl TranscriptionProvider for EarTranscriptionProvider {
             .file_name("audio.wav")
             .mime_str("audio/wav")
             .context("build multipart audio part")?;
+        // Ear 只做 STT；Desktop 的 cleanup_level/routing 是唯一文字整理層。
+        // 這也避免 force_local 轉檔因 ear cleanup 而意外呼叫雲端 LLM。
         let mut form = reqwest::multipart::Form::new()
             .part("file", part)
-            .text("backend", self.backend.clone());
+            .text("cleanup", "false");
+        if let Some(backend) = &self.backend {
+            form = form.text("backend", backend.clone());
+        }
         if let Some(lang) = &self.language {
             form = form.text("language", lang.clone());
         }
@@ -281,14 +287,14 @@ mod tests {
     #[test]
     fn force_local_uses_local_backend() {
         let p = EarTranscriptionProvider::force_local(Some("zh".into())).unwrap();
-        assert_eq!(p.backend, "local");
+        assert_eq!(p.backend.as_deref(), Some("local"));
         assert_eq!(p.language(), Some("zh"));
         assert_eq!(p.name(), "whisper-local");
     }
 
     #[test]
-    fn from_config_uses_auto_backend() {
+    fn from_config_defers_to_live_ear_backend() {
         let p = EarTranscriptionProvider::from_config().unwrap();
-        assert_eq!(p.backend, "auto");
+        assert_eq!(p.backend, None);
     }
 }

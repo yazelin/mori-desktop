@@ -48,7 +48,7 @@ async fn lazy_spawn_ear_and_transcribe() {
     let ear_desc = home().join(".mori/mori-ear-server.json");
     let _ = std::fs::remove_file(&ear_desc); // 清掉 → 確保走 lazy-spawn,而非用現成服務
 
-    // backend=auto(desktop 語音實際走這條):沒本機 server → ear `--ensure` 冷啟、否則 Groq
+    // Desktop 不指定 backend，使用 ear.json 當下模式。
     let provider =
         EarTranscriptionProvider::from_config().expect("build EarTranscriptionProvider");
     let text = provider
