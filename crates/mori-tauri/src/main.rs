@@ -3083,6 +3083,29 @@ fn picker_switch_agent_profile(app: AppHandle, state: tauri::State<Arc<AppState>
     }
 }
 
+/// `--profile-slot N` / `--agent-slot N` 的 N(0~9)。
+fn slot_arg(args: &[String], flag: &str) -> Option<u8> {
+    let i = args.iter().position(|a| a == flag)?;
+    args.get(i + 1)?.parse().ok().filter(|n| *n <= 9)
+}
+
+/// Wayland 沒 GlobalShortcuts portal 時,Alt+N / Ctrl+Alt+N 改由 GNOME 自訂快捷鍵
+/// 跑 `mori-tauri --profile-slot N` / `--agent-slot N`,跟 `--toggle-recording` 同一招。
+/// 第二個實例在 single-instance callback 轉發;第一個實例在 setup 尾端自己 emit。
+fn forward_slot_args(app: &tauri::AppHandle, args: &[String]) -> bool {
+    for (flag, event) in [
+        ("--profile-slot", hotkey_config::PROFILE_SLOT_EVENT),
+        ("--agent-slot", hotkey_config::AGENT_SLOT_EVENT),
+    ] {
+        if let Some(slot) = slot_arg(args, flag) {
+            tracing::info!(flag, slot, "cli profile slot");
+            let _ = app.emit(event, slot);
+            return true;
+        }
+    }
+    false
+}
+
 /// Alt+N 按下：永遠進入 VoiceInput 模式 + 載入對應 USER-0N.*.md。
 ///
 /// slot 0 = USER-00.*(預設極簡語音輸入,類似 iOS 語音輸入法,不潤稿)。
@@ -6324,6 +6347,9 @@ fn main() {
                 }
                 return;
             }
+            if forward_slot_args(app, &args) {
+                return;
+            }
             tracing::warn!("another mori-tauri instance tried to start — focusing existing");
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.show();
@@ -7440,6 +7466,8 @@ fn main() {
                 );
             });
 
+            forward_slot_args(app.handle(), &std::env::args().collect::<Vec<_>>());
+
             tracing::info!("hotkey path ready (toggle + cancel + picker + Alt+0~9 + Ctrl+Alt+0~9) + tray icon");
 
             Ok(())
@@ -7451,6 +7479,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slot_arg_parses_cli_profile_slots() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(slot_arg(&a(&["mori-tauri", "--agent-slot", "1"]), "--agent-slot"), Some(1));
+        assert_eq!(slot_arg(&a(&["mori-tauri", "--profile-slot", "0"]), "--profile-slot"), Some(0));
+        assert_eq!(slot_arg(&a(&["mori-tauri", "--agent-slot", "10"]), "--agent-slot"), None);
+        assert_eq!(slot_arg(&a(&["mori-tauri", "--agent-slot"]), "--agent-slot"), None);
+        assert_eq!(slot_arg(&a(&["mori-tauri", "--toggle-recording"]), "--agent-slot"), None);
+    }
 
     // ─── Phase 6 polish A: check_provider_binary ─────────────────────
     // 驗 provider name → binary mapping + 各 helper return 結構。
