@@ -61,6 +61,7 @@ mori-mcp = { path = "../mori-mcp" }
 # mori-core,無 cycle 風險。Skill 用 Arc<Mutex<GmailClient>> 共享 client(send
 # 需要 mut self for ensure_fresh_token,Mutex 提供 interior mutability)。
 mori-gmail = { path = "../mori-gmail" }
+zhconv = "0.4.2"
 
 [dev-dependencies]
 tempfile = "3"

@@ -22,11 +22,11 @@
 //!    包)
 //! 4. **Normalize 空白**:trim、合併多重空白、刪空行
 //!
-//! ## 為什麼**沒**做 OpenCC 簡→繁
-//! whisper.cpp 我們已經用 `initial_prompt` 把它 bias 到繁體中文(看
-//! `whisper_local.rs` 的 prompt — 全用繁體用語),實測幾乎不會吐簡體字。
-//! LLM cleanup 也都是繁體優先。真的要保底再加 `opencc-rust` 系統依賴
-//! 不太划算。如果之後遇到 mixed-script 問題再回來補。
+//! ## 簡→繁(第 0 步)
+//! 以前 whisper.cpp 有繁體 `initial_prompt` bias,幾乎不吐簡體,所以沒做。
+//! 改走 mori-ear / Groq 雲端 Whisper 後常吐簡體,gpt-oss cleanup 也不一定轉
+//! (2026-10-08 實測「他一直出现什么WL Clip…」兩次都原樣留簡體)。改用純 Rust
+//! 的 `zhconv` 轉台灣正體(含軟件→軟體這類詞彙),不靠 LLM 聽話。
 
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +81,7 @@ pub fn read_cleanup_level() -> CleanupLevel {
 
 /// 程式化 cleanup — 純 string-in / string-out,所有規則 deterministic。
 pub fn programmatic_cleanup(input: &str) -> String {
-    let mut s = input.to_string();
+    let mut s = zhconv::zhconv(input, zhconv::Variant::ZhTW);
     s = strip_whisper_hallucinations(&s);
     s = strip_wrapping_quotes(&s);
     s = halfwidth_to_fullwidth_near_cjk(&s);
@@ -222,6 +222,17 @@ fn normalize_whitespace(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn converts_simplified_to_taiwan_traditional() {
+        assert_eq!(
+            programmatic_cleanup("他一直出现什么 WL Clip,什么 Paste"),
+            "他一直出現什麼 WL Clip，什麼 Paste"
+        );
+        assert_eq!(programmatic_cleanup("这个软件后面再说"), "這個軟體後面再說");
+        // simplified hallucination gets caught after conversion
+        assert_eq!(programmatic_cleanup("好的感谢观看"), "好的");
+    }
 
     #[test]
     fn level_default_is_smart() {
