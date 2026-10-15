@@ -440,7 +440,7 @@ pub fn registry() -> Vec<DepSpec> {
             description: "Anthropic 官方 AI coding CLI。Mori provider `claude-bash` / \
                           `claude-cli` 需要這個 binary。",
             unlocks: "provider=claude-bash / claude-cli 啟動 Claude Code 當 agent loop",
-            size_hint: Some("~100MB(Node.js based)"),
+            size_hint: Some("~200MB(原生執行檔)"),
             needs_sudo: false,
             platforms: &["linux", "macos", "windows"],
             install_caveat: None,
@@ -448,8 +448,9 @@ pub fn registry() -> Vec<DepSpec> {
             check_overrides: &[],
             install: InstallSpec::Manual {
                 commands: &[
-                    "# 官方安裝(需先有 Node.js 18+):",
-                    "npm install -g @anthropic-ai/claude-code",
+                    "# 官方原生安裝(不需要 Node.js):",
+                    "curl -fsSL https://claude.ai/install.sh | bash",
+                    "# (舊的 npm 版仍可用:npm install -g @anthropic-ai/claude-code)",
                     "# 安裝完跑 `claude login` 完成 OAuth 認證(用 Anthropic 帳號)",
                     "# 詳見 https://docs.anthropic.com/claude/docs/claude-code",
                 ],
@@ -459,8 +460,9 @@ pub fn registry() -> Vec<DepSpec> {
         DepSpec {
             id: "gemini-cli",
             name: "Gemini CLI",
-            description: "Google 官方 Gemini CLI。Mori provider `gemini-bash` / \
-                          `gemini-cli` 需要這個 binary。\
+            description: "Google 官方 Gemini CLI。**個人帳號（Free／AI Pro／Ultra）自 2026-06-18 \
+                          起已停止服務，改用 Antigravity CLI（`agy`）**；企業與付費 API key \
+                          使用者不受影響。Mori provider `gemini-bash` / `gemini-cli` 需要這個 binary。\
                           \n\n注意:**只用 Gemini API**(`provider: gemini`)的話 \
                           **不需要**這個 CLI,直接設 API key 就能跑。",
             unlocks: "provider=gemini-bash / gemini-cli 啟動 Gemini CLI 當 agent loop",

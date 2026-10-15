@@ -60,9 +60,11 @@ async fn run_inner(app: &AppHandle, reminder: &Reminder, prompt: &str) -> anyhow
     registry.register(Arc::new(ReadGmailSkill::new(client)));
 
     let routing = Routing::build_from_config(None)?;
-    // bash-cli-agent 會自己 spawn 帶全套工具的 AI CLI，繞過上面的唯讀 registry，不能用在這裡。
-    if routing.agent.name() == "bash-cli-agent" {
-        anyhow::bail!("agent provider 是 bash-cli-agent，無法保證唯讀，排程任務不執行");
+    // 這些 provider 會自己 spawn 帶全套工具的 AI CLI（claude / gemini --yolo / codex bypass），
+    // 繞過上面的唯讀 registry，不能用在這裡。
+    let name = routing.agent.name();
+    if matches!(name, "bash-cli-agent" | "gemini-bash" | "codex-bash") {
+        anyhow::bail!("agent provider 是 {name}，無法保證唯讀，排程任務不執行");
     }
 
     let turn = Agent::new(routing.agent.clone(), Arc::new(registry))

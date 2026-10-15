@@ -413,7 +413,8 @@ impl LlmProvider for BashCliAgentProvider {
                 // sandbox` 順便跳過這條 check,Windows 拿掉 bypass 後就裸奔到 git check。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
                 let mut c = cli_command(&self.binary);
-                c.arg("exec").arg("--skip-git-repo-check");
+                // --ephemeral：不在 ~/.codex 留每次呼叫的 session 檔。
+                c.arg("exec").arg("--skip-git-repo-check").arg("--ephemeral");
                 #[cfg(not(target_os = "windows"))]
                 {
                     c.arg("--dangerously-bypass-approvals-and-sandbox");
@@ -440,7 +441,7 @@ impl LlmProvider for BashCliAgentProvider {
                 // tool 執行需手動核准;non-TTY 下核准不可得 → 純文字任務實質 chat-only。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
                 let mut c = cli_command(&self.binary);
-                c.arg("exec");
+                c.arg("exec").arg("--ephemeral");
                 if let Some(model) = &self.model {
                     c.arg("--model").arg(model);
                 }

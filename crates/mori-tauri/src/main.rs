@@ -1008,7 +1008,7 @@ fn suggested_api_fallback(bin: &str) -> &'static str {
 
 fn install_hint_for(bin: &str) -> &'static str {
     match bin {
-        "claude" => "npm install -g @anthropic-ai/claude-code(+ claude login)",
+        "claude" => "curl -fsSL https://claude.ai/install.sh | bash(+ claude login)",
         "gemini" => "npm install -g @google/gemini-cli",
         "codex" => "npm install -g @openai/codex(+ codex login)",
         _ => "",
@@ -7494,7 +7494,7 @@ mod tests {
             assert_eq!(v["requires_binary"], true);
             assert_eq!(v["binary"], "claude");
             assert_eq!(v["suggested_api"], "gemini");
-            assert!(v["install_hint"].as_str().unwrap().contains("@anthropic-ai/claude-code"));
+            assert!(v["install_hint"].as_str().unwrap().contains("claude.ai/install.sh"));
         }
     }
 
@@ -7528,15 +7528,16 @@ mod tests {
     }
 
     #[test]
-    fn install_hint_includes_npm_command() {
-        for (bin, expected_pkg) in &[
-            ("claude", "@anthropic-ai/claude-code"),
-            ("gemini", "@google/gemini-cli"),
-            ("codex", "@openai/codex"),
+    fn install_hint_mentions_install_source() {
+        // claude 改原生安裝（curl），gemini / codex 仍是 npm。
+        for (bin, prefix, expected) in &[
+            ("claude", "curl ", "claude.ai/install.sh"),
+            ("gemini", "npm install", "@google/gemini-cli"),
+            ("codex", "npm install", "@openai/codex"),
         ] {
             let hint = install_hint_for(bin);
-            assert!(hint.starts_with("npm install"), "{bin} hint should start with npm");
-            assert!(hint.contains(expected_pkg), "{bin} hint should mention {expected_pkg}");
+            assert!(hint.starts_with(prefix), "{bin} hint should start with {prefix}");
+            assert!(hint.contains(expected), "{bin} hint should mention {expected}");
         }
     }
 
