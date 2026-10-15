@@ -191,6 +191,7 @@ mod remind_me;
 // 2026-05-22:remind_me_cron — 週期性 reminder(LLM 直接給 6-field cron string)。
 // 跟 remind_me 不同 path,後者吃 NL 時間給 one-shot reminder,這個吃 cron 給週期性。
 mod remind_me_cron;
+mod schedule_agent_task;
 
 // Wave 7 L-mori 記憶之森(Karpathy LLM Wiki pattern):read_wiki_page LLM tool
 // dispatch path。LLM 看 system prompt 開頭的 wiki/index.md 知道 page 清單,
@@ -241,6 +242,7 @@ pub use read_file::ReadFileSkill;
 pub use read_wiki_page::ReadWikiPageSkill;
 pub use remind_me::RemindMeSkill;
 pub use remind_me_cron::RemindMeCronSkill;
+pub use schedule_agent_task::ScheduleAgentTaskSkill;
 
 pub use anthropic_skill::{
     discover_skills as discover_anthropic_skills, AnthropicPromptSkill, AnthropicScriptSkill,
@@ -249,7 +251,7 @@ pub use anthropic_skill::{
 
 pub use mcp_tool::McpToolSkill;
 
-pub use gmail::{ListGmailSkill, ReadGmailSkill, SendGmailSkill, SharedGmailClient};
+pub use gmail::{ListGmailSkill, NewOnlyListGmailSkill, ReadGmailSkill, SendGmailSkill, SharedGmailClient};
 
 // ─── 共用 helpers(memory-related skills 用)────────────────────────
 

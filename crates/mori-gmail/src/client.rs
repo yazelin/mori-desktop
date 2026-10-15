@@ -512,7 +512,7 @@ fn extract_plain_text(payload: &RawPayload) -> Result<String, GmailError> {
 }
 
 fn decode_base64url(s: &str) -> Result<String, GmailError> {
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s.trim())?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s.trim().trim_end_matches('='))?;
     // body 內容若不是 UTF-8(Google 偶爾會在 text/plain 摻 latin-1 / quoted-printable
     // 殘渣),不 hard fail,用 lossy decode — LLM 拿到「字」比拿到 error 重要。
     Ok(String::from_utf8_lossy(&bytes).into_owned())

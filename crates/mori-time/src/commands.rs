@@ -42,6 +42,12 @@ use crate::schema::{Reminder, ReminderError, ReminderStatus, ReminderStore};
 pub trait EventEmitter: Send + Sync {
     /// Emit `reminder-fire-show` event 帶 payload。失敗回 Err(只 log warn,不擋 mark_fired)。
     fn emit_reminder_fire(&self, reminder: &Reminder) -> Result<(), String>;
+
+    /// 排程 agent 任務到點：由實作端（mori-tauri）叫 agent 跑 `reminder.agent_prompt`。
+    /// 預設 no-op，純 lib / 單元測試不必實作。
+    fn emit_agent_task(&self, _reminder: &Reminder) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// no-op 實作,給沒 emit 需求的 caller(例如純 unit test)用。
@@ -157,6 +163,19 @@ impl ReminderService {
                             return;
                         }
                     }
+                }
+
+                // 排程 agent 任務：到點交給 agent（結果由 agent 端決定要不要通知），
+                // 不跳一般提醒、不開 popup。
+                if reminder.agent_prompt.is_some() {
+                    if let Err(e) = emitter_inner.emit_agent_task(&reminder) {
+                        tracing::warn!(reminder_id = reminder.id, error = %e, "emit_agent_task failed");
+                    }
+                    if reminder.cron_expr.is_none() {
+                        let store = store_inner.lock().await;
+                        let _ = store.mark_fired(reminder.id, Utc::now());
+                    }
+                    return;
                 }
 
                 // K3:發桌面通知。失敗 log warn,不 throw。
@@ -305,6 +324,22 @@ impl ReminderService {
         let reminder = {
             let store = self.store.lock().await;
             store.create(text, placeholder_due, Some(cron_expr))?
+        };
+        self.scheduler.schedule(&reminder).await?;
+        Ok(reminder)
+    }
+
+    /// 建立「週期性 agent 任務」：依 cron 到點叫 agent 以唯讀工具跑 `prompt`。
+    pub async fn schedule_agent_task(
+        &self,
+        text: String,
+        cron_expr: String,
+        prompt: String,
+    ) -> Result<Reminder, CommandError> {
+        let placeholder_due = Utc::now() + chrono::Duration::minutes(1);
+        let reminder = {
+            let store = self.store.lock().await;
+            store.create_with_agent_prompt(text, placeholder_due, Some(cron_expr), Some(prompt))?
         };
         self.scheduler.schedule(&reminder).await?;
         Ok(reminder)
@@ -826,5 +861,50 @@ mod tests {
         let calls = emitter.calls.lock().unwrap();
         assert_eq!(calls.len(), 1, "emit_reminder_fire should be called once");
         assert_eq!(calls[0], r.id);
+    }
+
+    #[tokio::test]
+    async fn agent_task_fire_calls_emit_agent_task_not_popup() {
+        use std::sync::Mutex as StdMutex;
+
+        #[derive(Default)]
+        struct Capturing {
+            popup: StdMutex<Vec<i64>>,
+            agent: StdMutex<Vec<(i64, String)>>,
+        }
+        impl EventEmitter for Capturing {
+            fn emit_reminder_fire(&self, r: &Reminder) -> Result<(), String> {
+                self.popup.lock().unwrap().push(r.id);
+                Ok(())
+            }
+            fn emit_agent_task(&self, r: &Reminder) -> Result<(), String> {
+                self.agent.lock().unwrap().push((r.id, r.agent_prompt.clone().unwrap()));
+                Ok(())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let emitter = Arc::new(Capturing::default());
+        let svc = ReminderService::new(
+            &dir.path().join("r.db"),
+            Notifier::disabled("Mori-Test"),
+            emitter.clone() as Arc<dyn EventEmitter>,
+        )
+        .await
+        .expect("svc");
+
+        // 每秒一次的 cron，等 ~2.5 秒應該至少觸發一次
+        let r = svc
+            .schedule_agent_task("看信箱".into(), "* * * * * *".into(), "看有沒有新信".into())
+            .await
+            .unwrap();
+        assert_eq!(svc.store.lock().await.get(r.id).unwrap().agent_prompt.as_deref(), Some("看有沒有新信"));
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+
+        assert!(!emitter.agent.lock().unwrap().is_empty(), "agent task never fired");
+        assert_eq!(emitter.agent.lock().unwrap()[0], (r.id, "看有沒有新信".to_string()));
+        assert!(emitter.popup.lock().unwrap().is_empty(), "agent task must not open reminder popup");
+        // cron 任務觸發後仍是 Pending（會繼續週期觸發）
+        assert_eq!(svc.store.lock().await.get(r.id).unwrap().status, ReminderStatus::Pending);
     }
 }

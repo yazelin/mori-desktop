@@ -8,6 +8,9 @@
 
 ## Unreleased
 
+### 新功能
+- **排程 agent 任務（唯讀）** — 新 skill `schedule_agent_task(text, cron, prompt)`：對 Mori 說「每 5 分鐘幫我看一次信箱，有新信跟我說」，到點由 Mori 用唯讀 Gmail 工具跑指令，有結果才跳桌面通知，沒有就不吵。Registry 只含 `list_gmail`（只回還沒報告過的 thread，已報告記在 `~/.mori/agent-task-<id>-seen.json`）與 `read_gmail`，沒有 `send_gmail`，寄信在結構上做不到。時之鳥提醒表新增 `agent_prompt` 欄位（自動 migrate）；provider 為 `bash-cli-agent` 時拒絕執行（它自帶全套工具，保證不了唯讀）。需要先完成 Gmail OAuth。
+
 ### 變更
 - **VoiceInput starter 邊界補強** — USER-00~05 中文範本明確要求「只整理口述文字,不要回答內容」;即使使用者口述的是問句 / 命令 / 請求,也要輸出可貼給別人的文字或 prompt,避免 VoiceInput cleanup 被誤當成問答助手。
 

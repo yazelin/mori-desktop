@@ -431,6 +431,7 @@ mod tests {
             snoozed_until: None,
             status: mori_time::ReminderStatus::Fired,
             dismissed_at: None,
+            agent_prompt: None,
         };
         let ar = ActiveReminder::from(&r);
         assert_eq!(ar.id, 42);
