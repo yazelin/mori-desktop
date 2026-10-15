@@ -161,6 +161,7 @@ impl LlmProvider for OllamaProvider {
             model: &self.model,
             messages: wire_messages,
             tools: wire_tools,
+            max_tokens: None,
         };
 
         let url = format!("{}/v1/chat/completions", self.base_url);

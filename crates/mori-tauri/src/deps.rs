@@ -458,6 +458,29 @@ pub fn registry() -> Vec<DepSpec> {
             install_overrides: &[],
         },
         DepSpec {
+            id: "agy-cli",
+            name: "Antigravity CLI (agy)",
+            description: "Google 的 Antigravity CLI，取代已停止服務的 Gemini CLI。Mori provider \
+                          `agy-bash` / `agy-cli` 需要這個 binary。\
+                          \n\n`agy-bash` 會帶 `--dangerously-skip-permissions`，讓它一次跑完不詢問。",
+            unlocks: "provider=agy-bash / agy-cli 啟動 agy 當 agent loop",
+            size_hint: None,
+            needs_sudo: false,
+            platforms: &["linux", "macos", "windows"],
+            install_caveat: None,
+            check: CheckSpec::Which { bin: "agy" },
+            check_overrides: &[],
+            install: InstallSpec::Manual {
+                commands: &[
+                    "# macOS / Linux:",
+                    "curl -fsSL https://antigravity.google/install.sh | bash",
+                    "# Windows(PowerShell):irm https://antigravity.google/install.ps1 | iex",
+                    "# 安裝完執行 `agy`,用 Google 帳號登入",
+                ],
+            },
+            install_overrides: &[],
+        },
+        DepSpec {
             id: "gemini-cli",
             name: "Gemini CLI",
             description: "Google 官方 Gemini CLI。**個人帳號（Free／AI Pro／Ultra）自 2026-06-18 \

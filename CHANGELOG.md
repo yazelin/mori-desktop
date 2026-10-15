@@ -9,6 +9,10 @@
 ## Unreleased
 
 ### 新功能
+- **agy（Antigravity CLI）provider** — 新增 `agy-bash`（帶 `--dangerously-skip-permissions` 一次跑完不詢問）與 chat-only 的 `agy-cli`，取代個人帳號自 2026-06-18 起停止服務的 Gemini CLI；`gemini-bash` / `gemini-cli` 保留給企業與付費 API key，標為已停用。安裝偵測（Deps）與設定頁一併更新。
+- **llmshare 設定範例** — `config.example.json` 加 `llmshare`（OpenAI 相容共享閘道）。自訂 provider 新增 `providers.<name>.max_tokens`（閘道不送就用很小預設，推理模型會回空內容）。
+- **安全** — 排程 agent 任務現在拒絕所有自帶全套工具的 CLI provider（claude / gemini / agy / codex），不只 claude。
+- codex CLI 呼叫加 `--ephemeral`；claude 安裝提示改原生安裝。
 - **排程 agent 任務（唯讀）** — 新 skill `schedule_agent_task(text, cron, prompt)`：對 Mori 說「每 5 分鐘幫我看一次信箱，有新信跟我說」，到點由 Mori 用唯讀 Gmail 工具跑指令，有結果才跳桌面通知，沒有就不吵。Registry 只含 `list_gmail`（只回還沒報告過的 thread，已報告記在 `~/.mori/agent-task-<id>-seen.json`）與 `read_gmail`，沒有 `send_gmail`，寄信在結構上做不到。時之鳥提醒表新增 `agent_prompt` 欄位（自動 migrate）；provider 為 `bash-cli-agent` 時拒絕執行（它自帶全套工具，保證不了唯讀）。需要先完成 Gmail OAuth。
 
 ### 變更

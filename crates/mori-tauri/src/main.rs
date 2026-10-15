@@ -988,6 +988,7 @@ fn provider_binary_for(provider_name: &str) -> Option<&'static str> {
     match provider_name {
         "claude-bash" | "claude-cli" => Some("claude"),
         "gemini-bash" | "gemini-cli" => Some("gemini"),
+        "agy-bash" | "agy-cli" => Some("agy"),
         "codex-bash" | "codex-cli" => Some("codex"),
         _ => None,
     }
@@ -1001,6 +1002,7 @@ fn suggested_api_fallback(bin: &str) -> &'static str {
     match bin {
         "claude" => "gemini",
         "gemini" => "gemini",
+        "agy" => "gemini",
         "codex" => "groq",
         _ => "gemini",
     }
@@ -1010,6 +1012,7 @@ fn install_hint_for(bin: &str) -> &'static str {
     match bin {
         "claude" => "curl -fsSL https://claude.ai/install.sh | bash(+ claude login)",
         "gemini" => "npm install -g @google/gemini-cli",
+        "agy" => "curl -fsSL https://antigravity.google/install.sh | bash",
         "codex" => "npm install -g @openai/codex(+ codex login)",
         _ => "",
     }
@@ -7509,6 +7512,16 @@ mod tests {
     }
 
     #[test]
+    fn check_provider_binary_agy_variants_map_to_agy() {
+        for name in ["agy-bash", "agy-cli"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], true);
+            assert_eq!(v["binary"], "agy");
+            assert!(v["install_hint"].as_str().unwrap().contains("antigravity.google/install.sh"));
+        }
+    }
+
+    #[test]
     fn check_provider_binary_codex_variants_map_to_codex() {
         for name in ["codex-bash", "codex-cli"] {
             let v = check_provider_binary(name);
@@ -7533,6 +7546,7 @@ mod tests {
         for (bin, prefix, expected) in &[
             ("claude", "curl ", "claude.ai/install.sh"),
             ("gemini", "npm install", "@google/gemini-cli"),
+            ("agy", "curl ", "antigravity.google/install.sh"),
             ("codex", "npm install", "@openai/codex"),
         ] {
             let hint = install_hint_for(bin);

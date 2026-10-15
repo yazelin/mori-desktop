@@ -4,8 +4,8 @@
 #
 # provider 留空 → 跟 config.json 的 `provider` 走(Quickstart 設的)。純 API
 # (gemini / groq / ollama)即可,不需先裝 CLI。進階要用外部 AI CLI 當 agent
-# loop 才打開 `provider: codex-bash` / `gemini-bash` / `claude-bash`(需各自裝
-# Codex CLI / Gemini CLI / Claude Code)。
+# loop 才打開 `provider: codex-bash` / `agy-bash` / `claude-bash`(需各自裝
+# Codex CLI / Antigravity CLI(agy) / Claude Code)。
 
 # provider: codex-bash    # 進階:有裝 Codex CLI 才打開
 enable_file_include: true   # 啟用 #file: 預處理(讓 body 能引用 ~/.mori/corrections.md)

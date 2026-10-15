@@ -63,7 +63,7 @@ async fn run_inner(app: &AppHandle, reminder: &Reminder, prompt: &str) -> anyhow
     // 這些 provider 會自己 spawn 帶全套工具的 AI CLI（claude / gemini --yolo / codex bypass），
     // 繞過上面的唯讀 registry，不能用在這裡。
     let name = routing.agent.name();
-    if matches!(name, "bash-cli-agent" | "gemini-bash" | "codex-bash") {
+    if mori_core::llm::is_self_tooled_cli(name) {
         anyhow::bail!("agent provider 是 {name}，無法保證唯讀，排程任務不執行");
     }
 

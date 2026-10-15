@@ -190,7 +190,7 @@ profile 做一次文字整理，避免重複潤飾。轉檔頁則固定使用 `l
 | Action skill `send_keys` | 支援：ydotool 鍵碼 | 支援：同左 | 支援：`SendInput` VK 注入 | 未支援 |
 | URL-template skills(google_search / ask_chatgpt / ask_gemini / find_youtube) | 支援 | 支援 | 支援：走 open_url | 未支援 |
 | ollama 本機 LLM | 支援 | 支援 | 支援：官方 Windows installer | 支援 |
-| claude-bash / gemini-bash / codex-bash CLI proxy | 支援 | 支援 | 支援：chain 端對端 work | 尚未驗證 |
+| claude-bash / agy-bash / codex-bash CLI proxy（gemini-bash 已停用） | 支援 | 支援 | 支援：chain 端對端 work | 尚未驗證 |
 | Memory persistence(`~/.mori/memory/*.md`) | 支援 | 支援 | 支援：走 USERPROFILE | 支援 |
 
 ### Windows 已知細微差別
