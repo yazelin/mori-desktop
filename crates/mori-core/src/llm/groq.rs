@@ -547,6 +547,7 @@ impl LlmProvider for GroqProvider {
             model: &self.model,
             messages: wire_messages,
             tools: wire_tools,
+            max_tokens: None,
         };
 
         let url = format!("{}/chat/completions", self.base_url);

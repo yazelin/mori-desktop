@@ -21,6 +21,11 @@ struct ReminderFirePayload<'a> {
 }
 
 impl EventEmitter for TauriEventEmitter {
+    fn emit_agent_task(&self, reminder: &Reminder) -> Result<(), String> {
+        tauri::async_runtime::spawn(crate::agent_task::run(self.handle.clone(), reminder.clone()));
+        Ok(())
+    }
+
     fn emit_reminder_fire(&self, reminder: &Reminder) -> Result<(), String> {
         // 讀當前設定 — load 是 read-on-call,user 切 toggle 即時生效
         let cfg = crate::notification_config::NotificationConfig::load(

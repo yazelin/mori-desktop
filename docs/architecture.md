@@ -235,8 +235,8 @@ LLM 通訊抽象。一份 agent 程式碼能打 Groq、Ollama、OpenAI、Anthrop
 | `groq` | 雲端,主力(預設) |
 | `gemini` | Gemini API 走 OpenAI-compat 端點 |
 | `ollama` | 本機 LLM,fallback / 隱私任務 |
-| `claude-bash` / `gemini-bash` / `codex-bash` | Bash CLI proxy(用 user 自己 Pro/Max quota) |
-| `claude-cli` / `gemini-cli` / `codex-cli` | 同上但限 chat-only(無 agent loop) |
+| `claude-bash` / `agy-bash` / `codex-bash`（`gemini-bash` 已停用） | Bash CLI proxy(用 user 自己 Pro/Max quota) |
+| `claude-cli` / `agy-cli` / `codex-cli`（`gemini-cli` 已停用） | 同上但限 chat-only(無 agent loop) |
 | `whisper-local` | 本機 Whisper STT — **v0.2 shell-out 到 whisper.cpp 官方 `whisper-server` HTTP 子程序**(不再 in-process FFI)。引擎跟模型都使用者自選 / 可換 GPU 加速版本,詳見 [providers](providers.html#組合-b-100-本機離線不依賴雲)。 |
 | 自訂 OpenAI-compat | `providers.<name>` 內 `api_base` + `api_key_env`,Azure / OpenRouter / 自家代理 |
 

@@ -104,6 +104,36 @@ pub fn build_named_provider(
                 .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-bash/model"));
             Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(binary, mori_cli, model)))
         }
+        "agy-bash" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-bash/binary"))
+                .unwrap_or_else(|| "agy".to_string());
+            let mori_cli = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-bash/mori_cli_path"))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(bash_cli_agent::BashCliAgentProvider::detect_mori_cli);
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-bash/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new(binary, mori_cli, model)))
+        }
+        "agy-cli" => {
+            let binary = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-cli/binary"))
+                .unwrap_or_else(|| "agy".to_string());
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-cli/model"));
+            Ok(Arc::new(bash_cli_agent::BashCliAgentProvider::new_with_protocol(
+                binary,
+                std::path::PathBuf::from("mori"),
+                model,
+                bash_cli_agent::CliProtocol::AgyChat,
+            )))
+        }
         "codex-bash" => {
             let binary = mori_config_path()
                 .as_deref()
@@ -242,14 +272,22 @@ pub fn build_named_provider(
                     model = %model,
                     "custom OpenAI-compat provider built from config.json"
                 );
+                // 可選 providers.<name>.max_tokens（數字或字串）。llmshare 這類閘道一定要送。
+                let max_tokens = cfg.and_then(|p| {
+                    let json: serde_json::Value =
+                        serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()?;
+                    let v = json.pointer(&format!("/providers/{other}/max_tokens"))?;
+                    v.as_u64().or_else(|| v.as_str()?.parse().ok()).map(|n| n as u32)
+                });
                 return Ok(Arc::new(
                     generic_openai::GenericOpenAiProvider::new(api_base, api_key, model)
+                        .with_max_tokens(max_tokens)
                         .with_name_owned(other.to_string()),
                 ));
             }
             anyhow::bail!(
                 "unknown provider '{}' — built-in: groq, gemini, ollama, claude-cli, \
-                 claude-bash, gemini-bash, codex-bash, gemini-cli, codex-cli。要用自訂 \
+                 claude-bash, agy-bash, codex-bash, agy-cli, codex-cli（gemini-bash / gemini-cli 已停用，企業與付費 API key 仍可用）。要用自訂 \
                  OpenAI-compat 端點請在 ~/.mori/config.json 設 providers.{}.api_base + \
                  .api_key_env + .model。",
                 other,
@@ -497,7 +535,7 @@ impl Routing {
         // translate → TranslateSkill 用 gemini-bash → 又 spawn gemini →…。
         // 自動 fallback 到 claude-cli(chat-only,不再 spawn)。
         // User 仍可在 routing.skills 顯式覆寫個別 skill。
-        let is_bash_cli = matches!(agent.name(), "bash-cli-agent" | "gemini-bash" | "codex-bash");
+        let is_bash_cli = is_self_tooled_cli(agent.name());
         let skill_fallback = if is_bash_cli {
             let fallback_name = "claude-cli";
             let p = match built.get(fallback_name) {
@@ -1049,6 +1087,71 @@ mod routing_tests {
         assert!(p.supports_tool_calling());
     }
 
+    /// config.example.json 裡的 llmshare 區塊必須能直接建出 provider，且 max_tokens 有被送出。
+    #[test]
+    fn example_config_llmshare_builds_and_serializes_max_tokens() {
+        let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let example: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../config.example.json")).unwrap();
+        let llmshare = example["providers"]["llmshare"].clone();
+        assert_eq!(llmshare["api_base"], "https://llm-share.duotify.com/v1");
+        assert!(llmshare["max_tokens"].as_u64().unwrap() > 0, "llmshare 必須設 max_tokens");
+
+        let home_dir = tempdir().unwrap();
+        std::fs::create_dir_all(home_dir.path().join(".mori")).unwrap();
+        std::fs::write(
+            home_dir.path().join(".mori/config.json"),
+            serde_json::json!({ "providers": { "llmshare": llmshare } }).to_string(),
+        )
+        .unwrap();
+        let _g_key = EnvGuard::set("LLMSHARE_API_KEY", "test-key");
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home_dir.path());
+        let result = build_named_provider("llmshare", None);
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let p = result.expect("llmshare example config should build");
+        assert_eq!(p.name(), "llmshare");
+        assert_eq!(p.model(), "glm-5.2");
+
+        let body = serde_json::to_value(openai_compat::ChatRequest {
+            model: "glm-5.2",
+            messages: vec![],
+            tools: vec![],
+            max_tokens: Some(32768),
+        })
+        .unwrap();
+        assert_eq!(body["max_tokens"], 32768);
+    }
+
+    /// 連線測試（預設不跑）：`LLMSHARE_API_KEY=... cargo test -p mori-core llmshare_live -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn llmshare_live_round_trip() {
+        let example: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../config.example.json")).unwrap();
+        let l = &example["providers"]["llmshare"];
+        let key = std::env::var("LLMSHARE_API_KEY").expect("需要 LLMSHARE_API_KEY");
+        let p = generic_openai::GenericOpenAiProvider::new(
+            l["api_base"].as_str().unwrap(),
+            key,
+            l["model"].as_str().unwrap(),
+        )
+        .with_max_tokens(l["max_tokens"].as_u64().map(|n| n as u32));
+        let resp = p
+            .chat(
+                vec![ChatMessage::user("只回答兩個字：你好")],
+                vec![],
+            )
+            .await
+            .expect("llmshare chat");
+        let text = resp.content.unwrap_or_default();
+        println!("llmshare replied: {text}");
+        assert!(!text.trim().is_empty(), "回應不可為空");
+    }
+
     #[test]
     fn build_named_provider_unknown_no_api_base_errors() {
         let _lock = GEMINI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1181,6 +1284,20 @@ pub fn active_chat_provider_snapshot() -> ProviderSnapshot {
                 .and_then(|p| groq::read_json_pointer(p, "/providers/gemini-bash/model"))
                 .unwrap_or_else(|| "(gemini default)".to_string());
             ProviderSnapshot { name: "gemini-bash".into(), model, base_url: None }
+        }
+        "agy-bash" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-bash/model"))
+                .unwrap_or_else(|| "(agy default)".to_string());
+            ProviderSnapshot { name: "agy-bash".into(), model, base_url: None }
+        }
+        "agy-cli" => {
+            let model = mori_config_path()
+                .as_deref()
+                .and_then(|p| groq::read_json_pointer(p, "/providers/agy-cli/model"))
+                .unwrap_or_else(|| "(agy default)".to_string());
+            ProviderSnapshot { name: "agy-cli".into(), model, base_url: None }
         }
         "codex-bash" => {
             let model = mori_config_path()
@@ -1366,3 +1483,24 @@ pub trait LlmProvider: Send + Sync {
 
 // transcribe 已從這個 trait 移到 [`super::transcribe::TranscriptionProvider`]
 // (5C)— 該 trait 跟 chat 解耦,LocalWhisper 可以只做 STT 不必假裝會 chat。
+
+/// 「自己 spawn 一個帶全套工具的 AI CLI」型 provider（claude-bash 的 name() 是 bash-cli-agent）。
+/// 它們繞過我們的 SkillRegistry：當 skill provider 會無限遞迴，排程任務也不能用（保證不了唯讀）。
+pub fn is_self_tooled_cli(provider_name: &str) -> bool {
+    matches!(provider_name, "bash-cli-agent" | "gemini-bash" | "agy-bash" | "codex-bash")
+}
+
+#[cfg(test)]
+mod self_tooled_tests {
+    use super::is_self_tooled_cli;
+
+    #[test]
+    fn self_tooled_cli_names() {
+        for n in ["bash-cli-agent", "gemini-bash", "agy-bash", "codex-bash"] {
+            assert!(is_self_tooled_cli(n), "{n}");
+        }
+        for n in ["groq", "gemini", "agy-cli", "codex-cli", "claude-cli", "llmshare"] {
+            assert!(!is_self_tooled_cli(n), "{n}");
+        }
+    }
+}

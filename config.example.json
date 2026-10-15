@@ -31,7 +31,19 @@
       "model": null
     },
 
+    "agy-bash": {
+      "_comment": "Antigravity CLI（agy）— 取代已停止服務的 gemini CLI。會帶 --dangerously-skip-permissions 讓它一次跑完不詢問。",
+      "binary": "agy",
+      "model": null,
+      "mori_cli_path": null
+    },
+    "agy-cli": {
+      "binary": "agy",
+      "model": null
+    },
+
     "gemini-bash": {
+      "_comment": "已停用：個人帳號自 2026-06-18 起 gemini CLI 停止服務，改用 agy-bash。企業與付費 API key 仍可用。",
       "binary": "gemini",
       "model": null,
       "mori_cli_path": null
@@ -49,6 +61,14 @@
     "codex-cli": {
       "binary": "codex",
       "model": null
+    },
+
+    "llmshare": {
+      "_comment": "共享閘道（OpenAI 相容）。金鑰走環境變數 LLMSHARE_API_KEY 或 api_keys.LLMSHARE_API_KEY。max_tokens 一定要設：閘道不送就用很小的預設，推理模型會回空內容。",
+      "api_base": "https://llm-share.duotify.com/v1",
+      "api_key_env": "LLMSHARE_API_KEY",
+      "model": "glm-5.2",
+      "max_tokens": 32768
     },
 
     "gemini": {
