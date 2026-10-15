@@ -163,6 +163,7 @@ async fn build_dynamic_registry(state: &SkillServerState) -> Result<SkillRegistr
         registry.register(Arc::new(RemindMeSkill::new(svc.inner().clone())));
         // 2026-05-22:remind_me_cron 同 ReminderService 共用 — bash-cli-agent 也要看得到
         registry.register(Arc::new(RemindMeCronSkill::new(svc.inner().clone())));
+        registry.register(Arc::new(mori_core::skill::ScheduleAgentTaskSkill::new(svc.inner().clone())));
     }
 
     // Wave 8 Gm-2 Gmail — optional state,沒設不註冊

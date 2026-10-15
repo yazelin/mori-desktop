@@ -153,6 +153,13 @@ pub enum CliProtocol {
     /// `codex exec`(省略 `--dangerously-bypass-approvals-and-sandbox`)— chat-only。
     /// 純文字任務 codex 不會嘗試執行 shell 命令,且 non-TTY 下也無法取得核准。
     CodexChat,
+    /// `agy --dangerously-skip-permissions --output-format text --print "<固定提示>"`，
+    /// system prompt + 對話嵌 stdin。agy（Antigravity CLI）取代已停止服務的 gemini CLI；
+    /// `--print` 的值就是提示詞，所以固定句子必須接在 `--print` 後面，旗標要放前面。
+    Agy,
+    /// `agy --output-format text --print "<固定提示>"`(省略 `--dangerously-skip-permissions`)—
+    /// chat-only。non-TTY 下無法核准 tool 執行 → 實質只輸出文字。
+    AgyChat,
 }
 
 impl CliProtocol {
@@ -166,11 +173,16 @@ impl CliProtocol {
             .unwrap_or(binary);
         match stem {
             "gemini" => Self::Gemini,
+            "agy" => Self::Agy,
             "codex" => Self::Codex,
             _ => Self::Claude,
         }
     }
 }
+
+/// agy 的固定提示詞（真正的 system prompt 與對話在 stdin）。
+const AGY_PRINT_PROMPT: &str =
+    "依 stdin 裡的系統指示與對話記錄，回覆最後一則使用者訊息。只輸出回應本身。";
 
 pub struct BashCliAgentProvider {
     /// agent CLI binary("claude" / "gemini" / "codex" / 自訂)
@@ -258,7 +270,7 @@ impl BashCliAgentProvider {
 
     fn system_prompt(&self) -> String {
         // chat-only 變體不透過 mori CLI dispatch,system prompt 簡化成純對話規則。
-        if matches!(self.protocol, CliProtocol::GeminiChat | CliProtocol::CodexChat) {
+        if matches!(self.protocol, CliProtocol::GeminiChat | CliProtocol::CodexChat | CliProtocol::AgyChat) {
             return "你是 Mori — 使用者的個人 AI 管家精靈,繁體中文為主、不客套。\n\
                     直接輸出結果,禁止前言(「我來幫你」「以下是」「好的」等),\
                     禁止尾綴補充說明,禁止執行任何 shell 命令。"
@@ -320,6 +332,8 @@ impl LlmProvider for BashCliAgentProvider {
             CliProtocol::Gemini     => "gemini-bash",
             CliProtocol::Codex      => "codex-bash",
             CliProtocol::GeminiChat => "gemini-cli",
+            CliProtocol::Agy        => "agy-bash",
+            CliProtocol::AgyChat    => "agy-cli",
             CliProtocol::CodexChat  => "codex-cli",
         }
     }
@@ -331,7 +345,7 @@ impl LlmProvider for BashCliAgentProvider {
     fn supports_tool_calling(&self) -> bool {
         // Agent 變體(Claude/Gemini/Codex):內部有 Bash tool loop → 可當主 agent。
         // Chat-only 變體(GeminiChat/CodexChat):純文字 in/out → 只能當 skill 內部 LLM。
-        !matches!(self.protocol, CliProtocol::GeminiChat | CliProtocol::CodexChat)
+        !matches!(self.protocol, CliProtocol::GeminiChat | CliProtocol::CodexChat | CliProtocol::AgyChat)
     }
 
     async fn chat(
@@ -413,7 +427,8 @@ impl LlmProvider for BashCliAgentProvider {
                 // sandbox` 順便跳過這條 check,Windows 拿掉 bypass 後就裸奔到 git check。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
                 let mut c = cli_command(&self.binary);
-                c.arg("exec").arg("--skip-git-repo-check");
+                // --ephemeral：不在 ~/.codex 留每次呼叫的 session 檔。
+                c.arg("exec").arg("--skip-git-repo-check").arg("--ephemeral");
                 #[cfg(not(target_os = "windows"))]
                 {
                     c.arg("--dangerously-bypass-approvals-and-sandbox");
@@ -421,6 +436,22 @@ impl LlmProvider for BashCliAgentProvider {
                 if let Some(model) = &self.model {
                     c.arg("--model").arg(model);
                 }
+                (c, stdin_content.into_bytes(), false)
+            }
+            CliProtocol::Agy | CliProtocol::AgyChat => {
+                // 提示詞是 `--print` 的值（實測 `--print -` 不會讀 stdin 當提示），
+                // 所以其他旗標全放前面、`--print "<固定句>"` 放最後；
+                // system prompt + 對話走 stdin（agy 會把 stdin 當上下文）。
+                let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
+                let mut c = cli_command(&self.binary);
+                if self.protocol == CliProtocol::Agy {
+                    c.arg("--dangerously-skip-permissions");
+                }
+                c.arg("--output-format").arg("text");
+                if let Some(model) = &self.model {
+                    c.arg("--model").arg(model);
+                }
+                c.arg("--print").arg(AGY_PRINT_PROMPT);
                 (c, stdin_content.into_bytes(), false)
             }
             CliProtocol::GeminiChat => {
@@ -440,7 +471,7 @@ impl LlmProvider for BashCliAgentProvider {
                 // tool 執行需手動核准;non-TTY 下核准不可得 → 純文字任務實質 chat-only。
                 let stdin_content = format_stdin_with_system(&system_prompt, &transcript);
                 let mut c = cli_command(&self.binary);
-                c.arg("exec");
+                c.arg("exec").arg("--ephemeral");
                 if let Some(model) = &self.model {
                     c.arg("--model").arg(model);
                 }
@@ -701,6 +732,24 @@ mod tests {
     }
 
     #[test]
+    fn agy_protocols_names_and_capabilities() {
+        assert_eq!(CliProtocol::detect("agy"), CliProtocol::Agy);
+        assert_eq!(CliProtocol::detect("/home/u/.local/bin/agy"), CliProtocol::Agy);
+        let agent = BashCliAgentProvider::new("agy", PathBuf::from("/tmp/mori"), None);
+        assert_eq!(agent.name(), "agy-bash");
+        assert!(agent.supports_tool_calling());
+        let chat = BashCliAgentProvider::new_with_protocol(
+            "agy",
+            PathBuf::from("mori"),
+            None,
+            CliProtocol::AgyChat,
+        );
+        assert_eq!(chat.name(), "agy-cli");
+        assert!(!chat.supports_tool_calling(), "agy-cli must be chat-only");
+        assert!(!chat.system_prompt().contains("mori skill"));
+    }
+
+    #[test]
     fn unknown_binary_defaults_to_claude_protocol() {
         let p = BashCliAgentProvider::new("my-custom-ai", PathBuf::from("/tmp/mori"), None);
         assert_eq!(p.protocol, CliProtocol::Claude);
@@ -882,5 +931,19 @@ mod tests {
             "expected color answer containing 'green' or '綠', got: {answer:?}"
         );
         assert!(resp.tool_calls.is_empty(), "codex-cli must not return tool_calls");
+    }
+
+    /// 連線測試（預設不跑）：`cargo test -p mori-core agy_bash_live -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn agy_bash_live_round_trip() {
+        let p = BashCliAgentProvider::new("agy", PathBuf::from("mori"), None);
+        let resp = p
+            .chat(vec![ChatMessage::user("只回答兩個字：你好")], vec![])
+            .await
+            .expect("agy chat");
+        let text = resp.content.unwrap_or_default();
+        println!("agy replied: {text}");
+        assert!(!text.trim().is_empty());
     }
 }

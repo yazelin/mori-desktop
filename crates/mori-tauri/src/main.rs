@@ -25,6 +25,7 @@ mod permission_broker;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
 mod recording;
+mod agent_task;
 mod reminder_emitter;
 mod reminders_cmd;
 mod x11_hotkey;
@@ -987,6 +988,7 @@ fn provider_binary_for(provider_name: &str) -> Option<&'static str> {
     match provider_name {
         "claude-bash" | "claude-cli" => Some("claude"),
         "gemini-bash" | "gemini-cli" => Some("gemini"),
+        "agy-bash" | "agy-cli" => Some("agy"),
         "codex-bash" | "codex-cli" => Some("codex"),
         _ => None,
     }
@@ -1000,6 +1002,7 @@ fn suggested_api_fallback(bin: &str) -> &'static str {
     match bin {
         "claude" => "gemini",
         "gemini" => "gemini",
+        "agy" => "gemini",
         "codex" => "groq",
         _ => "gemini",
     }
@@ -1007,8 +1010,9 @@ fn suggested_api_fallback(bin: &str) -> &'static str {
 
 fn install_hint_for(bin: &str) -> &'static str {
     match bin {
-        "claude" => "npm install -g @anthropic-ai/claude-code(+ claude login)",
+        "claude" => "curl -fsSL https://claude.ai/install.sh | bash(+ claude login)",
         "gemini" => "npm install -g @google/gemini-cli",
+        "agy" => "curl -fsSL https://antigravity.google/install.sh | bash",
         "codex" => "npm install -g @openai/codex(+ codex login)",
         _ => "",
     }
@@ -2909,6 +2913,7 @@ async fn skills_list(
         // 2026-05-22:remind_me_cron 共用同一 ReminderService(cron job 也是它管),
         // 一起註冊。LLM 自己 NL → 6-field cron string,skill 端把 cron 餵 service。
         registry.register(Arc::new(RemindMeCronSkill::new(svc.inner().clone())));
+        registry.register(Arc::new(mori_core::skill::ScheduleAgentTaskSkill::new(svc.inner().clone())));
     }
     // Wave 8 Gm-2「跨界之手」— Gmail skill。SharedGmailClient 是 optional state
     // (沒 OAuth / token 沒裝 → 撈不到,Gmail skill 不出現在 Skills tab)。
@@ -4450,6 +4455,14 @@ async fn run_agent_pipeline(
                 )));
             }
         }
+        // 排程 agent 任務：到點由 Mori 用唯讀 Gmail 工具執行指令（見 agent_task.rs）。
+        if allows("schedule_agent_task") {
+            if let Some(svc) = app.try_state::<Arc<ReminderService>>() {
+                registry.register(Arc::new(mori_core::skill::ScheduleAgentTaskSkill::new(
+                    svc.inner().clone(),
+                )));
+            }
+        }
         // Wave 8 Gm-2「跨界之手」— Gmail 系列 skill dispatch path。SharedGmailClient
         // 是 Tauri Manager 註冊的 optional state(沒 OAuth / token 沒裝 → 整組
         // skip,LLM 看不到 Gmail 工具)。對齊 `RemindMeSkill` 的 try_state pattern;
@@ -5832,6 +5845,17 @@ fn build_system_prompt(soul: Option<&str>, memory_index: &str, ctx: &MoriContext
     prompt.push_str(
         "  • cron 格式錯會回 error,看 error message 自己修(常見錯:5-field 漏秒、weekday 寫成 7 但 schedule 不接、月份用文字而非數字)\n\n",
     );
+
+    // 排程 agent 任務：到點叫 Mori 自己做事（唯讀），跟 remind_me_cron 只跳通知不同。
+    prompt.push_str("**schedule_agent_task(text, cron, prompt)**:定時叫 Mori 自己去做一件事（唯讀）。\n");
+    prompt.push_str(
+        "  • 觸發:user 說「每 5 分鐘幫我看一次信箱，有新信跟我說」「每天早上 8 點看信箱摘要給我」這類要**主動檢查**的事\n",
+    );
+    prompt.push_str("  • text:任務名稱（短句）；cron:同 remind_me_cron 的 6-field 格式\n");
+    prompt.push_str(
+        "  • prompt:到點要 Mori 做的事，寫成完整指令（含「沒有新信就什麼都不要說」）。到點時 Mori 只能列信、讀信，不能寄信，有結果才跳桌面通知\n",
+    );
+    prompt.push_str("  • 只要到點說一句話的提醒（喝水、開會）走 remind_me_cron，不要用這個\n\n");
 
     prompt.push_str(
         "**選 skill 的判斷**:閒聊或一般問答**直接答**,不要硬叫工具。\
@@ -7511,7 +7535,7 @@ mod tests {
             assert_eq!(v["requires_binary"], true);
             assert_eq!(v["binary"], "claude");
             assert_eq!(v["suggested_api"], "gemini");
-            assert!(v["install_hint"].as_str().unwrap().contains("@anthropic-ai/claude-code"));
+            assert!(v["install_hint"].as_str().unwrap().contains("claude.ai/install.sh"));
         }
     }
 
@@ -7522,6 +7546,16 @@ mod tests {
             assert_eq!(v["requires_binary"], true);
             assert_eq!(v["binary"], "gemini");
             assert!(v["install_hint"].as_str().unwrap().contains("@google/gemini-cli"));
+        }
+    }
+
+    #[test]
+    fn check_provider_binary_agy_variants_map_to_agy() {
+        for name in ["agy-bash", "agy-cli"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], true);
+            assert_eq!(v["binary"], "agy");
+            assert!(v["install_hint"].as_str().unwrap().contains("antigravity.google/install.sh"));
         }
     }
 
@@ -7545,15 +7579,17 @@ mod tests {
     }
 
     #[test]
-    fn install_hint_includes_npm_command() {
-        for (bin, expected_pkg) in &[
-            ("claude", "@anthropic-ai/claude-code"),
-            ("gemini", "@google/gemini-cli"),
-            ("codex", "@openai/codex"),
+    fn install_hint_mentions_install_source() {
+        // claude 改原生安裝（curl），gemini / codex 仍是 npm。
+        for (bin, prefix, expected) in &[
+            ("claude", "curl ", "claude.ai/install.sh"),
+            ("gemini", "npm install", "@google/gemini-cli"),
+            ("agy", "curl ", "antigravity.google/install.sh"),
+            ("codex", "npm install", "@openai/codex"),
         ] {
             let hint = install_hint_for(bin);
-            assert!(hint.starts_with("npm install"), "{bin} hint should start with npm");
-            assert!(hint.contains(expected_pkg), "{bin} hint should mention {expected_pkg}");
+            assert!(hint.starts_with(prefix), "{bin} hint should start with {prefix}");
+            assert!(hint.contains(expected), "{bin} hint should mention {expected}");
         }
     }
 

@@ -121,6 +121,14 @@ impl Notifier {
         Self::show(&n)
     }
 
+    /// 同 [`Self::notify`]，但 expire_timeout 用系統預設（-1）而非 0（Never）。
+    /// 實測 GNOME 對 timeout=0 的 Notify 不跳橫幅；排程 agent 任務用這個。
+    pub fn notify_default_timeout(&self, subject: &str, body: &str) -> Result<(), NotifyError> {
+        let mut n = self.build_text(subject, body);
+        n.timeout(notify_rust::Timeout::Default);
+        Self::show(&n)
+    }
+
     // ─── 以下 helpers 公開給 unit test 用,production 不直接呼叫 ─────────────
 
     /// 組「Reminder 通知」對應的 [`Notification`] 物件 — 不發送。
@@ -198,6 +206,7 @@ mod tests {
             dismissed_at: None,
             snoozed_until: None,
             status: ReminderStatus::Pending,
+            agent_prompt: None,
         }
     }
 

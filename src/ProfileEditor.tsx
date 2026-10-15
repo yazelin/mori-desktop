@@ -27,7 +27,8 @@ type View = "form" | "skills" | "raw";
 const ALL_PROVIDERS = [
   "groq", "gemini", "ollama",
   "claude-cli", "claude-bash",
-  "gemini-bash", "codex-bash", "gemini-cli", "codex-cli",
+  "agy-bash", "codex-bash", "agy-cli", "codex-cli",
+  "gemini-bash", "gemini-cli",
 ];
 
 const STT_PROVIDERS = ["groq", "whisper-local"];

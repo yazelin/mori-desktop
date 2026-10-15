@@ -138,6 +138,121 @@ impl Skill for ListGmailSkill {
     }
 }
 
+/// 排程任務專用的 `list_gmail`：只回「這個任務還沒報告過」的 thread。
+/// 看過的記在 `seen_path`（JSON 陣列，key = `id:historyId`，thread 有新信 historyId 會變所以會再出現）。
+/// 沒有這層，每 5 分鐘看一次信箱就會把同一封信報告到天荒地老。
+pub struct NewOnlyListGmailSkill {
+    inner: ListGmailSkill,
+    seen_path: std::path::PathBuf,
+    /// 這一輪列出來、還沒確認回報成功的 key；`commit()` 才寫進 seen 檔。
+    pending: std::sync::Mutex<Vec<String>>,
+}
+
+impl NewOnlyListGmailSkill {
+    pub fn new(client: Arc<Mutex<GmailClient>>, seen_path: std::path::PathBuf) -> Self {
+        Self { inner: ListGmailSkill::new(client), seen_path, pending: Default::default() }
+    }
+
+    fn load_seen(&self) -> std::collections::HashSet<String> {
+        std::fs::read_to_string(&self.seen_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    /// 整輪任務成功後呼叫：把這輪列到的 thread 記成「已回報」。失敗就不呼叫，下輪會重列。
+    pub fn commit(&self) {
+        let keys = std::mem::take(&mut *self.pending.lock().unwrap());
+        if keys.is_empty() {
+            return;
+        }
+        let mut seen = self.load_seen();
+        seen.extend(keys);
+        if let Some(dir) = self.seen_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        match serde_json::to_string(&seen) {
+            Ok(raw) => {
+                if let Err(e) = std::fs::write(&self.seen_path, raw) {
+                    tracing::warn!(error = %e, "failed to persist seen gmail threads");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "failed to serialize seen gmail threads"),
+        }
+    }
+}
+
+/// 從 `list_gmail` 的 data 濾掉已看過的 thread；回傳 (剩下的 threads, 新的 key 們)。
+fn filter_unseen(
+    threads: &[Value],
+    seen: &std::collections::HashSet<String>,
+) -> (Vec<Value>, Vec<String>) {
+    let mut fresh = Vec::new();
+    let mut keys = Vec::new();
+    for t in threads {
+        let key = format!(
+            "{}:{}",
+            t["id"].as_str().unwrap_or_default(),
+            t["historyId"].as_str().unwrap_or_default()
+        );
+        if !seen.contains(&key) {
+            fresh.push(t.clone());
+            keys.push(key);
+        }
+    }
+    (fresh, keys)
+}
+
+#[async_trait]
+impl Skill for NewOnlyListGmailSkill {
+    fn name(&self) -> &'static str {
+        "list_gmail"
+    }
+
+    fn description(&self) -> &'static str {
+        "列信箱裡「還沒報告過」的 Gmail thread（已經回報過的不會再出現）。可選 query 用 Gmail 搜尋語法\
+         （`is:unread`、`from:alice`）。沒有新的就回空。要看全文呼叫 `read_gmail(thread_id)`。"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        self.inner.parameters_schema()
+    }
+
+    fn target_capability(&self) -> ExecutionTarget {
+        ExecutionTarget::Local
+    }
+
+    fn privacy(&self) -> Privacy {
+        Privacy::Cloud
+    }
+
+    async fn execute(&self, args: Value, context: &Context) -> Result<SkillOutput> {
+        let out = self.inner.execute(args, context).await?;
+        let threads: Vec<Value> = out
+            .data
+            .as_ref()
+            .and_then(|d| d["threads"].as_array().cloned())
+            .unwrap_or_default();
+
+        let (fresh, keys) = filter_unseen(&threads, &self.load_seen());
+        self.pending.lock().unwrap().extend(keys);
+
+        let user_message = if fresh.is_empty() {
+            "(沒有新的 Gmail thread)".to_string()
+        } else {
+            let lines: String = fresh
+                .iter()
+                .map(|t| format!("- {} | {}\n", t["id"].as_str().unwrap_or_default(), t["snippet"].as_str().unwrap_or_default()))
+                .collect();
+            format!("共 {} 封新信，回報時請全部列出、每封一行，不可省略：\n{lines}", fresh.len())
+        };
+        Ok(SkillOutput {
+            user_message,
+            data: Some(json!({ "count": fresh.len(), "threads": fresh })),
+        })
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Read
 // ─────────────────────────────────────────────────────────────────────
@@ -697,5 +812,50 @@ mod tests {
                 "send_gmail schema must require {needle}"
             );
         }
+    }
+
+    #[test]
+    fn new_only_list_records_seen_only_after_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let seen_path = dir.path().join("seen.json");
+        let dummy = Arc::new(Mutex::new(GmailClient::with_base(
+            token_full_scope(),
+            dummy_oauth(),
+            std::path::PathBuf::from("/tmp/x"),
+            "http://localhost",
+            "http://localhost/token",
+        )));
+        let skill = NewOnlyListGmailSkill::new(dummy.clone(), seen_path.clone());
+        let threads = vec![serde_json::json!({"id": "t1", "historyId": "100"})];
+
+        // 列出新信 → 只進 pending，檔案還沒寫（模擬任務中途失敗）
+        let (fresh, keys) = filter_unseen(&threads, &skill.load_seen());
+        assert_eq!(fresh.len(), 1);
+        skill.pending.lock().unwrap().extend(keys);
+        assert!(!seen_path.exists(), "未 commit 不可寫入 seen 檔");
+        // 下一輪（新 skill 實例）仍看得到同一封
+        let retry = NewOnlyListGmailSkill::new(dummy, seen_path.clone());
+        assert_eq!(filter_unseen(&threads, &retry.load_seen()).0.len(), 1);
+
+        // commit 後才算回報過
+        skill.commit();
+        assert_eq!(filter_unseen(&threads, &skill.load_seen()).0.len(), 0);
+    }
+
+    #[test]
+    fn filter_unseen_drops_reported_threads_but_keeps_new_replies() {
+        use std::collections::HashSet;
+        let a = json!({"id": "t1", "snippet": "hi", "historyId": "10"});
+        let b = json!({"id": "t2", "snippet": "yo", "historyId": "20"});
+        let seen: HashSet<String> = ["t1:10".to_string()].into_iter().collect();
+
+        let (fresh, keys) = filter_unseen(&[a.clone(), b.clone()], &seen);
+        assert_eq!(fresh, vec![b]);
+        assert_eq!(keys, vec!["t2:20".to_string()]);
+
+        // 同一個 thread 來了新信（historyId 變了）要再出現
+        let a2 = json!({"id": "t1", "snippet": "re: hi", "historyId": "11"});
+        let (fresh, _) = filter_unseen(&[a2.clone()], &seen);
+        assert_eq!(fresh, vec![a2]);
     }
 }

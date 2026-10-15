@@ -21,6 +21,9 @@ pub(crate) struct ChatRequest<'a> {
     pub messages: Vec<WireMessage<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<WireTool<'a>>,
+    /// 部分閘道（例如 llmshare）不送就用很小的預設，推理模型會回空內容；其他 provider 不設。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Serialize)]
