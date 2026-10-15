@@ -27,6 +27,8 @@ pub struct GenericOpenAiProvider {
     /// 給 routing / UI 顯示用的 provider 名稱（log、ProviderSnapshot.name）。
     /// 預設 "openai-compat"，named provider（gemini 等）可用 `with_name` 覆寫。
     display_name: &'static str,
+    /// 可選：送 `max_tokens`（providers.<name>.max_tokens）。
+    max_tokens: Option<u32>,
     client: reqwest::Client,
 }
 
@@ -41,6 +43,7 @@ impl GenericOpenAiProvider {
             api_key: api_key.into(),
             model: model.into(),
             display_name: "openai-compat",
+            max_tokens: None,
             // brand-3 follow-up: 跟 groq.rs 同款 — reqwest 預設無 overall timeout,
             // LLM call 偶爾 hang(stream 不結束 / API glitch)會讓 agent loop 永遠
             // 卡 Phase::Responding。設 90s 上限,超過自動 cancel return Err → main.rs
@@ -51,6 +54,11 @@ impl GenericOpenAiProvider {
                 .build()
                 .expect("build reqwest client"),
         }
+    }
+
+    pub fn with_max_tokens(mut self, max_tokens: Option<u32>) -> Self {
+        self.max_tokens = max_tokens;
+        self
     }
 
     /// 蓋掉 `name()` 回傳值。`&'static str` 限制下只能傳 string literal。
@@ -125,6 +133,7 @@ impl LlmProvider for GenericOpenAiProvider {
             model: &self.model,
             messages: wire_messages,
             tools: wire_tools,
+            max_tokens: self.max_tokens,
         };
 
         let url = format!("{}/chat/completions", self.api_base);

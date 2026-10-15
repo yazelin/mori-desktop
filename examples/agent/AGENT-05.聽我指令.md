@@ -19,7 +19,7 @@
 # Provider 留空 → 跟 config.json 預設 `provider` 走(純 API 即可,不需 CLI)。
 # 進階要更穩定的 multi-step 工具呼叫,有裝對應 CLI 才開:
 #   - provider: codex-bash    # Codex CLI(`npm i -g @openai/codex`)
-#   - provider: gemini-bash   # Gemini CLI(`npm i -g @google/gemini-cli`)
+#   - provider: agy-bash      # Antigravity CLI(取代已停止服務的 Gemini CLI;`curl -fsSL https://antigravity.google/install.sh | bash`)
 #   - provider: claude-bash   # Claude Code(`npm i -g @anthropic-ai/claude-code`)
 # 純 API(`gemini` / `groq` / `ollama`)tool calling 在簡單意圖 OK,複雜的失敗率較高。
 

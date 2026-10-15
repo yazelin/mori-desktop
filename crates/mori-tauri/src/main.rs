@@ -988,6 +988,7 @@ fn provider_binary_for(provider_name: &str) -> Option<&'static str> {
     match provider_name {
         "claude-bash" | "claude-cli" => Some("claude"),
         "gemini-bash" | "gemini-cli" => Some("gemini"),
+        "agy-bash" | "agy-cli" => Some("agy"),
         "codex-bash" | "codex-cli" => Some("codex"),
         _ => None,
     }
@@ -1001,6 +1002,7 @@ fn suggested_api_fallback(bin: &str) -> &'static str {
     match bin {
         "claude" => "gemini",
         "gemini" => "gemini",
+        "agy" => "gemini",
         "codex" => "groq",
         _ => "gemini",
     }
@@ -1008,8 +1010,9 @@ fn suggested_api_fallback(bin: &str) -> &'static str {
 
 fn install_hint_for(bin: &str) -> &'static str {
     match bin {
-        "claude" => "npm install -g @anthropic-ai/claude-code(+ claude login)",
+        "claude" => "curl -fsSL https://claude.ai/install.sh | bash(+ claude login)",
         "gemini" => "npm install -g @google/gemini-cli",
+        "agy" => "curl -fsSL https://antigravity.google/install.sh | bash",
         "codex" => "npm install -g @openai/codex(+ codex login)",
         _ => "",
     }
@@ -7494,7 +7497,7 @@ mod tests {
             assert_eq!(v["requires_binary"], true);
             assert_eq!(v["binary"], "claude");
             assert_eq!(v["suggested_api"], "gemini");
-            assert!(v["install_hint"].as_str().unwrap().contains("@anthropic-ai/claude-code"));
+            assert!(v["install_hint"].as_str().unwrap().contains("claude.ai/install.sh"));
         }
     }
 
@@ -7505,6 +7508,16 @@ mod tests {
             assert_eq!(v["requires_binary"], true);
             assert_eq!(v["binary"], "gemini");
             assert!(v["install_hint"].as_str().unwrap().contains("@google/gemini-cli"));
+        }
+    }
+
+    #[test]
+    fn check_provider_binary_agy_variants_map_to_agy() {
+        for name in ["agy-bash", "agy-cli"] {
+            let v = check_provider_binary(name);
+            assert_eq!(v["requires_binary"], true);
+            assert_eq!(v["binary"], "agy");
+            assert!(v["install_hint"].as_str().unwrap().contains("antigravity.google/install.sh"));
         }
     }
 
@@ -7528,15 +7541,17 @@ mod tests {
     }
 
     #[test]
-    fn install_hint_includes_npm_command() {
-        for (bin, expected_pkg) in &[
-            ("claude", "@anthropic-ai/claude-code"),
-            ("gemini", "@google/gemini-cli"),
-            ("codex", "@openai/codex"),
+    fn install_hint_mentions_install_source() {
+        // claude 改原生安裝（curl），gemini / codex 仍是 npm。
+        for (bin, prefix, expected) in &[
+            ("claude", "curl ", "claude.ai/install.sh"),
+            ("gemini", "npm install", "@google/gemini-cli"),
+            ("agy", "curl ", "antigravity.google/install.sh"),
+            ("codex", "npm install", "@openai/codex"),
         ] {
             let hint = install_hint_for(bin);
-            assert!(hint.starts_with("npm install"), "{bin} hint should start with npm");
-            assert!(hint.contains(expected_pkg), "{bin} hint should mention {expected_pkg}");
+            assert!(hint.starts_with(prefix), "{bin} hint should start with {prefix}");
+            assert!(hint.contains(expected), "{bin} hint should mention {expected}");
         }
     }
 

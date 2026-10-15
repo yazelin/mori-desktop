@@ -95,9 +95,24 @@ const PROVIDER_SCHEMAS: Record<string, { fields: ProviderField[]; topHintKey?: s
     ],
     topHintKey: "config_tab.rows.hint_llm_chat_proxy",
   },
+  "agy-bash": {
+    fields: [
+      { key: "binary", label: "binary", hint: "通常填 `agy`(Antigravity CLI,取代已停止服務的 gemini CLI)" },
+      { key: "model", label: "model", hint: "(留空用 agy 內建預設)" },
+      { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空 Mori 自動偵測)" },
+    ],
+    topHintKey: "config_tab.rows.hint_llm_bash_proxy",
+  },
+  "agy-cli": {
+    fields: [
+      { key: "binary", label: "binary", hint: "通常填 `agy`(同 agy-bash)" },
+      { key: "model", label: "model" },
+    ],
+    topHintKey: "config_tab.rows.hint_llm_chat_proxy",
+  },
   "gemini-bash": {
     fields: [
-      { key: "binary", label: "binary", hint: "通常填 `gemini`(短名 Mori 自動探 .cmd shim,從 v0.4.0 起)" },
+      { key: "binary", label: "binary", hint: "(已停用:個人帳號自 2026-06-18 起 gemini CLI 停止服務,請改用 agy-bash)通常填 `gemini`" },
       { key: "model", label: "model", hint: "(留空用 gemini CLI 內建預設)" },
       { key: "mori_cli_path", label: "mori_cli_path", hint: "(留空 Mori 自動偵測)" },
     ],
