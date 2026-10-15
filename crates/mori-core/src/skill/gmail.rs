@@ -138,6 +138,100 @@ impl Skill for ListGmailSkill {
     }
 }
 
+/// 排程任務專用的 `list_gmail`：只回「這個任務還沒報告過」的 thread。
+/// 看過的記在 `seen_path`（JSON 陣列，key = `id:historyId`，thread 有新信 historyId 會變所以會再出現）。
+/// 沒有這層，每 5 分鐘看一次信箱就會把同一封信報告到天荒地老。
+pub struct NewOnlyListGmailSkill {
+    inner: ListGmailSkill,
+    seen_path: std::path::PathBuf,
+}
+
+impl NewOnlyListGmailSkill {
+    pub fn new(client: Arc<Mutex<GmailClient>>, seen_path: std::path::PathBuf) -> Self {
+        Self { inner: ListGmailSkill::new(client), seen_path }
+    }
+}
+
+/// 從 `list_gmail` 的 data 濾掉已看過的 thread；回傳 (剩下的 threads, 新的 key 們)。
+fn filter_unseen(
+    threads: &[Value],
+    seen: &std::collections::HashSet<String>,
+) -> (Vec<Value>, Vec<String>) {
+    let mut fresh = Vec::new();
+    let mut keys = Vec::new();
+    for t in threads {
+        let key = format!(
+            "{}:{}",
+            t["id"].as_str().unwrap_or_default(),
+            t["historyId"].as_str().unwrap_or_default()
+        );
+        if !seen.contains(&key) {
+            fresh.push(t.clone());
+            keys.push(key);
+        }
+    }
+    (fresh, keys)
+}
+
+#[async_trait]
+impl Skill for NewOnlyListGmailSkill {
+    fn name(&self) -> &'static str {
+        "list_gmail"
+    }
+
+    fn description(&self) -> &'static str {
+        "列信箱裡「還沒報告過」的 Gmail thread（已經回報過的不會再出現）。可選 query 用 Gmail 搜尋語法\
+         （`is:unread`、`from:alice`）。沒有新的就回空。要看全文呼叫 `read_gmail(thread_id)`。"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        self.inner.parameters_schema()
+    }
+
+    fn target_capability(&self) -> ExecutionTarget {
+        ExecutionTarget::Local
+    }
+
+    fn privacy(&self) -> Privacy {
+        Privacy::Cloud
+    }
+
+    async fn execute(&self, args: Value, context: &Context) -> Result<SkillOutput> {
+        let out = self.inner.execute(args, context).await?;
+        let threads: Vec<Value> = out
+            .data
+            .as_ref()
+            .and_then(|d| d["threads"].as_array().cloned())
+            .unwrap_or_default();
+
+        let mut seen: std::collections::HashSet<String> = std::fs::read_to_string(&self.seen_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+        let (fresh, keys) = filter_unseen(&threads, &seen);
+        seen.extend(keys);
+        if let Some(dir) = self.seen_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(&self.seen_path, serde_json::to_string(&seen)?) {
+            tracing::warn!(error = %e, "failed to persist seen gmail threads");
+        }
+
+        let user_message = if fresh.is_empty() {
+            "(沒有新的 Gmail thread)".to_string()
+        } else {
+            fresh
+                .iter()
+                .map(|t| format!("- {} | {}\n", t["id"].as_str().unwrap_or_default(), t["snippet"].as_str().unwrap_or_default()))
+                .collect()
+        };
+        Ok(SkillOutput {
+            user_message,
+            data: Some(json!({ "count": fresh.len(), "threads": fresh })),
+        })
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Read
 // ─────────────────────────────────────────────────────────────────────
@@ -697,5 +791,22 @@ mod tests {
                 "send_gmail schema must require {needle}"
             );
         }
+    }
+
+    #[test]
+    fn filter_unseen_drops_reported_threads_but_keeps_new_replies() {
+        use std::collections::HashSet;
+        let a = json!({"id": "t1", "snippet": "hi", "historyId": "10"});
+        let b = json!({"id": "t2", "snippet": "yo", "historyId": "20"});
+        let seen: HashSet<String> = ["t1:10".to_string()].into_iter().collect();
+
+        let (fresh, keys) = filter_unseen(&[a.clone(), b.clone()], &seen);
+        assert_eq!(fresh, vec![b]);
+        assert_eq!(keys, vec!["t2:20".to_string()]);
+
+        // 同一個 thread 來了新信（historyId 變了）要再出現
+        let a2 = json!({"id": "t1", "snippet": "re: hi", "historyId": "11"});
+        let (fresh, _) = filter_unseen(&[a2.clone()], &seen);
+        assert_eq!(fresh, vec![a2]);
     }
 }

@@ -33,6 +33,10 @@ pub struct Reminder {
     /// 暫緩到何時(snooze 後 status = Snoozed,到時間才繼續排程)。
     pub snoozed_until: Option<DateTime<Utc>>,
     pub status: ReminderStatus,
+    /// `Some(prompt)` = 到點不是跳通知，而是叫 agent 以唯讀工具跑這段指令（排程 agent 任務）；
+    /// `None` = 一般提醒。
+    #[serde(default)]
+    pub agent_prompt: Option<String>,
 }
 
 /// Reminder 生命週期狀態。
@@ -138,6 +142,15 @@ impl ReminderStore {
             )?;
         }
 
+        let has_agent_prompt: bool = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('reminders') WHERE name = 'agent_prompt'")
+            .and_then(|mut s| s.query_row([], |_| Ok(true)))
+            .unwrap_or(false);
+        if !has_agent_prompt {
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN agent_prompt TEXT", [])?;
+        }
+
         Ok(())
     }
 
@@ -148,17 +161,29 @@ impl ReminderStore {
         due_at: DateTime<Utc>,
         cron: Option<String>,
     ) -> Result<Reminder, ReminderError> {
+        self.create_with_agent_prompt(text, due_at, cron, None)
+    }
+
+    /// 同 [`create`],另帶 agent 任務指令（到點叫 agent 跑，不跳一般提醒）。
+    pub fn create_with_agent_prompt(
+        &self,
+        text: String,
+        due_at: DateTime<Utc>,
+        cron: Option<String>,
+        agent_prompt: Option<String>,
+    ) -> Result<Reminder, ReminderError> {
         let now = Utc::now();
         let status = ReminderStatus::Pending;
         self.conn.execute(
-            r#"INSERT INTO reminders (text, due_at, cron_expr, created_at, fired_at, snoozed_until, status)
-               VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5)"#,
+            r#"INSERT INTO reminders (text, due_at, cron_expr, created_at, fired_at, snoozed_until, status, agent_prompt)
+               VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, ?6)"#,
             params![
                 text,
                 due_at.to_rfc3339(),
                 cron,
                 now.to_rfc3339(),
                 status.as_db_str(),
+                agent_prompt,
             ],
         )?;
         let id = self.conn.last_insert_rowid();
@@ -172,13 +197,14 @@ impl ReminderStore {
             dismissed_at: None,
             snoozed_until: None,
             status,
+            agent_prompt,
         })
     }
 
     /// 列出仍需排程的 reminder(status = Pending 或 Snoozed)。
     pub fn list_pending(&self) -> Result<Vec<Reminder>, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status, agent_prompt
                FROM reminders
                WHERE status IN ('pending', 'snoozed')
                ORDER BY due_at ASC"#,
@@ -192,7 +218,7 @@ impl ReminderStore {
     /// 列出所有 reminder(含 fired / cancelled),由舊到新。
     pub fn list_all(&self) -> Result<Vec<Reminder>, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status, agent_prompt
                FROM reminders
                ORDER BY id ASC"#,
         )?;
@@ -205,7 +231,7 @@ impl ReminderStore {
     /// 拿單筆。找不到回 `NotFound(id)`。
     pub fn get(&self, id: i64) -> Result<Reminder, ReminderError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
+            r#"SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status, agent_prompt
                FROM reminders
                WHERE id = ?1"#,
         )?;
@@ -290,7 +316,7 @@ impl ReminderStore {
     ) -> Result<Vec<Reminder>, ReminderError> {
         let grace_cutoff = now - chrono::Duration::days(7);
         let mut stmt = self.conn.prepare(
-            "SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status
+            "SELECT id, text, due_at, cron_expr, created_at, fired_at, dismissed_at, snoozed_until, status, agent_prompt
              FROM reminders
              WHERE status = 'fired'
                AND dismissed_at IS NULL
@@ -308,7 +334,7 @@ impl ReminderStore {
 ///
 /// 欄位順序(對應 SELECT 的 column 位置):
 /// 0=id, 1=text, 2=due_at, 3=cron_expr, 4=created_at,
-/// 5=fired_at, 6=dismissed_at, 7=snoozed_until, 8=status
+/// 5=fired_at, 6=dismissed_at, 7=snoozed_until, 8=status, 9=agent_prompt
 fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderError>> {
     let id: i64 = row.get(0)?;
     let text: String = row.get(1)?;
@@ -319,6 +345,7 @@ fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderE
     let dismissed_at: Option<String> = row.get(6)?;
     let snoozed_until: Option<String> = row.get(7)?;
     let status: String = row.get(8)?;
+    let agent_prompt: Option<String> = row.get(9)?;
 
     Ok((|| -> Result<Reminder, ReminderError> {
         Ok(Reminder {
@@ -331,6 +358,7 @@ fn row_to_reminder(row: &Row<'_>) -> rusqlite::Result<Result<Reminder, ReminderE
             dismissed_at: dismissed_at.as_deref().map(parse_rfc3339).transpose()?,
             snoozed_until: snoozed_until.as_deref().map(parse_rfc3339).transpose()?,
             status: ReminderStatus::from_db_str(&status)?,
+            agent_prompt,
         })
     })())
 }

@@ -198,6 +198,7 @@ mod tests {
             dismissed_at: None,
             snoozed_until: None,
             status: ReminderStatus::Pending,
+            agent_prompt: None,
         }
     }
 
