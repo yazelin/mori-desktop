@@ -240,10 +240,11 @@ impl Skill for NewOnlyListGmailSkill {
         let user_message = if fresh.is_empty() {
             "(沒有新的 Gmail thread)".to_string()
         } else {
-            fresh
+            let lines: String = fresh
                 .iter()
                 .map(|t| format!("- {} | {}\n", t["id"].as_str().unwrap_or_default(), t["snippet"].as_str().unwrap_or_default()))
-                .collect()
+                .collect();
+            format!("共 {} 封新信，回報時請全部列出、每封一行，不可省略：\n{lines}", fresh.len())
         };
         Ok(SkillOutput {
             user_message,
