@@ -80,8 +80,26 @@ async fn notify(title: &str, body: &str) {
     }
     let (title, body) = (title.to_string(), body.to_string());
     // notify-rust 在 Linux 自己開 runtime，必須走 spawn_blocking（同 mori-time on_fire）。
-    let res = tokio::task::spawn_blocking(move || Notifier::new("Mori").notify(&title, &body)).await;
+    let res = tokio::task::spawn_blocking(move || send_notification(&title, &body)).await;
     if !matches!(res, Ok(Ok(()))) {
         tracing::warn!(?res, "agent task notification failed");
     }
+}
+
+/// Linux 上由 Mori 程序自己送的通知，會被 GNOME 在約 35ms 內以 reason 2 收掉（實測；
+/// 疑似跟 Mori 視窗綁在一起而被當成「正在看」）。改由獨立的 `notify-send` 程序送就會顯示，
+/// 失敗再退回 notify-rust。
+fn send_notification(title: &str, body: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let ok = std::process::Command::new("notify-send")
+            .args(["-a", "Mori", "-u", "critical", "-h", "boolean:resident:true", "--", title, body])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(());
+        }
+    }
+    Notifier::new("Mori").notify_default_timeout(title, body).map_err(|e| e.to_string())
 }
