@@ -144,11 +144,41 @@ impl Skill for ListGmailSkill {
 pub struct NewOnlyListGmailSkill {
     inner: ListGmailSkill,
     seen_path: std::path::PathBuf,
+    /// 這一輪列出來、還沒確認回報成功的 key；`commit()` 才寫進 seen 檔。
+    pending: std::sync::Mutex<Vec<String>>,
 }
 
 impl NewOnlyListGmailSkill {
     pub fn new(client: Arc<Mutex<GmailClient>>, seen_path: std::path::PathBuf) -> Self {
-        Self { inner: ListGmailSkill::new(client), seen_path }
+        Self { inner: ListGmailSkill::new(client), seen_path, pending: Default::default() }
+    }
+
+    fn load_seen(&self) -> std::collections::HashSet<String> {
+        std::fs::read_to_string(&self.seen_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    /// 整輪任務成功後呼叫：把這輪列到的 thread 記成「已回報」。失敗就不呼叫，下輪會重列。
+    pub fn commit(&self) {
+        let keys = std::mem::take(&mut *self.pending.lock().unwrap());
+        if keys.is_empty() {
+            return;
+        }
+        let mut seen = self.load_seen();
+        seen.extend(keys);
+        if let Some(dir) = self.seen_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        match serde_json::to_string(&seen) {
+            Ok(raw) => {
+                if let Err(e) = std::fs::write(&self.seen_path, raw) {
+                    tracing::warn!(error = %e, "failed to persist seen gmail threads");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "failed to serialize seen gmail threads"),
+        }
     }
 }
 
@@ -204,18 +234,8 @@ impl Skill for NewOnlyListGmailSkill {
             .and_then(|d| d["threads"].as_array().cloned())
             .unwrap_or_default();
 
-        let mut seen: std::collections::HashSet<String> = std::fs::read_to_string(&self.seen_path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
-        let (fresh, keys) = filter_unseen(&threads, &seen);
-        seen.extend(keys);
-        if let Some(dir) = self.seen_path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Err(e) = std::fs::write(&self.seen_path, serde_json::to_string(&seen)?) {
-            tracing::warn!(error = %e, "failed to persist seen gmail threads");
-        }
+        let (fresh, keys) = filter_unseen(&threads, &self.load_seen());
+        self.pending.lock().unwrap().extend(keys);
 
         let user_message = if fresh.is_empty() {
             "(沒有新的 Gmail thread)".to_string()
@@ -791,6 +811,34 @@ mod tests {
                 "send_gmail schema must require {needle}"
             );
         }
+    }
+
+    #[test]
+    fn new_only_list_records_seen_only_after_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let seen_path = dir.path().join("seen.json");
+        let dummy = Arc::new(Mutex::new(GmailClient::with_base(
+            token_full_scope(),
+            dummy_oauth(),
+            std::path::PathBuf::from("/tmp/x"),
+            "http://localhost",
+            "http://localhost/token",
+        )));
+        let skill = NewOnlyListGmailSkill::new(dummy.clone(), seen_path.clone());
+        let threads = vec![serde_json::json!({"id": "t1", "historyId": "100"})];
+
+        // 列出新信 → 只進 pending，檔案還沒寫（模擬任務中途失敗）
+        let (fresh, keys) = filter_unseen(&threads, &skill.load_seen());
+        assert_eq!(fresh.len(), 1);
+        skill.pending.lock().unwrap().extend(keys);
+        assert!(!seen_path.exists(), "未 commit 不可寫入 seen 檔");
+        // 下一輪（新 skill 實例）仍看得到同一封
+        let retry = NewOnlyListGmailSkill::new(dummy, seen_path.clone());
+        assert_eq!(filter_unseen(&threads, &retry.load_seen()).0.len(), 1);
+
+        // commit 後才算回報過
+        skill.commit();
+        assert_eq!(filter_unseen(&threads, &skill.load_seen()).0.len(), 0);
     }
 
     #[test]
