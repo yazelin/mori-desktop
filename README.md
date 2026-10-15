@@ -229,6 +229,22 @@ Ubuntu 24.04 LTS 內建的 `xdg-desktop-portal` 1.18 不支援 Mori 使用的全
 - 指令：`env WEBKIT_DISABLE_DMABUF_RENDERER=1 /完整路徑/mori-tauri --toggle-recording`
 - 快捷鍵：`Ctrl+Alt+Space`
 
+Alt+0~9(語音輸入 profile)與 Ctrl+Alt+0~9(Agent profile)同樣靠 portal 註冊，沒 portal 時改綁
+`mori-tauri --profile-slot N` / `--agent-slot N`。一次綁 20 組：
+
+```bash
+S=org.gnome.settings-daemon.plugins.media-keys; B=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
+BIN=/完整路徑/mori-tauri; paths=()
+for n in $(seq 0 9); do for k in profile agent; do
+  p="$B/mori-$k-$n/"; paths+=("'$p'")
+  [ $k = profile ] && key="<Alt>$n" || key="<Ctrl><Alt>$n"
+  gsettings set $S.custom-keybinding:$p name "Mori $k slot $n"
+  gsettings set $S.custom-keybinding:$p command "env WEBKIT_DISABLE_DMABUF_RENDERER=1 $BIN --$k-slot $n"
+  gsettings set $S.custom-keybinding:$p binding "$key"
+done; done
+# 再把 ${paths[@]} 併進 `gsettings get $S custom-keybindings` 既有清單後 set 回去(別覆蓋掉其他自訂快捷鍵)
+```
+
 若 Mori 已在執行，第二個程序會通知既有程序切換錄音；若 Mori 尚未執行，同一個指令會
 先啟動 Mori 再開始錄音。Wayland 貼回文字會自動偵測 `ydotool` 0.1.x 或 1.x 的參數格式，
 避免舊版把按鍵碼 `29 47 47 29` 當成文字貼出。
