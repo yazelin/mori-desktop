@@ -8,12 +8,21 @@
 
 ## Unreleased
 
+---
+
+## v0.8.3 — 排程 agent 任務、agy / llmshare、Wayland 切換修正(2026-10-16)
+
 ### 新功能
 - **agy（Antigravity CLI）provider** — 新增 `agy-bash`（帶 `--dangerously-skip-permissions` 一次跑完不詢問）與 chat-only 的 `agy-cli`，取代個人帳號自 2026-06-18 起停止服務的 Gemini CLI；`gemini-bash` / `gemini-cli` 保留給企業與付費 API key，標為已停用。安裝偵測（Deps）與設定頁一併更新。
 - **llmshare 設定範例** — `config.example.json` 加 `llmshare`（OpenAI 相容共享閘道）。自訂 provider 新增 `providers.<name>.max_tokens`（閘道不送就用很小預設，推理模型會回空內容）。
 - **安全** — 排程 agent 任務現在拒絕所有自帶全套工具的 CLI provider（claude / gemini / agy / codex），不只 claude。
 - codex CLI 呼叫加 `--ephemeral`；claude 安裝提示改原生安裝。
 - **排程 agent 任務（唯讀）** — 新 skill `schedule_agent_task(text, cron, prompt)`：對 Mori 說「每 5 分鐘幫我看一次信箱，有新信跟我說」，到點由 Mori 用唯讀 Gmail 工具跑指令，有結果才跳桌面通知，沒有就不吵。Registry 只含 `list_gmail`（只回還沒報告過的 thread，已報告記在 `~/.mori/agent-task-<id>-seen.json`）與 `read_gmail`，沒有 `send_gmail`，寄信在結構上做不到。時之鳥提醒表新增 `agent_prompt` 欄位（自動 migrate）；provider 為 `bash-cli-agent` 時拒絕執行（它自帶全套工具，保證不了唯讀）。需要先完成 Gmail OAuth。
+
+### 修正
+- **Linux 開機啟動找不到 codex** — GUI 行程沒有 shell 的 PATH,npm/nvm 裝的 CLI 找不到,Agent 模式報找不到 LLM。啟動時把存在的 ~/.local/bin、~/.cargo/bin、~/.npm-global/bin、~/.volta/bin 與最高版 nvm node bin 附加到 PATH 尾端(#170)。
+- **Linux 錄音前讀剪貼簿** 改走 xclip,不再跳 wl-clipboard 通知卡住貼上(#166)。
+- **Wayland 切 profile** — `mori-tauri --profile-slot N` / `--agent-slot N`,可綁 GNOME 自訂快捷鍵(#167)。
 
 ### 變更
 - **VoiceInput starter 邊界補強** — USER-00~05 中文範本明確要求「只整理口述文字,不要回答內容」;即使使用者口述的是問句 / 命令 / 請求,也要輸出可貼給別人的文字或 prompt,避免 VoiceInput cleanup 被誤當成問答助手。
