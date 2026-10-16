@@ -946,4 +946,25 @@ mod tests {
         println!("agy replied: {text}");
         assert!(!text.trim().is_empty());
     }
+
+    /// 工具迴圈連線測試（預設不跑）：agy 要自己執行 `mori skill list` 並回報結果。
+    /// 需要 Mori 正在執行（skill server 在線）與 `mori` 在 PATH。
+    /// `cargo test -p mori-core agy_bash_live_tool_use -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn agy_bash_live_tool_use() {
+        let p = BashCliAgentProvider::new("agy", PathBuf::from("mori"), None);
+        let resp = p
+            .chat(
+                vec![ChatMessage::user(
+                    "用 shell 執行 `mori skill list`，然後只回答輸出裡有 translate 這個 skill 嗎？回答「有」或「沒有」。",
+                )],
+                vec![],
+            )
+            .await
+            .expect("agy chat");
+        let text = resp.content.unwrap_or_default();
+        println!("agy replied: {text}");
+        assert!(text.contains('有'), "agy did not report the skill list: {text}");
+    }
 }
