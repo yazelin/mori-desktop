@@ -625,10 +625,10 @@ const VOICE_STARTERS: &[StarterTemplate] = &[
         content: include_str!("../../../examples/voice_input/USER-03.LINE貼文.md"),
     },
     StarterTemplate {
-        filename: "USER-04.哄老婆開心.md",
+        filename: "USER-04.不吵架溝通術.md",
         lang: "zh",
-        display: "USER-04 · 哄老婆開心",
-        content: include_str!("../../../examples/voice_input/USER-04.哄老婆開心.md"),
+        display: "USER-04 · 不吵架溝通術",
+        content: include_str!("../../../examples/voice_input/USER-04.不吵架溝通術.md"),
     },
     StarterTemplate {
         filename: "USER-05.提示詞優化.md",

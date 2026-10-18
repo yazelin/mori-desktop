@@ -6,7 +6,7 @@ Mori 的 system prompt 是 LLM 每輪 chat 都重送的「常駐成本」 — �
 
 ## 1. 怎麼量
 
-對比 4 對中英 starter(`USER-03.LINE貼文 / USER-04.哄老婆開心 / USER-05.提示詞優化 / AGENT-05.聽我指令`)的 system prompt body(去掉 YAML frontmatter,因為 LLM 只看 body)。
+對比 4 對中英 starter(`USER-03.LINE貼文 / USER-04.不吵架溝通術 / USER-05.提示詞優化 / AGENT-05.聽我指令`)的 system prompt body(去掉 YAML frontmatter,因為 LLM 只看 body)。
 
 跑兩個 tokenizer:
 
@@ -33,7 +33,7 @@ uvx --with google-genai python compare_gemini.py
 |---|---|---:|---:|---:|---:|---:|
 | USER-03 LINE 貼文 | zh | 695 | **509** | 438 | 694 | 1.37 |
 | USER-03 LINE post | en | 1543 | **370** | 386 | 375 | 4.17 |
-| USER-04 哄老婆 | zh | 712 | **592** | 492 | 841 | 1.20 |
+| USER-04 不吵架溝通術 | zh | 712 | **592** | 492 | 841 | 1.20 |
 | USER-04 sweet | en | 1843 | **432** | 461 | 449 | 4.27 |
 | USER-05 提示詞優化 | zh | 1104 | **703** | 597 | 957 | 1.57 |
 | USER-05 prompt-optim | en | 2231 | **497** | 531 | 501 | 4.49 |
