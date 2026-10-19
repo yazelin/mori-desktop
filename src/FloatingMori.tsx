@@ -48,6 +48,13 @@ const PROFILE_LABEL_MS = 1500;
 // 麥克風 RMS 值通常在 0.01–0.20，需要 sqrt + 放大讓效果更明顯
 const amplify = (v: number) => Math.sqrt(Math.min(v * 4, 1.0));
 
+// 錄音中連續這麼久都沒收到聲音,浮動視窗改顯示提示(麥克風沒開 / 選錯裝置時才看得出來)
+const NO_SOUND_GRACE_MS = 2500;
+// 低於辨識前守門的預設門檻(peak RMS 0.012)才算沒聲音;比這高的小聲說話仍會被辨識,不能提示「沒聽到」
+const NO_SOUND_LEVEL = 0.012;
+export const noSoundForTooLong = (lastSoundAtMs: number, startedAtMs: number, nowMs: number) =>
+  nowMs - Math.max(lastSoundAtMs, startedAtMs) > NO_SOUND_GRACE_MS;
+
 // 波紋觸發門檻 — 低於這個視為靜音不發波
 const RIPPLE_THRESHOLD = 0.04;
 // 波紋發射間隔 — 最快多久一次（防止暴雷洗版）
@@ -233,6 +240,8 @@ function FloatingMori() {
 
   // 5F-3A: 音量驅動的 aura（0.0–1.0，後端 ~30Hz emit）
   const [volume, setVolume] = useState(0);
+  const lastSoundAtRef = useRef(0);
+  const [noSound, setNoSound] = useState(false);
 
   // 5F-3A 波紋：音量超過門檻時 spawn 一個 ripple element，CSS animation
   // 自動 fade out。lastRippleAtRef 限流避免每 33ms 都發一個。
@@ -394,6 +403,7 @@ function FloatingMori() {
     const unlistenVolume = listen<number>("audio-level", (e) => {
       const v = e.payload;
       setVolume(v);
+      if (v >= NO_SOUND_LEVEL) lastSoundAtRef.current = Date.now();
 
       // 音量超過門檻 + 距離上一個波紋 > 限流間隔 → 發新波紋
       const now = performance.now();
@@ -437,6 +447,20 @@ function FloatingMori() {
       setStatusLabel(null);
     }
   }, [phase.kind]);
+
+  // 錄音中持續沒收到聲音 → 顯示提示;離開錄音就清掉
+  useEffect(() => {
+    if (phase.kind !== "recording") {
+      setNoSound(false);
+      return;
+    }
+    const startedAt = phase.started_at_ms;
+    const timer = setInterval(
+      () => setNoSound(noSoundForTooLong(lastSoundAtRef.current, startedAt, Date.now())),
+      500,
+    );
+    return () => clearInterval(timer);
+  }, [phase]);
 
   // ── transient done / error flash ──────────────────────────────────
 
@@ -835,6 +859,7 @@ function FloatingMori() {
   const labelToShow: string | null =
     infoLabel
     ?? statusLabel
+    ?? (visual === "recording" && noSound ? t("floating.no_sound") : null)
     ?? (visual === "recording" && currentProfileLabel ? `● ${currentProfileLabel}` : null);
 
   return (

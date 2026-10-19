@@ -221,6 +221,7 @@
     "chars_suffix": "chars"
   },
   "floating": {
+    "no_sound": "No sound detected, check your microphone",
     "label_walking": "Walking",
     "label_sleeping": "Sleeping",
     "label_idle": "Here",
