@@ -221,6 +221,7 @@
     "chars_suffix": "字"
   },
   "floating": {
+    "empty_transcript": "沒辨識到內容，請再說一次",
     "no_sound": "沒聽到聲音，請檢查麥克風",
     "label_walking": "散步中",
     "label_sleeping": "休眠中",

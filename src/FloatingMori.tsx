@@ -466,6 +466,11 @@ function FloatingMori() {
 
   useEffect(() => {
     if (phase.kind === "done") {
+      // 沒有任何內容(被略過或辨識回空)不放慶祝動畫,免得看起來像成功
+      if (!phase.transcript.trim() && !phase.response.trim()) {
+        setTransient(null);
+        return;
+      }
       setTransient("done");
       const t = setTimeout(() => setTransient(null), TRANSIENT_DURATION_MS.done);
       return () => clearTimeout(t);
@@ -534,6 +539,13 @@ function FloatingMori() {
       showChatBubble(text);
       const t = setTimeout(hideChatBubble, 6000);
       return () => clearTimeout(t);
+    }
+
+    // 聽寫模式沒有任何逐字稿(被音量守門略過,或辨識回空)→ 提示,不然使用者以為壞了
+    if (mode === "voice_input" && !phase.transcript.trim()) {
+      showInfo(t("floating.empty_transcript"));
+      const timer = setTimeout(() => setInfoLabel(null), TRANSCRIPT_LABEL_MS);
+      return () => clearTimeout(timer);
     }
 
     if (mode === "agent" && phase.response.trim()) {
