@@ -50,6 +50,8 @@ const amplify = (v: number) => Math.sqrt(Math.min(v * 4, 1.0));
 
 // 錄音中連續這麼久都沒收到聲音,浮動視窗改顯示提示(麥克風沒開 / 選錯裝置時才看得出來)
 const NO_SOUND_GRACE_MS = 2500;
+// 低於辨識前守門的預設門檻(peak RMS 0.012)才算沒聲音;比這高的小聲說話仍會被辨識,不能提示「沒聽到」
+const NO_SOUND_LEVEL = 0.012;
 export const noSoundForTooLong = (lastSoundAtMs: number, startedAtMs: number, nowMs: number) =>
   nowMs - Math.max(lastSoundAtMs, startedAtMs) > NO_SOUND_GRACE_MS;
 
@@ -401,7 +403,7 @@ function FloatingMori() {
     const unlistenVolume = listen<number>("audio-level", (e) => {
       const v = e.payload;
       setVolume(v);
-      if (v >= RIPPLE_THRESHOLD) lastSoundAtRef.current = Date.now();
+      if (v >= NO_SOUND_LEVEL) lastSoundAtRef.current = Date.now();
 
       // 音量超過門檻 + 距離上一個波紋 > 限流間隔 → 發新波紋
       const now = performance.now();
