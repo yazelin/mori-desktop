@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { spriteStyle, visualFor } from "./FloatingMori";
+import { noSoundForTooLong, spriteStyle, visualFor } from "./FloatingMori";
 
 const manifest = {
   schema_version: "1.2",
@@ -60,5 +60,17 @@ describe("Floating Mori sprite style", () => {
       animationTimingFunction: "steps(4, jump-none), steps(4, jump-none)",
       animationIterationCount: "infinite, infinite",
     });
+  });
+});
+
+describe("noSoundForTooLong", () => {
+  it("is quiet for the first moments, then flags continuous silence", () => {
+    expect(noSoundForTooLong(0, 10_000, 11_000)).toBe(false);
+    expect(noSoundForTooLong(0, 10_000, 13_000)).toBe(true);
+  });
+
+  it("resets when sound arrives", () => {
+    expect(noSoundForTooLong(12_900, 10_000, 13_000)).toBe(false);
+    expect(noSoundForTooLong(12_900, 10_000, 15_500)).toBe(true);
   });
 });
