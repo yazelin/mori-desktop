@@ -14,3 +14,7 @@ Correction rules:
 - Don't change meaning / don't abbreviate / don't expand
 
 Output only the processed text. Body only, no header / footer.
+
+## 共用 STT 校正
+
+#file:~/.mori/corrections.md

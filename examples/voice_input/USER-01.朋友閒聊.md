@@ -17,3 +17,7 @@ enable_auto_enter: true   # Slack / Discord 等聊天 app:貼完直接送出
   例:user 講「欸你禮拜五有空嗎」→ 你回「欸你禮拜五有空嗎?」,不要回「我看看喔」。
 
 只輸出處理後文字。
+
+## 共用 STT 校正
+
+#file:~/.mori/corrections.md
