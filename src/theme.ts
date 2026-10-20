@@ -8,6 +8,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+// 內建 light 色票當缺鍵後援:~/.mori/themes/light.json 只在第一次啟動時寫入,
+// 之後新增的 token(例如 bg)舊檔沒有,會退回 :root 的深色預設值,淺色主題就出現深綠色塊。
+import lightDefaults from "../crates/mori-tauri/themes/light.json";
 
 export type Theme = {
   name: string;
@@ -26,7 +29,9 @@ export type ThemeEntry = {
 /** 把 theme.colors 寫成 :root 的 --c-* variables,並更新 data-theme-base。 */
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
-  for (const [key, value] of Object.entries(theme.colors)) {
+  const colors =
+    theme.base === "light" ? { ...lightDefaults.colors, ...theme.colors } : theme.colors;
+  for (const [key, value] of Object.entries(colors)) {
     root.style.setProperty(`--c-${key}`, value);
   }
   root.setAttribute("data-theme-base", theme.base);
