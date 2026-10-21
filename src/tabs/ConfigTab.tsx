@@ -17,6 +17,8 @@ import { useTranslation } from "react-i18next";
 import { setLocale } from "../i18n";
 import { listThemes, setActiveTheme, themesDir, loadActiveTheme, type ThemeEntry } from "../theme";
 import { Select } from "../Select";
+import { HotkeyInput } from "../HotkeyInput";
+import { normalizeChord } from "../hotkeyChord";
 import {
   IconHome,
   IconCloud,
@@ -2217,64 +2219,73 @@ function ConfigTab({
               sessionType === "wayland"
                 ? "Wayland 上實際鍵位由系統設定決定 — 改 config.json 沒用,要去 GNOME Settings → Keyboard 改。"
                 : sessionType === "x11"
-                ? "X11 上 config.json 是 source of truth,改完重啟生效。"
-                : "Linux 以外 Mori 走 tauri-plugin-global-shortcut,鍵位仍寫死 Ctrl+Alt+Space。"
+                ? "X11 上 config.json 是 source of truth,點欄位後直接按想用的組合鍵,按儲存後重啟 Mori 生效。"
+                : "Windows / macOS 同樣以這裡為準,點欄位後直接按想用的組合鍵,按儲存後重啟 Mori 生效。"
             }
           >
             <FormRow
               label="toggle"
               hint={t("config_tab.rows.hint_hotkey_recording")}
             >
-              <input
-                type="text"
-                className="mori-input"
+              <HotkeyInput
                 value={getStr(cfg.hotkeys, "toggle", "Ctrl+Alt+Space")}
-                onChange={(e) =>
+                placeholder="Ctrl+Alt+Space"
+                onChange={(chord) =>
                   applyPatch((c) => {
                     const h = ensureSubObj(c, "hotkeys");
-                    setStrOrUndef(h, "toggle", e.target.value);
+                    setStrOrUndef(h, "toggle", chord);
                     if (Object.keys(h).length === 0) delete c.hotkeys;
                   })
                 }
-                placeholder="Ctrl+Alt+Space"
               />
             </FormRow>
             <FormRow
               label="cancel"
               hint={t("config_tab.rows.hint_hotkey_cancel")}
             >
-              <input
-                type="text"
-                className="mori-input"
+              <HotkeyInput
                 value={getStr(cfg.hotkeys, "cancel", "Ctrl+Alt+Escape")}
-                onChange={(e) =>
+                placeholder="Ctrl+Alt+Escape"
+                onChange={(chord) =>
                   applyPatch((c) => {
                     const h = ensureSubObj(c, "hotkeys");
-                    setStrOrUndef(h, "cancel", e.target.value);
+                    setStrOrUndef(h, "cancel", chord);
                     if (Object.keys(h).length === 0) delete c.hotkeys;
                   })
                 }
-                placeholder="Ctrl+Alt+Escape"
               />
             </FormRow>
             <FormRow
               label="picker"
               hint={t("config_tab.rows.hint_hotkey_picker")}
             >
-              <input
-                type="text"
-                className="mori-input"
+              <HotkeyInput
                 value={getStr(cfg.hotkeys, "picker", "Ctrl+Alt+P")}
-                onChange={(e) =>
+                placeholder="Ctrl+Alt+P"
+                onChange={(chord) =>
                   applyPatch((c) => {
                     const h = ensureSubObj(c, "hotkeys");
-                    setStrOrUndef(h, "picker", e.target.value);
+                    setStrOrUndef(h, "picker", chord);
                     if (Object.keys(h).length === 0) delete c.hotkeys;
                   })
                 }
-                placeholder="Ctrl+Alt+P"
               />
             </FormRow>
+            {(() => {
+              const chords = [
+                ["toggle", getStr(cfg.hotkeys, "toggle", "Ctrl+Alt+Space")],
+                ["cancel", getStr(cfg.hotkeys, "cancel", "Ctrl+Alt+Escape")],
+                ["picker", getStr(cfg.hotkeys, "picker", "Ctrl+Alt+P")],
+              ] as const;
+              const dup = chords.find(
+                ([, a], i) => chords.some(([, b], j) => j > i && normalizeChord(a) === normalizeChord(b)),
+              );
+              return dup ? (
+                <p className="mori-config-section-hint" style={{ color: "var(--c-warning-text)" }}>
+                  有兩個熱鍵設成同一組({dup[1]}),只有一個會生效,請改掉其中一個。
+                </p>
+              ) : null;
+            })()}
             {sessionType === "wayland" && (
               <p
                 className="mori-config-section-hint"

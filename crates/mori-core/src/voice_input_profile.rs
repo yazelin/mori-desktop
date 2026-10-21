@@ -567,6 +567,7 @@ pub fn ensure_voice_input_dir_initialized() {
         (STARTER_USER_03_FILENAME, STARTER_USER_03_MD),
         (STARTER_USER_04_FILENAME, STARTER_USER_04_MD),
         (STARTER_USER_05_FILENAME, STARTER_USER_05_MD),
+        (STARTER_USER_06_FILENAME, STARTER_USER_06_MD),
     ] {
         let starter_path = dir.join(filename);
         if starter_path.exists() {
@@ -625,16 +626,22 @@ const VOICE_STARTERS: &[StarterTemplate] = &[
         content: include_str!("../../../examples/voice_input/USER-03.LINE貼文.md"),
     },
     StarterTemplate {
-        filename: "USER-04.哄老婆開心.md",
+        filename: "USER-04.不吵架溝通術.md",
         lang: "zh",
-        display: "USER-04 · 哄老婆開心",
-        content: include_str!("../../../examples/voice_input/USER-04.哄老婆開心.md"),
+        display: "USER-04 · 不吵架溝通術",
+        content: include_str!("../../../examples/voice_input/USER-04.不吵架溝通術.md"),
     },
     StarterTemplate {
         filename: "USER-05.提示詞優化.md",
         lang: "zh",
         display: "USER-05 · 提示詞優化",
         content: include_str!("../../../examples/voice_input/USER-05.提示詞優化.md"),
+    },
+    StarterTemplate {
+        filename: "USER-06.生圖描述.md",
+        lang: "zh",
+        display: "USER-06 · 生圖描述",
+        content: include_str!("../../../examples/voice_input/USER-06.生圖描述.md"),
     },
     // en — 不 auto-deploy,UI「加入範本」可選裝。filename 跟 zh 不同避免衝突
     StarterTemplate {
@@ -701,6 +708,8 @@ const STARTER_USER_04_FILENAME: &str = VOICE_STARTERS[4].filename;
 const STARTER_USER_04_MD: &str = VOICE_STARTERS[4].content;
 const STARTER_USER_05_FILENAME: &str = VOICE_STARTERS[5].filename;
 const STARTER_USER_05_MD: &str = VOICE_STARTERS[5].content;
+const STARTER_USER_06_FILENAME: &str = VOICE_STARTERS[6].filename;
+const STARTER_USER_06_MD: &str = VOICE_STARTERS[6].content;
 
 // ─── Built-in fallback ────────────────────────────────────────────────────
 

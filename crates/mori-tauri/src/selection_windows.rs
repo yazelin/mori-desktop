@@ -15,6 +15,14 @@ use async_trait::async_trait;
 use mori_core::paste::{PasteController, PasteResult};
 use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
+    GetClipboardSequenceNumber, OpenClipboard, SetClipboardData,
+};
+use windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     VIRTUAL_KEY, VK_CONTROL, VK_RETURN, VK_SHIFT, VK_V,
@@ -48,6 +56,9 @@ impl WindowsPasteController {
         process_name: &str,
         override_shortcut: Option<mori_core::voice_input_profile::PasteShortcut>,
     ) -> Result<PasteResult> {
+        // 貼上前先備份使用者原本複製的內容,貼完再還原(#185)。
+        let backup = snapshot_clipboard().filter(|s| !s.formats.is_empty());
+
         // 寫剪貼簿 — Tauri plugin 在 Windows 上是 `OpenClipboard` + `SetClipboardData`
         // 標準 Win32 API,沒任何權限對話框問題。
         self.app
@@ -57,6 +68,8 @@ impl WindowsPasteController {
 
         // 小睡讓 clipboard ownership 穩定(跟 Linux 80ms 同理)。
         tokio::time::sleep(Duration::from_millis(80)).await;
+        // 記下我們寫入後的序號;還原前序號變了,代表使用者或別的程式又複製了東西。
+        let seq_after_write = unsafe { GetClipboardSequenceNumber() };
 
         use mori_core::voice_input_profile::PasteShortcut;
         let use_shift_v = match override_shortcut {
@@ -75,6 +88,9 @@ impl WindowsPasteController {
                     tool = "SendInput",
                     "paste-back dispatched",
                 );
+                if let Some(snap) = backup {
+                    schedule_clipboard_restore(snap, seq_after_write);
+                }
                 Ok(PasteResult::Pasted)
             }
             Err(e) => {
@@ -87,6 +103,139 @@ impl WindowsPasteController {
             }
         }
     }
+}
+
+/// 貼上後等多久再還原剪貼簿。目標程式收到 Ctrl+V 後才會去讀剪貼簿,太早還原
+/// 會貼到舊內容。競品實測約 1.2 秒才完成,這裡取 700ms 再加 SendInput 本身的時間。
+const CLIPBOARD_RESTORE_DELAY_MS: u64 = 700;
+
+/// 備份上限。複製了超大圖片時不備份超過這個量,避免貼上前卡住。
+const MAX_BACKUP_BYTES: usize = 64 * 1024 * 1024;
+
+/// 備份下來的剪貼簿:每個格式一份位元組。
+struct ClipboardSnapshot {
+    formats: Vec<(u32, Vec<u8>)>,
+}
+
+/// 只備份資料放在 HGLOBAL 的格式。GDI 物件(CF_BITMAP、CF_PALETTE、
+/// CF_METAFILEPICT、CF_ENHMETAFILE)與顯示用、私有格式的資料不是記憶體區塊,
+/// 不能這樣複製;CF_BITMAP 會由系統從 CF_DIB 自動合成,所以還原 CF_DIB 就夠。
+fn is_hglobal_format(fmt: u32) -> bool {
+    !matches!(fmt, 2 | 3 | 9 | 14 | 0x80..=0x83 | 0x8E | 0x200..=0x3FF)
+}
+
+/// 開著剪貼簿的期間才能讀寫;離開作用域自動關閉。
+struct ClipboardGuard;
+
+impl ClipboardGuard {
+    /// 別的程式正在使用剪貼簿時會開失敗,短暫重試幾次。
+    fn open() -> Option<Self> {
+        for _ in 0..10 {
+            if unsafe { OpenClipboard(HWND::default()) }.is_ok() {
+                return Some(Self);
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        None
+    }
+}
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseClipboard();
+        }
+    }
+}
+
+fn snapshot_clipboard() -> Option<ClipboardSnapshot> {
+    let _guard = ClipboardGuard::open()?;
+    let mut formats = Vec::new();
+    let mut total = 0usize;
+    let mut fmt = 0u32;
+    loop {
+        fmt = unsafe { EnumClipboardFormats(fmt) };
+        if fmt == 0 {
+            break;
+        }
+        if !is_hglobal_format(fmt) {
+            continue;
+        }
+        let Ok(handle) = (unsafe { GetClipboardData(fmt) }) else {
+            continue;
+        };
+        let hglobal = HGLOBAL(handle.0);
+        let size = unsafe { GlobalSize(hglobal) };
+        if size == 0 || total + size > MAX_BACKUP_BYTES {
+            continue;
+        }
+        let ptr = unsafe { GlobalLock(hglobal) };
+        if ptr.is_null() {
+            continue;
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) }.to_vec();
+        unsafe {
+            let _ = GlobalUnlock(hglobal);
+        }
+        total += size;
+        formats.push((fmt, bytes));
+    }
+    Some(ClipboardSnapshot { formats })
+}
+
+/// 清空剪貼簿後依序寫回備份的格式。回傳成功寫回的格式數。
+fn restore_clipboard(snap: &ClipboardSnapshot) -> usize {
+    let Some(_guard) = ClipboardGuard::open() else {
+        return 0;
+    };
+    if unsafe { EmptyClipboard() }.is_err() {
+        return 0;
+    }
+    let mut restored = 0;
+    for (fmt, bytes) in &snap.formats {
+        unsafe {
+            let Ok(hglobal) = GlobalAlloc(GMEM_MOVEABLE, bytes.len()) else {
+                continue;
+            };
+            let ptr = GlobalLock(hglobal);
+            if ptr.is_null() {
+                let _ = GlobalFree(hglobal);
+                continue;
+            }
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, bytes.len());
+            let _ = GlobalUnlock(hglobal);
+            // 成功後記憶體歸系統;失敗要自己釋放。
+            if SetClipboardData(*fmt, HANDLE(hglobal.0)).is_ok() {
+                restored += 1;
+            } else {
+                let _ = GlobalFree(hglobal);
+            }
+        }
+    }
+    restored
+}
+
+/// 等目標程式貼完之後還原。還原前序號變了就放棄,不蓋掉使用者新複製的內容。
+fn schedule_clipboard_restore(snap: ClipboardSnapshot, seq_after_write: u32) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS)).await;
+        let current = unsafe { GetClipboardSequenceNumber() };
+        let wanted = snap.formats.len();
+        let (ok, restored, reason) = if current != seq_after_write {
+            (false, 0, "clipboard_changed")
+        } else {
+            let n = restore_clipboard(&snap);
+            (n > 0, n, if n > 0 { "restored" } else { "restore_failed" })
+        };
+        tracing::info!(ok, restored, wanted, reason, "clipboard restore after paste");
+        mori_core::event_log::append(serde_json::json!({
+            "kind": "clipboard_restore",
+            "ok": ok,
+            "reason": reason,
+            "formats_wanted": wanted,
+            "formats_restored": restored,
+        }));
+    });
 }
 
 /// Windows terminal 偵測 — Windows Terminal / pwsh / cmd 等多數情境下
@@ -174,4 +323,25 @@ pub fn send_enter() {
 /// point 讓 main.rs 跨平台 call 同一個函式。
 pub fn warn_if_setup_missing() {
     tracing::debug!("Windows paste-back uses built-in Win32 SendInput — no external tools needed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_hglobal_format;
+
+    #[test]
+    fn text_and_dib_are_backed_up() {
+        assert!(is_hglobal_format(1)); // CF_TEXT
+        assert!(is_hglobal_format(8)); // CF_DIB
+        assert!(is_hglobal_format(13)); // CF_UNICODETEXT
+        assert!(is_hglobal_format(15)); // CF_HDROP(檔案清單)
+        assert!(is_hglobal_format(0xC123)); // 註冊格式(例如 HTML Format)
+    }
+
+    #[test]
+    fn gdi_and_private_formats_are_skipped() {
+        for f in [2u32, 3, 9, 14, 0x80, 0x82, 0x8E, 0x200, 0x2FF, 0x300, 0x3FF] {
+            assert!(!is_hglobal_format(f), "format {f:#x} should be skipped");
+        }
+    }
 }

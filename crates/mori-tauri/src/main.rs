@@ -6084,6 +6084,31 @@ fn refresh_mode_menu_labels(
 
 // ─── main ───────────────────────────────────────────────────────────
 
+/// GUI 行程 PATH 缺的使用者 bin 目錄(只回「存在且尚未在 PATH 內」的),附加在 PATH 尾端,
+/// 不蓋掉系統版本。nvm 只取版本最高的那個 node。
+#[cfg(unix)]
+fn extra_user_bin_dirs(home: &std::path::Path, path: &std::ffi::OsStr) -> Vec<std::path::PathBuf> {
+    let mut cands = vec![
+        home.join(".local/bin"),
+        home.join(".cargo/bin"),
+        home.join(".npm-global/bin"),
+        home.join(".volta/bin"),
+    ];
+    if let Ok(rd) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+        let ver = |p: &std::path::Path| -> Vec<u64> {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.trim_start_matches('v').split('.').filter_map(|x| x.parse().ok()).collect())
+                .unwrap_or_default()
+        };
+        if let Some(best) = rd.flatten().map(|e| e.path()).max_by_key(|p| ver(p)) {
+            cands.push(best.join("bin"));
+        }
+    }
+    let have: Vec<std::path::PathBuf> = std::env::split_paths(path).collect();
+    cands.into_iter().filter(|d| d.is_dir() && !have.contains(d)).collect()
+}
+
 fn main() {
     // ── 強制 XWayland(Linux only)──────────────────────────────────
     // GNOME mutter 在 Wayland 下對 app 自設 alwaysOnTop / position 是「軟
@@ -6101,6 +6126,23 @@ fn main() {
         if std::env::var_os("GDK_BACKEND").is_none() {
             // SAFETY: main() 進來時還是單執行緒,沒人在讀 env。
             std::env::set_var("GDK_BACKEND", "x11");
+        }
+    }
+
+    // 開機啟動 / 桌面 launcher 起的 GUI 行程沒有 shell rc 的 PATH,npm/nvm 裝的
+    // codex 等 CLI 會找不到(Agent 模式報「找不到 LLM」)。補上常見使用者 bin 目錄。
+    #[cfg(unix)]
+    {
+        if let (Some(home), Some(path)) = (std::env::var_os("HOME"), std::env::var_os("PATH")) {
+            let extra = extra_user_bin_dirs(std::path::Path::new(&home), &path);
+            if !extra.is_empty() {
+                let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+                dirs.extend(extra);
+                if let Ok(joined) = std::env::join_paths(dirs) {
+                    // SAFETY: main() 進來時還是單執行緒,沒人在讀 env。
+                    std::env::set_var("PATH", joined);
+                }
+            }
         }
     }
 
@@ -8049,5 +8091,22 @@ mod backdrop_ipc_tests {
     fn read_character_backdrop_missing_file_returns_none() {
         let out = read_character_backdrop("__nonexistent_pack__".into(), "dark".into()).unwrap();
         assert!(out.is_none(), "expected None for missing file, got Some");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod extra_path_tests {
+    use super::extra_user_bin_dirs;
+
+    #[test]
+    fn picks_highest_nvm_node_and_skips_dirs_already_in_path() {
+        let home = std::env::temp_dir().join(format!("mori-path-test-{}", std::process::id()));
+        for d in [".nvm/versions/node/v9.9.0/bin", ".nvm/versions/node/v22.17.1/bin", ".local/bin"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        let path = std::ffi::OsString::from(format!("/usr/bin:{}", home.join(".local/bin").display()));
+        let got = extra_user_bin_dirs(&home, &path);
+        assert_eq!(got, vec![home.join(".nvm/versions/node/v22.17.1/bin")]);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

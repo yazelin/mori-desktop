@@ -8,12 +8,49 @@
 
 ## Unreleased
 
+- **Windows:語音輸入貼上後還原使用者原本的剪貼簿**(#185)。貼上前備份剪貼簿(文字、圖片、檔案清單、HTML 等資料放在記憶體區塊的格式),貼完 700ms 後寫回;若這段時間使用者又複製了別的內容就不還原。GDI 物件與私有格式不備份,超過 64MB 的格式略過。結果寫進 event log(kind=`clipboard_restore`)。Linux、macOS 尚未做。
+
+- **設定頁熱鍵欄改成「按下組合鍵就填入」**(#180)。toggle / cancel / picker 三個欄位點一下後直接按想用的組合鍵,Esc 取消、Backspace 清除回預設;單獨的一般鍵(沒有 Ctrl / Alt / Shift / Super,也不是 F1~F24)不接受,避免吃掉正常打字。兩個以上熱鍵設成同一組時顯示警告。修正過時的提示:Windows 與 macOS 同樣以設定為準(原本寫「鍵位寫死」),改完按儲存後重啟生效。
+
+- **錄音中連續 2.5 秒沒收到聲音,浮動視窗顯示「沒聽到聲音,請檢查麥克風」**(#186 部分)。麥克風沒開或選錯裝置時,原本只看到「聽中」,看不出有沒有收到音。一有聲音提示就消失。
+
+- **聽寫模式錄完沒有辨識內容時,浮動視窗顯示「沒辨識到內容,請再說一次」,並且不放慶祝動畫**(#186 部分)。被音量守門略過或辨識回空時,原本直接回待機,使用者看不出發生什麼事。自動增益、門檻設定欄位尚未做。
+---
+
+## v0.8.6 — 新增 starter「生圖描述」(2026-10-18)
+
+### 新增
+- 語音輸入 starter 新增 USER-06「生圖描述」:講零碎的畫面印象,整理成生圖工具畫得出來的描述(主體、場景、光線與色調、構圖、風格、避免)。LLM 預設 groq。
+
+---
+
+## v0.8.5 — 不吵架溝通術 starter 修正(2026-10-18)
+
+### 修正
+- USER-04「不吵架溝通術」不再自行發明數字(時間、天數),感受強度照原話、不縮小,情緒詞不疊字。
+
+---
+
+## v0.8.4 — 語音輸入 starter 改為「不吵架溝通術」(2026-10-18)
+
+### 變更
+- 語音輸入 starter USER-04 由「哄老婆開心」改為「不吵架溝通術」：把情緒化的原話整理成對方聽得進去的訊息，只保留事實、感受、在意的事與請求，不編造內容、不自動送出。LLM 預設改用 groq，只填一把金鑰就能用。已經部署過舊檔的使用者不會被覆蓋，新檔會多出一份。
+
+---
+
+## v0.8.3 — 排程 agent 任務、agy / llmshare、Wayland 切換修正(2026-10-16)
+
 ### 新功能
 - **agy（Antigravity CLI）provider** — 新增 `agy-bash`（帶 `--dangerously-skip-permissions` 一次跑完不詢問）與 chat-only 的 `agy-cli`，取代個人帳號自 2026-06-18 起停止服務的 Gemini CLI；`gemini-bash` / `gemini-cli` 保留給企業與付費 API key，標為已停用。安裝偵測（Deps）與設定頁一併更新。
 - **llmshare 設定範例** — `config.example.json` 加 `llmshare`（OpenAI 相容共享閘道）。自訂 provider 新增 `providers.<name>.max_tokens`（閘道不送就用很小預設，推理模型會回空內容）。
 - **安全** — 排程 agent 任務現在拒絕所有自帶全套工具的 CLI provider（claude / gemini / agy / codex），不只 claude。
 - codex CLI 呼叫加 `--ephemeral`；claude 安裝提示改原生安裝。
 - **排程 agent 任務（唯讀）** — 新 skill `schedule_agent_task(text, cron, prompt)`：對 Mori 說「每 5 分鐘幫我看一次信箱，有新信跟我說」，到點由 Mori 用唯讀 Gmail 工具跑指令，有結果才跳桌面通知，沒有就不吵。Registry 只含 `list_gmail`（只回還沒報告過的 thread，已報告記在 `~/.mori/agent-task-<id>-seen.json`）與 `read_gmail`，沒有 `send_gmail`，寄信在結構上做不到。時之鳥提醒表新增 `agent_prompt` 欄位（自動 migrate）；provider 為 `bash-cli-agent` 時拒絕執行（它自帶全套工具，保證不了唯讀）。需要先完成 Gmail OAuth。
+
+### 修正
+- **Linux 開機啟動找不到 codex** — GUI 行程沒有 shell 的 PATH,npm/nvm 裝的 CLI 找不到,Agent 模式報找不到 LLM。啟動時把存在的 ~/.local/bin、~/.cargo/bin、~/.npm-global/bin、~/.volta/bin 與最高版 nvm node bin 附加到 PATH 尾端(#170)。
+- **Linux 錄音前讀剪貼簿** 改走 xclip,不再跳 wl-clipboard 通知卡住貼上(#166)。
+- **Wayland 切 profile** — `mori-tauri --profile-slot N` / `--agent-slot N`,可綁 GNOME 自訂快捷鍵(#167)。
 
 ### 變更
 - **VoiceInput starter 邊界補強** — USER-00~05 中文範本明確要求「只整理口述文字,不要回答內容」;即使使用者口述的是問句 / 命令 / 請求,也要輸出可貼給別人的文字或 prompt,避免 VoiceInput cleanup 被誤當成問答助手。

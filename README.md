@@ -9,7 +9,7 @@ Tauri 2 + Rust + React，Whisper 是耳朵，LLM 是腦袋，你是同伴。
 
 **完整介紹 + 互動 demo**：[**yazelin.github.io/mori-desktop**](https://yazelin.github.io/mori-desktop/)
 
-**Latest** — [**v0.7.6**](https://github.com/yazelin/mori-desktop/releases/tag/v0.7.6)：**Deps 修復 + CLI 偵測補強**（Linux whisper-server 改由 Deps 自行建置，已安裝項目可重新安裝 / 修復，Codex/Gemini/Claude CLI 補掃 nvm / Volta / 使用者 bin）· v0.7.5 → Annuli process controls + release toolchain cleanup · v0.7.4 → Windows Annuli runtime path hotfix · v0.7.3 → Annuli token setup + FLAC recordings 修補 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
+**Latest** — [**v0.8.6**](https://github.com/yazelin/mori-desktop/releases/tag/v0.8.6)：**語音輸入 starter 新增「生圖描述」**（講零碎的畫面印象，整理成生圖工具畫得出來的描述）· v0.8.5 → 「不吵架溝通術」不再自行發明數字 · v0.8.4 → 語音輸入 starter 改為「不吵架溝通術」 · v0.8.3 → 排程 agent 任務、agy / llmshare、Wayland 切換修正 · 完整 changelog 看 [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 
@@ -77,10 +77,10 @@ npm run tauri dev          # 會自動 build mori-cli + frontend dist + mori-tau
 3. **中斷** — `Ctrl+Alt+Esc` 隨時丟掉錄音 / abort LLM call
 4. **忘了 slot 編號** — `Ctrl+Alt+P` 開 picker
 
-預設安裝就送 6 個 voice + 6 個 agent starter(`USER-00.純文字輸入` ~ `USER-05.提示詞優化` /
-`AGENT.md` + `AGENT-01.翻譯助手` ~ `AGENT-05.聽我指令`),slot 0~5 都有，熱鍵切換馬上可用。
+預設安裝就送 7 個 voice + 7 個 agent starter(`USER-00.純文字輸入` ~ `USER-06.生圖描述` /
+`AGENT.md` + `AGENT-01.翻譯助手` ~ `AGENT-06.Obsidian`),slot 0~6 都有，熱鍵切換馬上可用。
 v0.4.1+ 也 bundle EN 對照版,**Profiles tab「加入範本」按鈕**可按一下換語系 / 還原
-(改壞了也救得回來)。自訂 slot 6~9 用同檔名格式 `AGENT-NN.<display>.md` /
+(改壞了也救得回來)。自訂 slot 7~9 用同檔名格式 `AGENT-NN.<display>.md` /
 `USER-NN.<display>.md` 丟到 `~/.mori/agent/` / `~/.mori/voice_input/` 即可
 (範本見 [`examples/`](examples/) 或 [Profile 範本頁](https://yazelin.github.io/mori-desktop/profile-examples.html))。
 
@@ -113,7 +113,7 @@ profile 做一次文字整理，避免重複潤飾。轉檔頁則固定使用 `l
 ## 能做什麼
 
 **Voice / Agent**
-- 雙模式(VoiceInput 純聽寫 / Agent 帶 loop)+ 10 個 profile slot 切換(0~9,v0.4.1+ 預載 6 個 voice + 6 個 agent starter)
+- 雙模式(VoiceInput 純聽寫 / Agent 帶 loop)+ 10 個 profile slot 切換(0~9,v0.4.1+ 預載 7 個 voice + 7 個 agent starter)
 - 外部工具 bridge — `agent_mode: dispatch` 把語音優化過的 prompt 推給其他桌面 app
   (範本見 [examples/agent/AGENT-03.ZeroType Agent.md](examples/agent/AGENT-03.ZeroType%20Agent.md))
 - 自訂 `shell_skills` — 把 `gh` / `docker` / `kubectl` / 自家 script 變 Mori 能力，不用改 Rust
