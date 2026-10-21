@@ -366,67 +366,101 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
-.mori-profiles-section-head h3 { margin: 0; }
+.mori-profiles-section-head h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-text-strong);
+}
 .mori-profiles-section-actions { display: flex; gap: 6px; }
 
 .mori-profiles-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .mori-profile-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--c-divider);
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--c-surface-bg);
   border: 1px solid var(--c-border);
-  border-radius: 8px;
+  border-radius: 10px;
+  transition: border-color 120ms ease, background 120ms ease;
 }
-.mori-profile-row:hover { background: var(--c-sidebar-hover-bg); }
-.mori-profile-row-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mori-profile-row:hover {
+  background: var(--c-sidebar-hover-bg);
+  border-color: var(--c-border-strong);
+}
+.mori-profile-row-key {
+  flex: 0 0 88px;
+  text-align: center;
+  padding: 3px 0;
+  border-radius: 5px;
+  background: var(--c-kbd-bg);
+  border: 1px solid var(--c-kbd-border);
+  color: var(--c-kbd-text);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mori-profile-row-key.is-empty { background: none; border-color: transparent; }
+.mori-profile-row-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .mori-profile-row-line1 {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
-.mori-profile-row-name { font-size: 13px; font-weight: 500; }
+.mori-profile-row-name { font-size: 14px; font-weight: 600; color: var(--c-text-strong); }
 .mori-profile-row-tokens {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--c-text-muted);
   font-family: ui-monospace, "JetBrains Mono", monospace;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--c-bg);
-  border: 1px solid var(--c-border);
   white-space: nowrap;
   cursor: help;
 }
 .mori-profile-row-provider {
-  font-size: 10.5px;
-  color: var(--c-text);
+  font-size: 11px;
+  color: var(--c-text-strong);
   font-family: ui-monospace, "JetBrains Mono", monospace;
-  padding: 1px 7px;
+  padding: 1px 8px;
   border-radius: 8px;
-  background: var(--c-sidebar-active-bg, var(--c-bg));
-  border: 1px solid var(--c-border);
+  background: var(--c-active-bg);
+  border: 1px solid var(--c-active-border);
   white-space: nowrap;
   cursor: help;
 }
 .mori-profile-row-provider.is-default {
-  color: var(--c-text-soft);
-  background: var(--c-bg);
+  color: var(--c-text-muted);
+  background: none;
+  border-color: var(--c-border);
   font-style: italic;
 }
 .mori-profile-row-stem {
-  font-size: 10.5px;
-  color: var(--c-text-soft);
+  font-size: 11px;
+  color: var(--c-text-muted);
   font-family: ui-monospace, "JetBrains Mono", monospace;
 }
 .mori-profile-row-actions { display: flex; gap: 6px; }
+.mori-profile-row-actions .mori-btn {
+  background: transparent;
+  border-color: var(--c-border-strong);
+}
+.mori-profile-row-actions .mori-btn:hover:not(:disabled) { background: var(--c-sidebar-hover-bg); }
+.mori-profile-row-actions .mori-btn.is-switch {
+  background: var(--c-active-bg);
+  border-color: var(--c-active-border);
+  color: var(--c-text-strong);
+}
+.mori-profile-row-actions .mori-btn.is-switch:hover:not(:disabled) { background: var(--c-primary-bg-hover); color: var(--c-primary-text); }
 
 .mori-btn {
   background: var(--c-border);

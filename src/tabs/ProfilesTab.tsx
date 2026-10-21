@@ -198,7 +198,7 @@ function NewProfileButton({
     }
   };
   return (
-    <button className="mori-btn" onClick={create}>
+    <button className="mori-btn primary" onClick={create}>
       {t("profiles_tab.new_button")}
     </button>
   );
@@ -221,6 +221,25 @@ function ProviderBadge({ provider }: { provider: string | null | undefined }) {
     >
       {label}
     </span>
+  );
+}
+
+/** 預設熱鍵 chip:USER-0N → Alt+N、AGENT-0N → Ctrl+Alt+N、AGENT(無編號)→ Ctrl+Alt+0。
+ *  修飾鍵可在 config 的 hotkeys 改,所以只當預設值的提示。沒編號的 profile 不顯示。 */
+function slotOf(stem: string, kind: Kind): number | null {
+  const m = kind === "voice" ? stem.match(/^USER-(\d+)/) : stem.match(/^AGENT(?:-(\d+))?/);
+  if (!m) return null;
+  return m[1] === undefined ? 0 : Number(m[1]);
+}
+
+function HotkeyChip({ stem, kind }: { stem: string; kind: Kind }) {
+  const slot = slotOf(stem, kind);
+  if (slot === null) return <span className="mori-profile-row-key is-empty" />;
+  const keys = `${kind === "voice" ? "Alt" : "Ctrl+Alt"}+${slot}`;
+  return (
+    <kbd className="mori-profile-row-key" title={`預設熱鍵 ${keys}`}>
+      {keys}
+    </kbd>
   );
 }
 
@@ -303,6 +322,7 @@ function ProfilesTab() {
         <div className="mori-profiles-list">
           {voice.map((p) => (
             <div key={p.stem} className="mori-profile-row">
+              <HotkeyChip stem={p.stem} kind="voice" />
               <div className="mori-profile-row-info">
                 <div className="mori-profile-row-line1">
                   <span className="mori-profile-row-name">{p.display}</span>
@@ -312,9 +332,9 @@ function ProfilesTab() {
                 <span className="mori-profile-row-stem">{p.stem}</span>
               </div>
               <div className="mori-profile-row-actions">
-                <button className="mori-btn small" onClick={() => switchVoice(p.stem)}>{t("profiles_tab.switch_button")}</button>
+                <button className="mori-btn small is-switch" onClick={() => switchVoice(p.stem)}>{t("profiles_tab.switch_button")}</button>
                 <button
-                  className="mori-btn small primary"
+                  className="mori-btn small"
                   onClick={() => setEditing({ kind: "voice", stem: p.stem })}
                 >
                   {t("profiles_tab.edit_button")}
@@ -338,6 +358,7 @@ function ProfilesTab() {
         <div className="mori-profiles-list">
           {agent.map((p) => (
             <div key={p.stem} className="mori-profile-row">
+              <HotkeyChip stem={p.stem} kind="agent" />
               <div className="mori-profile-row-info">
                 <div className="mori-profile-row-line1">
                   <span className="mori-profile-row-name">{p.display}</span>
@@ -347,9 +368,9 @@ function ProfilesTab() {
                 <span className="mori-profile-row-stem">{p.stem}</span>
               </div>
               <div className="mori-profile-row-actions">
-                <button className="mori-btn small" onClick={() => switchAgent(p.stem)}>{t("profiles_tab.switch_button")}</button>
+                <button className="mori-btn small is-switch" onClick={() => switchAgent(p.stem)}>{t("profiles_tab.switch_button")}</button>
                 <button
-                  className="mori-btn small primary"
+                  className="mori-btn small"
                   onClick={() => setEditing({ kind: "agent", stem: p.stem })}
                 >
                   {t("profiles_tab.edit_button")}
