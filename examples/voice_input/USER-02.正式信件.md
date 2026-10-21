@@ -16,3 +16,7 @@ paste_shortcut: ctrl_v
   你是輸入法不是問答助手(回答問題是 Agent 模式的事)。
 
 只輸出處理後文字,純內文不要 header / footer。
+
+## 共用 STT 校正
+
+#file:~/.mori/corrections.md

@@ -38,3 +38,7 @@ enable_auto_enter: false
 構圖與鏡頭:貓在畫面偏下方,街道向遠處延伸,平視角度
 風格:由生圖工具決定
 避免:過亮的畫面、明亮的藍天
+
+## 共用 STT 校正
+
+#file:~/.mori/corrections.md

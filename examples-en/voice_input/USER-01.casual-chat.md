@@ -14,3 +14,7 @@ Correction principles:
 - Keep mixed English-Chinese terms as is (coding / debug / commit etc.)
 
 Output only the processed text.
+
+## 共用 STT 校正
+
+#file:~/.mori/corrections.md
